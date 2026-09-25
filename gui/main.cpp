@@ -133,6 +133,20 @@ class Window final : public QWidget {
         if (!throttle_.isActive()) throttle_.start(40);
     }
 
+    // Page scrolling must not edit a control the pointer happens to cross.
+    bool eventFilter(QObject* object, QEvent* event) override
+    {
+        if (event->type() != QEvent::Wheel || static_cast<QWidget*>(object)->hasFocus()) return false;
+        event->ignore(); // Unaccepted, it propagates to the page's scroll area.
+        return true;
+    }
+
+    void wheelNeedsFocus(QWidget* editor)
+    {
+        editor->setFocusPolicy(Qt::StrongFocus); // WheelFocus would take focus before the filter runs.
+        editor->installEventFilter(this);
+    }
+
     void display(std::size_t index, double value)
     {
         auto& e = editors_[index];
@@ -219,6 +233,7 @@ class Window final : public QWidget {
             e.combo->setMinimumWidth(190);
             for (int i = 0; i < modes.size(); ++i) e.combo->addItem(modes[i], static_cast<int>(s.minimum) + i);
             e.combo->setAccessibleName(title(s.name));
+            wheelNeedsFocus(e.combo);
             row->addWidget(e.combo);
             connect(e.combo, &QComboBox::currentIndexChanged, this, [this, index](int) {
                 queue(index, editors_[index].combo->currentData().toInt());
@@ -235,6 +250,7 @@ class Window final : public QWidget {
             e.number->setSingleStep(s.isFloat ? step_ : 1);
             e.number->setKeyboardTracking(false);
             e.number->setAccessibleName(title(s.name));
+            wheelNeedsFocus(e.number);
             row->addWidget(e.number);
             connect(e.number, &QDoubleSpinBox::valueChanged, this, [this, index](double value) {
                 auto* slider = editors_[index].slider;
@@ -258,6 +274,7 @@ class Window final : public QWidget {
             e.slider = new dlsslop_gui::AbsoluteSlider(Qt::Horizontal);
             e.slider->setRange(s.isFloat ? 0 : static_cast<int>(s.minimum), s.isFloat ? 10000 : static_cast<int>(s.maximum));
             e.slider->setAccessibleName(title(s.name) + " slider");
+            wheelNeedsFocus(e.slider);
             e.slider->setToolTip(dlsslop_gui::logarithmicSlider(s) ? "Logarithmic sweep; use the numeric field for an exact value" :
                                                    "Live sweep; use the numeric field for an exact value");
             layout->addWidget(e.slider);
@@ -356,6 +373,7 @@ public:
         auto* step = new QComboBox;
         for (double value : {0.001, 0.01, 0.1}) step->addItem(QString::number(value), value);
         step->setCurrentIndex(1);
+        wheelNeedsFocus(step);
         precisionRow->addWidget(step);
         precisionRow->addStretch();
         pages[0]->insertLayout(1, precisionRow);
@@ -369,6 +387,7 @@ public:
         count->setRange(0, 64);
         count->setValue(1);
         count->setAccessibleName("Capture frame count");
+        wheelNeedsFocus(count);
         captureRow->addWidget(new QLabel("Capture frames"));
         captureRow->addWidget(count);
         auto* capture = new QPushButton("Request capture");

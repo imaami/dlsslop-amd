@@ -8,7 +8,8 @@
 namespace dlsslop_gui {
 
 // Left clicks place the handle at the pointer instead of taking a page step.
-// Keep QSlider's range, tracking, signals, keyboard and wheel behavior.
+// Keep QSlider's range, tracking, signals, keyboard and wheel behavior; the
+// controller window passes wheel input over an unfocused slider to its page.
 class AbsoluteSlider : public QSlider {
     bool dragging_ = false;
 

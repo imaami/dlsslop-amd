@@ -18,6 +18,8 @@ cmake --install build-gui --prefix "$HOME/.local"
 dlsslop-gui
 ```
 
+The tests need Qt 6.8 or newer; configure with `-DBUILD_TESTING=OFF` on older Qt.
+
 This independent build installs only the GUI. The full project enables the
 same target with `-DDLSSLOP_BUILD_GUI=ON` (default ON); use
 `-DDLSSLOP_BUILD_GUI=OFF` for a headless core source build. The application links
@@ -40,6 +42,8 @@ visible and disabled. Writable settings have individual reset buttons.
   at that position immediately; keep the mouse button down to drag. Only edited
   settings are written. Keyboard focus highlights the handle; arrow keys,
   Page Up/Down and Home/End remain available.
+- The mouse wheel scrolls the page. It edits a slider, numeric field or menu
+  only after that control has focus.
 - Numeric fields accept six decimal places; arrow steps are 0.001, 0.01
   (default) or 0.1. Typing commits on Enter or focus loss. Wide positive ranges
   have logarithmic sliders and linear numeric entry.
@@ -57,5 +61,5 @@ original proxy before per-pass history/feedback. Default 0 disables it. The
 worker selects the HIP module or logs the slower CPU fallback; see
 [COLOR-PRESERVATION.md](../COLOR-PRESERVATION.md).
 
-The CI workflow builds the GUI and runs its channel and offscreen slider tests. For testing
-instructions, see [VALIDATION.md](../VALIDATION.md).
+The CI workflow builds the GUI and runs its channel and offscreen slider and
+window tests. For testing instructions, see [VALIDATION.md](../VALIDATION.md).
