@@ -109,6 +109,19 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
                 (options, result.stderr)
     assert not channel.exists() and not (cwd / 'd').exists(), 'rejected tracing touched the filesystem'
 
+    # An existing channel directory must be private to this user: mode 0700
+    # and not a symlink. (trace_test checks that a created one is made so.)
+    shared = root / 'shared channel directory'
+    shared.mkdir(mode=0o755)
+    shared.chmod(0o755)
+    (root / 'linked channel directory').symlink_to(root / 'private channel directory')
+    (root / 'private channel directory').mkdir(mode=0o700)
+    for parent, message in ((shared, 'must be private (mode 0700)'),
+                            (root / 'linked channel directory', 'must be owned by the current user and not a symlink')):
+        result = run(binary, '--test-identity', '-s', str(parent / 'shm.bin'), env=env, cwd=cwd, expected=1)
+        assert f'shared-memory directory {message}' in result.stderr, result.stderr
+        assert not (parent / 'shm.bin').exists(), 'a rejected directory received a channel'
+
     # Invoke the relocated ELF directly and preserve literal path arguments.
     # Identity mode must still work when HIP/model paths are unavailable.
     input_path = cwd / "input '$() ` rgba"

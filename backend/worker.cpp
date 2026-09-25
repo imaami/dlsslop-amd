@@ -171,7 +171,7 @@ void usage(FILE* out)
         "                          Uses nonempty DLSSLOP_MODULES; otherwise\n"
         "                          <executable prefix>/share/dlsslop-amd/HIP/gfx1201\n"
         "                          (source build fallback: ../assets/HIP/gfx1201)\n"
-        "  -s, --shm FILE          Layer transport\n"
+        "  -s, --shm FILE          Layer transport in a private (0700) directory\n"
         "                          Default: %s\n"
         "                          From nonempty DLSSNR_SHM, otherwise %s\n"
         "  -t, --tier HEIGHT       Neural work raster: 720, 900, or 1080\n"
@@ -208,6 +208,7 @@ void usage(FILE* out)
         "                          Default: off; run until stopped\n"
         "  -R, --trace-dir DIR     Opt-in real-frame RGB float32 diagnostics\n"
         "                          Default: disabled; no readbacks or file checks\n"
+        "                          DIR is created private (0700) or must be so\n"
         "                          To trace one frame, write a unique TOKEN (1-64\n"
         "                          of A-Z a-z 0-9 _ -, not 'request') to\n"
         "                          DIR/TOKEN.tmp, then ln it to DIR/request;\n"
@@ -338,15 +339,7 @@ public:
     {
         const auto parent = std::filesystem::path(name).parent_path();
         if (parent.empty()) throw std::runtime_error("--shm requires a path inside a private directory");
-        std::error_code ec;
-        const bool created = std::filesystem::create_directories(parent, ec);
-        if (ec) throw std::runtime_error("create shared-memory directory: " + ec.message());
-        struct stat directory{};
-        if (lstat(parent.c_str(), &directory) || !S_ISDIR(directory.st_mode) || directory.st_uid != getuid())
-            throw std::runtime_error("shared-memory directory must be owned by the current user and not a symlink");
-        if (created && chmod(parent.c_str(), 0700)) system_error("make shared-memory directory private");
-        if (!created && (directory.st_mode & 0777) != 0700)
-            throw std::runtime_error("shared-memory directory must have mode 0700: " + parent.string());
+        dlsslop::private_directory(parent, "shared-memory");
         fd_ = open(name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
         if (fd_ < 0) system_error("open shared-memory file");
         if (flock(fd_, LOCK_EX | LOCK_NB)) {

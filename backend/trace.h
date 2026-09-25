@@ -88,6 +88,20 @@ inline bool trace_valid_token(const std::string& token)
     return token != "request"; // DIR/request is the request file itself
 }
 
+// Creates DIR as 0700, or accepts an existing real directory the current user
+// owns with exactly that mode, so no other user can plant or swap files in it.
+inline void private_directory(const std::filesystem::path& directory, const char* what)
+{
+    std::error_code error;
+    const bool created = std::filesystem::create_directories(directory, error);
+    if (error) throw std::runtime_error(std::string("create ") + what + " directory: " + error.message());
+    struct stat st{};
+    if (lstat(directory.c_str(), &st) || !S_ISDIR(st.st_mode) || st.st_uid != getuid())
+        throw std::runtime_error(std::string(what) + " directory must be owned by the current user and not a symlink");
+    if (created ? chmod(directory.c_str(), 0700) != 0 : (st.st_mode & 0777) != 0700)
+        throw std::runtime_error(std::string(what) + " directory must be private (mode 0700): " + directory.string());
+}
+
 inline void trace_write_text(const std::filesystem::path& file, const std::string& text)
 {
     const auto temporary = file.string() + ".tmp";
@@ -216,12 +230,7 @@ class TraceRequests {
 public:
     TraceRequests(const std::string& directory, const std::string& shm, unsigned version)
         : directory_(std::filesystem::absolute(directory)) {
-        const bool created = std::filesystem::create_directories(directory_);
-        struct stat st{};
-        if (lstat(directory_.c_str(), &st) || !S_ISDIR(st.st_mode) || st.st_uid != getuid())
-            throw std::runtime_error("trace directory must be owned by the current user and not a symlink");
-        if (created && chmod(directory_.c_str(), 0700))
-            throw std::runtime_error("make trace directory private");
+        private_directory(directory_, "trace");
         lock_ = open((directory_ / ".worker-lock").c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
         if (lock_ < 0 || flock(lock_, LOCK_EX | LOCK_NB)) {
             if (lock_ >= 0) close(lock_);

@@ -63,6 +63,31 @@ int main(int argc, char** argv)
                 !dlsslop::trace_valid_token("") && !dlsslop::trace_valid_token(std::string(65, 'a')) &&
                 dlsslop::trace_valid_token(std::string(64, 'a')) && !dlsslop::trace_valid_token("request") &&
                 dlsslop::trace_valid_token("requests"), "safe bounded request tokens");
+        // Other users must not be able to plant files (such as a symlinked
+        // owner.json.tmp) in the root, so only a private one is accepted.
+        const auto rejected = [&](const std::filesystem::path& root) {
+            try { dlsslop::TraceRequests loose(root.string(), "/tmp/example-shm", 22); }
+            catch (const std::runtime_error&) {
+                return !std::filesystem::exists(root / ".worker-lock") && !std::filesystem::exists(root / "owner.json");
+            }
+            return false;
+        };
+        for (const auto mode : {std::filesystem::perms::all, std::filesystem::perms::owner_all |
+                                std::filesystem::perms::group_read | std::filesystem::perms::group_exec |
+                                std::filesystem::perms::others_read | std::filesystem::perms::others_exec}) {
+            std::filesystem::permissions(directory, mode);
+            require(rejected(directory), "reject a trace root other users can read or write");
+        }
+        std::filesystem::permissions(directory, std::filesystem::perms::owner_all);
+        std::filesystem::create_directory_symlink(directory, directory / "link");
+        require(rejected(directory / "link"), "reject a symlinked trace root");
+        std::filesystem::remove(directory / "link");
+        {
+            dlsslop::TraceRequests created((directory / "new/nested").string(), "/tmp/example-shm", 22);
+            require((std::filesystem::status(directory / "new/nested").permissions() & std::filesystem::perms::all) ==
+                    std::filesystem::perms::owner_all, "a created trace root is private");
+        }
+        std::filesystem::remove_all(directory / "new");
         {
             dlsslop::TraceRequests requests(directory.string(), "/tmp/example-shm", 22);
             require(read_text(directory / "owner.json").find("\"protocol_version\":22") != std::string::npos,
