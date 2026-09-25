@@ -417,6 +417,7 @@ class Engine {
     void* device_input_ = nullptr;
     void* device_output_ = nullptr;
     void* device_tuned_ = nullptr;
+    void* answer_ = nullptr; // The latest frame's final network answer.
     unsigned width_ = 0, height_ = 0;
     std::vector<float> encoded_, neural_, feedback_;
     std::vector<float> color_original_, color_raw_, color_result_;
@@ -450,7 +451,7 @@ public:
         if (device_input_) api.hipFree(device_input_);
         if (device_output_) api.hipFree(device_output_);
         if (device_tuned_) api.hipFree(device_tuned_);
-        device_input_ = device_output_ = device_tuned_ = nullptr;
+        device_input_ = device_output_ = device_tuned_ = answer_ = nullptr;
         network_.reset();
     }
     void prepare()
@@ -488,9 +489,11 @@ public:
     {
         if (gpu_codec_) gpu_codec_->pin(input, output, bytes);
     }
-    // Input and output are w * h RGBA8, or RGBA16F with settings.fp16.
+    // Input and output are w * h RGBA8, or RGBA16F with settings.fp16. verify
+    // checks the GPU codec against the CPU reference inside the timed frame.
     void infer(const uint8_t* input, unsigned w, unsigned h, uint8_t* output, unsigned passes,
-               const ProcessingSettings& settings = {}, dlsslop::FrameTrace* trace = nullptr)
+               const ProcessingSettings& settings = {}, dlsslop::FrameTrace* trace = nullptr,
+               bool verify = false)
     {
         if (!passes || passes > kMaxPasses)
             throw std::invalid_argument("invalid neural pass count");
@@ -528,7 +531,7 @@ public:
         mark(0);
         if (gpu_codec_) {
             gpu_codec_->encode(input, g, device_input_, settings.fp16);
-            if (options_.self_test) {
+            if (verify) {
                 network_->Synchronize();
                 std::vector<float> reference, actual(size_t(g.width) * g.height * 4);
                 dlsslop::encode_proxy(input, g, settings.fp16, reference);
@@ -611,7 +614,7 @@ public:
             if (pass) {
                 if (gpu_codec_) {
                     gpu_codec_->feedback(g, answer, device_input_, settings.precision16);
-                    if (options_.self_test) {
+                    if (verify) {
                         network_->Synchronize();
                         dlsslop::feedback_neural_rgb(neural_.data(), g, feedback_, settings.precision16);
                         std::vector<float> actual(feedback_.size());
@@ -665,28 +668,21 @@ public:
                 if (trace) trace_image(std::string(stage) + "-color", answer, 3);
             }
             if (settings.motion) temporal_->finish_pass(pass, answer);
-            if (pass + 1 < passes && (!gpu_codec_ || options_.self_test)) {
+            // The CPU codec, like the GPU one, rejects the nonfinite samples it reads.
+            if (!gpu_codec_ || verify) {
                 network_->Synchronize();
                 api.Check(api.hipMemcpy(neural_.data(), answer, neural_.size() * sizeof(float), 2),
                           "read neural answer");
-                for (float value : neural_)
-                    if (!std::isfinite(value)) throw std::runtime_error("network produced nonfinite values between passes");
             }
         }
+        answer_ = answer;
         if (settings.motion) temporal_->end();
         mark(2);
-        if (!gpu_codec_ || options_.self_test) {
-            network_->Synchronize();
-            api.Check(api.hipMemcpy(neural_.data(), answer, neural_.size() * sizeof(float), 2),
-                      "read final neural answer");
-            for (float value : neural_)
-                if (!std::isfinite(value)) throw std::range_error("network produced nonfinite values");
-        }
         if (gpu_codec_) {
             gpu_codec_->decode(g, answer, output);
             mark(3);
             gpu_codec_->finish();
-            if (options_.self_test) {
+            if (verify) {
                 std::vector<uint8_t> reference;
                 dlsslop::decode_neural_proxy(input, g, settings.fp16, neural_.data(), reference);
                 unsigned maximum = 0;
@@ -720,8 +716,16 @@ public:
         api.Check(api.hipEventElapsedTime(&inference_ms, marks_[1], marks_[2]), "inference interval");
         api.Check(api.hipEventElapsedTime(&readback_ms, marks_[2], marks_[3]), "readback interval");
     }
-    // infer() reads this back on every self-test invocation, before decoding.
-    const std::vector<float>& raw_result() const { return neural_; }
+    // The latest infer()'s raw network answer, read back outside its timing.
+    const std::vector<float>& raw_result()
+    {
+        if (gpu_codec_) {
+            auto& api = network_->Runtime();
+            api.Check(api.hipMemcpy(neural_.data(), answer_, neural_.size() * sizeof(float), 2),
+                      "read raw network answer");
+        }
+        return neural_;
+    }
 };
 
 void run_self_test(const Options& o, Engine& engine)
@@ -738,16 +742,21 @@ void run_self_test(const Options& o, Engine& engine)
     const unsigned repeats = o.self_test_runs;
     const auto g = dlsslop::geometry(w, h, o.tier);
     std::vector<float> first_raw;
+    std::vector<uint8_t> first_output;
+    // Only the first run checks the codec against the CPU reference, so the
+    // later runs time the production path; each must reproduce the first.
     for (unsigned run = 0; run < repeats; ++run) {
-        engine.infer(input.data(), w, h, output.data(), o.passes);
+        engine.infer(input.data(), w, h, output.data(), o.passes, {}, nullptr, !run);
         const auto& raw = engine.raw_result();
         if (raw.size() != size_t(g.width) * g.height * 3)
             throw std::runtime_error("self-test raw network output size mismatch");
         if (!run) {
             first_raw = raw;
+            first_output = output;
             float minimum = raw.front(), maximum = raw.front();
             size_t below_zero = 0, above_one = 0;
             for (float value : raw) {
+                if (!std::isfinite(value)) throw std::runtime_error("network produced nonfinite values");
                 minimum = std::min(minimum, value);
                 maximum = std::max(maximum, value);
                 below_zero += value < 0.0f;
@@ -781,9 +790,18 @@ void run_self_test(const Options& o, Engine& engine)
                 (first / 3) % g.width, (first / 3) / g.width, first % 3,
                 double(first_raw[first]), unsigned(first_before), double(raw[first]), unsigned(first_after));
             throw std::runtime_error("network is nondeterministic with identical input and fixed seed");
+        } else if (const auto [a, b] = std::mismatch(first_output.begin(), first_output.end(), output.begin());
+                   a != first_output.end()) {
+            const size_t first = a - first_output.begin();
+            std::fflush(stdout);
+            std::fprintf(stderr,
+                "network repeat %u/%u decoded output differs from the first run: "
+                "first x=%zu y=%zu channel=%zu first=%u repeat=%u\n",
+                run + 1, repeats, (first / 4) % w, (first / 4) / w, first % 4, unsigned(*a), unsigned(*b));
+            throw std::runtime_error("decoded output differs from the verified first run");
         }
         std::printf("network repeat %u/%u: %s; passes=%u upload_ms=%.3f network_ms=%.3f readback_ms=%.3f\n",
-                    run + 1, repeats, run ? "raw FP32 bit-identical" : "baseline", o.passes,
+                    run + 1, repeats, run ? "raw FP32 and output bit-identical" : "baseline", o.passes,
                     engine.upload_ms, engine.inference_ms, engine.readback_ms);
         std::fflush(stdout);
     }
