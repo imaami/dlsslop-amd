@@ -1680,7 +1680,7 @@ index ec78533..e4f1a0e 100644
      return true;
  }
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..83afeba 100644
+index 4b37520..efadd45 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -1880,7 +1880,78 @@ index 4b37520..83afeba 100644
      // Four rather than eight, and with a pause before the next attempt, so giving up costs a
      // fraction of a second and retrying costs that again only every few seconds.
      if (++s.timeouts >= 4) {
-@@ -851,6 +938,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -477,13 +564,17 @@ struct SwapchainState {
+     uint32_t width = 0, height = 0;
+     // Two fences, not one. Leg 1's must be waited on before the proxy is handed to the helper --
+     // the sequence number is the helper's only ordering signal, and it may not be bumped ahead of
+-    // the write it announces. Leg 2's needs no wait at all in its own frame: the present follows it
+-    // on the same queue, so the GPU orders them without the CPU. The wait moves to the start of the
+-    // next present, where the command buffer and the composed surfaces are reused, which takes a
+-    // full GPU stall out of the frame it belongs to.
++    // the write it announces. Leg 2's needs no wait at all in its own frame: the present waits on
++    // the image's semaphore, so the GPU orders them without the CPU. The wait moves to the start of
++    // the next present, where the command buffer and the composed surfaces are reused, which takes
++    // a full GPU stall out of the frame it belongs to.
+     VkFence fenceLeg1 = VK_NULL_HANDLE;
+     VkFence fenceLeg2 = VK_NULL_HANDLE;
+     bool leg2Pending = false;
++    // Per image: leg 2 or the restore signals it and the present waits on it. Queue order alone does
++    // not order a present behind earlier work, and an image is acquired again only after its present
++    // waited.
++    std::vector<VkSemaphore> leg2Done;
+     VkCommandPool pool = VK_NULL_HANDLE;
+     VkCommandBuffer cb = VK_NULL_HANDLE;
+     // Reused by the present path; resizing only occurs when an unusual caller supplies more waits.
+@@ -751,7 +842,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_EnumeratePhysicalDevices(
+ // ---------------------------------------------------------------------------
+ // Both declared here for the idle repaint, which draws a frame the application did not ask for.
+ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+-                           VkImage swapchainImage, uint32_t waitCount, const VkSemaphore* pWaits,
++                           uint32_t index, uint32_t waitCount, const VkSemaphore* pWaits,
+                            bool repaint, bool* waitsConsumed);
+ 
+ // Put the captured frame back, for when the effect is switched off while the picture is still.
+@@ -759,12 +850,19 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+ // No model and no round trip: the composed result is replaced by the frame it was made from, which
+ // is what the application drew and what it would draw again if it were running. Without this,
+ // switching the effect off while paused leaves the edit on screen until something else redraws.
+-static bool RestorePresent(DeviceChain* dc, SwapchainState& sc, VkImage swapchainImage) {
++static bool RestorePresent(DeviceChain* dc, SwapchainState& sc, uint32_t index) {
+     if (!sc.comp || !sc.comp->HasCapturedFrame()) return false;
++    // The previous leg 2 or restore may still hold the command buffer and the fence reused here.
++    if (sc.leg2Pending) {
++        if (dc->vkWaitForFences(dc->self, 1, &sc.fenceLeg2, VK_TRUE, UINT64_MAX) != VK_SUCCESS) return false;
++        dc->vkResetFences(dc->self, 1, &sc.fenceLeg2);
++        sc.leg2Pending = false;
++        sc.comp->WriteCapturedFrame();
++    }
+     VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+     if (dc->vkBeginCommandBuffer(sc.cb, &bi) != VK_SUCCESS) return false;
+-    if (!sc.comp->RecordRestore(sc.cb, swapchainImage)) {
++    if (!sc.comp->RecordRestore(sc.cb, sc.images[index])) {
+         dc->vkEndCommandBuffer(sc.cb);
+         return false;
+     }
+@@ -772,12 +870,12 @@ static bool RestorePresent(DeviceChain* dc, SwapchainState& sc, VkImage swapchai
+     VkSubmitInfo si{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
+     si.commandBufferCount = 1;
+     si.pCommandBuffers = &sc.cb;
++    si.signalSemaphoreCount = 1;
++    si.pSignalSemaphores = &sc.leg2Done[index];
+     if (dc->vkQueueSubmit(sc.queue, 1, &si, sc.fenceLeg2) != VK_SUCCESS) return false;
+-    // Waited for here rather than left to the next frame: there may not be a next frame, and the
+-    // command buffer is reused by the repaint after this one.
+-    dc->vkWaitForFences(dc->self, 1, &sc.fenceLeg2, VK_TRUE, 500ull * 1000ull * 1000ull);
+-    dc->vkResetFences(dc->self, 1, &sc.fenceLeg2);
+-    sc.leg2Pending = false;
++    // Collected like leg 2: the present waits on the semaphore, and the next user of the command
++    // buffer waits on the fence.
++    sc.leg2Pending = true;
+     {
+         static std::once_flag said;
+         std::call_once(said, [] { Log("[layer] idle repaint: put the captured frame back"); });
+@@ -851,6 +949,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              for (size_t k = 0; k < kWantCount; ++k)
                      if (!std::strcmp(pCreateInfo->ppEnabledExtensionNames[i], kWantExts[k])) enabled[k] = true;
          for (size_t k = 0; k < kWantCount; ++k) {
@@ -1890,7 +1961,7 @@ index 4b37520..83afeba 100644
              if (!ic->surfaceMaintenance1 &&
                  !std::strcmp(kWantExts[k], VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME))
                  continue;
-@@ -886,6 +976,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -886,6 +987,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
  
      link->u.pLayerInfo = link->u.pLayerInfo->pNext;
      auto* const nextLayerInfo = link->u.pLayerInfo;
@@ -1913,7 +1984,7 @@ index 4b37520..83afeba 100644
      VkResult res = create(physicalDevice, effective, pAllocator, pDevice);
      if (res != VK_SUCCESS && effective != pCreateInfo) {
          // Nothing added here is worth failing a device creation over.
-@@ -893,6 +999,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -893,6 +1010,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              (int) res);
          link->u.pLayerInfo = nextLayerInfo;
          addedSwapMaint = false;
@@ -1921,7 +1992,7 @@ index 4b37520..83afeba 100644
          res = create(physicalDevice, pCreateInfo, pAllocator, pDevice);
      }
      if (res != VK_SUCCESS) return res;
-@@ -910,19 +1017,32 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -910,19 +1028,32 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
      dc->table.Load(*pDevice);
      dc->releaseImages = addedSwapMaint && dc->vkReleaseSwapchainImagesEXT != nullptr;
      if (!dc->vkQueuePresentKHR || !dc->vkCreateSwapchainKHR || !ic) dc->inert = true;
@@ -1960,7 +2031,31 @@ index 4b37520..83afeba 100644
          }
      }
  
-@@ -1250,8 +1370,27 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
+@@ -1089,11 +1220,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+                 }
+ 
+                 const bool drew =
+-                    on ? ProcessPresent(dc, *sc, sc->queue, sc->images[index], 0, nullptr,
+-                                         /*repaint=*/true, nullptr)
+-                       : RestorePresent(dc, *sc, sc->images[index]);
++                    on ? ProcessPresent(dc, *sc, sc->queue, index, 0, nullptr, /*repaint=*/true, nullptr)
++                       : RestorePresent(dc, *sc, index);
+                 if (drew) {
+                     VkPresentInfoKHR pi{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
++                    pi.waitSemaphoreCount = 1;
++                    pi.pWaitSemaphores = &sc->leg2Done[index];
+                     pi.swapchainCount = 1;
+                     pi.pSwapchains = &swapchain;
+                     pi.pImageIndices = &index;
+@@ -1159,6 +1291,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
+             sc.comp.reset();
+             if (sc.fenceLeg1) dc->vkDestroyFence(device, sc.fenceLeg1, nullptr);
+             if (sc.fenceLeg2) dc->vkDestroyFence(device, sc.fenceLeg2, nullptr);
++            for (VkSemaphore semaphore : sc.leg2Done) dc->table.vkDestroySemaphore(device, semaphore, nullptr);
+             if (sc.repaintFence) dc->vkDestroyFence(device, sc.repaintFence, nullptr);
+             if (sc.pool) dc->vkDestroyCommandPool(device, sc.pool, nullptr);
+         }
+@@ -1250,8 +1383,27 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
      }
      if (!dc || !dc->vkCreateSwapchainKHR) return VK_ERROR_INITIALIZATION_FAILED;
  
@@ -1989,7 +2084,7 @@ index 4b37520..83afeba 100644
          m.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
  
      VkResult res = dc->vkCreateSwapchainKHR(device, &m, pAllocator, pSwapchain);
-@@ -1269,14 +1408,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
+@@ -1269,14 +1421,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
      sc.width = pCreateInfo->imageExtent.width;
      sc.height = pCreateInfo->imageExtent.height;
      const bool tooSmall = sc.width < kMinW || sc.height < kMinH;
@@ -2009,7 +2104,15 @@ index 4b37520..83afeba 100644
                            : tooSmall ? " (too small)" : " (too large)") : "");
      dc->swapchains[*pSwapchain] = std::move(sc);
      return VK_SUCCESS;
-@@ -1335,6 +1477,23 @@ static bool SetLoaderData(DeviceChain* dc, void* object) {
+@@ -1303,6 +1458,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
+         sc.comp.reset();
+         if (sc.fenceLeg1) dc->vkDestroyFence(device, sc.fenceLeg1, nullptr);
+         if (sc.fenceLeg2) dc->vkDestroyFence(device, sc.fenceLeg2, nullptr);
++        for (VkSemaphore semaphore : sc.leg2Done) dc->table.vkDestroySemaphore(device, semaphore, nullptr);
+         if (sc.repaintFence) dc->vkDestroyFence(device, sc.repaintFence, nullptr);
+         if (sc.pool) dc->vkDestroyCommandPool(device, sc.pool, nullptr);
+         dc->swapchains.erase(it);
+@@ -1335,6 +1491,23 @@ static bool SetLoaderData(DeviceChain* dc, void* object) {
  static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family) {
      VkDevice d = dc->self;
  
@@ -2033,7 +2136,46 @@ index 4b37520..83afeba 100644
      VkCommandPoolCreateInfo cpci{};
      cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
      cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-@@ -1403,6 +1562,19 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1352,6 +1525,11 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
+     fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+     if (dc->vkCreateFence(d, &fci, nullptr, &sc.fenceLeg1) != VK_SUCCESS) return false;
+     if (dc->vkCreateFence(d, &fci, nullptr, &sc.fenceLeg2) != VK_SUCCESS) return false;
++    VkSemaphoreCreateInfo sci{};
++    sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
++    sc.leg2Done.resize(sc.images.size());
++    for (VkSemaphore& semaphore : sc.leg2Done)
++        if (dc->table.vkCreateSemaphore(d, &sci, nullptr, &semaphore) != VK_SUCCESS) return false;
+ 
+     if (!dc->instance) return false;
+     sc.comp = std::make_unique<dlssnr::Composition>(&dc->table, &dc->instance->table, d, dc->physical);
+@@ -1383,26 +1561,40 @@ static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
+     return false;
+ }
+ 
+-// Returns true if the swapchain image now holds the composed frame.
++// Returns true if the swapchain image will hold the composed frame: leg 2 was submitted and signals
++// sc.leg2Done[index], which the present must wait on.
+ //
+ // Three steps around one round trip. The pass encodes a proxy of the frame on the GPU, that proxy
+ // crosses to the helper and comes back as the model's answer, and the pass composes the answer onto
+ // the frame. The proxy's crossing is fenced on the CPU because the model is in another process and
+-// there is nothing to wait on but a sequence number; the answer's return is not -- leg 2 and the
+-// present are ordered by the queue itself, and the fence that covers leg 2 is only waited on at the
+-// start of the NEXT frame, where the command buffer and the composed surfaces are reused.
++// there is nothing to wait on but a sequence number; the answer's return is not -- the present waits
++// on leg 2's semaphore, and the fence that covers leg 2 is only waited on at the start of the NEXT
++// frame, where the command buffer and the composed surfaces are reused.
+ //
+ // The caller's present semaphores are consumed by the first submit, because that submit is the first
+ // thing to touch the image. They are therefore unsignalled by the time this returns and must not be
+-// handed to vkQueuePresentKHR again; the caller presents with none.
++// handed to vkQueuePresentKHR again; the caller presents with the composed image's semaphore or none.
+ //
+ // Every path out leaves the swapchain image in PRESENT_SRC_KHR, including the ones that give up.
+ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+-                            VkImage swapchainImage, uint32_t waitCount,
++                            uint32_t index, uint32_t waitCount,
+                             const VkSemaphore* waitSemaphores, bool repaint,
                              bool* waitsConsumed) {
      if (waitsConsumed) *waitsConsumed = false;
      if (!sc.comp) return false;
@@ -2053,7 +2195,7 @@ index 4b37520..83afeba 100644
      VkDevice d = dc->self;
      VkCommandBuffer cb = sc.cb;
      const bool time = TimeEnabled();
-@@ -1437,19 +1609,26 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1437,19 +1629,26 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // frame on the 8-bit path it has always used. hdrActive doubles as the echo the helper reads, so
      // it builds the float images only for a layer that has said it will feed them.
      const uint32_t hdrMode = dc->shm.hdr ? dc->shm.hdr->hdrMode.load() : kHdrAuto;
@@ -2088,7 +2230,7 @@ index 4b37520..83afeba 100644
          uint32_t mw = 0, mh = 0;
          dlssnr::Composition::ModelExtent(sc.width, sc.height, fs, mw, mh);
          if (ShmMapFrames(dc->shm, size_t(mw) * mh * (hdrProxy ? 8 : 4)))
-@@ -1470,7 +1649,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1470,7 +1669,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // through, and the helper honours them on exactly the frame they were set for.
      sc.comp->SetDmaBuf(DmaBufEnabled());
  
@@ -2097,7 +2239,7 @@ index 4b37520..83afeba 100644
          Log("[layer] composition cannot run here: %s", sc.comp->Reason());
          return false;
      }
-@@ -1534,8 +1713,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1534,8 +1733,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // A capture is asked for by writing a frame count into the header; taking it clears the request,
      // so one press produces one run rather than one per frame for as long as nobody clears it.
      if (dc->shm.hdr) {
@@ -2113,7 +2255,7 @@ index 4b37520..83afeba 100644
      }
  
      VkCommandBufferBeginInfo bi{};
-@@ -1559,7 +1743,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1559,7 +1763,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          si.pWaitDstStageMask = nullptr;
      };
  
@@ -2127,7 +2269,16 @@ index 4b37520..83afeba 100644
          if (!NoteVk(dc, dc->vkEndCommandBuffer(cb), "vkEndCommandBuffer")) return false;
          if (!NoteVk(dc, dc->vkQueueSubmit(queue, 1, &si, fence), "vkQueueSubmit")) return false;
          if (waitsConsumed && si.waitSemaphoreCount != 0) *waitsConsumed = true;
-@@ -1595,6 +1785,9 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1574,7 +1784,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+ 
+     // ---- leg 1: the frame the model is shown ----
+     if (!NoteVk(dc, dc->vkBeginCommandBuffer(cb, &bi), "vkBeginCommandBuffer")) return false;
+-    if (!sc.comp->RecordCapture(cb, swapchainImage, fs)) {
++    if (!sc.comp->RecordCapture(cb, sc.images[index], fs)) {
+         dc->vkEndCommandBuffer(cb);
+         return false;
+     }
+@@ -1595,19 +1805,31 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          return false;
      }
      sc.comp->MarkModelFrame();
@@ -2137,21 +2288,90 @@ index 4b37520..83afeba 100644
      const double tHelper = time ? NowMs() : 0.0;
  
      // ---- leg 2: the answer, composed back ----
-@@ -1608,6 +1801,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
-     // the top of the next frame, where the reused surfaces actually need it.
+     if (!NoteVk(dc, dc->vkBeginCommandBuffer(cb, &bi), "vkBeginCommandBuffer")) return false;
+-    if (!sc.comp->RecordCompose(cb, swapchainImage, fs)) {
++    if (!sc.comp->RecordCompose(cb, sc.images[index], fs)) {
+         dc->vkEndCommandBuffer(cb);
+         return false;
+     }
+-    // No wait. The present that follows runs on this same queue behind these commands, so the image
+-    // is composed before it is shown without the CPU ever parking here; the fence is collected at
+-    // the top of the next frame, where the reused surfaces actually need it.
++    // No CPU wait. The present waits on this semaphore, so the image is composed before it is shown
++    // without the CPU ever parking here; the fence is collected at the top of the next frame, where
++    // the reused surfaces actually need it.
++    si.signalSemaphoreCount = 1;
++    si.pSignalSemaphores = &sc.leg2Done[index];
      if (!endAndSubmit(sc.fenceLeg2)) return false;
      sc.leg2Pending = true;
 +    // A diagnostic request must finish even if a paused application presents
 +    // no subsequent frame. Ordinary frames keep the asynchronous leg-2 path.
-+    if (sc.comp->CaptureActive()) {
-+        if (!waitAndReset(sc.fenceLeg2)) return false;
++    // The semaphore is signalled either way, so a failed wait still presents.
++    if (sc.comp->CaptureActive() && waitAndReset(sc.fenceLeg2)) {
 +        sc.leg2Pending = false;
 +        sc.comp->WriteCapturedFrame();
 +    }
      const double tReturn = time ? NowMs() : 0.0;
  
      if (dc->shm.hdr) {
-@@ -1851,7 +2051,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
+@@ -1650,11 +1872,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+     dc->lastPresentMs.store(NowMs(), std::memory_order_relaxed);
+ 
+     // Whether this call's wait semaphores have already been consumed by a submit of ours. They are
+-    // handed to the first swapchain we actually process; every path after that presents with none,
++    // handed to the first swapchain we actually process; every path after that presents without them,
+     // because a semaphore signalled once may only be waited on once. Presenting with them a second
+     // time is a wait that never completes -- which is what a second layer in the chain, Steam's
+     // overlay among them, turns from a latent bug into a hang.
+     bool waitsConsumed = false;
++    // Signalled by the composition's last submit; the present waits on it.
++    VkSemaphore composedSem = VK_NULL_HANDLE;
+ 
+     // Held from here to the present at the end, alongside Hook_QueueSubmit{,2}. Vulkan requires
+     // external synchronization for every operation on a queue; the repaint uses the application's
+@@ -1679,6 +1903,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+                 if (k < 3) Log("[layer] present: swapchain %p is not primary", (void*)pPresentInfo->pSwapchains[i]);
+                 continue;
+             }
++            // One composition, and one semaphore, per present. A larger swapchain that has just taken
++            // the primary role over composes from its next present.
++            if (composedSem) continue;
+             sc.queue = queue;
+             if (!sc.ready && !dc->shm.dead) {
+                 if (!CreateResources(dc, sc, family)) {
+@@ -1700,11 +1927,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+             }
+             const uint32_t waitCount = waitsConsumed ? 0u : pPresentInfo->waitSemaphoreCount;
+             bool submittedWaits = false;
+-            const bool composed = ProcessPresent(dc, sc, queue, sc.images[pPresentInfo->pImageIndices[i]],
++            const bool composed = ProcessPresent(dc, sc, queue, pPresentInfo->pImageIndices[i],
+                                                  waitCount, pPresentInfo->pWaitSemaphores,
+                                                  /*repaint=*/false, &submittedWaits);
+             waitsConsumed = waitsConsumed || submittedWaits;
+-            if (!composed) ++dc->framesPassedThrough;
++            if (composed) composedSem = sc.leg2Done[pPresentInfo->pImageIndices[i]];
++            else ++dc->framesPassedThrough;
+             if (VerboseEnabled()) {
+                 Log("[present] swapchain=%p image=%u seq=%u composed=%d",
+                     (void*)pPresentInfo->pSwapchains[i], pPresentInfo->pImageIndices[i],
+@@ -1723,13 +1951,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+         }
+     }
+ 
+-    if (!waitsConsumed) return dc->vkQueuePresentKHR(queue, pPresentInfo);
++    if (!waitsConsumed && !composedSem) return dc->vkQueuePresentKHR(queue, pPresentInfo);
+ 
+     // pNext is carried through untouched: present ids, present timing and the rest belong to the
+     // caller and none of them are about semaphores.
+     VkPresentInfoKHR pi = *pPresentInfo;
+-    pi.waitSemaphoreCount = 0;
+-    pi.pWaitSemaphores = nullptr;
++    pi.waitSemaphoreCount = composedSem ? 1u : 0u;
++    pi.pWaitSemaphores = &composedSem;
+     return dc->vkQueuePresentKHR(queue, &pi);
+ }
+ 
+@@ -1851,7 +2079,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
      if (*pCount < 1) { *pCount = 1; return VK_INCOMPLETE; }
      std::memset(pProperties, 0, sizeof(*pProperties));
      std::strncpy(pProperties->layerName, VK_LAYER_NAME, VK_MAX_EXTENSION_NAME_SIZE - 1);
