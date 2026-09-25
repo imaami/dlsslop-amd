@@ -124,8 +124,6 @@ int main(int argc, char** argv)
             metadata.intensity = 0.5f;
             metadata.local_tone = 1;
             metadata.local_structure = 1;
-            metadata.detail = 0.75f;
-            metadata.color = 0.25f;
             frame->finish(metadata.json());
             require(read_text(directory / "frame_1.done") == "frame_1/summary.json\n", "root marker follows summary commit");
             const auto summary = read_text(directory / "frame_1/summary.json");
@@ -143,7 +141,7 @@ int main(int argc, char** argv)
                     "\"fit_x\":1", "\"fit_y\":1", "\"fit_width\":2", "\"fit_height\":2",
                     "\"fp16_proxy\":1", "\"fp16_feedback\":1", "\"motion\":0",
                     "\"intensity\":0.5", "\"local_tone\":1", "\"local_structure\":1",
-                    "\"sharpness\":0", "\"detail\":0.75", "\"color\":0.25",
+                    "\"sharpness\":0",
                     "\"file\":\"pass-01-input.pfm\"", "\"file\":\"pass-01-raw.pfm\""})
                 require(summary.find(field) != std::string::npos, field);
             dlsslop::trace_write_text(directory / "request", "frame_1\n");

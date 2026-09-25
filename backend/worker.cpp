@@ -938,8 +938,6 @@ void run_worker(const Options& o)
                     metadata.sharpness = settings.tuning.sharpness;
                     metadata.color_preserve = settings.color_preserve;
                     metadata.color_backend = settings.color_preserve > 0 ? engine.color_backend() : "off";
-                    metadata.detail = BitsToFloat(h->transferStrengthBits.load());
-                    metadata.color = BitsToFloat(h->colourStrengthBits.load());
                     trace_metadata = metadata.json();
                 }
                 if (!failure.empty()) { // Serving recovered: the failure is no longer current.
