@@ -9,11 +9,12 @@ parts of the integration.
 CTest covers CLI parsing and defaults, launchers, an identity worker's handling
 of shared-memory requests, storage-image handling, CPU codec/tuning/temporal
 behaviour, color preservation, trace serialization, capture writing,
-color-diagnostic orchestration, and offline imports with filtered dependency
-fetches and source preparation. With the GUI enabled it also checks the
-controller's option parsing without a display, its shared-memory backend and
-slider, that an edit is written at once and later ones coalesced, and that the
-wheel scrolls a page without editing the unfocused controls it crosses.
+color-diagnostic orchestration, offline imports with filtered dependency
+fetches and source preparation, and the kernel build's compiler selection. With
+the GUI enabled it also checks the controller's option parsing without a
+display, its shared-memory backend and slider, that an edit is written at once
+and later ones coalesced, and that the wheel scrolls a page without editing the
+unfocused controls it crosses.
 
 The presentation smoke drives Vulkan capture, an explicit identity worker,
 composition and presentation through a separate test layer that also admits

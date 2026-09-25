@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Build the upstream production HIP modules on Linux, without a GPU or HIP SDK headers.
 
-Only an AMDGPU-enabled Clang with gfx1201 builtins and matching ld.lld are required.
-ROCm's amdclang++ and the isolated TheRock SDK are supported as well. No AMD
-display driver, kernel module, Windows DLL, or proprietary model is executed.
+Only an AMDGPU-enabled Clang with gfx1201 builtins and matching ld.lld are required;
+auto-detection needs the minimum Clang version stated under --compiler. ROCm's
+amdclang++ and the isolated TheRock SDK are supported as well. No AMD display
+driver, kernel module, Windows DLL, or proprietary model is executed.
 """
 
 import argparse
@@ -11,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -49,31 +51,50 @@ MODULES = [
 ]
 
 
+# Auto-detection order. Before Clang 22, every gfx12 workgroup barrier also
+# drains global loads and stores.
+MIN_CLANG = 22
+PATH_COMPILERS = ["amdclang++", "clang++-22", "clang++-23", "clang++"]
+ROCM_COMPILERS = ["/opt/rocm/llvm/bin/clang++", "/opt/rocm/bin/amdclang++"]
+SDK_COMPILERS = ["lib/llvm/bin/clang++", "llvm/bin/clang++", "bin/amdclang++"]
+AUTO_COMPILERS = (f"the first Clang {MIN_CLANG} or newer among {', '.join(PATH_COMPILERS)} on PATH, "
+                  f"then {', '.join(ROCM_COMPILERS)} and the active rocm-sdk's {', '.join(SDK_COMPILERS)}")
+
+
+def compiler_candidates():
+    yield from (Path(path) for name in PATH_COMPILERS if (path := shutil.which(name)))
+    yield from filter(Path.is_file, map(Path, ROCM_COMPILERS))
+    if sdk := shutil.which("rocm-sdk"):
+        root = Path(subprocess.check_output([sdk, "path", "--root"], text=True).strip())
+        yield from filter(Path.is_file, (root / rel for rel in SDK_COMPILERS))
+
+
+def version_line(compiler):
+    return subprocess.check_output([str(compiler), "--version"], text=True).partition("\n")[0]
+
+
 def find_compiler(explicit):
+    """Return the explicit compiler, whatever its version, or the first new enough candidate, with its version."""
     if explicit:
         found = shutil.which(explicit)
         if not found:
             raise RuntimeError(f"compiler not found: {explicit}")
-        return Path(found)
-    candidates = ["amdclang++", "clang++-23", "clang++-22", "clang++-21", "clang++-20", "clang++"]
-    for name in candidates:
-        if path := shutil.which(name):
-            return Path(path)
-    for path in [Path("/opt/rocm/llvm/bin/clang++"), Path("/opt/rocm/bin/amdclang++")]:
-        if path.is_file():
-            return path
-    if sdk := shutil.which("rocm-sdk"):
-        root = subprocess.check_output([sdk, "path", "--root"], text=True).strip()
-        for rel in ["lib/llvm/bin/clang++", "llvm/bin/clang++", "bin/amdclang++"]:
-            path = Path(root) / rel
-            if path.is_file():
-                return path
-    raise RuntimeError("install clang-20 (or newer) + matching lld, or activate a ROCm/TheRock SDK; use --compiler PATH")
+        return Path(found), version_line(found)
+    for compiler in compiler_candidates():
+        try:
+            version = version_line(compiler)
+        except (OSError, subprocess.CalledProcessError):
+            continue  # A candidate that cannot report its version counts as too old.
+        major = re.search(r"clang version (\d+)", version)
+        if major and int(major[1]) >= MIN_CLANG:
+            return compiler, version
+    raise RuntimeError(f"found no Clang {MIN_CLANG} or newer: install clang-{MIN_CLANG} + lld-{MIN_CLANG} or activate "
+                       f"a ROCm/TheRock SDK with Clang {MIN_CLANG} or newer, or name any other compiler with "
+                       "--compiler PATH or HIP_CLANG")
 
 
 def build(args):
-    compiler = find_compiler(args.compiler)
-    version = subprocess.check_output([str(compiler), "--version"], text=True).splitlines()[0]
+    compiler, version = find_compiler(args.compiler)
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=True)
     modules = [row for row in MODULES if not args.only or row[0] == args.only]
@@ -113,10 +134,13 @@ def build(args):
         generated.write_text(source, encoding="utf-8")
         output = root / f"{name}.hsaco"
         # Suppress the host/device bundle: HIP's module API accepts the raw
-        # AMDGPU shared ELF emitted by Clang's device link step.
+        # AMDGPU shared ELF emitted by Clang's device link step. Without a cuid
+        # the module does not hash the output path. Upstream's f16 inline asm
+        # takes 32-bit VGPRs, which LLVM 23's gfx12 true16 mode rejects.
         command = [str(compiler), "-x", "hip", "--cuda-device-only", "--no-gpu-bundle-output",
                    f"--offload-arch={args.arch}", f"-mcode-object-version={args.code_object_version}",
-                   "-nogpuinc", "-nogpulib", "-O3", "-std=c++17",
+                   "-nogpuinc", "-nogpulib", "-fuse-cuid=none", "-O3", "-std=c++17",
+                   "-Xclang", "-target-feature", "-Xclang", "-real-true16",
                    "-I", str(args.source.resolve()),
                    "-I", str(args.codec_source.parent.resolve()),
                    "-c", str(generated), "-o", str(output)]
@@ -147,11 +171,8 @@ def build(args):
 def main():
     base = Path(__file__).resolve().parents[1]
     compiler_default = os.environ.get("HIP_CLANG") or None
-    compiler_help = "compiler executable (default: %(default)s from HIP_CLANG)" if compiler_default else (
-        "compiler executable (default: auto; search PATH for amdclang++, clang++-23, "
-        "clang++-22, clang++-21, clang++-20, clang++; then /opt/rocm/llvm/bin/clang++, "
-        "/opt/rocm/bin/amdclang++; then the active rocm-sdk)"
-    )
+    compiler_help = "compiler executable, used whatever its Clang version (default: " + (
+        "%(default)s from HIP_CLANG" if compiler_default else "HIP_CLANG if set, else auto: " + AUTO_COMPILERS) + ")"
     parser = argparse.ArgumentParser(description=__doc__, add_help=False, allow_abbrev=False)
     parser.add_argument("-s", "--source", type=Path, default=base / "kernels",
                         help="directory containing upstream production *.hip (default: %(default)s)")

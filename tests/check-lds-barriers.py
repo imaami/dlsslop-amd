@@ -65,7 +65,9 @@ def probe(objdump, compiler, base):
         output = Path(temporary) / "probe.hsaco"
         subprocess.run([compiler, "-x", "hip", "--cuda-device-only", "--no-gpu-bundle-output",
                         "--offload-arch=gfx1201", "-mcode-object-version=5", "-nogpuinc", "-nogpulib",
-                        "-O3", "-std=c++17", "-I", str(base / "kernels"), "-c",
+                        "-fuse-cuid=none", "-O3", "-std=c++17",
+                        "-Xclang", "-target-feature", "-Xclang", "-real-true16",
+                        "-I", str(base / "kernels"), "-c",
                         str(base / "tests/lds_barrier_probe.hip"), "-o", str(output)], check=True)
         bodies = disassemble(objdump, output)
     errors = []
