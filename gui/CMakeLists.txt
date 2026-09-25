@@ -14,6 +14,9 @@ include(CTest)
 if(BUILD_TESTING)
     # The window test turns the wheel with QTest::wheelEvent, added in Qt 6.8.
     find_package(Qt6 6.8 REQUIRED COMPONENTS Test)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME gui-cli COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/../tests/gui-cli.py $<TARGET_FILE:dlsslop-gui>)
     add_executable(gui-channel-test channel_test.cpp)
     add_test(NAME gui-channel COMMAND gui-channel-test)
     add_executable(gui-slider-test slider_test.cpp)

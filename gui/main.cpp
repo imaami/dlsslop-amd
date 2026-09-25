@@ -36,6 +36,9 @@ namespace {
 using dlsslop_control::kSettings;
 using dlsslop_gui::Channel;
 
+constexpr double kArrowSteps[] = {0.001, 0.01, 0.1};
+constexpr int kDefaultArrowStep = 1;
+
 QStringList choices(const QString& name)
 {
     if (name == "hdr-mode") return {"Automatic", "8-bit proxy", "16-bit proxy"};
@@ -93,7 +96,7 @@ class Window final : public QWidget {
     dev_t device_{};
     ino_t inode_{};
     std::string activePath_;
-    double step_ = 0.01;
+    double step_ = kArrowSteps[kDefaultArrowStep];
 
     bool sameChannel(const Channel& channel) const
     { return connected_ && channel.device() == device_ && channel.inode() == inode_; }
@@ -372,8 +375,8 @@ public:
         auto* precisionRow = new QHBoxLayout;
         precisionRow->addWidget(new QLabel("Numeric arrow step"));
         auto* step = new QComboBox;
-        for (double value : {0.001, 0.01, 0.1}) step->addItem(QString::number(value), value);
-        step->setCurrentIndex(1);
+        for (double value : kArrowSteps) step->addItem(QString::number(value), value);
+        step->setCurrentIndex(kDefaultArrowStep);
         wheelNeedsFocus(step);
         precisionRow->addWidget(step);
         precisionRow->addStretch();
@@ -451,11 +454,13 @@ int main(int argc, char** argv)
                 "                  otherwise /tmp/dlsslop-amd-UID/shm.bin; effective: %s)\n"
                 "  -h, --help      Show help (default: off)\n"
                 "Standalone Qt 6 Widgets client. Does not start or stop the worker on open/close.\n"
-                "Live changes: on; numeric arrow step: 0.01; exact entry: six decimals.\n"
-                "QT_QPA_PLATFORM selects the Qt platform (default: automatic; xcb for X11).\n", path.c_str());
+                "Live changes: on; numeric arrow step: %g; exact entry: six decimals.\n"
+                "QT_QPA_PLATFORM selects the Qt platform (default: automatic; xcb for X11).\n",
+                path.c_str(), kArrowSteps[kDefaultArrowStep]);
             return 0;
         }
-        if (code != 's' || !optarg || !*optarg) return 2;
+        if (code != 's') return 2;
+        if (!*optarg) { std::fprintf(stderr, "--shm requires a nonempty path; try --help\n"); return 2; }
         path = optarg;
     }
     if (optind != argc) { std::fprintf(stderr, "Unexpected argument; try --help\n"); return 2; }

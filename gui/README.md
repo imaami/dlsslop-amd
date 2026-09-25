@@ -62,5 +62,6 @@ original proxy before per-pass history/feedback. Default 0 disables it. The
 worker selects the HIP module or logs the slower CPU fallback; see
 [COLOR-PRESERVATION.md](../COLOR-PRESERVATION.md).
 
-The CI workflow builds the GUI and runs its channel and offscreen slider and
-window tests. For testing instructions, see [VALIDATION.md](../VALIDATION.md).
+The CI workflow builds the GUI and runs its option-parsing, channel and
+offscreen slider and window tests. For testing instructions, see
+[VALIDATION.md](../VALIDATION.md).
