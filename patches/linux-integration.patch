@@ -2592,10 +2592,10 @@ diff --git a/upstream-layer/tools/meson-build.sh b/upstream-layer/tools/meson-bu
 old mode 100644
 new mode 100755
 diff --git a/upstream-layer/tools/shmctl.cpp b/upstream-layer/tools/shmctl.cpp
-index 4e16702..b769d15 100644
+index 4e16702..1bf7c7a 100644
 --- a/upstream-layer/tools/shmctl.cpp
 +++ b/upstream-layer/tools/shmctl.cpp
-@@ -1,168 +1,333 @@
+@@ -1,168 +1,362 @@
 -// dlssnr-shmctl — read and write the shared-memory header from shell.
 -//
 -// This exists because the helper CLI used to poke the header with
@@ -2837,7 +2837,11 @@ index 4e16702..b769d15 100644
 +        if (!std::strcmp(name, setting.name)) return &setting;
 +    return nullptr;
 +}
-+
+ 
+-    if ((size_t) st.st_size < ShmTotalBytes()) {
+-        if (!create) {  // nothing has ever attached; there is nothing to talk to
+-            close(fd);
+-            return nullptr;
 +bool FixedConfiguration(const Setting& setting) {
 +    return setting.field == &ShmHeader::preset || setting.field == &ShmHeader::style ||
 +           setting.field == &ShmHeader::autoMask || setting.field == &ShmHeader::skinStructureBits;
@@ -2853,11 +2857,7 @@ index 4e16702..b769d15 100644
 +                 setting.name, setting.isFloat ? double(BitsToFloat(raw)) : double(raw));
 +    return false;
 +}
- 
--    if ((size_t) st.st_size < ShmTotalBytes()) {
--        if (!create) {  // nothing has ever attached; there is nothing to talk to
--            close(fd);
--            return nullptr;
++
 +bool ChangesTuning(const Setting& setting) {
 +    return setting.field == &ShmHeader::colorPreserveBits || setting.field == &ShmHeader::intensityBits || setting.field == &ShmHeader::localToneBits ||
 +           setting.field == &ShmHeader::localStructureBits || setting.field == &ShmHeader::sharpnessBits ||
@@ -3004,6 +3004,18 @@ index 4e16702..b769d15 100644
 -// Returns false when the name is not a setting, so the caller can say so rather than silently
 -// succeeding at nothing.
 -bool ApplySetting(ShmHeader* h, const char* name, const char* value) {
+-    for (const auto& s : kSettings) {
+-        if (std::strcmp(s.name, name) != 0) continue;
+-        const double v = std::atof(value);
+-        (h->*s.field).store(s.isFloat ? FloatToBits(float(v)) : uint32_t(v < 0 ? 0 : v));
+-        h->controlSeq.fetch_add(1);
+-        // Anything the model latches when its feature is built also bumps the tuning sequence, which
+-        // is what tells the helper to rebuild rather than to keep using a feature built with the old
+-        // values. Sharpness is absent: it is read at evaluate, so a running feature follows it.
+-        static const char* kCreateTime[] = { "preset", "style", "automask", "intensity",
+-                                             "localtone", "localstructure", "skinstructure", "passes" };
+-        for (const char* k : kCreateTime) {
+-            if (std::strcmp(k, name) == 0) { h->tuningSeq.fetch_add(1); break; }
 +// Readers never create, resize, initialise or write the channel.
 +ShmHeader* MapHeader(const char* path, bool create, bool writable, void** base, int* fdOut) {
 +    const int flags = (writable ? O_RDWR : O_RDONLY) | O_CLOEXEC | O_NOFOLLOW | (create ? O_CREAT : 0);
@@ -3013,7 +3025,20 @@ index 4e16702..b769d15 100644
 +    struct stat st {};
 +    if (fstat(fd, &st)) return fail(errno);
 +    if (!S_ISREG(st.st_mode) || st.st_uid != getuid()) return fail(EACCES);
-+    if (writable && fchmod(fd, 0600)) return fail(errno);
++    if (writable) {
++        // Never chmod, grow or initialise a file that is not a channel. A new or
++        // grown file reads as zero, and initialisation clears the header before
++        // it stores the magic, so a channel's header has the magic or is zero.
++        uint32_t head[sizeof(ShmHeader) / 4] = {}, bits = 0;
++        if (pread(fd, head, sizeof head, 0) < 0) return fail(errno);
++        for (const uint32_t word : head) bits |= word;
++        if (head[0] != kShmMagic && bits) {
++            std::fprintf(stderr, "'%s' is not a dlsslop channel; refusing to modify it\n", path);
++            return fail(EINVAL);
+         }
+-        return true;
++        if (fchmod(fd, 0600)) return fail(errno);
++    }
 +    if (st.st_size < static_cast<off_t>(ShmTotalBytes())) {
 +        if (!create) return fail(EINVAL);
 +        if (ftruncate(fd, static_cast<off_t>(ShmTotalBytes()))) return fail(errno);
@@ -3023,6 +3048,23 @@ index 4e16702..b769d15 100644
 +    *base = mapping;
 +    *fdOut = fd;
 +    return static_cast<ShmHeader*>(mapping);
++}
++
++// Writers initialise a new channel and, like the worker and the layer,
++// re-initialise one left by another protocol version. A process still on
++// that version misreads the new layout and re-initialises it back when it
++// next attaches, so say so.
++bool Attach(ShmHeader* h, bool create, const char* path) {
++    if (Initialised(h)) return true;
++    if (!create) {
++        std::fprintf(stderr, "channel '%s' is uninitialised or has an incompatible protocol\n", path);
++        return false;
++    }
++    if (h->magic.load() == kShmMagic)
++        std::fprintf(stderr, "channel '%s' held protocol v%u and is re-initialised as v%u; restart any "
++                     "dlsslopd, game or GUI still using it\n", path, h->version.load(), kShmVersion);
++    ShmInitNativeDefaults(h);
++    return true;
 +}
 +
 +bool WorkerBypassDefault(const ShmHeader* h) {
@@ -3035,20 +3077,7 @@ index 4e16702..b769d15 100644
 +    ShmHeader defaults{};
 +    ShmInitNativeDefaults(&defaults, WorkerBypassDefault(h));
 +    std::printf("# Live values; defaults are the initial/reset values for this worker mode.\n");
-     for (const auto& s : kSettings) {
--        if (std::strcmp(s.name, name) != 0) continue;
--        const double v = std::atof(value);
--        (h->*s.field).store(s.isFloat ? FloatToBits(float(v)) : uint32_t(v < 0 ? 0 : v));
--        h->controlSeq.fetch_add(1);
--        // Anything the model latches when its feature is built also bumps the tuning sequence, which
--        // is what tells the helper to rebuild rather than to keep using a feature built with the old
--        // values. Sharpness is absent: it is read at evaluate, so a running feature follows it.
--        static const char* kCreateTime[] = { "preset", "style", "automask", "intensity",
--                                             "localtone", "localstructure", "skinstructure", "passes" };
--        for (const char* k : kCreateTime) {
--            if (std::strcmp(k, name) == 0) { h->tuningSeq.fetch_add(1); break; }
--        }
--        return true;
++    for (const auto& s : kSettings) {
 +        const uint32_t raw = (h->*s.field).load();
 +        const uint32_t initial = (defaults.*s.field).load();
 +        if (s.isFloat)
@@ -3060,7 +3089,7 @@ index 4e16702..b769d15 100644
  }
  
  void PrintStatus(const ShmHeader* h) {
-@@ -171,11 +336,20 @@ void PrintStatus(const ShmHeader* h) {
+@@ -171,11 +365,20 @@ void PrintStatus(const ShmHeader* h) {
      if (!Initialised(h)) return;
      std::printf("seq_req=%u\nseq_resp=%u\n", h->seq_req.load(), h->seq_resp.load());
      std::printf("width=%u\nheight=%u\n", h->width.load(), h->height.load());
@@ -3083,7 +3112,7 @@ index 4e16702..b769d15 100644
      std::printf("layer_pid=%u\nlayer_composition_up=%u\nlayer_frames=%llu\nlayer_ms=%.2f\n",
                  h->layerPid.load(),
                  h->layerCompositionUp.load(),
-@@ -189,99 +363,82 @@ void PrintStatus(const ShmHeader* h) {
+@@ -189,99 +392,75 @@ void PrintStatus(const ShmHeader* h) {
      if (!reason.empty()) std::printf("helper_reason=%s\n", reason.c_str());
  }
  
@@ -3151,15 +3180,17 @@ index 4e16702..b769d15 100644
 -        PrintSettings(h);
 -    } else if (std::strcmp(cmd, "capture") == 0) {
 -        if (argc != 4) { Usage(); rc = 2; }
-+    int result = 0;
-+    if (!Initialised(h)) {
-+        if (create) ShmInitNativeDefaults(h);
-         else {
+-        else {
 -            if (!Initialised(h)) ShmInitDefaults(h);
 -            h->captureRequest.store(uint32_t(std::atoi(argv[3])));
 -            h->controlSeq.fetch_add(1);
-+            std::fprintf(stderr, "channel '%s' is uninitialised or has an incompatible protocol\n", options.path.c_str());
-+            result = 1;
++    int result = Attach(h, create, options.path.c_str()) ? 0 : 1;
++    if (!result) {
++        if (options.reset) {
++            // Copy controls only. Never memset a live transport header.
++            ShmHeader defaults{};
++            ShmInitNativeDefaults(&defaults, WorkerBypassDefault(h));
++            for (const auto& s : kSettings) (h->*s.field).store((defaults.*s.field).load());
          }
 -    } else if (std::strcmp(cmd, "toggle") == 0) {
 -        // The one command worth binding to a key.
@@ -3188,13 +3219,10 @@ index 4e16702..b769d15 100644
 -                std::fprintf(stderr, "unknown setting: %s\n", argv[3]);
 -                rc = 2;
 -            }
-+    }
-+    if (!result) {
-+        if (options.reset) {
-+            // Copy controls only. Never memset a live transport header.
-+            ShmHeader defaults{};
-+            ShmInitNativeDefaults(&defaults, WorkerBypassDefault(h));
-+            for (const auto& s : kSettings) (h->*s.field).store((defaults.*s.field).load());
++        bool tuningChanged = options.reset;
++        for (const auto& change : options.changes) {
++            (h->*change.setting->field).store(change.value);
++            tuningChanged = tuningChanged || ChangesTuning(*change.setting);
          }
 -    } else if (std::strcmp(cmd, "set") == 0) {
 -        if (argc != 5) { Usage(); rc = 2; }
@@ -3204,14 +3232,6 @@ index 4e16702..b769d15 100644
 -                std::fprintf(stderr, "unknown setting: %s\n", argv[3]);
 -                rc = 2;
 -            }
-+        bool tuningChanged = options.reset;
-+        for (const auto& change : options.changes) {
-+            (h->*change.setting->field).store(change.value);
-+            tuningChanged = tuningChanged || ChangesTuning(*change.setting);
-         }
--    } else {
--        Usage();
--        rc = 2;
 +        // Repeating a toggle names the same action; it does not cancel itself out.
 +        std::vector<const Setting*> toggled;
 +        for (const auto* toggle : options.toggles) {
@@ -3222,7 +3242,10 @@ index 4e16702..b769d15 100644
 +            uint32_t value = field.load();
 +            while (!field.compare_exchange_weak(value, value ? 0u : 1u)) {}
 +            toggled.push_back(toggle);
-+        }
+         }
+-    } else {
+-        Usage();
+-        rc = 2;
 +        if (tuningChanged) h->tuningSeq.fetch_add(1);
 +        if (options.quit) h->quit.store(1);
 +        if (options.resume) h->quit.store(0);

@@ -18,10 +18,10 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     channel = Path(directory) / 'channel with spaces.bin'
     env = dict(os.environ, DLSSNR_SHM=str(channel))
 
-    def run(*options, expected=0):
+    def run(*options, expected=0, errors=False):
         result = subprocess.run([control, *options], env=env, text=True, capture_output=True)
         assert result.returncode == expected, (options, result.returncode, result.stdout, result.stderr)
-        return result.stdout
+        return result.stderr if errors else result.stdout
 
     def header():
         with channel.open('rb') as stream:
@@ -45,6 +45,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     shared_header = Path(__file__).resolve().parent.parent / 'upstream-layer/common/shm_protocol.h'
     tier = re.search(r'kNativeDefaultTier\s*=\s*(\d+)', shared_header.read_text())[1]
     max_passes = int(re.search(r'kMaxPasses\s*=\s*(\d+)', shared_header.read_text())[1])
+    version = int(re.search(r'kShmVersion\s*=\s*(\d+)', shared_header.read_text())[1])
     assert f'worker default: {tier}' in helptext
     assert run('-h') == helptext
     run('--settings', expected=1)
@@ -199,7 +200,31 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     assert other.stat().st_mtime_ns == stat.st_mtime_ns
     with other.open('rb') as stream:
         assert not any(stream.read(8192))
-    run('-s', str(other), '-r')
+    assert run('-s', str(other), '-r', errors=True) == ''
     assert 'initialised=1\n' in run('-s', str(other))
+
+    # Writers refuse a file that is not a channel, even one that starts with
+    # four zero bytes, say so and leave it untouched.
+    notes = Path(directory) / 'notes.txt'
+    for text in (b'not a channel\n' * 300, b'\0\0\0\0important data\n'):
+        notes.write_bytes(text)
+        notes.chmod(0o644)
+        for options in (('--enabled', '1'), ('--reset',), ('--quit',), ('--status',)):
+            error = run('--shm', str(notes), *options, expected=1, errors=True)
+            assert notes.read_bytes() == text and notes.stat().st_mode & 0o777 == 0o644, (text[:20], options)
+            refused = f"'{notes}' is not a dlsslop channel; refusing to modify it\n" in error
+            assert refused == (options != ('--status',)), (text[:20], options, error)
+
+    # A writer re-initialises another protocol version's channel and warns
+    # about the stale process; a reader only reports it.
+    stale = bytearray(header())
+    stale[4:8] = (version - 1).to_bytes(4, 'little')
+    with channel.open('r+b') as stream:
+        stream.write(stale)
+    run('-S', expected=1)
+    assert header() == stale
+    warning = run('--reset', errors=True)
+    assert f"'{channel}' held protocol v{version - 1} and is re-initialised as v{version};" in warning, warning
+    assert f'version={version}\n' in run('-S')
 
 print('control CLI: defaults, getopt syntax, read-only access, validation and reset checks passed')
