@@ -64,6 +64,12 @@ struct Context {
         VkCheck(vkEnumeratePhysicalDevices(instance, &count, nullptr), "enumerate physical devices");
         std::vector<VkPhysicalDevice> devices(count);
         VkCheck(vkEnumeratePhysicalDevices(instance, &count, devices.data()), "get physical devices");
+        // Prefer software Vulkan; fall back to hardware only when no CPU device qualifies.
+        std::stable_partition(devices.begin(), devices.end(), [](VkPhysicalDevice device) {
+            VkPhysicalDeviceProperties properties{};
+            vkGetPhysicalDeviceProperties(device, &properties);
+            return properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
+        });
         uint32_t family = 0;
         for (VkPhysicalDevice candidate : devices) {
             VkPhysicalDeviceFeatures features{};

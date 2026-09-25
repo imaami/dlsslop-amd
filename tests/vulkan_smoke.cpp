@@ -184,6 +184,12 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
     check(vkEnumeratePhysicalDevices(c.instance, &count, nullptr), "enumerate devices");
     std::vector<VkPhysicalDevice> devices(count);
     check(vkEnumeratePhysicalDevices(c.instance, &count, devices.data()), "enumerate devices");
+    // Prefer software Vulkan; fall back to hardware only when no CPU device qualifies.
+    std::stable_partition(devices.begin(), devices.end(), [](VkPhysicalDevice device) {
+        VkPhysicalDeviceProperties properties{};
+        vkGetPhysicalDeviceProperties(device, &properties);
+        return properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
+    });
     VkPhysicalDevice physical = VK_NULL_HANDLE;
     uint32_t family = 0;
     for (VkPhysicalDevice candidate : devices) {
@@ -206,7 +212,7 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
     require(physical, "no graphics/compute/present queue");
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(physical, &properties);
-    std::fprintf(stderr, "transport smoke GPU: %s\n", properties.deviceName);
+    std::fprintf(stderr, "transport smoke device: %s\n", properties.deviceName);
 
     const float priority = 1.0f;
     VkDeviceQueueCreateInfo qci{};

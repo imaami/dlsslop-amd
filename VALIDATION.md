@@ -9,9 +9,10 @@ parts of the integration.
 CTest covers CLI parsing and defaults, launchers, storage-image handling, CPU
 codec/tuning/temporal behaviour, color preservation, trace serialization,
 capture writing and color-diagnostic orchestration. With the GUI enabled it
-also checks the shared-memory controller backend. The HDR shader test uses
-software Vulkan and can skip when no suitable device is available; inspect the
-CTest result for skips. These checks do not establish neural image quality.
+also checks the shared-memory controller backend. The HDR shader test prefers
+software Vulkan (Mesa lavapipe), falls back to a hardware device and can skip
+when no suitable device is available; inspect the CTest result for skips. These
+checks do not establish neural image quality.
 
 After the build described in README.md:
 
@@ -20,9 +21,10 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 python3 tests/run-smoke.py --build-dir build --headless
 ```
 
-The optional presentation smoke uses a separate software-device test layer and
-an explicit identity worker. It checks transport and composition, not HIP
-inference.
+The optional presentation smoke uses an explicit identity worker and a
+separate test layer that also admits software devices. It prefers software
+Vulkan and falls back to a hardware device. It checks transport and
+composition, not HIP inference.
 
 ## Hardware checks
 
