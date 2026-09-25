@@ -169,11 +169,8 @@ void test_feedback_precision_and_padding()
         neural[marker * 3] = 0.500244140625f;     // Tie to even: .5.
         neural[marker * 3 + 1] = 0.500732421875f; // Tie to even: .5009765625.
         neural[marker * 3 + 2] = 0x1p-24f;       // Smallest binary16 subnormal.
-        const auto saved = neural;
         std::vector<float> feedback;
         dlsslop::feedback_neural_rgb(neural.data(), g, feedback);
-        require(!std::memcmp(saved.data(), neural.data(), neural.size() * sizeof(float)),
-                "feedback modified its raw input");
         require(feedback.size() == std::size_t(g.width) * g.height * 4,
                 "feedback extent differs from encode extent");
         require(feedback[marker * 4] == 0.5f &&

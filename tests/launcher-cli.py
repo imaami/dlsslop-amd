@@ -45,9 +45,12 @@ def main():
         run([BASH, str(LAUNCHER), "--shm"], expected=2, env=env)
         run([BASH, str(LAUNCHER), "--shm="], expected=2, env=env)
         run([BASH, str(LAUNCHER), "--unknown"], expected=2, env=env)
-        run([BASH, str(LAUNCHER), "/usr/bin/true"], expected=1, env=env)
+        result = run([BASH, str(LAUNCHER), "/usr/bin/true"], expected=1, env=env)
+        assert "Start dlsslopd on the host first" in result.stderr
+        assert not channel.exists()
         channel.touch(mode=0o600)
-        run([BASH, str(LAUNCHER), "/usr/bin/true"], expected=1, env=env)
+        result = run([BASH, str(LAUNCHER), "/usr/bin/true"], expected=1, env=env)
+        assert "No live native worker" in result.stderr
         result = run([BASH, str(LAUNCHER), "/usr/bin/true"], expected=1,
                      env=dict(env, PATH=str(base)))
         assert "requires flock" in result.stderr
