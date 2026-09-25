@@ -1,0 +1,1261 @@
+{
+  "version": 1,
+  "repositories": {
+    "layer": {
+      "path": "external/layer",
+      "url": "https://github.com/bmitch87/DLSS5VKLayer.git",
+      "commit": "117c9530834d37ef8dc7b371e36cc3fb507e6b6b"
+    },
+    "amd": {
+      "path": "external/amd",
+      "url": "https://github.com/lmxxf/dlss5-on-amd-9070xt-porting.git",
+      "commit": "7ef24e7c1498bce59738277e174249866608c4ed"
+    },
+    "optiscaler": {
+      "path": "external/optiscaler",
+      "url": "https://github.com/optiscaler/OptiScaler.git",
+      "commit": "6ded74bfa4fbb932fda7184c1263fc45380d5b1d"
+    }
+  },
+  "files": {
+    "upstream-layer/.github/workflows/build.yml": {
+      "repository": "layer",
+      "source": ".github/workflows/build.yml",
+      "sha256": "8c23e60c3fd87aae902be6511e77c5adec14bd01e00f983563556028aa280425"
+    },
+    "upstream-layer/.github/workflows/release-draft.yml": {
+      "repository": "layer",
+      "source": ".github/workflows/release-draft.yml",
+      "sha256": "8d2f42802a0d43333d9ab56f4cebf36f53bdeb149f8226df9914d23965cb45f8"
+    },
+    "upstream-layer/.gitignore": {
+      "repository": "layer",
+      "source": ".gitignore",
+      "sha256": "4f6d3aa8ed43891e5429bab96c8e5b3bfd037668ce9e5b122d2eb703610a922b"
+    },
+    "upstream-layer/ATTRIBUTION.md": {
+      "repository": "layer",
+      "source": "ATTRIBUTION.md",
+      "sha256": "9318b9aea64ae314667beac0dff7267d59508113025cbecfd9a6049bfc63cdfc"
+    },
+    "upstream-layer/LICENSE": {
+      "repository": "layer",
+      "source": "LICENSE",
+      "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
+    },
+    "upstream-layer/README.md": {
+      "repository": "layer",
+      "source": "README.md",
+      "sha256": "6d91b571a2972aa618d459041b12913208c446a95cb656ec3db83e26c70b4665"
+    },
+    "upstream-layer/common/runner_discovery.cpp": {
+      "repository": "layer",
+      "source": "common/runner_discovery.cpp",
+      "sha256": "83071509f48264f0e46a6f2e5fee057800fa2e755e40cf39f2046b6b857ab4ee"
+    },
+    "upstream-layer/common/runner_discovery.h": {
+      "repository": "layer",
+      "source": "common/runner_discovery.h",
+      "sha256": "4de4ab43c90d5d2c0d5bd02c21a30eb1c5fd0885baee7991c9a6de86a4fcda88"
+    },
+    "upstream-layer/common/shm_protocol.h": {
+      "repository": "layer",
+      "source": "common/shm_protocol.h",
+      "sha256": "2198cca22404234fb2df1af88ed934a1756bc08ac95d705d9f4cc1009be680a3"
+    },
+    "upstream-layer/core/guard.cpp": {
+      "repository": "layer",
+      "source": "core/guard.cpp",
+      "sha256": "80b675ecc3f8edca3174ee778e28b426b663577bce1d19c4535e68278459f44f"
+    },
+    "upstream-layer/core/guard.h": {
+      "repository": "layer",
+      "source": "core/guard.h",
+      "sha256": "3c101b8e0ad2f6daa4e59dfc12f5c80b356030b8b359216f55d2b74b098a5963"
+    },
+    "upstream-layer/core/logging.h": {
+      "repository": "layer",
+      "source": "core/logging.h",
+      "sha256": "81c11a0b130d75eeb79e172d942b40fd759baf4c9992c4e476d40d11dc53485e"
+    },
+    "upstream-layer/core/ngx_abi.h": {
+      "repository": "layer",
+      "source": "core/ngx_abi.h",
+      "sha256": "bb0b960b4e20f4af02b38231a0ee213c81767faf47e42ed3994673940542c3ac"
+    },
+    "upstream-layer/core/ngx_param.h": {
+      "repository": "layer",
+      "source": "core/ngx_param.h",
+      "sha256": "aeac83c7af6433f37455ef2f14418faba9810bf7d622a9ce28b7c9a567bd4e1d"
+    },
+    "upstream-layer/core/ngx_snippet.cpp": {
+      "repository": "layer",
+      "source": "core/ngx_snippet.cpp",
+      "sha256": "bddc74109fd4495f94cf1bd893d89878412c015422b3c465520e8aa25c08ebd2"
+    },
+    "upstream-layer/core/ngx_snippet.h": {
+      "repository": "layer",
+      "source": "core/ngx_snippet.h",
+      "sha256": "81469e621a8d07c234cc5279a919d5b7e69b1b3bf40f64978517d0e1ad2a88d9"
+    },
+    "upstream-layer/core/stb_image_write.h": {
+      "repository": "layer",
+      "source": "core/stb_image_write.h",
+      "sha256": "fe31f93135df4ce3fa3107b744c73f13939c104aa378932018f69124c5114b50"
+    },
+    "upstream-layer/dlssnr-helper": {
+      "repository": "layer",
+      "source": "dlssnr-helper",
+      "sha256": "f59fb5b9361a511a27998823c114a7c994f98239c80c9d846e18d3b68ac34cbf"
+    },
+    "upstream-layer/extracted_pipeline_notes.md": {
+      "repository": "layer",
+      "source": "extracted_pipeline_notes.md",
+      "sha256": "01f5640f7fe986ccae6187ce79e584a7f511c8cba5044579666342385627cbdf"
+    },
+    "upstream-layer/gui/dlssnr_gui.pro": {
+      "repository": "layer",
+      "source": "gui/dlssnr_gui.pro",
+      "sha256": "1ecf174652b4ed4bd1cc44d7fab9bb432b87dc2e4f1bef427bd4396a2cac2439"
+    },
+    "upstream-layer/gui/main.cpp": {
+      "repository": "layer",
+      "source": "gui/main.cpp",
+      "sha256": "cbb7f19560ce8e1607fa8b4775b21879ebcf0c548b76f0bd77c293ccb46b640e"
+    },
+    "upstream-layer/gui/mainwindow.cpp": {
+      "repository": "layer",
+      "source": "gui/mainwindow.cpp",
+      "sha256": "d39d61630b97d993d7f6ab8d5ea04c5207b969449c2b9b2d1cab3d8dcf72cfbf"
+    },
+    "upstream-layer/gui/mainwindow.h": {
+      "repository": "layer",
+      "source": "gui/mainwindow.h",
+      "sha256": "9ec7abc818957e771ab7121ad7fafc0765514b11a2b36c4289cd29e77d06de54"
+    },
+    "upstream-layer/gui/meson.build": {
+      "repository": "layer",
+      "source": "gui/meson.build",
+      "sha256": "220de324fa26056fa0a384686094a4dad50b514702d68dbfe95ecd80197be36d"
+    },
+    "upstream-layer/gui/passdialog.cpp": {
+      "repository": "layer",
+      "source": "gui/passdialog.cpp",
+      "sha256": "0e6e72a7e4ea7cc7f86f795bd2faa552041003edaae35530aa5ea3b94ae5c72c"
+    },
+    "upstream-layer/gui/passdialog.h": {
+      "repository": "layer",
+      "source": "gui/passdialog.h",
+      "sha256": "daa63c1832139efffb1d8823909ecf750e3ef05cca20ff52bdf467cd4253efd7"
+    },
+    "upstream-layer/gui/shm_binder.cpp": {
+      "repository": "layer",
+      "source": "gui/shm_binder.cpp",
+      "sha256": "312eb7f9d5fd4543735af268f342a9c05834981773517751ba054f4bbf85569e"
+    },
+    "upstream-layer/gui/shm_binder.h": {
+      "repository": "layer",
+      "source": "gui/shm_binder.h",
+      "sha256": "295330e360cfdae73d14c31056bf0f9e9f9a71051c901bbc4bcd99e8595633d5"
+    },
+    "upstream-layer/helper/main.cpp": {
+      "repository": "layer",
+      "source": "helper/main.cpp",
+      "sha256": "52afa097db149982145abbef43662a02501d71a8048af15317dfb4f87016df90"
+    },
+    "upstream-layer/helper/mvec_deadzone_spv.h": {
+      "repository": "layer",
+      "source": "helper/mvec_deadzone_spv.h",
+      "sha256": "770ee9de81501ab26eac1050ce170c77ecdbea9d6ad6f4a4754cc97e7c3bc1ce"
+    },
+    "upstream-layer/helper/shaders/mvec_deadzone.comp": {
+      "repository": "layer",
+      "source": "helper/shaders/mvec_deadzone.comp",
+      "sha256": "8c1df4f2f88ca386d6ca59b330bfc510c893854b1290fdd9c83ff40d6674f466"
+    },
+    "upstream-layer/layer_linux/dlssnr.map": {
+      "repository": "layer",
+      "source": "layer_linux/dlssnr.map",
+      "sha256": "4dc4e55f59d62456441d5a69c0c0bdff51fb7c85d6e4205df8919f71082a4ab4"
+    },
+    "upstream-layer/layer_linux/manifest/VK_LAYER_NV_dlssnr.json": {
+      "repository": "layer",
+      "source": "layer_linux/manifest/VK_LAYER_NV_dlssnr.json",
+      "sha256": "6110c5dd2f06ab69af219970d07cbc74b453f1b10f6d69b44313a5a3153baf0d"
+    },
+    "upstream-layer/layer_linux/meson.build": {
+      "repository": "layer",
+      "source": "layer_linux/meson.build",
+      "sha256": "062a7329fac42c3901491440dde02a232d6b3a3d7ce35df223c338af88e8f4e2"
+    },
+    "upstream-layer/layer_linux/src/capture.cpp": {
+      "repository": "layer",
+      "source": "layer_linux/src/capture.cpp",
+      "sha256": "585835c47c37ce2f9db754d07031ec1dadeff431e011df8159a9176642d48417"
+    },
+    "upstream-layer/layer_linux/src/capture.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/capture.h",
+      "sha256": "d341382162e73a7c4642608fc82c70e8e18fd9986c1cea78016f53b6980a157e"
+    },
+    "upstream-layer/layer_linux/src/composition.cpp": {
+      "repository": "layer",
+      "source": "layer_linux/src/composition.cpp",
+      "sha256": "d7f29ebb41e1ae12fb92855776fab8226a338c884ea11d923b9a1c91c7ce6a72"
+    },
+    "upstream-layer/layer_linux/src/composition.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/composition.h",
+      "sha256": "2a27790e2534b4783bc80ebedd1908bde1aad76d5ffbded1672ada8080107e6d"
+    },
+    "upstream-layer/layer_linux/src/dlssnr/DEVELOPMENT.md": {
+      "repository": "layer",
+      "source": "layer_linux/src/dlssnr/DEVELOPMENT.md",
+      "sha256": "94123e30d793e67dc188737d8aef9a3be4fd59077bc5d543a74bd5bd6404015e"
+    },
+    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Common.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/dlssnr/DlssNr_Common.h",
+      "sha256": "c978a66d9fe6aac9ce6f82d1e0f58b002608262bbcafc261bd82427323115444"
+    },
+    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Layout.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/dlssnr/DlssNr_Layout.h",
+      "sha256": "c15948312e20559102284ed6c05754e001cf1b2a463073e7717b1ba70750d3b8"
+    },
+    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Shader_Vk.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/dlssnr/DlssNr_Shader_Vk.h",
+      "sha256": "c82dc37155995b9d8d3b99dd689393787b18b9120e9bb41b371250b3286633b5"
+    },
+    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Shader_Vk.spv": {
+      "repository": "layer",
+      "source": "layer_linux/src/dlssnr/DlssNr_Shader_Vk.spv",
+      "sha256": "8243fb57dcc29bdd037633086b1aa326ede70624ba0a5cef9d4a55dafd94a534"
+    },
+    "upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl": {
+      "repository": "layer",
+      "source": "layer_linux/src/dlssnr/dlssnr.hlsl",
+      "sha256": "30154d7e697d396ec9ce209523c6b3a471eecce1be580e709136b0de4b797c68"
+    },
+    "upstream-layer/layer_linux/src/dlssnr/frame-hold.md": {
+      "repository": "layer",
+      "source": "layer_linux/src/dlssnr/frame-hold.md",
+      "sha256": "7a2266a95a11811360954b001175c60db1d06931b5d077703a916306b950b7f4"
+    },
+    "upstream-layer/layer_linux/src/dlssnr_pass.cpp": {
+      "repository": "layer",
+      "source": "layer_linux/src/dlssnr_pass.cpp",
+      "sha256": "a6a5ca738f6a5e87fb63ac883540e99cb304cbe41da54ac075299ba07e434269"
+    },
+    "upstream-layer/layer_linux/src/dlssnr_pass.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/dlssnr_pass.h",
+      "sha256": "84c521a917f682ced54942e7402839fd1e1622e9cf64b92d7225ca650b5fc568"
+    },
+    "upstream-layer/layer_linux/src/hotkey.cpp": {
+      "repository": "layer",
+      "source": "layer_linux/src/hotkey.cpp",
+      "sha256": "fcf4641231687c88f2e1fd234619fd60374a076188ffac6f35dc1c320b7437de"
+    },
+    "upstream-layer/layer_linux/src/hotkey.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/hotkey.h",
+      "sha256": "1c131407aaaa39b0e65cecd933ccefc66411646dc73186d8a3d10a4a506aa8fb"
+    },
+    "upstream-layer/layer_linux/src/layer.cpp": {
+      "repository": "layer",
+      "source": "layer_linux/src/layer.cpp",
+      "sha256": "50692f6a7bfa037a23aeae1c97b5e42488541ed6ea86bb6c8f9f920d13ab3bdb"
+    },
+    "upstream-layer/layer_linux/src/log.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/log.h",
+      "sha256": "6d72ae8e93ecf529d15f74a030475a460dcd13735e23f47d784ef53c919d3223"
+    },
+    "upstream-layer/layer_linux/src/scaler_vk.cpp": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaler_vk.cpp",
+      "sha256": "498681ea2715ae9da4a0bd0009db952923cf61c0c7ae8b7bd5e1c73bef0cff42"
+    },
+    "upstream-layer/layer_linux/src/scaler_vk.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaler_vk.h",
+      "sha256": "b80938043f9a2a175e7cf1ea93e7576189c60dc4bb8e3bda6fecfa5527262b5a"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_bicubic_Shader_Vk.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcds_bicubic_Shader_Vk.h",
+      "sha256": "61395cb0cd7d8b0d44e9e7d992c1db843f02acc9ffe8eaa56ddb22f7f5bd40aa"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_bicubic_Shader_Vk.spv": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcds_bicubic_Shader_Vk.spv",
+      "sha256": "4ac02bc2c0195e7bb3534b429802d7755536f0fff1abfa9f93690bf890623a78"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_catmull_Shader_Vk.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcds_catmull_Shader_Vk.h",
+      "sha256": "608e78f0e3520066e7ce7298eda565ad20f2e9814329d9e68ed2d8bd2eeecc13"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_catmull_Shader_Vk.spv": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcds_catmull_Shader_Vk.spv",
+      "sha256": "5de62230c9fd7fdb3d72295d851eb623bab9a2601af3838b15499d93164b7bed"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.h",
+      "sha256": "57605564e71e923eccda8323db306b69e40e41ffebc0fec4fb392fd420c99deb"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.spv": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.spv",
+      "sha256": "5117ebca23f97ddacbb04abbe2a11fc433cc7a1dc99f198707b3e6ca31607cc8"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.h",
+      "sha256": "57b4c6fb8a39db0649b2ddb37bb1609b5a194c7e3c92db4eb32ceae9168bc8d3"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.spv": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.spv",
+      "sha256": "5f6a2ca0abac100eee754d032d0cb99120473cb5f139e77abc351fc7faafc6d5"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.h",
+      "sha256": "1cc1770bf3068f87ec3b0fb57612c056e24754e0e9e708587a9decc8a5aed330"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.spv": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.spv",
+      "sha256": "ee9ebbdc0e833309cebe42bf80e4acf05dceec8b1fa6aab7320a61edecc5f859"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.h",
+      "sha256": "7bcce1e0c655928daf9877dc6a5efefaddcd4decddb2a7ac5d5f99388a6fbcab"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.spv": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.spv",
+      "sha256": "5dcf95eb63a86c0d7fd3ac5e38ce46f1fb6e4de78ba7ad8c3272fbaf4f78f550"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_magc_Shader_Vk.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcds_magc_Shader_Vk.h",
+      "sha256": "9bac7d92cb7b15ec575995d1365199e86f24ff5213a898e22f0532071e82f567"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_magc_Shader_Vk.spv": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcds_magc_Shader_Vk.spv",
+      "sha256": "7a144ff7c067c4e4d9002e997f8a4f93407e3a4f36b2afc80ff6ba3b7c780f19"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcus_Shader_Vk.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcus_Shader_Vk.h",
+      "sha256": "73f6e92f6e4b5e419b6c5618f6ce3901238949cb3346291fb539c7342972d395"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcus_Shader_Vk.spv": {
+      "repository": "layer",
+      "source": "layer_linux/src/scaling/bcus_Shader_Vk.spv",
+      "sha256": "f1317d2ebc422a4d2cc1f4cbf248463b344e0797dcd421777942af3cf6d9e8fa"
+    },
+    "upstream-layer/layer_linux/src/shader_vk.cpp": {
+      "repository": "layer",
+      "source": "layer_linux/src/shader_vk.cpp",
+      "sha256": "9b07286de872b3f70e8d4287a3e4e5390f27fa1db03a5bb042541d964714cd28"
+    },
+    "upstream-layer/layer_linux/src/shader_vk.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/shader_vk.h",
+      "sha256": "8538f531c1d3ca806a1fc020469b88bae42b261a4e2d84230eca368a34906933"
+    },
+    "upstream-layer/layer_linux/src/shaders/meter_reduce.comp": {
+      "repository": "layer",
+      "source": "layer_linux/src/shaders/meter_reduce.comp",
+      "sha256": "ad8048f747a709a859e0f7f2ce856c225267f271147ba465c455759bc5a412aa"
+    },
+    "upstream-layer/layer_linux/src/shaders/meter_reduce_spv.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/shaders/meter_reduce_spv.h",
+      "sha256": "7fa639f98d3bc25795e7130f8f27f97fbd20b73747e517bafc554b6884db43e1"
+    },
+    "upstream-layer/layer_linux/src/vk_table.h": {
+      "repository": "layer",
+      "source": "layer_linux/src/vk_table.h",
+      "sha256": "1518365a26deb0b873d4481dcf275f5966c7a54012edd5848cd2b1580455cc06"
+    },
+    "upstream-layer/local_install.sh": {
+      "repository": "layer",
+      "source": "local_install.sh",
+      "sha256": "7287c1c4146d5ecff9b5f2f472b2dda5517f8bbe8149430104fc98c7e551935b"
+    },
+    "upstream-layer/meson/cross-clang-linux32.ini": {
+      "repository": "layer",
+      "source": "meson/cross-clang-linux32.ini",
+      "sha256": "885cd7bc87a3c66c8f389944ef1b4ca076d1655a5b77f12d9524801602170f60"
+    },
+    "upstream-layer/meson/cross-clang-mingw64.ini": {
+      "repository": "layer",
+      "source": "meson/cross-clang-mingw64.ini",
+      "sha256": "f620fb13b2055828d52a5cc44cf89d15d1c56863d80deb1d47014c986d7c6056"
+    },
+    "upstream-layer/meson/native-clang.ini": {
+      "repository": "layer",
+      "source": "meson/native-clang.ini",
+      "sha256": "229ab28b54b5ce3995142f94d73a1f18dbcd4847d78cde167601ecb127a8f748"
+    },
+    "upstream-layer/meson.build": {
+      "repository": "layer",
+      "source": "meson.build",
+      "sha256": "17b56b282885578c82f2a44dbfefd3df2a7abf306da5d012dc4d60aa9012890a"
+    },
+    "upstream-layer/meson_options.txt": {
+      "repository": "layer",
+      "source": "meson_options.txt",
+      "sha256": "80c86c18290f7638b6b9bf94e20700be51b1e93ae7ab68dfd6e0ba872466e6b6"
+    },
+    "upstream-layer/packaging/PKGBUILD": {
+      "repository": "layer",
+      "source": "packaging/PKGBUILD",
+      "sha256": "8bc50a393eeb949d031d87e3606589255b226ebfd78ae417aec2f0ab8f4ca58b"
+    },
+    "upstream-layer/packaging/dlssnr-personal.spec": {
+      "repository": "layer",
+      "source": "packaging/dlssnr-personal.spec",
+      "sha256": "a8aae90d5b0ff6f5617427be1c944a644ca59fc5a1bc5a54a211967e59427260"
+    },
+    "upstream-layer/packaging/dlssnr.desktop": {
+      "repository": "layer",
+      "source": "packaging/dlssnr.desktop",
+      "sha256": "8e5d9838b9e116bc63af8059dc7ba469b943fcb8ca8d37f9f0a7496df4be3179"
+    },
+    "upstream-layer/packaging/dlssnr.spec": {
+      "repository": "layer",
+      "source": "packaging/dlssnr.spec",
+      "sha256": "7d4c507605a387617a1a015518d9b619d1e2517b2e1cc3ac9092af5a1aaa2256"
+    },
+    "upstream-layer/packaging/install.sh": {
+      "repository": "layer",
+      "source": "packaging/install.sh",
+      "sha256": "2164181307570f7d7cc451695201f354d9a30c0b9efb88927123f366c27fdc88"
+    },
+    "upstream-layer/packaging/make-deb.sh": {
+      "repository": "layer",
+      "source": "packaging/make-deb.sh",
+      "sha256": "314af445683fa655fef578f44dd1d28d060c9f178b02f1ffeec2e3becf198daa"
+    },
+    "upstream-layer/packaging/make-dist.sh": {
+      "repository": "layer",
+      "source": "packaging/make-dist.sh",
+      "sha256": "1933a19bbd6134d0b7ab3a41c61d7d9998b4c9392a06258e01102d177cbca5ae"
+    },
+    "upstream-layer/packaging/uninstall.sh": {
+      "repository": "layer",
+      "source": "packaging/uninstall.sh",
+      "sha256": "1cfd524a1f16f525ca675cbcf73b63dfd4a3b0fe56d4deabddb1da7a682d1202"
+    },
+    "upstream-layer/run_helper.sh": {
+      "repository": "layer",
+      "source": "run_helper.sh",
+      "sha256": "e058411d48647337d6d1f42f609f77594e2e3c779994fe7dd13cab7f0b0d632c"
+    },
+    "upstream-layer/standalone_runner/third_party/stb_image.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/stb_image.h",
+      "sha256": "594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3"
+    },
+    "upstream-layer/standalone_runner/third_party/stb_image_write.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/stb_image_write.h",
+      "sha256": "cbd5f0ad7a9cf4468affb36354a1d2338034f2c12473cf1a8e32053cb6914a05"
+    },
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_av1std.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_av1std.h",
+      "sha256": "f3ab53dbfdeb36a349f674656d50bd507f2e4b3c883343da74aace0df4f02a02"
+    },
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_av1std_decode.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_av1std_decode.h",
+      "sha256": "96f923dc01cd3e266c081d88fa020525a20d63ffe4ce09a4c807a04ef3aaf97e"
+    },
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h264std.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_h264std.h",
+      "sha256": "072ee6eac80e73d93bb4bfe0059f99e581fc8b55b1437236185bb4ff377914b1"
+    },
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h264std_decode.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_h264std_decode.h",
+      "sha256": "e1708b3996a740eeedb79f51d0f0e379f9bcae13566538375acaf73301023b58"
+    },
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h264std_encode.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_h264std_encode.h",
+      "sha256": "052a6e357be8d88bf4be0db1b3da5a9cc1a6011cf4b3533759ff588e1e26f9f1"
+    },
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h265std.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_h265std.h",
+      "sha256": "0cbdfd6c45ee8ca902e9c961cd7e49a4d601d443ea0ef2a60a8496b127ed397c"
+    },
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h265std_decode.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_h265std_decode.h",
+      "sha256": "800946aa19d83d305d504e2e4141bc938f989e0cf8872cef97480238eefef1ea"
+    },
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h265std_encode.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_h265std_encode.h",
+      "sha256": "7239f9f4e811546639111e562a8be1ec73ad5bef1c23d5fad80889f35e125e9c"
+    },
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codecs_common.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vk_video/vulkan_video_codecs_common.h",
+      "sha256": "78cf3c99d3d57afa7ab1782ec6018b4bcdbe273f2843d76e3375282db875b71e"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vk_icd.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vk_icd.h",
+      "sha256": "6c80200a7fcc4c7da3170ef9dc674eab142c92767bfc9733c98649bce78aecb9"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vk_layer.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vk_layer.h",
+      "sha256": "861cd0ea24c7d81b935e5726520d184dbbc00e571f9089e17a723ccbbc1944e2"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vk_platform.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vk_platform.h",
+      "sha256": "c4cabbcf699c90cde344095ae54da9435d117951aad114ba3a540c5997d7906f"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan.h",
+      "sha256": "52297513cc6b6cc8db2921aa849f72e3f55d678b3a58a2c3eb297c02ded7a837"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_android.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_android.h",
+      "sha256": "f815593b7d20f291850b8d85e21e3d47fb123932805ba3606df631bdff4cb1e7"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_beta.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_beta.h",
+      "sha256": "fd7eaa882fb01dd0b798f3d11aeba0f20fc7de1b27dff50cae0a2b8ceb3ed373"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_core.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_core.h",
+      "sha256": "24b258dbfc5f177206fbffcf35f3a87cf756ee6f883167b92ecaeab16a5aa005"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_directfb.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_directfb.h",
+      "sha256": "dad1fe7c78d6d3113bc4416ee85530da221708bc2d505609e118115bf03b903f"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_fuchsia.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_fuchsia.h",
+      "sha256": "780e5d646ecc21e8884e8860be3c1afc0ac4aa165f5aaeca7cbd6238061d4a36"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_ggp.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_ggp.h",
+      "sha256": "fe67e4ff5d3442f4749096391a30bd4b7866f6ebf773739b06fe99a435013da5"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_ios.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_ios.h",
+      "sha256": "341027604524623c7c8d9433b75d75e520f151fe691bd1bd92b212989391173b"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_macos.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_macos.h",
+      "sha256": "5a2ac88f5ac809dab80a6353240302fac1d2fd7010eb377560996a12d392b030"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_metal.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_metal.h",
+      "sha256": "ed0fb6ba231ec5e363487c062255667371914d7b79eb12eb39649bce0757b0d7"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_screen.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_screen.h",
+      "sha256": "71bff61ec120bb60efdccf2fe7d40e64b52336232c32fbd85ae435ad23b43e54"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_vi.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_vi.h",
+      "sha256": "73f34c7d87515ad6caf6d91bfad17d5d11959261f99386c14978ec7aba4d1f5a"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_wayland.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_wayland.h",
+      "sha256": "ebf1981d5b6cf3119f9945759e11f900918d911724bdd25ddf1706f1e323ac09"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_win32.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_win32.h",
+      "sha256": "fa3a9263d1764b82b634180ec5d3010adc216108bae11c02b157f733073f87f8"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_xcb.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_xcb.h",
+      "sha256": "3d9c38165d2ffa24f585ae1b287ee89e32b54cc49bc28ac142f3ab92d00c8818"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_xlib.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_xlib.h",
+      "sha256": "e8878c1efe85ce965d3e5019c1ca48043671e1a782804c4ec68eb460d45f7042"
+    },
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_xlib_xrandr.h": {
+      "repository": "layer",
+      "source": "standalone_runner/third_party/vulkan/vulkan_xlib_xrandr.h",
+      "sha256": "b33d51ee2feb28890cb5b2db3cd4c8b0553553d81c71d6057ed91bb5029d844e"
+    },
+    "upstream-layer/test_gui/binder_test.cpp": {
+      "repository": "layer",
+      "source": "test_gui/binder_test.cpp",
+      "sha256": "6ff2561d624d0274471e0857d63142179dd6c6503e309254658629f6360cd0b3"
+    },
+    "upstream-layer/test_gui/meson.build": {
+      "repository": "layer",
+      "source": "test_gui/meson.build",
+      "sha256": "d11f8321fa864b9ad68fc06183d7bffc4524d6c700a1660e1c07fb210487631c"
+    },
+    "upstream-layer/test_layer/smoke.cpp": {
+      "repository": "layer",
+      "source": "test_layer/smoke.cpp",
+      "sha256": "0e9509ff73c4b8a90c1da8571d79ef6f3ddea845cf78d8822a7be21f555368ba"
+    },
+    "upstream-layer/third_party/dxvk/2.7.1/LICENSE.txt": {
+      "repository": "layer",
+      "source": "third_party/dxvk/2.7.1/LICENSE.txt",
+      "sha256": "ef22f45815d8e58ae7bd919131071aac8b50d52cc9e92becfbf6d05f8225fc3a"
+    },
+    "upstream-layer/third_party/dxvk/2.7.1/VERSION": {
+      "repository": "layer",
+      "source": "third_party/dxvk/2.7.1/VERSION",
+      "sha256": "bd7f9252181a4f69c7bc99cf9ef5beded7fce04dcf5899f4314e1ca6664156e7"
+    },
+    "upstream-layer/third_party/optiscaler/LICENSE": {
+      "repository": "layer",
+      "source": "third_party/optiscaler/LICENSE",
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    "upstream-layer/third_party/optiscaler/RenoDX_ATTRIBUTION.txt": {
+      "repository": "layer",
+      "source": "third_party/optiscaler/RenoDX_ATTRIBUTION.txt",
+      "sha256": "40db841188178fa6871e4b435f1cf25cf46a7b52070f973cbbbc999ec020d7f2"
+    },
+    "upstream-layer/tools/gen_dlssnr_spv.sh": {
+      "repository": "layer",
+      "source": "tools/gen_dlssnr_spv.sh",
+      "sha256": "1d742d6e89f26ae757edb3a8ea59a48de06b09531227a8d733e9f0bb43d864a7"
+    },
+    "upstream-layer/tools/gen_meter_spv.sh": {
+      "repository": "layer",
+      "source": "tools/gen_meter_spv.sh",
+      "sha256": "c77f4d1fe9529c35ee2e7571da5146e02c384b931fe8cd4e53efc8353fe43d1b"
+    },
+    "upstream-layer/tools/gen_mvec_spv.sh": {
+      "repository": "layer",
+      "source": "tools/gen_mvec_spv.sh",
+      "sha256": "47b0d2a42d443fe1365217d14cd34f519135c33789f3b0be035a2374f317b246"
+    },
+    "upstream-layer/tools/glsl2spv.cpp": {
+      "repository": "layer",
+      "source": "tools/glsl2spv.cpp",
+      "sha256": "fa48282a0b3ac9bde160cc39c01d4460125aa1dd07f05be6b09a1cf3cabc2218"
+    },
+    "upstream-layer/tools/meson-build.sh": {
+      "repository": "layer",
+      "source": "tools/meson-build.sh",
+      "sha256": "0329d6457a3d201f6d712faabc087a5e16ae8433ccc3454d74331c695b40b78c"
+    },
+    "upstream-layer/tools/meson.build": {
+      "repository": "layer",
+      "source": "tools/meson.build",
+      "sha256": "dd820563103ec62366133d9d4d4bb65c72d18683b2720a1ad92a6e8941724850"
+    },
+    "upstream-layer/tools/runner_probe.cpp": {
+      "repository": "layer",
+      "source": "tools/runner_probe.cpp",
+      "sha256": "8a163a995c81c244310b7466e64f4a049681dae0a24e50aeba05d77d44acda40"
+    },
+    "upstream-layer/tools/shm_frames.cpp": {
+      "repository": "layer",
+      "source": "tools/shm_frames.cpp",
+      "sha256": "22859d41e9ea685a740e6eb84d0b3e041d234b9693e73bfc5381acdf07669e9c"
+    },
+    "upstream-layer/tools/shmctl.cpp": {
+      "repository": "layer",
+      "source": "tools/shmctl.cpp",
+      "sha256": "27ad9df5a04a4da20ab2e49e0fbbb1786a2b6bebb30bce568c3512dfa34de57b"
+    },
+    "upstream-layer/tools/soak_passes.cpp": {
+      "repository": "layer",
+      "source": "tools/soak_passes.cpp",
+      "sha256": "2401c7fc8b71934855ebe34d25df28cffcfff10f119703cc145f42da2ec65d77"
+    },
+    "upstream-layer/windows/meson.build": {
+      "repository": "layer",
+      "source": "windows/meson.build",
+      "sha256": "38f78786e275fa52be0d045e9fa0fb2741a2e1c65732b4e5e3b15b2a3ea3c7a1"
+    },
+    "kernels/LICENSE": {
+      "repository": "amd",
+      "source": "LICENSE",
+      "sha256": "e289f704a22be5bb836eca345831b81e383ff9ffab443ecd1e436347515bf111"
+    },
+    "kernels/UPSTREAM-README.md": {
+      "repository": "amd",
+      "source": "hip/README.md",
+      "sha256": "4844e293a93d38e3e503e3e75c5f36e3528c0870fc5da69837ecd0bb159f6740"
+    },
+    "kernels/boundary_fast.hip": {
+      "repository": "amd",
+      "source": "hip/boundary_fast.hip",
+      "sha256": "c8439f7999f5431afbac7b6b0251e417d9beb80d222644d4aae3fa7e58a203cf"
+    },
+    "kernels/boundary_reference.hip": {
+      "repository": "amd",
+      "source": "hip/boundary_reference.hip",
+      "sha256": "29cfe6378b966f8b7bbd30d04ebd3f927e95bc75845e6d3e5a6540dca44244dd"
+    },
+    "kernels/c32_fast.hip": {
+      "repository": "amd",
+      "source": "hip/c32_fast.hip",
+      "sha256": "f8ae35cce9a0ae2c0e0b60d9023aa8ecef01eb1d0832acdbe6c6bb03293da8f4"
+    },
+    "kernels/c32_fast_attention.hip": {
+      "repository": "amd",
+      "source": "hip/c32_fast_attention.hip",
+      "sha256": "516fdd90f22b8549aa1258949f04415544b9ea2a9ce7c5924bfbc25c5b06645a"
+    },
+    "kernels/c32_fused_attention_packed.hip": {
+      "repository": "amd",
+      "source": "hip/c32_fused_attention_packed.hip",
+      "sha256": "4c4347888e6c8c11a5a5522b23687def54daafc1a85632c6530cb929f68ad090"
+    },
+    "kernels/c32_fused_ffn_attention.hip": {
+      "repository": "amd",
+      "source": "hip/c32_fused_ffn_attention.hip",
+      "sha256": "6276332fcd0532796beeaef9a450b6a889a99a70fae5fa6de594344319cd04f3"
+    },
+    "kernels/c32_reference.hip": {
+      "repository": "amd",
+      "source": "hip/c32_reference.hip",
+      "sha256": "6c6c3078a9b7893e58dd8b9732dbe74b01e23edb275ba0a43761acf8bad4fcc9"
+    },
+    "kernels/c32_tiled.hip": {
+      "repository": "amd",
+      "source": "hip/c32_tiled.hip",
+      "sha256": "2f3c57727cde458a7c643f12f5f41c8f8d6eb046da9ea06cf5c68e12c84ff6c2"
+    },
+    "kernels/c32_wmma.hip": {
+      "repository": "amd",
+      "source": "hip/c32_wmma.hip",
+      "sha256": "7b580fb2327970def7e698dfe70b14c7093d99863acedd21f3d7d40c296f91e3"
+    },
+    "kernels/deep_fast.hip": {
+      "repository": "amd",
+      "source": "hip/deep_fast.hip",
+      "sha256": "fe84985dc06fbce3d07de680fa27f2f21c7ef06ba7233df119fe66c553117d50"
+    },
+    "kernels/deep_reference.hip": {
+      "repository": "amd",
+      "source": "hip/deep_reference.hip",
+      "sha256": "0be0b196fe90eeed4c6acd3214898a79ff79c8f3ee51bcda9ae6fb31363bdc85"
+    },
+    "kernels/deep_wmma.hip": {
+      "repository": "amd",
+      "source": "hip/deep_wmma.hip",
+      "sha256": "e181ecb24036a467ac5891d774eafd3df811aff5f8460e530394d08a86d656f5"
+    },
+    "kernels/multihead_fast.hip": {
+      "repository": "amd",
+      "source": "hip/multihead_fast.hip",
+      "sha256": "bd8a97795212c6aad6c3eceb79905fdbcb34b2318642ea4ea8c4758d46f7f595"
+    },
+    "kernels/multihead_fast_padded.hip": {
+      "repository": "amd",
+      "source": "hip/multihead_fast_padded.hip",
+      "sha256": "530e8ee0a76ff6d8cedd687c218e95eca0439f10ed4551dc5f1568236f039dec"
+    },
+    "kernels/multihead_fused_attention.hip": {
+      "repository": "amd",
+      "source": "hip/multihead_fused_attention.hip",
+      "sha256": "b9020b4b851e3c599e826a2bd50d54cd6ed6faf51b45d2982637d2712364bd80"
+    },
+    "kernels/multihead_reference.hip": {
+      "repository": "amd",
+      "source": "hip/multihead_reference.hip",
+      "sha256": "cdc6e06f5e23231a3c73ccd6affc3612bc22f49b4c3f427aed7b2d8fb7561a27"
+    },
+    "kernels/multihead_tiled.hip": {
+      "repository": "amd",
+      "source": "hip/multihead_tiled.hip",
+      "sha256": "a6ec115d90f99e9e8cc52d48259cdc71e31f38cf989b74c1ff75a1a6d347060e"
+    },
+    "kernels/multihead_wmma.hip": {
+      "repository": "amd",
+      "source": "hip/multihead_wmma.hip",
+      "sha256": "913732b3b307ce1b336cac5099397b0d2f8c3652240d7b19d742446a522eb06a"
+    },
+    "kernels/prefix_fast.hip": {
+      "repository": "amd",
+      "source": "hip/prefix_fast.hip",
+      "sha256": "0bbe76496496060e3e835afb3fdba41529bf5c127fa8323bd9dcd6f3648bc36e"
+    },
+    "kernels/prefix_reference.hip": {
+      "repository": "amd",
+      "source": "hip/prefix_reference.hip",
+      "sha256": "59985f984c43ac0d1d7d247776448f7a719bba761e8065ca25d8d3ad0c6de0ac"
+    },
+    "kernels/wave_pointwise.hip": {
+      "repository": "amd",
+      "source": "hip/wave_pointwise.hip",
+      "sha256": "ec8a3cf001bfe3f43352732e0ef58aefa54a9344695ae47d36e6dbe915223d17"
+    },
+    "backend/vendor/LICENSE.lmxxf": {
+      "repository": "amd",
+      "source": "LICENSE",
+      "sha256": "e289f704a22be5bb836eca345831b81e383ff9ffab443ecd1e436347515bf111"
+    },
+    "backend/vendor/LmxxfProductionOptions.h": {
+      "repository": "amd",
+      "source": "src/LmxxfProductionOptions.h",
+      "sha256": "fb507617edde6d86744fd962f90d58d1b61404df592b46fa67aa3fddf40edef7"
+    },
+    "backend/vendor/hip_api.h": {
+      "repository": "amd",
+      "source": "Development/HIP/hip_api.h",
+      "sha256": "7517108c5bf4550b3045d433c001895834597a14c15b47cc6f7e6fe39f788db2"
+    },
+    "backend/vendor/hip_device_properties.h": {
+      "repository": "amd",
+      "source": "Development/HIP/hip_device_properties.h",
+      "sha256": "bcda817fe03bc7084f9d3a2c23f52567651a92a15838a0092cd9dc451132d254"
+    },
+    "backend/vendor/hip_reference_network.h": {
+      "repository": "amd",
+      "source": "Development/HIP/hip_reference_network.h",
+      "sha256": "93d80a12250d9e54bfc3081019a1ec13acb77ce25c340153cf9325c3b01edb34"
+    },
+    "backend/vendor/packed_weights.h": {
+      "repository": "amd",
+      "source": "Development/HIP/packed_weights.h",
+      "sha256": "4aa0a3a8b014cb0c517d7c9e4811a1af5e3f92f7165a5b90c4e3d0edced99d35"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_bicubic.hlsl": {
+      "repository": "optiscaler",
+      "source": "OptiScaler/shaders/output_scaling/precompile/bcds_bicubic.hlsl",
+      "sha256": "426a9fb342dd469e5b5e81c65435a9935c8095204725bacea817090db5cf29ca"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_catmull.hlsl": {
+      "repository": "optiscaler",
+      "source": "OptiScaler/shaders/output_scaling/precompile/bcds_catmull.hlsl",
+      "sha256": "f5b2ca7ff84da9462d289069a0e6a95e4ff0f33f8bc81700c8808e92fd942403"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2.hlsl": {
+      "repository": "optiscaler",
+      "source": "OptiScaler/shaders/output_scaling/precompile/bcds_kaiser2.hlsl",
+      "sha256": "cb09cd0899109cb5cf24b51787dc7647626c6f5f7327de24b74e2c79b1c3f86e"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3.hlsl": {
+      "repository": "optiscaler",
+      "source": "OptiScaler/shaders/output_scaling/precompile/bcds_kaiser3.hlsl",
+      "sha256": "9289c946c2a63ee2233cdffbf24b93934a1a7d049919175245c36939ea9ac870"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2.hlsl": {
+      "repository": "optiscaler",
+      "source": "OptiScaler/shaders/output_scaling/precompile/bcds_lanczos2.hlsl",
+      "sha256": "8c1248e510f2019ac43c62db5e0e93ff408bb035c0f2733ccb19ae3cc7e854f0"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3.hlsl": {
+      "repository": "optiscaler",
+      "source": "OptiScaler/shaders/output_scaling/precompile/bcds_lanczos3.hlsl",
+      "sha256": "d50d850bd9819c3755fab3fe4404c3b117490c00270e02bb7436fdb6ba6619f9"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcds_magc.hlsl": {
+      "repository": "optiscaler",
+      "source": "OptiScaler/shaders/output_scaling/precompile/bcds_magc.hlsl",
+      "sha256": "bc9d1bf5bde9855cd36a085beaa772891e1c40999926cbd39c673a49465ab3f1"
+    },
+    "upstream-layer/layer_linux/src/scaling/bcus.hlsl": {
+      "repository": "optiscaler",
+      "source": "OptiScaler/shaders/output_scaling/precompile/bcus.hlsl",
+      "sha256": "a2c0d83a34dff92ad02fbc53c5a4733201d107823b550ab8777ec4a4319fc57b"
+    }
+  },
+  "outputs": {
+    "upstream-layer/.github/workflows/build.yml": "8c23e60c3fd87aae902be6511e77c5adec14bd01e00f983563556028aa280425",
+    "upstream-layer/.github/workflows/release-draft.yml": "8d2f42802a0d43333d9ab56f4cebf36f53bdeb149f8226df9914d23965cb45f8",
+    "upstream-layer/.gitignore": "4f6d3aa8ed43891e5429bab96c8e5b3bfd037668ce9e5b122d2eb703610a922b",
+    "upstream-layer/ATTRIBUTION.md": "9318b9aea64ae314667beac0dff7267d59508113025cbecfd9a6049bfc63cdfc",
+    "upstream-layer/LICENSE": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef",
+    "upstream-layer/README.md": "6d91b571a2972aa618d459041b12913208c446a95cb656ec3db83e26c70b4665",
+    "upstream-layer/common/control_settings.h": "caba078d25bd1c01a0e8254bbf772ad1ca46c58747aea932c31122e197216aeb",
+    "upstream-layer/common/runner_discovery.cpp": "83071509f48264f0e46a6f2e5fee057800fa2e755e40cf39f2046b6b857ab4ee",
+    "upstream-layer/common/runner_discovery.h": "4de4ab43c90d5d2c0d5bd02c21a30eb1c5fd0885baee7991c9a6de86a4fcda88",
+    "upstream-layer/common/shm_protocol.h": "d586cbc3f3c8c65e9b8e288a03fd4c1e85e06f2976fa9ca060fc12aaa71dc69d",
+    "upstream-layer/core/guard.cpp": "80b675ecc3f8edca3174ee778e28b426b663577bce1d19c4535e68278459f44f",
+    "upstream-layer/core/guard.h": "3c101b8e0ad2f6daa4e59dfc12f5c80b356030b8b359216f55d2b74b098a5963",
+    "upstream-layer/core/logging.h": "81c11a0b130d75eeb79e172d942b40fd759baf4c9992c4e476d40d11dc53485e",
+    "upstream-layer/core/ngx_abi.h": "bb0b960b4e20f4af02b38231a0ee213c81767faf47e42ed3994673940542c3ac",
+    "upstream-layer/core/ngx_param.h": "aeac83c7af6433f37455ef2f14418faba9810bf7d622a9ce28b7c9a567bd4e1d",
+    "upstream-layer/core/ngx_snippet.cpp": "bddc74109fd4495f94cf1bd893d89878412c015422b3c465520e8aa25c08ebd2",
+    "upstream-layer/core/ngx_snippet.h": "81469e621a8d07c234cc5279a919d5b7e69b1b3bf40f64978517d0e1ad2a88d9",
+    "upstream-layer/core/stb_image_write.h": "fe31f93135df4ce3fa3107b744c73f13939c104aa378932018f69124c5114b50",
+    "upstream-layer/dlssnr-helper": "f59fb5b9361a511a27998823c114a7c994f98239c80c9d846e18d3b68ac34cbf",
+    "upstream-layer/extracted_pipeline_notes.md": "01f5640f7fe986ccae6187ce79e584a7f511c8cba5044579666342385627cbdf",
+    "upstream-layer/gui/dlssnr_gui.pro": "1ecf174652b4ed4bd1cc44d7fab9bb432b87dc2e4f1bef427bd4396a2cac2439",
+    "upstream-layer/gui/main.cpp": "cbb7f19560ce8e1607fa8b4775b21879ebcf0c548b76f0bd77c293ccb46b640e",
+    "upstream-layer/gui/mainwindow.cpp": "d39d61630b97d993d7f6ab8d5ea04c5207b969449c2b9b2d1cab3d8dcf72cfbf",
+    "upstream-layer/gui/mainwindow.h": "9ec7abc818957e771ab7121ad7fafc0765514b11a2b36c4289cd29e77d06de54",
+    "upstream-layer/gui/meson.build": "220de324fa26056fa0a384686094a4dad50b514702d68dbfe95ecd80197be36d",
+    "upstream-layer/gui/passdialog.cpp": "0e6e72a7e4ea7cc7f86f795bd2faa552041003edaae35530aa5ea3b94ae5c72c",
+    "upstream-layer/gui/passdialog.h": "daa63c1832139efffb1d8823909ecf750e3ef05cca20ff52bdf467cd4253efd7",
+    "upstream-layer/gui/shm_binder.cpp": "312eb7f9d5fd4543735af268f342a9c05834981773517751ba054f4bbf85569e",
+    "upstream-layer/gui/shm_binder.h": "295330e360cfdae73d14c31056bf0f9e9f9a71051c901bbc4bcd99e8595633d5",
+    "upstream-layer/helper/main.cpp": "52afa097db149982145abbef43662a02501d71a8048af15317dfb4f87016df90",
+    "upstream-layer/helper/mvec_deadzone_spv.h": "770ee9de81501ab26eac1050ce170c77ecdbea9d6ad6f4a4754cc97e7c3bc1ce",
+    "upstream-layer/helper/shaders/mvec_deadzone.comp": "8c1df4f2f88ca386d6ca59b330bfc510c893854b1290fdd9c83ff40d6674f466",
+    "upstream-layer/layer_linux/dlssnr.map": "4dc4e55f59d62456441d5a69c0c0bdff51fb7c85d6e4205df8919f71082a4ab4",
+    "upstream-layer/layer_linux/manifest/VK_LAYER_NV_dlssnr.json": "6110c5dd2f06ab69af219970d07cbc74b453f1b10f6d69b44313a5a3153baf0d",
+    "upstream-layer/layer_linux/meson.build": "062a7329fac42c3901491440dde02a232d6b3a3d7ce35df223c338af88e8f4e2",
+    "upstream-layer/layer_linux/src/capture.cpp": "2570f69cf9fdd4741676b286be6b67b9b8f025fb6bb981de898cf6dc4c0f5721",
+    "upstream-layer/layer_linux/src/capture.h": "f34974efb9230ab7f62f8b91ad475ad63ab9e1f9e08be6c9a99144ea73a97ddb",
+    "upstream-layer/layer_linux/src/composition.cpp": "16386bfecdcb2954ae703ce779d41a78f7b4ce1730db3f00267457ef899aaa2f",
+    "upstream-layer/layer_linux/src/composition.h": "41a27fccae84dd58fb5f63846ff686151041ac64747447c39ddcd45302691378",
+    "upstream-layer/layer_linux/src/device_features.h": "78c11b27d50cd9cd32e859942dcefe380f1c2073d325115f7e694918a3e29f08",
+    "upstream-layer/layer_linux/src/dlssnr/DEVELOPMENT.md": "94123e30d793e67dc188737d8aef9a3be4fd59077bc5d543a74bd5bd6404015e",
+    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Common.h": "03a2e4da293345c372b1918a386ba33fe7376f476c1c61ae776d7b7381ad2061",
+    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Layout.h": "c15948312e20559102284ed6c05754e001cf1b2a463073e7717b1ba70750d3b8",
+    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Shader_Vk.h": "83970365cfaaccce2a7a3d5a685c14f02406b3bf14797060a39e211cbae13c0c",
+    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Shader_Vk.spv": "f7faa516f26e153b86dd3fa34bd9618a98ab07c354241437e671d39793a623f6",
+    "upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl": "74c5ba09833772c9ea0e73c57df16f40e046a68377d0b86aea73a4d8217cb395",
+    "upstream-layer/layer_linux/src/dlssnr/frame-hold.md": "7a2266a95a11811360954b001175c60db1d06931b5d077703a916306b950b7f4",
+    "upstream-layer/layer_linux/src/dlssnr_pass.cpp": "a6a5ca738f6a5e87fb63ac883540e99cb304cbe41da54ac075299ba07e434269",
+    "upstream-layer/layer_linux/src/dlssnr_pass.h": "92f03aca4b110573ebc4636cc48752ce95f2806522b3b2d90749dbeceaf850e8",
+    "upstream-layer/layer_linux/src/hotkey.cpp": "1004a0f23284f56d170f7f6123e9cb98fbeeea041c9a7d177e39f71ea26ad2ff",
+    "upstream-layer/layer_linux/src/hotkey.h": "1c131407aaaa39b0e65cecd933ccefc66411646dc73186d8a3d10a4a506aa8fb",
+    "upstream-layer/layer_linux/src/layer.cpp": "6fdec705eef747daebf7a3674714370b8f1d6366202ef8e520086a8f1af31971",
+    "upstream-layer/layer_linux/src/log.h": "6d72ae8e93ecf529d15f74a030475a460dcd13735e23f47d784ef53c919d3223",
+    "upstream-layer/layer_linux/src/scaler_vk.cpp": "498681ea2715ae9da4a0bd0009db952923cf61c0c7ae8b7bd5e1c73bef0cff42",
+    "upstream-layer/layer_linux/src/scaler_vk.h": "b80938043f9a2a175e7cf1ea93e7576189c60dc4bb8e3bda6fecfa5527262b5a",
+    "upstream-layer/layer_linux/src/scaling/bcds_bicubic.hlsl": "426a9fb342dd469e5b5e81c65435a9935c8095204725bacea817090db5cf29ca",
+    "upstream-layer/layer_linux/src/scaling/bcds_bicubic_Shader_Vk.h": "61395cb0cd7d8b0d44e9e7d992c1db843f02acc9ffe8eaa56ddb22f7f5bd40aa",
+    "upstream-layer/layer_linux/src/scaling/bcds_bicubic_Shader_Vk.spv": "4ac02bc2c0195e7bb3534b429802d7755536f0fff1abfa9f93690bf890623a78",
+    "upstream-layer/layer_linux/src/scaling/bcds_catmull.hlsl": "f5b2ca7ff84da9462d289069a0e6a95e4ff0f33f8bc81700c8808e92fd942403",
+    "upstream-layer/layer_linux/src/scaling/bcds_catmull_Shader_Vk.h": "608e78f0e3520066e7ce7298eda565ad20f2e9814329d9e68ed2d8bd2eeecc13",
+    "upstream-layer/layer_linux/src/scaling/bcds_catmull_Shader_Vk.spv": "5de62230c9fd7fdb3d72295d851eb623bab9a2601af3838b15499d93164b7bed",
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2.hlsl": "cb09cd0899109cb5cf24b51787dc7647626c6f5f7327de24b74e2c79b1c3f86e",
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.h": "57605564e71e923eccda8323db306b69e40e41ffebc0fec4fb392fd420c99deb",
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.spv": "5117ebca23f97ddacbb04abbe2a11fc433cc7a1dc99f198707b3e6ca31607cc8",
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3.hlsl": "9289c946c2a63ee2233cdffbf24b93934a1a7d049919175245c36939ea9ac870",
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.h": "57b4c6fb8a39db0649b2ddb37bb1609b5a194c7e3c92db4eb32ceae9168bc8d3",
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.spv": "5f6a2ca0abac100eee754d032d0cb99120473cb5f139e77abc351fc7faafc6d5",
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2.hlsl": "8c1248e510f2019ac43c62db5e0e93ff408bb035c0f2733ccb19ae3cc7e854f0",
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.h": "1cc1770bf3068f87ec3b0fb57612c056e24754e0e9e708587a9decc8a5aed330",
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.spv": "ee9ebbdc0e833309cebe42bf80e4acf05dceec8b1fa6aab7320a61edecc5f859",
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3.hlsl": "d50d850bd9819c3755fab3fe4404c3b117490c00270e02bb7436fdb6ba6619f9",
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.h": "7bcce1e0c655928daf9877dc6a5efefaddcd4decddb2a7ac5d5f99388a6fbcab",
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.spv": "5dcf95eb63a86c0d7fd3ac5e38ce46f1fb6e4de78ba7ad8c3272fbaf4f78f550",
+    "upstream-layer/layer_linux/src/scaling/bcds_magc.hlsl": "bc9d1bf5bde9855cd36a085beaa772891e1c40999926cbd39c673a49465ab3f1",
+    "upstream-layer/layer_linux/src/scaling/bcds_magc_Shader_Vk.h": "9bac7d92cb7b15ec575995d1365199e86f24ff5213a898e22f0532071e82f567",
+    "upstream-layer/layer_linux/src/scaling/bcds_magc_Shader_Vk.spv": "7a144ff7c067c4e4d9002e997f8a4f93407e3a4f36b2afc80ff6ba3b7c780f19",
+    "upstream-layer/layer_linux/src/scaling/bcus.hlsl": "a2c0d83a34dff92ad02fbc53c5a4733201d107823b550ab8777ec4a4319fc57b",
+    "upstream-layer/layer_linux/src/scaling/bcus_Shader_Vk.h": "73f6e92f6e4b5e419b6c5618f6ce3901238949cb3346291fb539c7342972d395",
+    "upstream-layer/layer_linux/src/scaling/bcus_Shader_Vk.spv": "f1317d2ebc422a4d2cc1f4cbf248463b344e0797dcd421777942af3cf6d9e8fa",
+    "upstream-layer/layer_linux/src/shader_vk.cpp": "1d3ba72b0866e5bd675352f351141f49cb000f29466da166b30c306fff297289",
+    "upstream-layer/layer_linux/src/shader_vk.h": "8538f531c1d3ca806a1fc020469b88bae42b261a4e2d84230eca368a34906933",
+    "upstream-layer/layer_linux/src/shaders/meter_reduce.comp": "ad8048f747a709a859e0f7f2ce856c225267f271147ba465c455759bc5a412aa",
+    "upstream-layer/layer_linux/src/shaders/meter_reduce_spv.h": "7fa639f98d3bc25795e7130f8f27f97fbd20b73747e517bafc554b6884db43e1",
+    "upstream-layer/layer_linux/src/storage_shader.h": "834fa642ea9ef9309c6ed3ac8c0f001c6d55a79ae0de077d4f806b6b52ccba55",
+    "upstream-layer/layer_linux/src/vk_table.h": "07c025a1115e5e2ec7905e0b79a820422bf6c13db07ce82012efbb88af8af6af",
+    "upstream-layer/local_install.sh": "7287c1c4146d5ecff9b5f2f472b2dda5517f8bbe8149430104fc98c7e551935b",
+    "upstream-layer/meson/cross-clang-linux32.ini": "885cd7bc87a3c66c8f389944ef1b4ca076d1655a5b77f12d9524801602170f60",
+    "upstream-layer/meson/cross-clang-mingw64.ini": "f620fb13b2055828d52a5cc44cf89d15d1c56863d80deb1d47014c986d7c6056",
+    "upstream-layer/meson/native-clang.ini": "229ab28b54b5ce3995142f94d73a1f18dbcd4847d78cde167601ecb127a8f748",
+    "upstream-layer/meson.build": "17b56b282885578c82f2a44dbfefd3df2a7abf306da5d012dc4d60aa9012890a",
+    "upstream-layer/meson_options.txt": "80c86c18290f7638b6b9bf94e20700be51b1e93ae7ab68dfd6e0ba872466e6b6",
+    "upstream-layer/packaging/PKGBUILD": "8bc50a393eeb949d031d87e3606589255b226ebfd78ae417aec2f0ab8f4ca58b",
+    "upstream-layer/packaging/dlssnr-personal.spec": "a8aae90d5b0ff6f5617427be1c944a644ca59fc5a1bc5a54a211967e59427260",
+    "upstream-layer/packaging/dlssnr.desktop": "8e5d9838b9e116bc63af8059dc7ba469b943fcb8ca8d37f9f0a7496df4be3179",
+    "upstream-layer/packaging/dlssnr.spec": "7d4c507605a387617a1a015518d9b619d1e2517b2e1cc3ac9092af5a1aaa2256",
+    "upstream-layer/packaging/install.sh": "2164181307570f7d7cc451695201f354d9a30c0b9efb88927123f366c27fdc88",
+    "upstream-layer/packaging/make-deb.sh": "314af445683fa655fef578f44dd1d28d060c9f178b02f1ffeec2e3becf198daa",
+    "upstream-layer/packaging/make-dist.sh": "1933a19bbd6134d0b7ab3a41c61d7d9998b4c9392a06258e01102d177cbca5ae",
+    "upstream-layer/packaging/uninstall.sh": "1cfd524a1f16f525ca675cbcf73b63dfd4a3b0fe56d4deabddb1da7a682d1202",
+    "upstream-layer/run_helper.sh": "e058411d48647337d6d1f42f609f77594e2e3c779994fe7dd13cab7f0b0d632c",
+    "upstream-layer/standalone_runner/third_party/stb_image.h": "594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3",
+    "upstream-layer/standalone_runner/third_party/stb_image_write.h": "cbd5f0ad7a9cf4468affb36354a1d2338034f2c12473cf1a8e32053cb6914a05",
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_av1std.h": "f3ab53dbfdeb36a349f674656d50bd507f2e4b3c883343da74aace0df4f02a02",
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_av1std_decode.h": "96f923dc01cd3e266c081d88fa020525a20d63ffe4ce09a4c807a04ef3aaf97e",
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h264std.h": "072ee6eac80e73d93bb4bfe0059f99e581fc8b55b1437236185bb4ff377914b1",
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h264std_decode.h": "e1708b3996a740eeedb79f51d0f0e379f9bcae13566538375acaf73301023b58",
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h264std_encode.h": "052a6e357be8d88bf4be0db1b3da5a9cc1a6011cf4b3533759ff588e1e26f9f1",
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h265std.h": "0cbdfd6c45ee8ca902e9c961cd7e49a4d601d443ea0ef2a60a8496b127ed397c",
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h265std_decode.h": "800946aa19d83d305d504e2e4141bc938f989e0cf8872cef97480238eefef1ea",
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h265std_encode.h": "7239f9f4e811546639111e562a8be1ec73ad5bef1c23d5fad80889f35e125e9c",
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codecs_common.h": "78cf3c99d3d57afa7ab1782ec6018b4bcdbe273f2843d76e3375282db875b71e",
+    "upstream-layer/standalone_runner/third_party/vulkan/vk_icd.h": "6c80200a7fcc4c7da3170ef9dc674eab142c92767bfc9733c98649bce78aecb9",
+    "upstream-layer/standalone_runner/third_party/vulkan/vk_layer.h": "861cd0ea24c7d81b935e5726520d184dbbc00e571f9089e17a723ccbbc1944e2",
+    "upstream-layer/standalone_runner/third_party/vulkan/vk_platform.h": "c4cabbcf699c90cde344095ae54da9435d117951aad114ba3a540c5997d7906f",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan.h": "52297513cc6b6cc8db2921aa849f72e3f55d678b3a58a2c3eb297c02ded7a837",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_android.h": "f815593b7d20f291850b8d85e21e3d47fb123932805ba3606df631bdff4cb1e7",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_beta.h": "fd7eaa882fb01dd0b798f3d11aeba0f20fc7de1b27dff50cae0a2b8ceb3ed373",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_core.h": "24b258dbfc5f177206fbffcf35f3a87cf756ee6f883167b92ecaeab16a5aa005",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_directfb.h": "dad1fe7c78d6d3113bc4416ee85530da221708bc2d505609e118115bf03b903f",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_fuchsia.h": "780e5d646ecc21e8884e8860be3c1afc0ac4aa165f5aaeca7cbd6238061d4a36",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_ggp.h": "fe67e4ff5d3442f4749096391a30bd4b7866f6ebf773739b06fe99a435013da5",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_ios.h": "341027604524623c7c8d9433b75d75e520f151fe691bd1bd92b212989391173b",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_macos.h": "5a2ac88f5ac809dab80a6353240302fac1d2fd7010eb377560996a12d392b030",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_metal.h": "ed0fb6ba231ec5e363487c062255667371914d7b79eb12eb39649bce0757b0d7",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_screen.h": "71bff61ec120bb60efdccf2fe7d40e64b52336232c32fbd85ae435ad23b43e54",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_vi.h": "73f34c7d87515ad6caf6d91bfad17d5d11959261f99386c14978ec7aba4d1f5a",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_wayland.h": "ebf1981d5b6cf3119f9945759e11f900918d911724bdd25ddf1706f1e323ac09",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_win32.h": "fa3a9263d1764b82b634180ec5d3010adc216108bae11c02b157f733073f87f8",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_xcb.h": "3d9c38165d2ffa24f585ae1b287ee89e32b54cc49bc28ac142f3ab92d00c8818",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_xlib.h": "e8878c1efe85ce965d3e5019c1ca48043671e1a782804c4ec68eb460d45f7042",
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_xlib_xrandr.h": "b33d51ee2feb28890cb5b2db3cd4c8b0553553d81c71d6057ed91bb5029d844e",
+    "upstream-layer/test_gui/binder_test.cpp": "6ff2561d624d0274471e0857d63142179dd6c6503e309254658629f6360cd0b3",
+    "upstream-layer/test_gui/meson.build": "d11f8321fa864b9ad68fc06183d7bffc4524d6c700a1660e1c07fb210487631c",
+    "upstream-layer/test_layer/smoke.cpp": "0e9509ff73c4b8a90c1da8571d79ef6f3ddea845cf78d8822a7be21f555368ba",
+    "upstream-layer/third_party/dxvk/2.7.1/LICENSE.txt": "ef22f45815d8e58ae7bd919131071aac8b50d52cc9e92becfbf6d05f8225fc3a",
+    "upstream-layer/third_party/dxvk/2.7.1/VERSION": "bd7f9252181a4f69c7bc99cf9ef5beded7fce04dcf5899f4314e1ca6664156e7",
+    "upstream-layer/third_party/optiscaler/LICENSE": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+    "upstream-layer/third_party/optiscaler/RenoDX_ATTRIBUTION.txt": "40db841188178fa6871e4b435f1cf25cf46a7b52070f973cbbbc999ec020d7f2",
+    "upstream-layer/tools/gen_dlssnr_spv.sh": "1d742d6e89f26ae757edb3a8ea59a48de06b09531227a8d733e9f0bb43d864a7",
+    "upstream-layer/tools/gen_meter_spv.sh": "c77f4d1fe9529c35ee2e7571da5146e02c384b931fe8cd4e53efc8353fe43d1b",
+    "upstream-layer/tools/gen_mvec_spv.sh": "47b0d2a42d443fe1365217d14cd34f519135c33789f3b0be035a2374f317b246",
+    "upstream-layer/tools/glsl2spv.cpp": "fa48282a0b3ac9bde160cc39c01d4460125aa1dd07f05be6b09a1cf3cabc2218",
+    "upstream-layer/tools/meson-build.sh": "0329d6457a3d201f6d712faabc087a5e16ae8433ccc3454d74331c695b40b78c",
+    "upstream-layer/tools/meson.build": "dd820563103ec62366133d9d4d4bb65c72d18683b2720a1ad92a6e8941724850",
+    "upstream-layer/tools/runner_probe.cpp": "8a163a995c81c244310b7466e64f4a049681dae0a24e50aeba05d77d44acda40",
+    "upstream-layer/tools/shm_frames.cpp": "22859d41e9ea685a740e6eb84d0b3e041d234b9693e73bfc5381acdf07669e9c",
+    "upstream-layer/tools/shmctl.cpp": "1b5db60c4fed9cabb905c321a8dab2c3581641a04195370adb059e832049160f",
+    "upstream-layer/tools/soak_passes.cpp": "2401c7fc8b71934855ebe34d25df28cffcfff10f119703cc145f42da2ec65d77",
+    "upstream-layer/windows/meson.build": "38f78786e275fa52be0d045e9fa0fb2741a2e1c65732b4e5e3b15b2a3ea3c7a1",
+    "kernels/LICENSE": "e289f704a22be5bb836eca345831b81e383ff9ffab443ecd1e436347515bf111",
+    "kernels/UPSTREAM-README.md": "4844e293a93d38e3e503e3e75c5f36e3528c0870fc5da69837ecd0bb159f6740",
+    "kernels/boundary_fast.hip": "c8439f7999f5431afbac7b6b0251e417d9beb80d222644d4aae3fa7e58a203cf",
+    "kernels/boundary_reference.hip": "29cfe6378b966f8b7bbd30d04ebd3f927e95bc75845e6d3e5a6540dca44244dd",
+    "kernels/c32_fast.hip": "f8ae35cce9a0ae2c0e0b60d9023aa8ecef01eb1d0832acdbe6c6bb03293da8f4",
+    "kernels/c32_fast_attention.hip": "516fdd90f22b8549aa1258949f04415544b9ea2a9ce7c5924bfbc25c5b06645a",
+    "kernels/c32_fused_attention_packed.hip": "4c4347888e6c8c11a5a5522b23687def54daafc1a85632c6530cb929f68ad090",
+    "kernels/c32_fused_ffn_attention.hip": "6276332fcd0532796beeaef9a450b6a889a99a70fae5fa6de594344319cd04f3",
+    "kernels/c32_reference.hip": "6c6c3078a9b7893e58dd8b9732dbe74b01e23edb275ba0a43761acf8bad4fcc9",
+    "kernels/c32_tiled.hip": "2f3c57727cde458a7c643f12f5f41c8f8d6eb046da9ea06cf5c68e12c84ff6c2",
+    "kernels/c32_wmma.hip": "7b580fb2327970def7e698dfe70b14c7093d99863acedd21f3d7d40c296f91e3",
+    "kernels/deep_fast.hip": "fa5960bc0816b07ad5bf0f78effac4d7edd6c676a410a45ac629abdce6cb24b7",
+    "kernels/deep_reference.hip": "0be0b196fe90eeed4c6acd3214898a79ff79c8f3ee51bcda9ae6fb31363bdc85",
+    "kernels/deep_wmma.hip": "e181ecb24036a467ac5891d774eafd3df811aff5f8460e530394d08a86d656f5",
+    "kernels/lds_barrier.h": "a10f938c43698bb140ffb3005f883275cc8279975d060a1764c16b1d3ab0fb86",
+    "kernels/multihead_fast.hip": "5cd881d1d9c062ea9308d18b00dc329f2e5391091cbac1bbf9d943a1cf67aad9",
+    "kernels/multihead_fast_padded.hip": "057e44ffe19273ee3535bce03ab85c14f998fa7ff26a0d637e7afc9a7799a9f6",
+    "kernels/multihead_fused_attention.hip": "b9020b4b851e3c599e826a2bd50d54cd6ed6faf51b45d2982637d2712364bd80",
+    "kernels/multihead_reference.hip": "cdc6e06f5e23231a3c73ccd6affc3612bc22f49b4c3f427aed7b2d8fb7561a27",
+    "kernels/multihead_tiled.hip": "cc984e9be116bd9528752f329abefaa652e772081924fcfc03c3f0c5cccb6f13",
+    "kernels/multihead_wmma.hip": "913732b3b307ce1b336cac5099397b0d2f8c3652240d7b19d742446a522eb06a",
+    "kernels/prefix_fast.hip": "18c45487f0fb3c21d735d87312595c0c32dddb62d4ef128c15d7d12b2f184fa0",
+    "kernels/prefix_reference.hip": "59985f984c43ac0d1d7d247776448f7a719bba761e8065ca25d8d3ad0c6de0ac",
+    "kernels/wave_pointwise.hip": "ec8a3cf001bfe3f43352732e0ef58aefa54a9344695ae47d36e6dbe915223d17",
+    "backend/vendor/LICENSE.lmxxf": "e289f704a22be5bb836eca345831b81e383ff9ffab443ecd1e436347515bf111",
+    "backend/vendor/LmxxfProductionOptions.h": "fb507617edde6d86744fd962f90d58d1b61404df592b46fa67aa3fddf40edef7",
+    "backend/vendor/README.md": "87c847438d0f8f4b0490f7940a068e744f8c6c7b68dc824cc4066ebf1f9c6e8f",
+    "backend/vendor/hip_api.h": "39fdde9a8c3aa2a552b47aa8d3c68842bb8c7103523347fe09fc04e059aac89b",
+    "backend/vendor/hip_device_properties.h": "bcda817fe03bc7084f9d3a2c23f52567651a92a15838a0092cd9dc451132d254",
+    "backend/vendor/hip_reference_network.h": "29cc0b68a98543c39f1c645d32fb5cfdd5decea6821d10378f72a03386e76ec3",
+    "backend/vendor/packed_weights.h": "4aa0a3a8b014cb0c517d7c9e4811a1af5e3f92f7165a5b90c4e3d0edced99d35"
+  },
+  "modes": {
+    "upstream-layer/.github/workflows/build.yml": 420,
+    "upstream-layer/.github/workflows/release-draft.yml": 420,
+    "upstream-layer/.gitignore": 420,
+    "upstream-layer/ATTRIBUTION.md": 420,
+    "upstream-layer/LICENSE": 420,
+    "upstream-layer/README.md": 420,
+    "upstream-layer/common/control_settings.h": 420,
+    "upstream-layer/common/runner_discovery.cpp": 420,
+    "upstream-layer/common/runner_discovery.h": 420,
+    "upstream-layer/common/shm_protocol.h": 420,
+    "upstream-layer/core/guard.cpp": 420,
+    "upstream-layer/core/guard.h": 420,
+    "upstream-layer/core/logging.h": 420,
+    "upstream-layer/core/ngx_abi.h": 420,
+    "upstream-layer/core/ngx_param.h": 420,
+    "upstream-layer/core/ngx_snippet.cpp": 420,
+    "upstream-layer/core/ngx_snippet.h": 420,
+    "upstream-layer/core/stb_image_write.h": 420,
+    "upstream-layer/dlssnr-helper": 493,
+    "upstream-layer/extracted_pipeline_notes.md": 420,
+    "upstream-layer/gui/dlssnr_gui.pro": 420,
+    "upstream-layer/gui/main.cpp": 420,
+    "upstream-layer/gui/mainwindow.cpp": 420,
+    "upstream-layer/gui/mainwindow.h": 420,
+    "upstream-layer/gui/meson.build": 420,
+    "upstream-layer/gui/passdialog.cpp": 420,
+    "upstream-layer/gui/passdialog.h": 420,
+    "upstream-layer/gui/shm_binder.cpp": 420,
+    "upstream-layer/gui/shm_binder.h": 420,
+    "upstream-layer/helper/main.cpp": 420,
+    "upstream-layer/helper/mvec_deadzone_spv.h": 420,
+    "upstream-layer/helper/shaders/mvec_deadzone.comp": 420,
+    "upstream-layer/layer_linux/dlssnr.map": 420,
+    "upstream-layer/layer_linux/manifest/VK_LAYER_NV_dlssnr.json": 420,
+    "upstream-layer/layer_linux/meson.build": 420,
+    "upstream-layer/layer_linux/src/capture.cpp": 420,
+    "upstream-layer/layer_linux/src/capture.h": 420,
+    "upstream-layer/layer_linux/src/composition.cpp": 420,
+    "upstream-layer/layer_linux/src/composition.h": 420,
+    "upstream-layer/layer_linux/src/device_features.h": 420,
+    "upstream-layer/layer_linux/src/dlssnr/DEVELOPMENT.md": 420,
+    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Common.h": 420,
+    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Layout.h": 420,
+    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Shader_Vk.h": 420,
+    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Shader_Vk.spv": 420,
+    "upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl": 420,
+    "upstream-layer/layer_linux/src/dlssnr/frame-hold.md": 420,
+    "upstream-layer/layer_linux/src/dlssnr_pass.cpp": 420,
+    "upstream-layer/layer_linux/src/dlssnr_pass.h": 420,
+    "upstream-layer/layer_linux/src/hotkey.cpp": 420,
+    "upstream-layer/layer_linux/src/hotkey.h": 420,
+    "upstream-layer/layer_linux/src/layer.cpp": 420,
+    "upstream-layer/layer_linux/src/log.h": 420,
+    "upstream-layer/layer_linux/src/scaler_vk.cpp": 420,
+    "upstream-layer/layer_linux/src/scaler_vk.h": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_bicubic.hlsl": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_bicubic_Shader_Vk.h": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_bicubic_Shader_Vk.spv": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_catmull.hlsl": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_catmull_Shader_Vk.h": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_catmull_Shader_Vk.spv": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2.hlsl": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.h": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.spv": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3.hlsl": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.h": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.spv": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2.hlsl": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.h": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.spv": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3.hlsl": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.h": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.spv": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_magc.hlsl": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_magc_Shader_Vk.h": 420,
+    "upstream-layer/layer_linux/src/scaling/bcds_magc_Shader_Vk.spv": 420,
+    "upstream-layer/layer_linux/src/scaling/bcus.hlsl": 420,
+    "upstream-layer/layer_linux/src/scaling/bcus_Shader_Vk.h": 420,
+    "upstream-layer/layer_linux/src/scaling/bcus_Shader_Vk.spv": 420,
+    "upstream-layer/layer_linux/src/shader_vk.cpp": 420,
+    "upstream-layer/layer_linux/src/shader_vk.h": 420,
+    "upstream-layer/layer_linux/src/shaders/meter_reduce.comp": 420,
+    "upstream-layer/layer_linux/src/shaders/meter_reduce_spv.h": 420,
+    "upstream-layer/layer_linux/src/storage_shader.h": 420,
+    "upstream-layer/layer_linux/src/vk_table.h": 420,
+    "upstream-layer/local_install.sh": 493,
+    "upstream-layer/meson/cross-clang-linux32.ini": 420,
+    "upstream-layer/meson/cross-clang-mingw64.ini": 420,
+    "upstream-layer/meson/native-clang.ini": 420,
+    "upstream-layer/meson.build": 420,
+    "upstream-layer/meson_options.txt": 420,
+    "upstream-layer/packaging/PKGBUILD": 420,
+    "upstream-layer/packaging/dlssnr-personal.spec": 420,
+    "upstream-layer/packaging/dlssnr.desktop": 420,
+    "upstream-layer/packaging/dlssnr.spec": 420,
+    "upstream-layer/packaging/install.sh": 493,
+    "upstream-layer/packaging/make-deb.sh": 493,
+    "upstream-layer/packaging/make-dist.sh": 493,
+    "upstream-layer/packaging/uninstall.sh": 493,
+    "upstream-layer/run_helper.sh": 493,
+    "upstream-layer/standalone_runner/third_party/stb_image.h": 420,
+    "upstream-layer/standalone_runner/third_party/stb_image_write.h": 420,
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_av1std.h": 420,
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_av1std_decode.h": 420,
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h264std.h": 420,
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h264std_decode.h": 420,
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h264std_encode.h": 420,
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h265std.h": 420,
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h265std_decode.h": 420,
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h265std_encode.h": 420,
+    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codecs_common.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vk_icd.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vk_layer.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vk_platform.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_android.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_beta.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_core.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_directfb.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_fuchsia.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_ggp.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_ios.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_macos.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_metal.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_screen.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_vi.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_wayland.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_win32.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_xcb.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_xlib.h": 420,
+    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_xlib_xrandr.h": 420,
+    "upstream-layer/test_gui/binder_test.cpp": 420,
+    "upstream-layer/test_gui/meson.build": 420,
+    "upstream-layer/test_layer/smoke.cpp": 420,
+    "upstream-layer/third_party/dxvk/2.7.1/LICENSE.txt": 420,
+    "upstream-layer/third_party/dxvk/2.7.1/VERSION": 420,
+    "upstream-layer/third_party/optiscaler/LICENSE": 420,
+    "upstream-layer/third_party/optiscaler/RenoDX_ATTRIBUTION.txt": 420,
+    "upstream-layer/tools/gen_dlssnr_spv.sh": 493,
+    "upstream-layer/tools/gen_meter_spv.sh": 493,
+    "upstream-layer/tools/gen_mvec_spv.sh": 493,
+    "upstream-layer/tools/glsl2spv.cpp": 420,
+    "upstream-layer/tools/meson-build.sh": 493,
+    "upstream-layer/tools/meson.build": 420,
+    "upstream-layer/tools/runner_probe.cpp": 420,
+    "upstream-layer/tools/shm_frames.cpp": 420,
+    "upstream-layer/tools/shmctl.cpp": 420,
+    "upstream-layer/tools/soak_passes.cpp": 420,
+    "upstream-layer/windows/meson.build": 420,
+    "kernels/LICENSE": 420,
+    "kernels/UPSTREAM-README.md": 420,
+    "kernels/boundary_fast.hip": 420,
+    "kernels/boundary_reference.hip": 420,
+    "kernels/c32_fast.hip": 420,
+    "kernels/c32_fast_attention.hip": 420,
+    "kernels/c32_fused_attention_packed.hip": 420,
+    "kernels/c32_fused_ffn_attention.hip": 420,
+    "kernels/c32_reference.hip": 420,
+    "kernels/c32_tiled.hip": 420,
+    "kernels/c32_wmma.hip": 420,
+    "kernels/deep_fast.hip": 420,
+    "kernels/deep_reference.hip": 420,
+    "kernels/deep_wmma.hip": 420,
+    "kernels/lds_barrier.h": 420,
+    "kernels/multihead_fast.hip": 420,
+    "kernels/multihead_fast_padded.hip": 420,
+    "kernels/multihead_fused_attention.hip": 420,
+    "kernels/multihead_reference.hip": 420,
+    "kernels/multihead_tiled.hip": 420,
+    "kernels/multihead_wmma.hip": 420,
+    "kernels/prefix_fast.hip": 420,
+    "kernels/prefix_reference.hip": 420,
+    "kernels/wave_pointwise.hip": 420,
+    "backend/vendor/LICENSE.lmxxf": 420,
+    "backend/vendor/LmxxfProductionOptions.h": 420,
+    "backend/vendor/README.md": 420,
+    "backend/vendor/hip_api.h": 420,
+    "backend/vendor/hip_device_properties.h": 420,
+    "backend/vendor/hip_reference_network.h": 420,
+    "backend/vendor/packed_weights.h": 420
+  }
+}

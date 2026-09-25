@@ -1,0 +1,128 @@
+#!/usr/bin/bash
+# Steam launch options: /home/USER/.local/bin/dlsslop-run -- %command%
+
+channel_default=${DLSSNR_SHM:-/tmp/dlsslop-amd-${UID}/shm.bin}
+
+usage() {
+    local default_directory=${channel_default%/*}
+    if [[ $channel_default != */* ]]; then
+        default_directory=.
+    elif [[ -z $default_directory ]]; then
+        default_directory=/
+    fi
+    local log_default=${DLSSNR_LOG:-${default_directory%/}/layer.log}
+    cat <<HELP
+Usage: dlsslop-run [OPTIONS] [--] COMMAND [ARGUMENTS...]
+Run a game with the native AMD presentation layer and an existing worker.
+
+Options:
+  -s, --shm PATH   Worker channel (default: ${channel_default}).
+  -l, --log PATH   Layer log (default: ${log_default}).
+  -h, --help       Show this help and exit (default: off).
+  --              End launcher options (default: first COMMAND ends options).
+
+Environment defaults:
+  DLSSNR_SHM      /tmp/dlsslop-amd-\$UID/shm.bin (UID=${UID}); --shm overrides it.
+  DLSSNR_LOG      <channel directory>/layer.log; --log overrides it.
+
+The launcher sets these values for COMMAND, overriding inherited values:
+  DLSSLOP_AMD_ENABLE=1  DLSSNR_ENABLE=1  DLSSLOP_BACKEND=hip
+  DLSSNR_DMABUF=0      DLSSNR_IDLE_REPAINT=0
+It unsets DLSSNR_DISABLE and VKLayer_DLSS5. Other environment is inherited.
+COMMAND and its arguments are passed unchanged; its exit status is preserved.
+Start dlsslopd separately before launching the game.
+HELP
+}
+
+channel=$channel_default
+log_override=${DLSSNR_LOG:-}
+while (( $# )); do
+    case $1 in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -s|--shm|-l|--log)
+            if (( $# < 2 )) || [[ -z $2 ]]; then
+                printf 'dlsslop-run: %s requires a nonempty path\n' "$1" >&2
+                exit 2
+            fi
+            if [[ $1 == -s || $1 == --shm ]]; then
+                channel=$2
+            else
+                log_override=$2
+            fi
+            shift 2
+            ;;
+        --shm=*|--log=*)
+            value=${1#*=}
+            if [[ -z $value ]]; then
+                printf 'dlsslop-run: %s requires a nonempty path\n' "${1%%=*}" >&2
+                exit 2
+            fi
+            if [[ $1 == --shm=* ]]; then
+                channel=$value
+            else
+                log_override=$value
+            fi
+            shift
+            ;;
+        -s?*|-l?*)
+            if [[ $1 == -s* ]]; then
+                channel=${1:2}
+            else
+                log_override=${1:2}
+            fi
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        -*)
+            printf 'dlsslop-run: unknown option: %s (see --help)\n' "$1" >&2
+            exit 2
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+if (( ! $# )); then
+    printf '%s\n' 'Usage: dlsslop-run [OPTIONS] [--] COMMAND [ARGUMENTS...]' >&2
+    exit 2
+fi
+export DLSSNR_SHM=$channel
+if [[ ! -f $DLSSNR_SHM ]]; then
+    printf 'Start dlsslopd on the host first (missing %s).\n' "$DLSSNR_SHM" >&2
+    exit 1
+fi
+if ! command -v flock >/dev/null 2>&1; then
+    printf '%s\n' 'dlsslop-run requires flock (Debian package util-linux).' >&2
+    exit 1
+fi
+if flock --nonblock --conflict-exit-code 73 "$DLSSNR_SHM" true; then
+    printf '%s\n' 'No live native worker owns this channel; start dlsslopd first.' >&2
+    exit 1
+else
+    lock_status=$?
+    if (( lock_status != 73 )); then
+        printf '%s\n' 'Could not inspect the native worker channel.' >&2
+        exit 1
+    fi
+fi
+export DLSSLOP_AMD_ENABLE=1 DLSSNR_ENABLE=1 DLSSLOP_BACKEND=hip
+export DLSSNR_DMABUF=0 DLSSNR_IDLE_REPAINT=0
+channel_directory=${DLSSNR_SHM%/*}
+if [[ $DLSSNR_SHM != */* ]]; then
+    channel_directory=.
+elif [[ -z $channel_directory ]]; then
+    channel_directory=/
+fi
+export DLSSNR_LOG=${log_override:-${channel_directory%/}/layer.log}
+unset DLSSNR_DISABLE VKLayer_DLSS5
+shopt -s execfail
+exec -- "$@"
+status=$?
+printf 'dlsslop-run: could not execute %s (status %d)\n' "$1" "$status" >&2
+exit "$status"

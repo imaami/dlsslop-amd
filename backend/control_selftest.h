@@ -1,0 +1,285 @@
+// SPDX-License-Identifier: MIT
+#pragma once
+
+#include "codec_gpu.h"
+#include "temporal_gpu.h"
+#include "tuning.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+namespace dlsslop {
+namespace control_selftest {
+
+class Buffer {
+    hip_probe::Api& api_;
+    hip_probe::Handle stream_;
+    std::size_t bytes_;
+public:
+    void* pointer = nullptr;
+    Buffer(hip_probe::Api& api, hip_probe::Handle stream, std::size_t bytes)
+        : api_(api), stream_(stream), bytes_(bytes)
+    {
+        api_.Check(api_.hipMalloc(&pointer, bytes_), "allocate control self-test buffer");
+    }
+    Buffer(const Buffer&) = delete;
+    Buffer& operator=(const Buffer&) = delete;
+    ~Buffer()
+    {
+        if (pointer) {
+            api_.hipStreamSynchronize(stream_);
+            api_.hipFree(pointer);
+        }
+    }
+    void upload(const std::vector<float>& values)
+    {
+        if (values.size() * sizeof(float) != bytes_)
+            throw std::logic_error("control self-test upload size");
+        api_.Check(api_.hipStreamSynchronize(stream_), "wait before control self-test upload");
+        api_.Check(api_.hipMemcpy(pointer, values.data(), bytes_, 1), "upload control self-test fixture");
+    }
+    std::vector<float> read() const
+    {
+        return read_pointer(api_, stream_, pointer, bytes_ / sizeof(float));
+    }
+    static std::vector<float> read_pointer(hip_probe::Api& api, hip_probe::Handle stream,
+                                            const void* pointer, std::size_t samples)
+    {
+        if (!pointer) throw std::runtime_error("control self-test received null GPU output");
+        std::vector<float> result(samples);
+        api.Check(api.hipStreamSynchronize(stream), "complete control self-test kernel");
+        api.Check(api.hipMemcpy(result.data(), pointer, samples * sizeof(float), 2),
+                  "read control self-test output");
+        return result;
+    }
+};
+
+inline void require(bool condition, const char* message)
+{
+    if (!condition) throw std::runtime_error(message);
+}
+
+inline float compare(const std::vector<float>& actual, const std::vector<float>& expected,
+                     float tolerance, const char* name, bool exact = false)
+{
+    require(actual.size() == expected.size(), "control self-test output size mismatch");
+    float maximum = 0;
+    std::size_t worst = 0;
+    for (std::size_t i = 0; i < actual.size(); ++i) {
+        if (!std::isfinite(actual[i]))
+            throw std::runtime_error(std::string(name) + ": nonfinite GPU result at sample " + std::to_string(i));
+        const float error = std::fabs(actual[i] - expected[i]);
+        if (error > maximum) { maximum = error; worst = i; }
+    }
+    if (maximum > tolerance || (exact && std::memcmp(actual.data(), expected.data(), actual.size() * sizeof(float)))) {
+        std::fprintf(stderr, "%s mismatch: max_abs_error=%.9g tolerance=%.9g sample=%zu GPU=%.9g CPU=%.9g\n",
+                     name, double(maximum), double(tolerance), worst,
+                     double(actual[worst]), double(expected[worst]));
+        throw std::runtime_error(std::string(name) + " disagrees with CPU reference");
+    }
+    return maximum;
+}
+
+inline void check_tuning(hip_probe::Api& api, hip_probe::Handle stream, const std::string& modules)
+{
+    const Geometry g{7, 5, 7, 5, 7, 5, 0, 0, 7, 5};
+    const std::size_t pixels = g.width * g.height;
+    std::vector<float> input(pixels * 4), model(pixels * 3), reference;
+    for (unsigned p = 0; p < pixels; ++p) {
+        for (unsigned c = 0; c < 3; ++c) {
+            input[p * 4 + c] = float((p * 3 + c * 7) % 31) / 32.0f;
+            model[p * 3 + c] = input[p * 4 + c] + float(int((p + c) % 7) - 3) / 64.0f;
+        }
+        input[p * 4 + 3] = 1;
+    }
+    Buffer device_input(api, stream, input.size() * sizeof(float));
+    Buffer device_model(api, stream, model.size() * sizeof(float));
+    Buffer device_result(api, stream, model.size() * sizeof(float));
+    device_input.upload(input); device_model.upload(model);
+    GpuTuning tuning(api, stream, modules + "/linux_tuning.hsaco");
+    const NativeTuning states[] = {{}, {0, 1, 1, 0}, {1.75f, .25f, 2.5f, .375f},
+                                  {1, 0, 1, 0}, {1, 1, 0, 1}};
+    float maximum = 0;
+    for (unsigned i = 0; i < sizeof(states) / sizeof(states[0]); ++i) {
+        tune_neural_rgb(input.data(), model.data(), g, reference, states[i]);
+        tuning.apply(g, device_input.pointer, device_model.pointer, device_result.pointer, states[i]);
+        maximum = std::max(maximum, compare(device_result.read(), reference, 0.000001f,
+                          "GPU native tuning", i < 2));
+    }
+    std::printf("GPU control self-test: native tuning 5 states passed; max_abs_error=%.9g\n", double(maximum));
+    std::fflush(stdout);
+}
+
+inline float texture(unsigned x, unsigned y)
+{
+    unsigned v = x * 0x45d9f3bu + y * 0x119de1f3u;
+    v ^= v >> 16; v *= 0x45d9f3bu; v ^= v >> 16;
+    return float(v & 65535u) / 65535.0f;
+}
+
+inline void check_temporal(hip_probe::Api& api, hip_probe::Handle stream, const std::string& modules)
+{
+    constexpr unsigned width = 128, height = 96, padded_height = 104;
+    const Geometry g{width, height, width, padded_height, width, height, 0, 0, width, height};
+    const std::size_t pixels = width * padded_height;
+    std::vector<float> original(pixels * 4), shifted(pixels * 4), fallback(pixels * 4, .125f);
+    std::vector<float> previous_gray(width * height), histories[2];
+    for (unsigned y = 0; y < height; ++y)
+        for (unsigned x = 0; x < width; ++x)
+            previous_gray[y * width + x] = texture(x / 8, y / 8) * .3f +
+                                           texture(x / 2, y / 2) * .5f + texture(x, y) * .2f;
+    for (auto& history : histories) history.resize(pixels * 3);
+    for (unsigned padded_y = 0; padded_y < padded_height; ++padded_y) {
+        const unsigned y = padded_y < height ? padded_y : 2 * height - 2 - padded_y;
+        for (unsigned x = 0; x < width; ++x) {
+            const unsigned p = padded_y * width + x;
+            const float current = dlsslop_temporal::sample(previous_gray.data(), {width, height},
+                                                        float(x) - 6.0f, float(y) + 3.0f);
+            for (unsigned c = 0; c < 3; ++c) {
+                original[p * 4 + c] = previous_gray[y * width + x];
+                shifted[p * 4 + c] = current;
+            }
+            original[p * 4 + 3] = shifted[p * 4 + 3] = fallback[p * 4 + 3] = 1;
+            for (unsigned pass = 0; pass < 2; ++pass) {
+                histories[pass][p * 3] = float(x) / 128.0f;
+                histories[pass][p * 3 + 1] = float(y) / 128.0f;
+                histories[pass][p * 3 + 2] = pass ? .625f : .875f;
+            }
+        }
+    }
+    Buffer device_input(api, stream, original.size() * sizeof(float));
+    Buffer device_fallback(api, stream, fallback.size() * sizeof(float));
+    Buffer device_first(api, stream, histories[0].size() * sizeof(float));
+    Buffer device_second(api, stream, histories[1].size() * sizeof(float));
+    device_input.upload(original); device_fallback.upload(fallback);
+    device_first.upload(histories[0]); device_second.upload(histories[1]);
+    void* results[] = {device_first.pointer, device_second.pointer};
+    GpuTemporal temporal(api, stream, modules + "/linux_temporal.hsaco");
+
+    temporal.begin(device_input.pointer, g, 2, 2, 1, 2);
+    for (unsigned pass = 0; pass < 2; ++pass) {
+        require(!temporal.history(pass, device_fallback.pointer), "GPU temporal first frame returned uninitialized history");
+        temporal.finish_pass(pass, results[pass]);
+    }
+    temporal.end();
+    temporal.begin(device_input.pointer, g, 2, 2, 1, 2);
+    for (unsigned pass = 0; pass < 2; ++pass) {
+        const auto warped = Buffer::read_pointer(api, stream, temporal.history(pass, device_fallback.pointer), pixels * 4);
+        std::vector<float> expected(pixels * 4);
+        for (std::size_t p = 0; p < pixels; ++p) {
+            for (unsigned c = 0; c < 3; ++c) expected[p * 4 + c] = histories[pass][p * 3 + c];
+            expected[p * 4 + 3] = 1;
+        }
+        compare(warped, expected, 0, "GPU static temporal history", true);
+        temporal.finish_pass(pass, results[pass]);
+    }
+    temporal.end();
+
+    device_input.upload(shifted);
+    temporal.begin(device_input.pointer, g, 2, 2, 1, 2);
+    require(!temporal.cut_rejected(), "GPU temporal rejected the known translated frame as a cut");
+    for (unsigned pass = 0; pass < 2; ++pass) {
+        const auto warped = Buffer::read_pointer(api, stream, temporal.history(pass, device_fallback.pointer), pixels * 4);
+        unsigned good = 0, tested = 0;
+        for (unsigned y = 16; y + 16 < height; ++y) {
+            for (unsigned x = 16; x + 16 < width; ++x) {
+                const std::size_t p = (y * width + x) * 4;
+                ++tested;
+                good += std::fabs(warped[p] * 128.0f - float(x - 6)) < .75f &&
+                        std::fabs(warped[p + 1] * 128.0f - float(y + 3)) < .75f &&
+                        warped[p + 2] == (pass ? .625f : .875f) && warped[p + 3] == 1;
+            }
+        }
+        std::printf("GPU control self-test: temporal pass %u static exact; translated history %u/%u within 0.75 pixels\n",
+                    pass + 1, good, tested);
+        std::fflush(stdout);
+        require(good * 10 > tested * 8, "GPU temporal translation/history isolation check failed");
+        temporal.finish_pass(pass, results[pass]);
+    }
+    temporal.end();
+}
+
+inline float half_value(std::uint16_t value)
+{
+    const unsigned exponent = (value >> 10) & 31u;
+    const unsigned fraction = value & 1023u;
+    const float sign = value & 0x8000u ? -1.0f : 1.0f;
+    if (!exponent) return sign * float(fraction) * 0x1p-24f;
+    if (exponent == 31) throw std::runtime_error("FP16 control self-test produced nonfinite bits");
+    return sign * std::ldexp(float(1024u + fraction), int(exponent) - 25);
+}
+
+inline void check_codec(hip_probe::Api& api, hip_probe::Handle stream, const std::string& modules)
+{
+    const Geometry g = geometry(7, 5, 720);
+    const std::size_t pixels = std::size_t(g.width) * g.height;
+    std::vector<std::uint8_t> proxy(g.source_width * g.source_height * 8);
+    const std::uint16_t half_samples[] = {0xb800, 0x0000, 0x3400, 0x3a00, 0x3e00, 0x4000};
+    for (unsigned p = 0; p < g.source_width * g.source_height; ++p) {
+        for (unsigned c = 0; c < 4; ++c) {
+            const std::uint16_t value = c == 3 ? std::uint16_t(p & 1 ? 0x3800 : 0x3c00) :
+                                       half_samples[(p * 3 + c) % 6];
+            std::memcpy(proxy.data() + p * 8 + c * 2, &value, sizeof(value));
+        }
+    }
+    Buffer device_input(api, stream, pixels * 4 * sizeof(float));
+    Buffer device_rgb(api, stream, pixels * 3 * sizeof(float));
+    GpuCodec codec(api, stream, modules + "/linux_codec.hsaco");
+    std::vector<float> reference, model(pixels * 3);
+    encode_proxy(proxy.data(), g, true, reference);
+    codec.encode(proxy, g, device_input.pointer, true);
+    const float encode_error = compare(device_input.read(), reference, 1.0f / 1024.0f, "GPU FP16 proxy encode");
+
+    // A constant signed/extended-range RGB fixture makes all decode resampling
+    // exact and verifies that the FP16 route retains alpha and never UNORM-clamps.
+    for (std::size_t p = 0; p < pixels; ++p) {
+        model[p * 3] = -.25f; model[p * 3 + 1] = 1.5f; model[p * 3 + 2] = .5f;
+    }
+    device_rgb.upload(model);
+    std::vector<std::uint8_t> decoded, expected;
+    codec.decode(g, device_rgb.pointer, decoded);
+    decode_neural_proxy(proxy.data(), g, true, model.data(), expected);
+    require(decoded == expected, "GPU FP16 proxy decode disagrees on exact signed/extended-range fixture");
+    std::uint16_t first_red, first_green;
+    std::memcpy(&first_red, decoded.data(), sizeof(first_red));
+    std::memcpy(&first_green, decoded.data() + 2, sizeof(first_green));
+    require(half_value(first_red) == -.25f && half_value(first_green) == 1.5f,
+            "GPU FP16 proxy decode clipped signed/extended-range values");
+
+    for (std::size_t p = 0; p < pixels; ++p) {
+        model[p * 3] = float(int(p % 29) - 3) / 16.0f;
+        model[p * 3 + 1] = float((p / g.width) % 23) / 16.0f;
+        model[p * 3 + 2] = float(p % 17) / 19.0f;
+    }
+    device_rgb.upload(model);
+    for (bool precision16 : {true, false}) {
+        feedback_neural_rgb(model.data(), g, reference, precision16);
+        codec.feedback(g, device_rgb.pointer, device_input.pointer, precision16);
+        compare(device_input.read(), reference, 0,
+                precision16 ? "GPU FP16 feedback" : "GPU UNORM8 feedback", true);
+    }
+    std::printf("GPU control self-test: FP16 proxy encode max_abs_error=%.9g; FP16 decode and 16/8-bit feedback exact\n",
+                double(encode_error));
+    std::fflush(stdout);
+}
+
+} // namespace control_selftest
+
+// Exercises the native controls on synthetic inputs, independently of model
+// weights. Run on the selected GPU and the network stream before self-test.
+inline void check_gpu_controls(hip_probe::Api& api, hip_probe::Handle stream,
+                               const std::string& modules)
+{
+    control_selftest::check_tuning(api, stream, modules);
+    control_selftest::check_temporal(api, stream, modules);
+    control_selftest::check_codec(api, stream, modules);
+}
+
+} // namespace dlsslop

@@ -1,0 +1,73 @@
+dlsslop-amd third-party notices
+===============================
+
+DLSS Linux Open Proxy for AMD integrates and adapts these components:
+
+* DLSS5VKLayer by bmitch87 and contributors, including Thomas Eric: Vulkan
+  presentation layer and shared-memory protocol (AGPL-3.0.txt).
+  https://github.com/bmitch87/DLSS5VKLayer
+* AMD neural scheduler and HIP kernels by Kien / lmxxf (MIT-amd.txt).
+  https://github.com/lmxxf/dlss5-on-amd-9070xt-porting
+* OptiScaler shader lineage and Dagherbou/OptiScaler_DLSSNR snapshot
+  97376162 (GPL-3.0.txt). The current integration is a modified derivative.
+  https://github.com/optiscaler/OptiScaler
+  https://github.com/Dagherbou/OptiScaler_DLSSNR
+* RenoDX color-composition design by clshortfuse / Carlos Lopez Jr.,
+  reimplemented through OptiScaler (RenoDX.txt contains attribution and MIT terms).
+  https://github.com/clshortfuse/renodx
+* Matched residual and cube scaling technique by hhkbble; native + edit
+  enlargement technique by xen/xenmods (DLSSNR-Cost-Scaler, MIT, no copied code).
+  https://github.com/xenmods/DLSSNR-Cost-Scaler
+* New independent integration code (MIT-integration.txt); copied or adapted
+  material retains the licenses and notices of its authors.
+
+Exact release sources and dependency pins are identified in SOURCES.
+
+Khronos Vulkan and video headers
+-------------------------------
+Copyright 2014-2024 The Khronos Group Inc.
+Licensed under Apache License 2.0; see Apache-2.0.txt.
+https://github.com/KhronosGroup/Vulkan-Headers
+
+stb_image and stb_image_write
+----------------------------
+Copyright (c) 2017 Sean Barrett
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+BCUS scaling shader from Microsoft MiniEngine / Minigraph
+--------------------------------------------------------
+Copyright (c) Microsoft. All rights reserved.
+Developed by Minigraph. Author: James Stanard.
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

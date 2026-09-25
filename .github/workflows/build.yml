@@ -1,0 +1,66 @@
+name: Native Linux build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: /usr/bin/bash {0}
+    steps:
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update || exit $?
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git curl xz-utils build-essential cmake ninja-build python3 python3-numpy python3-pil qt6-base-dev libx11-dev libxi-dev libvulkan-dev mesa-vulkan-drivers glslang-tools spirv-tools clang-22 lld-22 || exit $?
+      - uses: actions/checkout@v6
+        with:
+          submodules: false
+          persist-credentials: false
+      - name: Check offline imports and filtered dependency fetches
+        run: python3 tests/submodules.py
+      - name: Fetch only the pinned build dependencies
+        timeout-minutes: 20
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE" || exit $?
+          python3 scripts/fetch-submodules.py --timeout 300 || exit $?
+          python3 scripts/prepare-sources.py || exit $?
+      - name: Install checksum-pinned DXC
+        run: |
+          dxc_archive="$RUNNER_TEMP/dxc.tar.gz"
+          dxc_root="$RUNNER_TEMP/dxc"
+          curl --fail --location --retry 3 --connect-timeout 20 --max-time 300 --retry-max-time 600 -o "$dxc_archive" https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2607/linux_dxc_2026_07_29.x86_x64.tar.gz || exit $?
+          printf '%s  %s\n' '55665c87824051ed4774ff3280a79ccbbb7d39243b9736ca5e98222134112d54' "$dxc_archive" | sha256sum --check || exit $?
+          mkdir -p "$dxc_root" || exit $?
+          # This pinned archive nests bin/ and lib/ under linux_dxc_2026_07_29.x86_x64/.
+          tar -xzf "$dxc_archive" --strip-components=1 -C "$dxc_root" || exit $?
+          if [[ ! -x "$dxc_root/bin/dxc" || ! -f "$dxc_root/lib/libdxcompiler.so" || ! -f "$dxc_root/lib/libdxil.so" ]]; then
+            printf 'DXC archive did not provide the expected executable and libraries under %s\n' "$dxc_root" >&2
+            exit 1
+          fi
+          LD_LIBRARY_PATH="$dxc_root/lib" "$dxc_root/bin/dxc" --version || exit $?
+      - name: Compile every native-layer shader
+        env:
+          LD_LIBRARY_PATH: ${{ runner.temp }}/dxc/lib
+        run: python3 scripts/build-all-shaders.py --dxc "$RUNNER_TEMP/dxc/bin/dxc"
+      - name: Compile all 28 gfx1201 HIP modules including color preservation
+        run: python3 scripts/build-kernels.py --compiler clang++-22 --linker /usr/bin/ld.lld-22
+      - name: Configure worker, layer, CLI, Qt Widgets GUI and tests
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDLSSLOP_BUILD_GUI=ON -DBUILD_TESTING=ON -DPython3_EXECUTABLE=/usr/bin/python3
+      - name: Compile all native targets
+        run: cmake --build build --parallel 2
+      - name: Run host and software Vulkan tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --test-dir build --output-on-failure
+      - name: Package the binary runtime release
+        run: python3 scripts/package-ci.py
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dlsslop-amd-linux-gfx1201
+          path: dist/*.tar.xz
+          if-no-files-found: error

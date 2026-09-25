@@ -1,0 +1,9 @@
+[submodule "layer"]
+	path = external/layer
+	url = https://github.com/bmitch87/DLSS5VKLayer.git
+[submodule "amd"]
+	path = external/amd
+	url = https://github.com/lmxxf/dlss5-on-amd-9070xt-porting.git
+[submodule "optiscaler"]
+	path = external/optiscaler
+	url = https://github.com/optiscaler/OptiScaler.git

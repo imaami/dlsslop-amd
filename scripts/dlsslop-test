@@ -1,0 +1,502 @@
+#!/usr/bin/python3
+"""Capture and measure a frozen game frame through the native color pipeline."""
+import argparse
+import ctypes
+import fcntl
+import importlib.util
+import json
+import os
+from pathlib import Path
+import select
+import shlex
+import shutil
+import signal
+import struct
+import subprocess
+import sys
+import time
+import uuid
+
+
+def key_values(text):
+    result = {}
+    for line in text.splitlines():
+        if line and not line.startswith('#') and '=' in line:
+            key, value = line.split('=', 1)
+            result[key] = value.split(' default=', 1)[0]
+    return result
+
+
+def manifest_values(path):
+    try:
+        return dict(line.split(None, 1) for line in path.read_text().splitlines()
+                    if line and not line.startswith('#') and len(line.split(None, 1)) == 2)
+    except (OSError, ValueError):
+        return {}
+
+
+class DirectoryEvents:
+    """Wait on Linux filesystem events; timeouts are bounded diagnostic deadlines."""
+    def __init__(self, directory):
+        self.libc = ctypes.CDLL(None, use_errno=True)
+        self.fd = self.libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+        if self.fd < 0:
+            raise OSError(ctypes.get_errno(), 'inotify_init1')
+        # Close-write, moved-to, and create include atomic completion manifests.
+        if self.libc.inotify_add_watch(self.fd, os.fsencode(directory), 0x8 | 0x80 | 0x100) < 0:
+            error = ctypes.get_errno()
+            os.close(self.fd)
+            raise OSError(error, 'inotify_add_watch')
+
+    def wait(self, predicate, timeout, label):
+        deadline = time.monotonic() + timeout
+        while True:
+            value = predicate()
+            if value:
+                return value
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError(f'Timed out waiting for {label}; keep the game presenting frames.')
+            if select.select([self.fd], [], [], remaining)[0]:
+                try:
+                    os.read(self.fd, 65536)
+                except BlockingIOError:
+                    pass
+
+    def close(self):
+        os.close(self.fd)
+
+
+def same_setting(a, b):
+    return struct.pack('f', float(a)) == struct.pack('f', float(b))
+
+
+class Control:
+    def __init__(self, executable, shm, timeout):
+        self.argv = [str(executable), '--shm', str(shm)]
+        self.timeout = timeout
+        self.changed = {}
+
+    def call(self, *arguments):
+        result = subprocess.run(self.argv + list(arguments), text=True, capture_output=True,
+                                timeout=self.timeout)
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip() or f'Control exited {result.returncode}')
+        return key_values(result.stdout)
+
+    def set(self, **settings):
+        arguments = []
+        for key, value in settings.items():
+            key = key.replace('_', '-')
+            arguments.extend(['--' + key, str(value)])
+            self.changed[key] = str(value)
+        return self.call(*arguments, '--status')
+
+    def restore(self, original):
+        current = self.call('--settings')
+        arguments, conflicts = [], []
+        for name, value in self.changed.items():
+            if name not in original:
+                continue
+            if name in current and same_setting(current[name], value):
+                arguments.extend(['--' + name, original[name]])
+            else:
+                conflicts.append(name)
+        if arguments:
+            self.call(*arguments)
+        return conflicts
+
+
+def capture_directory(status):
+    # The game can have a different XDG_STATE_HOME from this terminal.
+    try:
+        data = Path(f"/proc/{int(status['layer_pid'])}/environ").read_bytes()
+        env = dict(part.split(b'=', 1) for part in data.split(b'\0') if b'=' in part)
+        if env.get(b'XDG_STATE_HOME'):
+            return Path(os.fsdecode(env[b'XDG_STATE_HOME'])) / 'dlssnr/captures'
+        if env.get(b'HOME'):
+            return Path(os.fsdecode(env[b'HOME'])) / '.local/state/dlssnr/captures'
+    except (OSError, ValueError, KeyError):
+        pass
+    return Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'dlssnr/captures'
+
+
+def safe_child(root, name):
+    path = (root / name).resolve()
+    if path.parent != root.resolve():
+        raise RuntimeError('Capture manifest contains an invalid batch directory')
+    return path
+
+
+def write_json(path, value):
+    temporary = path.with_suffix(path.suffix + '.tmp')
+    temporary.write_text(json.dumps(value, indent=2, allow_nan=False) + '\n')
+    temporary.replace(path)
+
+
+TRACE_METADATA_SCHEMA = 2
+
+
+def check_trace_owner(args):
+    """Negotiate the worker contract before touching controls or taking captures."""
+    if args.trace_dir is None:
+        return None
+    directory = args.trace_dir.expanduser().resolve()
+    owner = json.loads((directory / 'owner.json').read_text())
+    if owner.get('trace_metadata_schema') != TRACE_METADATA_SCHEMA:
+        raise RuntimeError('Worker trace metadata is incompatible: expected schema 2; '
+                           'reinstall matching versions of the worker and color diagnostic, '
+                           'then restart the worker with --trace-dir.')
+    if Path(owner['shm']).resolve() != args.shm.expanduser().resolve():
+        raise RuntimeError('Trace directory belongs to another shared-memory channel')
+    pid = owner.get('pid')
+    if type(pid) is not int or pid <= 0:
+        raise RuntimeError('Trace owner has an invalid worker PID')
+    os.kill(pid, 0)
+    return owner
+
+
+class Run:
+    def __init__(self, args, control, output, captures, trace_owner=None):
+        self.args, self.control, self.output, self.captures = args, control, output, captures
+        self.cases = []
+        self.before_hash = None
+        self.proxy_hash = None
+        self.trace_owner = trace_owner
+        self.failed_raw_traces = []
+        self.events = DirectoryEvents(captures)
+
+    def capture(self, name, **settings):
+        self.control.set(**settings)
+        # Tuning's deferred commit can publish one further control generation.
+        # Wait for real capture completion, then retry under the settled token.
+        deadline = time.monotonic() + self.args.timeout
+        while True:
+            status = self.control.call('--capture', '1', '--status')
+            token = status.get('capture_control_seq', status['control_seq'])
+            def completed():
+                manifest = manifest_values(self.captures / 'manifest.txt')
+                generation = manifest.get('capture_control_seq', '-1')
+                return manifest if int(generation) >= int(token) else None
+            manifest = self.events.wait(completed, max(0, deadline - time.monotonic()),
+                                        f'{name} capture token {token}')
+            if manifest.get('capture_control_seq') == token and manifest.get('frame_control_seq') == token:
+                break
+            current = self.control.call('--settings')
+            if any(key not in current or not same_setting(current[key], value)
+                   for key, value in self.control.changed.items()):
+                raise RuntimeError('Settings changed concurrently during capture; rerun without adjusting controls.')
+            if time.monotonic() >= deadline:
+                raise RuntimeError('Control generations did not settle before the capture deadline')
+        if manifest.get('capture_metadata_version') != '1':
+            raise RuntimeError('Capture metadata is unsupported; reinstall matching versions of the layer and color diagnostic.')
+        if manifest.get('frame_control_seq') != token:
+            raise RuntimeError('Settings changed during capture; rerun without changing controls.')
+        for key in ('request_seq', 'response_seq', 'ok_seq'):
+            if not manifest.get(key) or manifest[key] == '0':
+                raise RuntimeError(f'{name}: missing successful inference sequence')
+        if len({manifest[k] for k in ('request_seq', 'response_seq', 'ok_seq')}) != 1:
+            raise RuntimeError(f'{name}: capture was not paired with a successful inference response')
+        for setting, field in (('passes', 'passes'), ('debug-view', 'debug_view'),
+                               ('apply-model', 'apply_model'), ('bypass', 'bypass'),
+                               ('hold', 'hold'), ('detail', 'detail'), ('color', 'color')):
+            if setting in self.control.changed and (field not in manifest or
+                    not same_setting(manifest[field], self.control.changed[setting])):
+                raise RuntimeError(f'{name}: captured {field} differs from requested value')
+        if self.before_hash is None:
+            self.before_hash = manifest['before_hash']
+        elif self.before_hash != manifest.get('before_hash'):
+            raise RuntimeError('Held input changed; stage comparisons would be invalid.')
+        source = safe_child(self.captures, manifest['batch_dir'])
+        destination = self.output / name
+        shutil.copytree(source, destination)
+        case = {'name': name, 'directory': name, 'manifest': manifest,
+                'settings': self.control.call('--settings')}
+        self.cases.append(case)
+        write_json(self.output / 'captures.json', self.cases)
+        print(f'Captured {name}', flush=True)
+
+    def trace(self, passes):
+        if self.args.trace_dir is None:
+            return None
+        directory = self.args.trace_dir.expanduser().resolve()
+        owner = check_trace_owner(self.args)
+        if self.trace_owner is not None and owner != self.trace_owner:
+            raise RuntimeError('The tracing worker changed during the diagnostic; rerun the test.')
+        token = f'color-{uuid.uuid4().hex}'
+        request = directory / 'request'
+        if request.exists():
+            raise RuntimeError('Another worker trace request is pending')
+        # Exclusive file publication, never replace another diagnostic request.
+        temporary = directory / (token + '.request')
+        temporary.write_text(token + '\n')
+        try:
+            os.link(temporary, request)
+        finally:
+            temporary.unlink()
+        events = DirectoryEvents(directory)
+        try:
+            # Worker atomically publishes a completion marker at directory root.
+            completion = directory / (token + '.done')
+            events.wait(lambda: completion.is_file(), self.args.timeout, 'raw neural trace')
+        finally:
+            events.close()
+        source = directory / token
+        destination = self.output / f'raw-{passes}-pass'
+        # Keep rejected evidence too: a metadata failure must not discard the
+        # summary needed to diagnose it. Only validated traces enter analysis.
+        self.failed_raw_traces.append(destination.name)
+        shutil.copytree(source, destination)
+        summary = json.loads((destination / 'summary.json').read_text())
+        metadata = summary.get('metadata', {})
+        if summary.get('status') != 'complete' or summary.get('schema') != 1:
+            raise RuntimeError('Worker could not complete the raw neural trace')
+        required = ('held_input', 'held_input_end', 'control_seq', 'control_seq_end',
+                    'tuning_seq', 'tuning_seq_end', 'source_proxy_hash')
+        missing = [key for key in required if key not in metadata]
+        if metadata.get('trace_metadata_schema') != TRACE_METADATA_SCHEMA or missing:
+            detail = '; missing ' + ', '.join(missing) if missing else ''
+            raise RuntimeError('Worker trace metadata is incompatible' + detail +
+                               '; reinstall matching versions of the worker and color diagnostic, '
+                               'then restart the worker.')
+        if metadata.get('passes') != passes:
+            raise RuntimeError('Raw trace used the wrong pass count')
+        if metadata.get('held_input') != 1 or metadata.get('held_input_end') != 1:
+            raise RuntimeError('Raw trace input was not held')
+        if metadata.get('control_seq') != metadata.get('control_seq_end'):
+            raise RuntimeError('Settings changed during raw trace')
+        if metadata['tuning_seq'] != metadata['tuning_seq_end']:
+            raise RuntimeError('Tuning changed during raw trace')
+        for key, expected in (('intensity', 1), ('local_tone', 1), ('local_structure', 1),
+                              ('sharpness', 0), ('color_preserve', 0), ('motion', 0)):
+            if metadata.get(key) != expected:
+                raise RuntimeError(f'Raw trace used unexpected {key}')
+        source_hash = metadata.get('source_proxy_hash')
+        if not source_hash or self.proxy_hash not in (None, source_hash):
+            raise RuntimeError('Raw trace input proxy changed between pass counts')
+        self.proxy_hash = source_hash
+        files = {stage['file'] for stage in summary['stages']}
+        for number in range(1, passes + 1):
+            for stage in ('input', 'raw'):
+                if f'pass-{number:02}-{stage}.pfm' not in files:
+                    raise RuntimeError('Raw trace is missing a neural stage')
+        self.failed_raw_traces.remove(destination.name)
+        return destination.name
+
+
+def metrics_module():
+    script = Path(__file__).resolve()
+    helper = script.parent / 'color_metrics.py'
+    if not helper.is_file():
+        helper = script.parent.parent / 'libexec/dlsslop-amd/color_metrics.py'
+    spec = importlib.util.spec_from_file_location('color_metrics', helper)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f'Cannot load color metrics helper: {helper}')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def analyse(output, cases, raw_traces=(), *, completed=True, error=None):
+    metrics = metrics_module()
+    load_capture, read_pfm = metrics.load_capture, metrics.read_pfm
+    image_stats, compare_stats = metrics.image_stats, metrics.compare_stats
+    diagnose_identity = metrics.diagnose_identity
+    import numpy as np
+    images = {}
+    report = {'completed': completed,
+              'scope': 'stage localization; no NVIDIA reference or neural color-quality ground truth',
+              'metrics_domain': 'native stored values; encoded SDR, linear FP16, or packed10 codes',
+              'cases': {}, 'comparisons': {}}
+    if error is not None:
+        report['error'] = error
+    for case in cases:
+        manifest = case['manifest']
+        directory = output / case['directory']
+        extension = 'png' if manifest['encoding'] == 'png' else 'raw'
+        kwargs = dict(vk_format=int(manifest['vk_format']), width=int(manifest['width']),
+                      height=int(manifest['height']), encoding=manifest['encoding'])
+        before = load_capture(directory / f'before_00.{extension}', **kwargs)
+        after = load_capture(directory / f'after_00.{extension}', **kwargs)
+        if not np.isfinite(before).all() or not np.isfinite(after).all():
+            raise RuntimeError(f"{case['name']}: nonfinite captured pixels")
+        if case['name'] in ('original', 'proxy'):
+            images[case['name']] = after
+        report['cases'][case['name']] = {'statistics': image_stats(after),
+                                        'against_original': compare_stats(before, after)}
+        if case['name'] == 'original':
+            report['clean_frame_identity'] = diagnose_identity(before, after, tolerance=2/255 + 1e-7)
+        name = case['name']
+        if name.startswith('model-'):
+            report['comparisons']['proxy_to_' + name] = compare_stats(images['proxy'], after)
+        if name.startswith('composed-'):
+            report['comparisons']['original_to_' + name] = compare_stats(images['original'], after)
+    report['raw_traces'] = {}
+    for name in raw_traces:
+        directory = output / name
+        summary = json.loads((directory / 'summary.json').read_text())
+        comparisons = {}
+        for number in range(1, summary['metadata']['passes'] + 1):
+            stem = f'pass-{number:02}'
+            comparisons[stem] = compare_stats(read_pfm(directory / (stem + '-input.pfm')),
+                                               read_pfm(directory / (stem + '-raw.pfm')))
+        report['raw_traces'][name] = {'metadata': summary['metadata'], 'per_pass_changes': comparisons}
+    report['interpretation'] = [
+        'A red shift in proxy relative to original points toward input/proxy conversion; resampling also changes pixels.',
+        'A red shift in model relative to proxy arises before final edit composition, but includes inference and transport/display conversion.',
+        'A shift appearing only in composed views points toward final composition.',
+        'Endpoint occupancy measures samples at 0 or 1; it cannot prove clipping occurred.',
+        'An intentional model edit can change color. Differences alone are observations, not failed neural correctness tests.',
+        'Raw traces, when enabled, separate network tensors from final display conversion. No golden NVIDIA output is available.'
+    ]
+    write_json(output / 'report.json', report)
+    text = ['# Color diagnostic' + ('' if completed else ' (partial)'), '', report['scope'], '']
+    if not completed:
+        text += ['The diagnostic did not complete. Only validated captures and traces are analysed.',
+                 '', 'Failure: ' + str(error), '']
+    text += [
+            'The input was held and its captured bytes were checked across all stages.', '',
+            'Open each stage directory to compare its lossless before/after images.',
+            'The current case retains the initial tuning; later cases use neutral per-pass tuning, detail/color 1, motion off and normal composition.', '',
+            'Positive red excess means R increased more than the average of G and B; it is not a correctness threshold.', '',
+            '| Stage | Mean R | Mean G | Mean B | Red-excess change vs original |',
+            '|---|---:|---:|---:|---:|']
+    for name, case in report['cases'].items():
+        means = case['statistics']['mean']
+        change = case['against_original']['red_excess_delta']
+        text.append(f"| {name} | {means['r']:.6g} | {means['g']:.6g} | {means['b']:.6g} | {change:+.6g} |")
+    text += ['', 'Per-pixel and neutral-region metrics are in report.json.', '', '## Interpretation', '']
+    text += ['- ' + line for line in report['interpretation']]
+    text += ['', '## Changes before composition', '',
+             '| Comparison | Red-excess change | Neutral-region red chromaticity change |',
+             '|---|---:|---:|']
+    for name, comparison in report['comparisons'].items():
+        if not name.startswith('proxy_to_'):
+            continue
+        neutral = comparison['reference_neutral_chromaticity']['mean_channel_delta']['r']
+        neutral_text = 'no eligible pixels' if neutral is None else f'{neutral:+.6g}'
+        text.append(f"| {name} | {comparison['red_excess_delta']:+.6g} | {neutral_text} |")
+    if report['raw_traces']:
+        text += ['', '## Raw network tensors', '',
+                 '| Trace/pass | Red-excess change, input to raw output |', '|---|---:|']
+        for name, trace in report['raw_traces'].items():
+            for stage, comparison in trace['per_pass_changes'].items():
+                change = comparison['red_excess_delta']
+                value = 'no finite samples' if change is None else f'{change:+.6g}'
+                text.append(f'| {name}/{stage} | {value} |')
+    (output / 'report.md').write_text('\n'.join(text) + '\n')
+    first_pass = report['comparisons'].get('proxy_to_model-1')
+    if first_pass:
+        print(f"One-pass red-excess change before composition: {first_pass['red_excess_delta']:+.6g}", flush=True)
+    return report
+
+
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__, add_help=False,
+                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('-h', '--help', action='help', help='show help (default: off)')
+    parser.add_argument('-o', '--output-dir', type=Path,
+                        default=Path('dlsslop-amd-color-' + time.strftime('%Y%m%d-%H%M%S')),
+                        help='new report directory; existing paths are refused')
+    parser.add_argument('-C', '--control', default=shutil.which('dlsslopctl') or 'dlsslopctl',
+                        help='control executable')
+    parser.add_argument('-s', '--shm', type=Path,
+                        default=Path(os.environ.get('DLSSNR_SHM') or f'/tmp/dlsslop-amd-{os.getuid()}/shm.bin'),
+                        help='shared-memory channel')
+    parser.add_argument('-c', '--capture-dir', type=Path, default=None,
+                        help='capture directory (default: detect from game environment, then XDG_STATE_HOME or ~/.local/state/dlssnr/captures)')
+    parser.add_argument('-r', '--trace-dir', type=Path, default=None,
+                        help='optional directory passed to worker --trace-dir; None means no raw tensors')
+    parser.add_argument('-P', '--max-passes', type=int, choices=range(1, 4), default=3,
+                        help='capture model/composed views at counts 1 through this value')
+    parser.add_argument('-t', '--timeout', type=float, default=60,
+                        help='seconds allowed per capture or control invocation')
+    args = parser.parse_args(argv)
+    if not 1 <= args.timeout <= 600:
+        parser.error('--timeout must be 1..600 seconds')
+    return args
+
+
+def main(argv=None):
+    args = parse_args(argv)
+    # Help remains usable without optional analysis dependencies.
+    try:
+        import numpy
+        import PIL
+    except ImportError as error:
+        raise RuntimeError('Install python3-numpy and python3-pil before running the diagnostic') from error
+    trace_owner = check_trace_owner(args)
+    control = Control(args.control, args.shm, args.timeout)
+    status = control.call('--status')
+    if status.get('initialised') != '1' or status.get('model_up') != '1' or status.get('layer_composition_up') != '1':
+        raise RuntimeError('A running neural worker and game using the layer are required')
+    if 'IDENTITY' in status.get('helper_reason', ''):
+        raise RuntimeError('The identity worker cannot diagnose neural color')
+    original = control.call('--settings')
+    captures = (args.capture_dir or capture_directory(status)).expanduser().resolve()
+    captures.mkdir(parents=True, exist_ok=True)
+    output = args.output_dir.expanduser().resolve()
+    output.mkdir(parents=True, exist_ok=False)
+    write_json(output / 'initial.json', {'status': status, 'settings': original})
+    lock = (args.shm.parent / 'color-test.lock').open('a')
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    run = Run(args, control, output, captures, trace_owner)
+    outcome = {'completed': False, 'restored': False, 'raw_traces': [], 'failed_raw_traces': []}
+    try:
+        print('Keep the game running; do not adjust controls during capture. Input will be held temporarily.', flush=True)
+        run.capture('current', enabled=1, hold=1)
+        control.set(enabled=1, hold=1, passes=1, mvec=0, intensity=1, local_tone=1,
+                    local_structure=1, sharpness=0, color_preserve=0, detail=1, color=1, bypass=0,
+                    reversible=0, debug_view=0, debug_scale=1, compare=0,
+                    apply_model=1, rebuild_ms=0)
+        run.capture('original', apply_model=0, debug_view=0)
+        run.capture('proxy', apply_model=1, debug_view=1)
+        for passes in range(1, args.max_passes + 1):
+            run.capture(f'model-{passes}', passes=passes, debug_view=2, color=1)
+            trace = run.trace(passes)
+            if trace:
+                outcome['raw_traces'].append(trace)
+            run.capture(f'composed-{passes}', debug_view=0, color=1)
+        run.capture('composed-1-color-zero', passes=1, color=0, debug_view=0)
+        report = analyse(output, run.cases, outcome['raw_traces'])
+        outcome['clean_frame_identity_passed'] = report['clean_frame_identity']['passed']
+        outcome['completed'] = True
+    except BaseException as error:
+        outcome['error'] = str(error) or type(error).__name__
+        raise
+    finally:
+        try:
+            conflicts = control.restore(original)
+            outcome['restored'] = not conflicts
+            outcome['restore_conflicts'] = conflicts
+        except Exception as error:
+            outcome['restore_error'] = str(error)
+            print('Settings restoration failed; original values are in initial.json.', file=sys.stderr)
+        run.events.close()
+        lock.close()
+        outcome['failed_raw_traces'] = run.failed_raw_traces
+        if not outcome['completed'] and run.cases:
+            try:
+                analyse(output, run.cases, outcome['raw_traces'], completed=False,
+                        error=outcome.get('error', 'Diagnostic did not complete'))
+                outcome['partial_report'] = True
+            except Exception as error:
+                outcome['analysis_error'] = str(error)
+        write_json(output / 'run.json', outcome)
+    print(f'Diagnostic observations saved in {output}; this is not a neural correctness verdict.')
+    if not outcome['restored']:
+        raise RuntimeError('Some settings were changed concurrently and were not overwritten; see run.json')
+    return 0 if outcome['clean_frame_identity_passed'] else 2
+
+
+def terminate(signum, _frame):
+    raise KeyboardInterrupt(f'signal {signum}')
+
+
+if __name__ == '__main__':
+    signal.signal(signal.SIGTERM, terminate)
+    try:
+        sys.exit(main())
+    except (Exception, KeyboardInterrupt) as error:
+        print(f'dlsslop-test: {error}', file=sys.stderr)
+        sys.exit(1)
