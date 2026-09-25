@@ -166,6 +166,14 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     assert settings(run('-A', 'hold', '-l'))['hold'][0] == 0
     assert settings(run('-A', 'sdr16-multipass', '-l'))['sdr16-multipass'][0] == 0
     assert settings(run('-A', 'sdr16-multipass', '-A', 'sdr16-multipass', '-l'))['sdr16-multipass'][0] == 1
+    # A toggle applies after reset and assignments, once however it is named.
+    changed = settings(run('-A', 'hold', '-P', '3', '--reset', '-e', '0', '-P', '2', '-l'))
+    assert changed.pop('hold') == (1, 0) and changed.pop('enabled') == (0, 1), changed
+    assert changed.pop('passes') == (2, 1), changed
+    assert all(current == default for current, default in changed.values()), changed
+    assert settings(run('-T', '-A', 'enabled', '-l'))['enabled'][0] == 1
+    assert settings(run('-T', '-T', '-l'))['enabled'][0] == 0
+    assert settings(run('-A', 'hold', '-A', 'hold', '-l'))['hold'][0] == 0
     run('--reset')
 
     changed = settings(run('-w', '0.5', '-t', '0', '-e', '0', '-l'))

@@ -2592,10 +2592,10 @@ diff --git a/upstream-layer/tools/meson-build.sh b/upstream-layer/tools/meson-bu
 old mode 100644
 new mode 100755
 diff --git a/upstream-layer/tools/shmctl.cpp b/upstream-layer/tools/shmctl.cpp
-index 4e16702..1bf7c7a 100644
+index 4e16702..4af340d 100644
 --- a/upstream-layer/tools/shmctl.cpp
 +++ b/upstream-layer/tools/shmctl.cpp
-@@ -1,168 +1,362 @@
+@@ -1,168 +1,355 @@
 -// dlssnr-shmctl — read and write the shared-memory header from shell.
 -//
 -// This exists because the helper CLI used to poke the header with
@@ -2637,16 +2637,31 @@ index 4e16702..1bf7c7a 100644
 -    std::atomic<uint32_t> ShmHeader::*field;
 -    bool isFloat;
 -    const char* help;
+-};
 +using dlsslop_control::Setting;
 +using dlsslop_control::kSettings;
 +
 +// --capture parses like an integer setting.
 +constexpr Setting kCapture{"capture", 'c', &ShmHeader::captureRequest, false, 0, 64, nullptr};
 +
-+struct Change {
-+    const Setting* setting;
-+    uint32_t value;
- };
++constexpr std::size_t kCount = std::size(kSettings);
++static_assert(kCount <= 64, "Options keeps one mask bit per setting");
++
++uint64_t Bit(const Setting* setting) { return uint64_t(1) << (setting - kSettings); }
++
++struct Options {
++    std::string path;
++    uint64_t assigned = 0;  // Bit(setting): values holds its new value
++    uint64_t toggled = 0;   // Bit(setting): flip it once
++    uint32_t values[kCount] = {};
++    uint32_t capture = 0;
++    bool help = false;
++    bool status = false;
++    bool settings = false;
++    bool reset = false;
++    bool quit = false;
++    bool resume = false;
++    bool captureSet = false;
  
 -const Setting kSettings[] = {
 -    { "enabled", &ShmHeader::enabled, false, "0/1 run the model at all" },
@@ -2695,21 +2710,8 @@ index 4e16702..1bf7c7a 100644
 -    { "applymodel", &ShmHeader::applyModel, false, "0 show the clean frame, 1 apply the edit" },
 -    { "hold", &ShmHeader::holdFrame, false, "0/1 freeze the frame the pass works on" },
 -    { "togglekey", &ShmHeader::toggleKey, false, "Linux KEY_ code the layer watches, 0 for none" },
-+struct Options {
-+    std::string path;
-+    std::vector<Change> changes;
-+    bool help = false;
-+    bool status = false;
-+    bool settings = false;
-+    bool reset = false;
-+    bool quit = false;
-+    bool resume = false;
-+    std::vector<const Setting*> toggles;
-+    bool captureSet = false;
-+    uint32_t capture = 0;
-+
 +    bool changesHeader() const {
-+        return !changes.empty() || reset || quit || resume || !toggles.empty() || captureSet;
++        return assigned || toggled || reset || quit || resume || captureSet;
 +    }
  };
  
@@ -2837,16 +2839,16 @@ index 4e16702..1bf7c7a 100644
 +        if (!std::strcmp(name, setting.name)) return &setting;
 +    return nullptr;
 +}
++
++bool FixedConfiguration(const Setting& setting) {
++    return setting.field == &ShmHeader::preset || setting.field == &ShmHeader::style ||
++           setting.field == &ShmHeader::autoMask || setting.field == &ShmHeader::skinStructureBits;
++}
  
 -    if ((size_t) st.st_size < ShmTotalBytes()) {
 -        if (!create) {  // nothing has ever attached; there is nothing to talk to
 -            close(fd);
 -            return nullptr;
-+bool FixedConfiguration(const Setting& setting) {
-+    return setting.field == &ShmHeader::preset || setting.field == &ShmHeader::style ||
-+           setting.field == &ShmHeader::autoMask || setting.field == &ShmHeader::skinStructureBits;
-+}
-+
 +bool SupportedConfiguration(const Setting& setting, uint32_t value) {
 +    if (!FixedConfiguration(setting)) return true;
 +    ShmHeader defaults{};
@@ -2856,12 +2858,6 @@ index 4e16702..1bf7c7a 100644
 +    std::fprintf(stderr, "--%s: this captured network supports only %g; alternate preset/style/skin-mask parameter mappings are unavailable\n",
 +                 setting.name, setting.isFloat ? double(BitsToFloat(raw)) : double(raw));
 +    return false;
-+}
-+
-+bool ChangesTuning(const Setting& setting) {
-+    return setting.field == &ShmHeader::colorPreserveBits || setting.field == &ShmHeader::intensityBits || setting.field == &ShmHeader::localToneBits ||
-+           setting.field == &ShmHeader::localStructureBits || setting.field == &ShmHeader::sharpnessBits ||
-+           setting.field == &ShmHeader::rebuildSettleMs;
 +}
 +
 +bool ParseOptions(int argc, char** argv, Options& options) {
@@ -2901,7 +2897,8 @@ index 4e16702..1bf7c7a 100644
 +        case 'r': options.reset = true; break;
 +        case 'q': options.quit = true; break;
 +        case 'R': options.resume = true; break;
-+        case 'T': options.toggles.push_back(FindSetting("enabled")); break;
++        // Repeating a toggle names the same action; it does not cancel itself out.
++        case 'T': options.toggled |= Bit(FindSetting("enabled")); break;
 +        case 'A': {
 +            const Setting* setting = FindSetting(optarg);
 +            if (!setting || setting->isFloat || setting->minimum != 0 || setting->maximum != 1) {
@@ -2912,7 +2909,7 @@ index 4e16702..1bf7c7a 100644
 +                std::fprintf(stderr, "--toggle %s: the captured network fixes this configuration; it cannot be toggled\n", setting->name);
 +                return false;
 +            }
-+            options.toggles.push_back(setting);
++            options.toggled |= Bit(setting);
 +            break;
 +        }
 +        case 'h': options.help = true; break;
@@ -2933,7 +2930,7 @@ index 4e16702..1bf7c7a 100644
 +            const Setting* setting = nullptr;
 +            for (const auto& s : kSettings) if (code == s.shortName) setting = &s;
 +            if (!setting) return false;
-+            uint32_t value;
++            uint32_t& value = options.values[setting - kSettings];
 +            if (!ParseValue(optarg, *setting, value)) {
 +                std::fprintf(stderr, "--%s: expected a finite %s in [%g, %g], got '%s'\n",
 +                             setting->name, setting->isFloat ? "number" : "integer",
@@ -2941,7 +2938,7 @@ index 4e16702..1bf7c7a 100644
 +                return false;
 +            }
 +            if (!SupportedConfiguration(*setting, value)) return false;
-+            options.changes.push_back({setting, value});
++            options.assigned |= Bit(setting);
 +            break;
          }
 -        if (ftruncate(fd, (off_t) ShmTotalBytes()) != 0) {
@@ -2967,13 +2964,10 @@ index 4e16702..1bf7c7a 100644
 +        std::fprintf(stderr, "--quit and --resume cannot be combined\n");
 +        return false;
 +    }
-+    for (const auto* toggle : options.toggles) {
-+        for (const auto& change : options.changes) {
-+            if (change.setting == toggle) {
-+                std::fprintf(stderr, "--toggle %s and --%s cannot be combined\n", toggle->name, toggle->name);
-+                return false;
-+            }
-+        }
++    if (const uint64_t both = options.assigned & options.toggled) {
++        const char* name = kSettings[__builtin_ctzll(both)].name;
++        std::fprintf(stderr, "--toggle %s and --%s cannot be combined\n", name, name);
++        return false;
 +    }
 +    if (!options.changesHeader() && !options.settings) options.status = true;
 +    return true;
@@ -3089,7 +3083,7 @@ index 4e16702..1bf7c7a 100644
  }
  
  void PrintStatus(const ShmHeader* h) {
-@@ -171,11 +365,20 @@ void PrintStatus(const ShmHeader* h) {
+@@ -171,11 +358,20 @@ void PrintStatus(const ShmHeader* h) {
      if (!Initialised(h)) return;
      std::printf("seq_req=%u\nseq_resp=%u\n", h->seq_req.load(), h->seq_resp.load());
      std::printf("width=%u\nheight=%u\n", h->width.load(), h->height.load());
@@ -3112,7 +3106,7 @@ index 4e16702..1bf7c7a 100644
      std::printf("layer_pid=%u\nlayer_composition_up=%u\nlayer_frames=%llu\nlayer_ms=%.2f\n",
                  h->layerPid.load(),
                  h->layerCompositionUp.load(),
-@@ -189,99 +392,75 @@ void PrintStatus(const ShmHeader* h) {
+@@ -189,99 +385,70 @@ void PrintStatus(const ShmHeader* h) {
      if (!reason.empty()) std::printf("helper_reason=%s\n", reason.c_str());
  }
  
@@ -3153,7 +3147,7 @@ index 4e16702..1bf7c7a 100644
 -        // No mapping and none wanted: for 'quit' that means nothing is running, which is success.
 -        return std::strcmp(cmd, "quit") == 0 ? 0 : 1;
 +        if (options.quit && errno == ENOENT && !options.status && !options.settings &&
-+            options.changes.empty() && !options.reset && !options.captureSet && options.toggles.empty()) return 0;
++            !options.assigned && !options.toggled && !options.reset && !options.captureSet) return 0;
 +        std::fprintf(stderr, "cannot access channel '%s': %s\n", options.path.c_str(), std::strerror(errno));
 +        return 1;
      }
@@ -3186,11 +3180,22 @@ index 4e16702..1bf7c7a 100644
 -            h->controlSeq.fetch_add(1);
 +    int result = Attach(h, create, options.path.c_str()) ? 0 : 1;
 +    if (!result) {
-+        if (options.reset) {
-+            // Copy controls only. Never memset a live transport header.
-+            ShmHeader defaults{};
-+            ShmInitNativeDefaults(&defaults, WorkerBypassDefault(h));
-+            for (const auto& s : kSettings) (h->*s.field).store((defaults.*s.field).load());
++        // Store each setting once: readers never wait on controlSeq, so a second
++        // store would show them a value nobody asked for. Reset copies controls
++        // only and never memsets a live transport header.
++        ShmHeader defaults{};
++        if (options.reset) ShmInitNativeDefaults(&defaults, WorkerBypassDefault(h));
++        bool tuningChanged = options.reset;
++        for (std::size_t i = 0; i < kCount; ++i) {
++            const uint64_t bit = uint64_t(1) << i;
++            const uint32_t flip = (options.toggled & bit) != 0;
++            const Setting& s = kSettings[i];
++            auto& field = h->*s.field;
++            if (options.assigned & bit) {  // never also toggled
++                field.store(options.values[i]);
++                tuningChanged |= dlsslop_control::tuning(s);
++            } else if (options.reset) field.store((defaults.*s.field).load() ^ flip);
++            else if (flip) for (uint32_t value = field.load(); !field.compare_exchange_weak(value, !value);) {}
          }
 -    } else if (std::strcmp(cmd, "toggle") == 0) {
 -        // The one command worth binding to a key.
@@ -3219,11 +3224,7 @@ index 4e16702..1bf7c7a 100644
 -                std::fprintf(stderr, "unknown setting: %s\n", argv[3]);
 -                rc = 2;
 -            }
-+        bool tuningChanged = options.reset;
-+        for (const auto& change : options.changes) {
-+            (h->*change.setting->field).store(change.value);
-+            tuningChanged = tuningChanged || ChangesTuning(*change.setting);
-         }
+-        }
 -    } else if (std::strcmp(cmd, "set") == 0) {
 -        if (argc != 5) { Usage(); rc = 2; }
 -        else {
@@ -3232,17 +3233,7 @@ index 4e16702..1bf7c7a 100644
 -                std::fprintf(stderr, "unknown setting: %s\n", argv[3]);
 -                rc = 2;
 -            }
-+        // Repeating a toggle names the same action; it does not cancel itself out.
-+        std::vector<const Setting*> toggled;
-+        for (const auto* toggle : options.toggles) {
-+            bool done = false;
-+            for (const auto* previous : toggled) if (previous == toggle) done = true;
-+            if (done) continue;
-+            auto& field = h->*toggle->field;
-+            uint32_t value = field.load();
-+            while (!field.compare_exchange_weak(value, value ? 0u : 1u)) {}
-+            toggled.push_back(toggle);
-         }
+-        }
 -    } else {
 -        Usage();
 -        rc = 2;
