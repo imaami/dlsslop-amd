@@ -1291,7 +1291,7 @@ index 2690bb9..90440b6 100644
  
      // How much of the chroma-agreement gate to apply, 0..1. See colourTrustPercent.
 diff --git a/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl b/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
-index 67c5f9d..712c614 100644
+index 67c5f9d..007a7e7 100644
 --- a/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
 +++ b/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
 @@ -29,7 +29,7 @@ cbuffer Params : register(b0)
@@ -1503,7 +1503,17 @@ index 67c5f9d..712c614 100644
  
          // What bounds the sum. An addition says nothing about where the result lands, so the model's
          // verdict is read as a ratio on the pair it came from and the sum is held near it.
-@@ -1349,8 +1376,8 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -1342,15 +1369,17 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+     if (gDebugView == 4)
+     {
+         const float a = saturate(colourAllow);
+-        gTarget[id.xy] = float4(float3(1.0 - a, a, 0.0) * WhitePoint(), originalSample.a);
++        float3 dbg = float3(1.0 - a, a, 0.0) * normScale;
++        if (gHdrTransfer != 0) dbg = LinearToPq(dbg);
++        gTarget[id.xy] = float4(dbg, originalSample.a);
+         return;
+     }
+ 
      // The composed colour before the bound is applied, so the two can be compared frame by frame.
      if (gDebugView == 5)
      {
@@ -1514,7 +1524,7 @@ index 67c5f9d..712c614 100644
          gTarget[id.xy] = float4(max(dbg, 0.0), originalSample.a);
          return;
      }
-@@ -1362,21 +1389,36 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -1362,21 +1391,36 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      if (gColourStrength > 1.0)
          result = ClampAp1(FromOkLab(float3(1.0, gColourStrength, gColourStrength) * ToOkLab(max(result, 0.0))));
  
@@ -1555,7 +1565,7 @@ index 67c5f9d..712c614 100644
  
      // The side being shown untouched takes the frame as it arrived, past every step above -- code
      // for code, transfer included.
-@@ -1392,11 +1434,15 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -1392,11 +1436,15 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      if (onDivider)
      {
          float3 white = float3(WhitePoint(), WhitePoint(), WhitePoint());

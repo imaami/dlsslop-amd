@@ -272,6 +272,7 @@ struct Options {
     bool pq = false, sdr = false, reduced = false;
     float white = 1, modelScale = 1;  // the model's answer is the proxy with its RGB scaled by this
     uint32_t transfer = 2, hdrProxy = 2;  // HdrProxy 2: display-encoded native HIP model input
+    uint32_t debugView = 0;
     VkFormat proxyFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 };
 
@@ -345,6 +346,7 @@ Result Run(Context& c, const std::array<float, components>& input, const Options
     constants.CompareSplit = 0.5f;
     constants.CompareZoom = 1;
     constants.Transfer = o.transfer;
+    constants.DebugView = o.debugView;
     constants.DebugScale = 1;
     constants.ApplyModel = 1;
     constants.ExposurePreMul = 1;
@@ -486,6 +488,33 @@ void NoNegativeLight(const char* name, const std::array<float, components>& inpu
     std::printf("%s: no channel below the frame's own, lowest luminance ratio %.9g\n", name, lowest);
 }
 
+// Debug view 4 paints how far the colour bound let the model's colour through: red held back,
+// green passed, together always paper white. Checked in BT.709 linear light, so a PQ swapchain must
+// receive BT.2020 PQ codes for paper white rather than linear values read as up to 10,000 nits.
+void ColourBoundView(const char* name, const std::array<float, components>& input, const Result& result,
+                     bool pq, float white) {
+    constexpr float to709[3][3] = {{1.660491f, -0.587641f, -0.072850f}, {-0.124550f, 1.132900f, -0.008349f},
+                                   {-0.018151f, -0.100579f, 1.118730f}};
+    for (size_t pixel = 0; pixel < components / 4; ++pixel) {
+        const float* out = &result.output[pixel * 4];
+        float rgb[3] = {out[0], out[1], out[2]};
+        if (pq) {
+            const float bt2020[3] = {PqToLinear(out[0]), PqToLinear(out[1]), PqToLinear(out[2])};
+            for (size_t channel = 0; channel < 3; ++channel)
+                rgb[channel] = to709[channel][0] * bt2020[0] + to709[channel][1] * bt2020[1] +
+                               to709[channel][2] * bt2020[2];
+        }
+        const float tolerance = white * 0.001f;
+        if (std::abs(rgb[0] + rgb[1] - white) <= tolerance && std::abs(rgb[2]) <= tolerance &&
+            rgb[0] >= -tolerance && rgb[1] >= -tolerance && out[3] == input[pixel * 4 + 3])
+            continue;
+        std::fprintf(stderr, "%s pixel %zu: %.9g %.9g %.9g %.9g, linear %.9g %.9g %.9g, expected red plus "
+                     "green %.9g\n", name, pixel, out[0], out[1], out[2], out[3], rgb[0], rgb[1], rgb[2], white);
+        throw std::runtime_error("colour-bound view is not paper white split between red and green");
+    }
+    std::printf("%s: colour-bound view sums to paper white %.9g\n", name, white);
+}
+
 } // namespace
 
 int main() {
@@ -618,6 +647,16 @@ int main() {
                           darker.modelScale, darker.hdrProxy);
             NoNegativeLight(name, gamut_edge, Run(context, gamut_edge, darker), false, false);
         }
+        Options bound_hdr10 = hdr10;
+        bound_hdr10.debugView = 4;
+        ColourBoundView("debug view 4, HDR10 PQ", pq, Run(context, pq, bound_hdr10), true, 0.0203f);
+        Options bound_linear = brighter;
+        bound_linear.debugView = 4;
+        ColourBoundView("debug view 4, linear HDR, white point 2", linear, Run(context, linear, bound_linear),
+                        false, 2);
+        Options bound_sdr = display;
+        bound_sdr.debugView = 4;
+        ColourBoundView("debug view 4, SDR", sdr, Run(context, sdr, bound_sdr), false, 1);
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "hdr-shader-test: %s\n", error.what());
