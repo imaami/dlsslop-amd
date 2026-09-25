@@ -90,14 +90,27 @@ void interaction(Slider& slider)
 
 void directions(Slider& slider)
 {
+    // A fine range exposes any pixel of disagreement between the painted
+    // handle travel and the widget's inversion of it.
+    slider.setRange(0, 10000);
     for (const auto orientation : {Qt::Horizontal, Qt::Vertical}) {
         slider.setOrientation(orientation);
-        slider.resize(orientation == Qt::Horizontal ? QSize(420, 40) : QSize(40, 420));
+        // Size the handle-centre span to a multiple of four so each quarter
+        // value sits on an exact pixel. The span's sign depends on which end
+        // is painted first, so search a few sizes instead of computing the
+        // padding.
+        QPoint span;
+        for (int extra = 0; extra < 8; ++extra) {
+            slider.resize(orientation == Qt::Horizontal ? QSize(420 + extra, 40) : QSize(40, 420 + extra));
+            span = slider.pointAt(10000) - slider.pointAt(0);
+            if ((span.x() + span.y()) % 4 == 0) break;
+        }
+        require((span.x() + span.y()) % 4 == 0, "test geometry must give a span divisible by four");
         for (const auto direction : {Qt::LeftToRight, Qt::RightToLeft}) {
             slider.setLayoutDirection(direction);
             for (const bool inverted : {false, true}) {
                 slider.setInvertedAppearance(inverted);
-                for (const int value : {0, 25, 75, 100}) {
+                for (const int value : {0, 2500, 7500, 10000}) {
                     QTest::mouseClick(&slider, Qt::LeftButton, Qt::NoModifier, slider.pointAt(value));
                     require(slider.value() == value, "click must match the painted value in each orientation and direction");
                 }

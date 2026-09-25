@@ -4,7 +4,6 @@
 #include <QSlider>
 #include <QStyle>
 #include <QStyleOptionSlider>
-#include <algorithm>
 
 namespace dlsslop_gui {
 
@@ -17,17 +16,16 @@ class AbsoluteSlider : public QSlider {
     {
         QStyleOptionSlider option;
         initStyleOption(&option);
-        const QRect groove = style()->subControlRect(QStyle::CC_Slider, &option,
-                                                     QStyle::SC_SliderGroove, this);
-        const QRect handle = style()->subControlRect(QStyle::CC_Slider, &option,
-                                                     QStyle::SC_SliderHandle, this);
-        const bool horizontal = orientation() == Qt::Horizontal;
-        const int length = horizontal ? handle.width() : handle.height();
-        const int start = horizontal ? groove.left() : groove.top();
-        const int span = std::max(0, (horizontal ? groove.width() : groove.height()) - length);
-        // QRect's integer center rounds down for an even-sized handle.
-        const int pixel = (horizontal ? point.x() : point.y()) - start - (length - 1) / 2;
-        return QStyle::sliderValueFromPosition(minimum(), maximum(), pixel, span, option.upsideDown);
+        // Invert the style's painting: its handle centres at the two painted
+        // ends bound the travel, whatever groove insets or margins it applies.
+        const int first = option.upsideDown ? option.maximum : option.minimum;
+        option.sliderPosition = first;
+        const QPoint start = style()->subControlRect(QStyle::CC_Slider, &option, QStyle::SC_SliderHandle, this).center();
+        option.sliderPosition = option.minimum + option.maximum - first;
+        QPoint pixel = point - start;
+        QPoint span = style()->subControlRect(QStyle::CC_Slider, &option, QStyle::SC_SliderHandle, this).center() - start;
+        if (orientation() == Qt::Vertical) { pixel = pixel.transposed(); span = span.transposed(); }
+        return QStyle::sliderValueFromPosition(option.minimum, option.maximum, pixel.x(), span.x(), option.upsideDown);
     }
 
 protected:
