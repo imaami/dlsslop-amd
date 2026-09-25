@@ -2592,10 +2592,10 @@ diff --git a/upstream-layer/tools/meson-build.sh b/upstream-layer/tools/meson-bu
 old mode 100644
 new mode 100755
 diff --git a/upstream-layer/tools/shmctl.cpp b/upstream-layer/tools/shmctl.cpp
-index 4e16702..ad86a27 100644
+index 4e16702..b769d15 100644
 --- a/upstream-layer/tools/shmctl.cpp
 +++ b/upstream-layer/tools/shmctl.cpp
-@@ -1,168 +1,335 @@
+@@ -1,168 +1,333 @@
 -// dlssnr-shmctl — read and write the shared-memory header from shell.
 -//
 -// This exists because the helper CLI used to poke the header with
@@ -2614,7 +2614,7 @@ index 4e16702..ad86a27 100644
 +#include "../../common/control_settings.h"
  
 +#include <cerrno>
-+#include <cmath>
++#include <cctype>
  #include <cstdio>
 +#include <cstdlib>
  #include <cstring>
@@ -2639,6 +2639,9 @@ index 4e16702..ad86a27 100644
 -    const char* help;
 +using dlsslop_control::Setting;
 +using dlsslop_control::kSettings;
++
++// --capture parses like an integer setting.
++constexpr Setting kCapture{"capture", 'c', &ShmHeader::captureRequest, false, 0, 64, nullptr};
 +
 +struct Change {
 +    const Setting* setting;
@@ -2809,26 +2812,21 @@ index 4e16702..ad86a27 100644
 -    if (fstat(fd, &st) != 0) {
 -        close(fd);
 -        return nullptr;
-+bool ParseValue(const char* text, bool floating, double minimum, double maximum,
-+                uint32_t& result) {
-+    if (!text || !*text) return false;
-+    // strtod/strtoull accept whitespace and signs that are inappropriate for unsigned
-+    // controls. Reject them here instead of silently coercing malformed arguments.
-+    if (*text == ' ' || *text == '\t' || *text == '\n' || *text == '\r' ||
-+        *text == '\v' || *text == '\f') return false;
++// strtod/strtoull skip leading whitespace, strtoull accepts signs and strtod
++// parses nothing from an empty string. Reject all of them rather than silently
++// coercing malformed arguments.
++bool ParseValue(const char* text, const Setting& setting, uint32_t& result) {
 +    char* end = nullptr;
 +    errno = 0;
-+    if (floating) {
++    if (setting.isFloat) {
++        if (!*text || std::isspace(static_cast<unsigned char>(*text))) return false;
 +        const double value = std::strtod(text, &end);
-+        if (errno || end == text || *end || !std::isfinite(value) ||
-+            value < minimum || value > maximum) return false;
-+        const float converted = static_cast<float>(value);
-+        if (!std::isfinite(converted)) return false;
-+        result = FloatToBits(converted);
++        if (errno || *end || !dlsslop_control::inRange(setting, value)) return false;
++        result = FloatToBits(static_cast<float>(value) + 0.0f);  // + 0.0f stores -0 as 0
 +    } else {
 +        if (*text < '0' || *text > '9') return false;
 +        const unsigned long long value = std::strtoull(text, &end, 10);
-+        if (errno || end == text || *end || value < minimum || value > maximum) return false;
++        if (errno || *end || !dlsslop_control::inRange(setting, value)) return false;
 +        result = static_cast<uint32_t>(value);
      }
 +    return true;
@@ -2855,17 +2853,17 @@ index 4e16702..ad86a27 100644
 +                 setting.name, setting.isFloat ? double(BitsToFloat(raw)) : double(raw));
 +    return false;
 +}
-+
-+bool ChangesTuning(const Setting& setting) {
-+    return setting.field == &ShmHeader::colorPreserveBits || setting.field == &ShmHeader::intensityBits || setting.field == &ShmHeader::localToneBits ||
-+           setting.field == &ShmHeader::localStructureBits || setting.field == &ShmHeader::sharpnessBits ||
-+           setting.field == &ShmHeader::rebuildSettleMs;
-+}
  
 -    if ((size_t) st.st_size < ShmTotalBytes()) {
 -        if (!create) {  // nothing has ever attached; there is nothing to talk to
 -            close(fd);
 -            return nullptr;
++bool ChangesTuning(const Setting& setting) {
++    return setting.field == &ShmHeader::colorPreserveBits || setting.field == &ShmHeader::intensityBits || setting.field == &ShmHeader::localToneBits ||
++           setting.field == &ShmHeader::localStructureBits || setting.field == &ShmHeader::sharpnessBits ||
++           setting.field == &ShmHeader::rebuildSettleMs;
++}
++
 +bool ParseOptions(int argc, char** argv, Options& options) {
 +    options.path = DefaultPath();
 +    std::vector<option> longOptions = {
@@ -2919,7 +2917,7 @@ index 4e16702..ad86a27 100644
 +        }
 +        case 'h': options.help = true; break;
 +        case 'c':
-+            if (!ParseValue(optarg, false, 0, 64, options.capture)) {
++            if (!ParseValue(optarg, kCapture, options.capture)) {
 +                std::fprintf(stderr, "--capture: expected an integer from 0 through 64, got '%s'\n", optarg);
 +                return false;
 +            }
@@ -2936,7 +2934,7 @@ index 4e16702..ad86a27 100644
 +            for (const auto& s : kSettings) if (code == s.shortName) setting = &s;
 +            if (!setting) return false;
 +            uint32_t value;
-+            if (!ParseValue(optarg, setting->isFloat, setting->minimum, setting->maximum, value)) {
++            if (!ParseValue(optarg, *setting, value)) {
 +                std::fprintf(stderr, "--%s: expected a finite %s in [%g, %g], got '%s'\n",
 +                             setting->name, setting->isFloat ? "number" : "integer",
 +                             setting->minimum, setting->maximum, optarg);
@@ -3062,7 +3060,7 @@ index 4e16702..ad86a27 100644
  }
  
  void PrintStatus(const ShmHeader* h) {
-@@ -171,11 +338,20 @@ void PrintStatus(const ShmHeader* h) {
+@@ -171,11 +336,20 @@ void PrintStatus(const ShmHeader* h) {
      if (!Initialised(h)) return;
      std::printf("seq_req=%u\nseq_resp=%u\n", h->seq_req.load(), h->seq_resp.load());
      std::printf("width=%u\nheight=%u\n", h->width.load(), h->height.load());
@@ -3085,7 +3083,7 @@ index 4e16702..ad86a27 100644
      std::printf("layer_pid=%u\nlayer_composition_up=%u\nlayer_frames=%llu\nlayer_ms=%.2f\n",
                  h->layerPid.load(),
                  h->layerCompositionUp.load(),
-@@ -189,99 +365,82 @@ void PrintStatus(const ShmHeader* h) {
+@@ -189,99 +363,82 @@ void PrintStatus(const ShmHeader* h) {
      if (!reason.empty()) std::printf("helper_reason=%s\n", reason.c_str());
  }
  

@@ -58,6 +58,24 @@ int main()
             require(header->controlSeq.load() == seq && BitsToFloat(header->intensityBits.load()) < 0.32f,
                     "invalid batch partially applied");
             rejects([&] { channel.write({{intensity, std::nan("")}}); });
+            rejects([&] { channel.write({{intensity, HUGE_VAL}}); });
+            channel.write({{intensity, -0.0}});
+            require(header->intensityBits.load() == 0, "negative zero stored");
+            // Every advertised bound is accepted and reads back in range, although
+            // binary32 stores some float minimums below themselves.
+            for (std::size_t i = 0; i < std::size(dlsslop_control::kSettings); ++i) {
+                const auto& s = dlsslop_control::kSettings[i];
+                const double below = std::nextafter(static_cast<double>(static_cast<float>(s.minimum)), -HUGE_VAL);
+                const double above = std::nextafter(static_cast<double>(static_cast<float>(s.maximum)), HUGE_VAL);
+                require(!dlsslop_control::inRange(s, below) && !dlsslop_control::inRange(s, above) &&
+                        !dlsslop_control::inRange(s, std::nan("")), "range admits an outside value");
+                if (dlsslop_control::fixed(s)) continue;
+                for (const double bound : {s.minimum, s.maximum}) {
+                    channel.write({{i, bound}});
+                    require(dlsslop_control::inRange(s, dlsslop_gui::Channel::value(s, (header->*s.field).load())),
+                            "a written bound reads back out of range");
+                }
+            }
             channel.capture(3);
             require(header->captureRequest.load() == 3, "capture not published");
             rejects([&] { channel.capture(65); });
@@ -74,7 +92,7 @@ int main()
         header->version.store(kShmVersion + 1);
         rejects([&] { dlsslop_gui::Channel channel(path, true); });
         require(header->version.load() == kShmVersion + 1, "mismatched channel reinitialized");
-        std::puts("GUI channel tests passed: precision, batching, generations, isolation, reset, actions, protocol and symlink checks");
+        std::puts("GUI channel tests passed: precision, bounds, batching, generations, isolation, reset, actions, protocol and symlink checks");
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());
         result = 1;

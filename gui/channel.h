@@ -63,8 +63,7 @@ public:
             if (index >= std::size(dlsslop_control::kSettings))
                 throw std::invalid_argument("Unknown setting");
             const auto& s = dlsslop_control::kSettings[index];
-            if (!std::isfinite(number) || number < s.minimum || number > s.maximum ||
-                (!s.isFloat && std::trunc(number) != number))
+            if (!dlsslop_control::inRange(s, number) || (!s.isFloat && std::trunc(number) != number))
                 throw std::invalid_argument("Setting outside supported range");
             if (dlsslop_control::fixed(s) && number != value(s, (defaults.*s.field).load()))
                 throw std::invalid_argument("This captured model fixes that setting");
@@ -72,7 +71,8 @@ public:
         bool tuningChanged = false;
         for (const auto& [index, number] : changes) {
             const auto& s = dlsslop_control::kSettings[index];
-            (header_->*s.field).store(s.isFloat ? FloatToBits(static_cast<float>(number)) :
+            // + 0.0f stores -0 as 0.
+            (header_->*s.field).store(s.isFloat ? FloatToBits(static_cast<float>(number) + 0.0f) :
                                                static_cast<uint32_t>(number));
             tuningChanged |= dlsslop_control::tuning(s);
         }

@@ -61,6 +61,13 @@ inline constexpr Setting kSettings[] = {
     {"toggle-key", 'k', &ShmHeader::toggleKey, false, 0, KEY_MAX, "Linux KEY_ code for the layer hotkey; 0 disables it"},
 };
 
+// Readers see float settings as binary32, which rounds some minimums below
+// themselves, so compare with the bounds as stored; integer bounds are exact
+// there. NaN fails.
+inline bool inRange(const Setting& s, double v)
+{
+    return v >= static_cast<float>(s.minimum) && v <= static_cast<float>(s.maximum);
+}
 inline bool fixed(const Setting& s)
 {
     return s.field == &ShmHeader::preset || s.field == &ShmHeader::style ||

@@ -156,7 +156,7 @@ class Window final : public QWidget {
             std::vector<double> values;
             for (const auto& s : kSettings) {
                 const double value = Channel::value(s, (h->*s.field).load());
-                if (!std::isfinite(value) || value < s.minimum || value > s.maximum)
+                if (!dlsslop_control::inRange(s, value))
                     throw std::runtime_error(std::string("Invalid live setting: ") + s.name);
                 values.push_back(value);
             }

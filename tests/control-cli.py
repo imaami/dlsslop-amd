@@ -98,6 +98,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
         ('--color-preserve', '1.001'), ('--color-preserve', '-0.1'), ('--intensity', '4.001'), ('--local-tone', '-0.1'), ('--sharpness', '1.01'),
         ('--hdr-mode', '3'), ('--mvec-quality', '3'), ('--mvec-units', '3'),
         ('--mvec-pixels', '4'), ('--white-point', '0.00009'), ('--reversible', '5'),
+        ('--debug-scale', '0.0099999995'),
         ('--preset', '1'), ('--style', '1'), ('--auto-mask', '0'), ('--skin-structure', '0'),
         ('--intensity', '0.5', '--preset', '1'), ('--rebuild-ms', '5001'),
         ('--toggle', 'auto-mask'), ('--toggle', 'intensity'), ('--toggle', 'hdr-mode'),
@@ -109,6 +110,25 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     for options in invalid_options:
         run(*options, expected=2)
         assert header() == original, ('invalid option mutated channel', options)
+
+    # Every advertised bound is accepted, and so is the value --settings then
+    # prints, although binary32 stores some float minimums below themselves.
+    def printed(output):
+        return dict(re.findall(r'^([a-z0-9-]+)=([^ ]+) default=', output, re.MULTILINE))
+
+    fixed = ('preset', 'style', 'auto-mask', 'skin-structure')
+    for name in values:
+        if name in fixed:
+            continue
+        bounds = re.search(r'--' + re.escape(name) + r'\s+VALUE[^\n]*\n\s*Range: (\S+?)\.\.([^;]+);', helptext)
+        assert bounds, name
+        for bound in bounds.groups():
+            shown = printed(run('--' + name, bound, '--settings'))[name]
+            assert printed(run('--' + name, shown, '--settings'))[name] == shown, (name, bound, shown)
+    # Negative zero is stored as zero.
+    assert '\nsharpness=0 default=0\n' in run('--sharpness', '-0', '--settings')
+    assert '\nintensity=0 default=1\n' in run('--intensity', '-0.0', '--settings')
+    run('--reset')
 
     # Each option below has a working short form and is read back by name.
     # Captured configuration fields accept only the one real configuration.
