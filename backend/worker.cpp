@@ -875,6 +875,13 @@ void run_worker(const Options& o)
                         request, &timeout, nullptr, 0);
                 continue;
             }
+            // Writers store a setting before bumping controlSeq, so sample the
+            // generations after this loop's own bumps (trace claim, tuning
+            // commit) and before reading any other setting, the dimensions or
+            // the input; sample again after inference.
+            const uint32_t control_sequence = h->controlSeq.load();
+            const uint32_t tuning_sequence = h->tuningSeq.load();
+            const uint32_t held_input = pending_trace ? h->holdFrame.load() : 0;
             const unsigned w = h->width.load(), height = h->height.load();
             last = request;
             try {
@@ -899,9 +906,6 @@ void run_worker(const Options& o)
                 // A live control change takes effect on the next request;
                 // never shorten or extend a chain partway through a frame.
                 const unsigned passes = ShmPasses(h);
-                const uint32_t control_sequence = h->controlSeq.load();
-                const uint32_t tuning_sequence = h->tuningSeq.load();
-                const uint32_t held_input = pending_trace ? h->holdFrame.load() : 0;
                 if (!o.test_identity && passes != previous_passes) {
                     std::fprintf(stderr, "neural passes=%u; one final composition per frame\n", passes);
                     previous_passes = passes;
