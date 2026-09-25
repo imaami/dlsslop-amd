@@ -111,37 +111,6 @@ bool same_tuning(const dlsslop::NativeTuning& a, const dlsslop::NativeTuning& b)
            a.structure == b.structure && a.sharpness == b.sharpness;
 }
 
-// Debounce expensive-looking slider drags without rebuilding fixed weights.
-// The idle worker also commits pending changes and nudges the layer so a held
-// frame updates after the settle interval, even when the game is not drawing.
-class TuningLatch {
-    uint32_t sequence_;
-    dlsslop::NativeTuning current_, pending_;
-    bool waiting_ = false;
-    std::chrono::steady_clock::time_point changed_;
-public:
-    explicit TuningLatch(const ShmHeader* h)
-        : sequence_(h->tuningSeq.load()), current_(read_tuning(h)), pending_(current_) {}
-    dlsslop::NativeTuning update(ShmHeader* h)
-    {
-        const auto now = std::chrono::steady_clock::now();
-        const auto sequence = h->tuningSeq.load();
-        if (sequence != sequence_) {
-            sequence_ = sequence;
-            pending_ = read_tuning(h);
-            changed_ = now;
-            waiting_ = true;
-        }
-        const auto settle = std::chrono::milliseconds(std::min(h->rebuildSettleMs.load(), 5000u));
-        if (waiting_ && now - changed_ >= settle) {
-            current_ = pending_;
-            waiting_ = false;
-            h->controlSeq.fetch_add(1);
-        }
-        return current_;
-    }
-};
-
 [[noreturn]] void system_error(const char* action)
 {
     throw std::runtime_error(std::string(action) + ": " + std::strerror(errno));
@@ -858,7 +827,6 @@ void run_worker(const Options& o)
                          o.cpu_compose ? "CPU composition" : "native-resolution Vulkan composition");
         uint64_t frames = 0;
         unsigned previous_passes = 0;
-        TuningLatch tuning(h);
         uint32_t last = h->seq_resp.load(std::memory_order_acquire);
         std::string failure;
         while (!stopping && !h->quit.load(std::memory_order_relaxed)) {
@@ -870,7 +838,6 @@ void run_worker(const Options& o)
                     std::fprintf(stderr, "diagnostic request rejected: %s\n", error.what());
                 }
             }
-            const auto active_tuning = tuning.update(h);
             const uint32_t request = h->seq_req.load(std::memory_order_acquire);
             if (request == last) {
                 const timespec timeout{0, 100000000};
@@ -879,9 +846,9 @@ void run_worker(const Options& o)
                 continue;
             }
             // Writers store a setting before bumping controlSeq, so sample the
-            // generations after this loop's own bumps (trace claim, tuning
-            // commit) and before reading any other setting, the dimensions or
-            // the input; sample again after inference.
+            // generations after this loop's own bump (the trace claim) and
+            // before reading any setting, the dimensions or the input; sample
+            // again after inference.
             const uint32_t control_sequence = h->controlSeq.load();
             const uint32_t tuning_sequence = h->tuningSeq.load();
             const uint32_t held_input = pending_trace ? h->holdFrame.load() : 0;
@@ -896,7 +863,7 @@ void run_worker(const Options& o)
                 settings.motion_quality = ShmMVecQuality(h);
                 settings.motion_grid = ShmMVecPixelSize(h);
                 settings.motion_units = ShmMVecScaleMode(h);
-                settings.tuning = active_tuning;
+                settings.tuning = read_tuning(h);
                 settings.color_preserve = BitsToFloat(h->colorPreserveBits.load());
                 if (!w || !height || w > kMaxW || height > kMaxH || h->format.load() != 1)
                     throw std::range_error("unsupported request dimensions or proxy format");

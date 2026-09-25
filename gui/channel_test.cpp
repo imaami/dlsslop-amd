@@ -35,12 +35,13 @@ int main()
         header = static_cast<ShmHeader*>(memory);
         rejects([&] { dlsslop_gui::Channel channel(path, true); });
         ShmInitNativeDefaults(header);
-        std::size_t intensity = 0, color = 0, preset = 0;
+        std::size_t intensity = 0, color = 0, preset = 0, colorPreserve = 0;
         for (std::size_t i = 0; i < std::size(dlsslop_control::kSettings); ++i) {
             const std::string name = dlsslop_control::kSettings[i].name;
             if (name == "intensity") intensity = i;
             if (name == "color") color = i;
             if (name == "preset") preset = i;
+            if (name == "color-preserve") colorPreserve = i;
         }
         const uint32_t control = header->controlSeq.load(), tuning = header->tuningSeq.load();
         header->holdFrame.store(1);
@@ -53,6 +54,8 @@ int main()
             require(header->holdFrame.load() == 1 && header->quit.load() == 1, "unrelated settings changed");
             channel.write({{color, 0.25}});
             require(header->tuningSeq.load() == tuning + 1, "composition bumped tuning");
+            channel.write({{colorPreserve, 0.5}});
+            require(header->tuningSeq.load() == tuning + 1, "color preservation bumped tuning");
             const auto seq = header->controlSeq.load();
             rejects([&] { channel.write({{intensity, 0.5}, {preset, 1}}); });
             require(header->controlSeq.load() == seq && BitsToFloat(header->intensityBits.load()) < 0.32f,

@@ -2,8 +2,8 @@
 
 `dlsslopctl --help` is the canonical option, range and default reference.
 `--settings` prints current values alongside reset defaults. Omitted options leave
-current settings unchanged. There are 42 settings: 41 inherited controls mapped
-below, plus native per-pass color preservation described at the end.
+current settings unchanged. There are 41 settings: 40 of the 41 inherited controls
+mapped below, plus native per-pass color preservation described at the end.
 
 “Native equivalent” means an implemented AMD-side operation, not an implementation
 of NVIDIA's proprietary parameter mapping. “Fixed” means the extracted network
@@ -29,7 +29,7 @@ opening or modifying the control channel.
 | `guard` | `-g`, `--guard` | Bounds per-pixel relighting gain in ratio-based composition modes. |
 | `transfer` | `-t`, `--transfer` | Chooses classic ratio, matched residual, or native-frame-plus-edit composition. |
 | `bypass` | `-b`, `--bypass` | Presents the model result instead of composing its edit. |
-| `rebuildms` | `-J`, `--rebuild-ms` | **Native equivalent:** debounces intensity, tone, structure and sharpness changes; fixed weights are not rebuilt. |
+| `rebuildms` | None | **Not applicable:** native tuning rebuilds nothing; intensity, tone, structure and sharpness apply on the next request. |
 | `ratiosmooth` | `-a`, `--ratio-smooth` | Neighbourhood contribution to ratio-based relighting. |
 | `colourtrust` | `-u`, `--color-trust` | Bounds color displacement in composition. |
 | `mvec` | `-V`, `--mvec` | **Native equivalent:** HIP optical-flow estimation and reprojection into the network's temporal input. |
@@ -91,7 +91,7 @@ dlsslopctl --hold 0
 
 `-L`, `--color-preserve 0..1` (default **0**) anchors broad chroma changes to
 the original encoded input after each pass, before history/feedback. It is the
-42nd setting and appears in the Qt controller's Neural passes section.
+41st setting and appears in the Qt controller's Neural passes section.
 The HIP implementation avoids correction-related host transfers when its
 module is installed; an explicitly logged CPU fallback remains available.
 Unlike `--color`, it operates before feedback. See COLOR-PRESERVATION.md.

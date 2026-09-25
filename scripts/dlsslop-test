@@ -168,7 +168,8 @@ class Run:
 
     def capture(self, name, **settings):
         self.control.set(**settings)
-        # Tuning's deferred commit can publish one further control generation.
+        # Another writer (a controller, or the worker taking a trace request)
+        # can publish a control generation between the token and the frame.
         # Wait for real capture completion, then retry under the settled token.
         deadline = time.monotonic() + self.args.timeout
         while True:
@@ -448,7 +449,7 @@ def main(argv=None):
         control.set(enabled=1, hold=1, passes=1, mvec=0, intensity=1, local_tone=1,
                     local_structure=1, sharpness=0, color_preserve=0, detail=1, color=1, bypass=0,
                     reversible=0, debug_view=0, debug_scale=1, compare=0,
-                    apply_model=1, rebuild_ms=0)
+                    apply_model=1)
         run.capture('original', apply_model=0, debug_view=0)
         run.capture('proxy', apply_model=1, debug_view=1)
         for passes in range(1, args.max_passes + 1):

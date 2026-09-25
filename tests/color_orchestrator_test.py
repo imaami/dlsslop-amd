@@ -22,7 +22,7 @@ INITIAL = {
     "intensity": "0.65", "local-tone": "0.8", "local-structure": "0.7",
     "color-preserve": "0.75", "sharpness": "0.2", "detail": "0.5", "color": "0.3", "bypass": "0",
     "reversible": "1", "debug-view": "0", "debug-scale": "0.75",
-    "compare": "0", "apply-model": "1", "rebuild-ms": "100",
+    "compare": "0", "apply-model": "1",
     "working-scale": "1", "unrelated-setting": "17",
 }
 
@@ -102,7 +102,7 @@ if capture:
         elif state['mode'] == 'failed-response':
             meta['ok_seq'] = '0'
         elif state['mode'] == 'generation-bump':
-            # Deferred tuning commit raced the requested capture token. The
+            # Another control generation raced the requested capture token. The
             # settings are unchanged; a second capture must use this generation.
             state['seq'] += 1
             meta['capture_control_seq'] = str(state['seq'])
@@ -304,7 +304,7 @@ class ColorOrchestratorTest(unittest.TestCase):
             self.assertTrue((self.output / case["directory"] / "manifest.txt").is_file())
         self.assertTrue((self.output / "report.md").is_file())
 
-    def test_deferred_generation_commit_retries_capture(self):
+    def test_concurrent_generation_retries_capture(self):
         result = self.invoke("generation-bump")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(self.outcome()["completed"])

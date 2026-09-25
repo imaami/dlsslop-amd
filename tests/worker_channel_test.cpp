@@ -222,6 +222,25 @@ void rejection(const char* executable, const std::filesystem::path& directory)
     std::printf("PASS: rejected requests were answered as failed while serving continued\n");
 }
 
+// Native tuning applies on the next request. The worker only reads controls: it
+// publishes no control generation of its own, however long after a change.
+void controls(const char* executable, const std::filesystem::path& directory)
+{
+    Channel channel((directory / "controls.bin").string());
+    Worker worker(executable, channel, (directory / "controls.log").string());
+    auto* h = channel.h;
+    h->intensityBits.store(FloatToBits(0.5f));
+    h->tuningSeq.fetch_add(1);
+    const uint32_t control = h->controlSeq.fetch_add(1) + 1;
+    require(channel.answered(channel.publish(false, 11), false), "a request after a tuning change failed");
+    // Past the settle time the protocol still carries for the layer.
+    std::this_thread::sleep_for(std::chrono::milliseconds(h->rebuildSettleMs.load() + 200));
+    require(channel.answered(channel.publish(false, 12), false), "a later request failed");
+    require(h->controlSeq.load() == control, "the worker published a control generation");
+    require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
+    std::printf("PASS: the worker published no control generation after a tuning change\n");
+}
+
 // --once exits after its one answer, with status 1 when that answer failed.
 void once(const char* executable, const std::filesystem::path& directory)
 {
@@ -257,6 +276,7 @@ int main(int argc, char** argv)
     try {
         restart(argv[1], directory);
         rejection(argv[1], directory);
+        controls(argv[1], directory);
         once(argv[1], directory);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "worker channel: %s\n", e.what());

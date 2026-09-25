@@ -29,7 +29,6 @@ inline constexpr Setting kSettings[] = {
     {"local-structure", 'j', &ShmHeader::localStructureBits, true, 0, 4, "Native per-pass high-frequency residual strength"},
     {"skin-structure", 'K', &ShmHeader::skinStructureBits, true, -1, 4, "Captured skin configuration; only -1 (follow structure) is supported"},
     {"sharpness", 'n', &ShmHeader::sharpnessBits, true, 0, 1, "Native per-pass sharpening strength"},
-    {"rebuild-ms", 'J', &ShmHeader::rebuildSettleMs, false, 0, 5000, "Debounce native per-pass tuning updates for this many milliseconds"},
     {"mvec", 'V', &ShmHeader::mvecEnabled, false, 0, 1, "Estimate motion and reproject previous neural output (0/1)"},
     {"mvec-quality", 'Q', &ShmHeader::mvecQuality, false, 0, 2, "Motion search quality: 0 fast, 1 balanced, 2 quality"},
     {"mvec-units", 'U', &ShmHeader::mvecScaleMode, false, 0, 2, "Motion field units: 0 normalized, 1 pixels, 2 UV"},
@@ -75,8 +74,7 @@ inline bool fixed(const Setting& s)
 }
 inline bool tuning(const Setting& s)
 {
-    return s.field == &ShmHeader::colorPreserveBits || s.field == &ShmHeader::intensityBits || s.field == &ShmHeader::localToneBits ||
-        s.field == &ShmHeader::localStructureBits || s.field == &ShmHeader::sharpnessBits ||
-        s.field == &ShmHeader::rebuildSettleMs;
+    return s.field == &ShmHeader::intensityBits || s.field == &ShmHeader::localToneBits ||
+        s.field == &ShmHeader::localStructureBits || s.field == &ShmHeader::sharpnessBits;
 }
 } // namespace dlsslop_control

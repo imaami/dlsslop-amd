@@ -58,7 +58,7 @@ QStringList choices(const QString& name)
 int category(const QString& name)
 {
     if (QStringList{"enabled", "passes", "color-preserve", "intensity", "local-tone", "local-structure",
-                    "sharpness", "rebuild-ms", "apply-model", "hold"}.contains(name)) return 0;
+                    "sharpness", "apply-model", "hold"}.contains(name)) return 0;
     if (QStringList{"detail", "color", "guard", "transfer", "bypass", "ratio-smooth", "color-trust"}.contains(name)) return 1;
     if (QStringList{"hdr-mode", "sdr16-multipass", "white-point", "white-point-scale", "white-point-source",
                     "white-point-trim", "color-mode", "reversible", "working-scale", "downscaler"}.contains(name)) return 2;

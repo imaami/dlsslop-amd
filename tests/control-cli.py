@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     assert values['sdr16-multipass'] == (1, 1)
     assert values['hdr-mode'] == (1, 1)
     assert values['mvec'] == (0, 0)
-    assert len(values) == 42, values.keys()
+    assert len(values) == 41, values.keys()
     assert channel.stat().st_mode & 0o777 == 0o600
 
     # Every supported setting advertises the same default as --settings.
@@ -105,7 +105,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
         ('--mvec-pixels', '4'), ('--white-point', '0.00009'), ('--reversible', '5'),
         ('--debug-scale', '0.0099999995'),
         ('--preset', '1'), ('--style', '1'), ('--auto-mask', '0'), ('--skin-structure', '0'),
-        ('--intensity', '0.5', '--preset', '1'), ('--rebuild-ms', '5001'),
+        ('--intensity', '0.5', '--preset', '1'), ('--rebuild-ms', '0'), ('-J', '0'),
         ('--toggle', 'auto-mask'), ('--toggle', 'intensity'), ('--toggle', 'hdr-mode'),
         ('--toggle', 'unknown'), ('--toggle',), ('--toggle', 'hold', '--hold', '1'),
         ('set', 'workingscale', '1'), ('toggle', 'enabled'), ('status',),
@@ -155,7 +155,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
         'preset': ('N', 0), 'style': ('y', 0), 'auto-mask': ('M', 1),
         'intensity': ('i', 0.75), 'local-tone': ('o', 1.25),
         'local-structure': ('j', 0.5), 'skin-structure': ('K', -1),
-        'color-preserve': ('L', 0.75), 'sharpness': ('n', 0.5), 'rebuild-ms': ('J', 5000),
+        'color-preserve': ('L', 0.75), 'sharpness': ('n', 0.5),
         'mvec': ('V', 1), 'mvec-quality': ('Q', 2), 'mvec-units': ('U', 2),
         'mvec-pixels': ('F', 3), 'white-point': ('W', 100),
         'white-point-scale': ('G', 2), 'white-point-source': ('O', 1),
@@ -174,8 +174,11 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     sequence = tuning_sequence()
     run('--working-scale', '0.75', '--passes', '2')
     assert tuning_sequence() == sequence
+    # The worker reads color preservation per request; it is not native tuning.
+    run('--color-preserve', '0.5')
+    assert tuning_sequence() == sequence
     run('--intensity', '0.75', '--local-tone', '0.5', '--local-structure', '1.25',
-        '--sharpness', '0.5', '--rebuild-ms', '0')
+        '--sharpness', '0.5')
     assert tuning_sequence() == sequence + 1
     run('--reset')
     assert tuning_sequence() == sequence + 2
