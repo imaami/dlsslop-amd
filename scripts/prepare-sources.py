@@ -44,27 +44,29 @@ def prepare(destination):
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
         run('git', 'apply', '--binary', str(ROOT / 'patches/linux-integration.patch'), cwd=stage, env=STAGE_ENV)
+        staged = {path.relative_to(stage).as_posix(): digest(path)
+                  for folder in DIRECTORIES for path in (stage / folder).rglob('*') if path.is_file()}
         for name, expected in lock['outputs'].items():
-            if digest(stage / name) != expected:
+            if staged.get(name) != expected:
                 raise RuntimeError(f'patched source hash mismatch: {name}')
-        # Never overwrite locally edited generated sources. A fresh output
+        # Never overwrite local edits: an existing file must hold what the
+        # previous preparation recorded or what this one writes. A fresh output
         # directory permits inspection without touching an existing workspace.
+        record = destination / '.prepared-sources.json'
+        previous = json.loads(record.read_text()) if record.exists() else {}
         for folder in DIRECTORIES:
-            existing = destination / folder
-            if existing.exists():
-                for path in existing.rglob('*'):
-                    if path.is_file():
-                        name = path.relative_to(destination).as_posix()
-                        if name not in lock['outputs'] or digest(path) != lock['outputs'][name]:
-                            raise RuntimeError(f'local changes at {path}; preserve them before preparing sources')
-        for folder in DIRECTORIES:
-            for path in (stage / folder).rglob('*'):
-                if path.is_file():
-                    name = path.relative_to(stage).as_posix()
-                    target = destination / name
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copyfile(path, target)
-                    target.chmod(lock.get('modes', {}).get(name, 420))
+            for path in (destination / folder).rglob('*'):
+                name = path.relative_to(destination).as_posix()
+                if path.is_file() and digest(path) not in (previous.get(name), staged.get(name)):
+                    raise RuntimeError(f'local changes at {path}; preserve them before preparing sources')
+        for name in previous.keys() - staged.keys():
+            (destination / name).unlink(missing_ok=True)
+        for name in staged:
+            target = destination / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(stage / name, target)
+            target.chmod(lock.get('modes', {}).get(name, 420))
+        record.write_text(json.dumps(staged))
     print(f"Verified and prepared {len(lock['outputs'])} source files in {destination}")
 
 def main():

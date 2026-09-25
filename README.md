@@ -49,6 +49,8 @@ those files. The helper fails if the server cannot provide blob filtering. The
 preparation script verifies pinned inputs, applies `patches/linux-integration.patch`,
 and checks the resulting hashes. It generates `upstream-layer/`, `kernels/` and
 `backend/vendor/`; those directories are not tracked in the parent repository.
+Run it again after a pull: it updates files it prepared, deletes those the patch
+no longer produces and refuses to overwrite local edits.
 Pins, file mappings and hashes are in `upstreams.lock.json`; attribution is in
 [PROVENANCE.md](PROVENANCE.md).
 

@@ -70,7 +70,8 @@ class SubmodulesTest(unittest.TestCase):
                 shutil.copyfile(ROOT / 'scripts' / name, project / 'scripts' / name)
             (project / '.gitmodules').write_text('[submodule "amd"]\n\tpath = external/amd\n'
                                                 f'\turl = {mirror}\n')
-            (project / '.gitignore').write_text('__pycache__/\n/upstream-layer/\n/kernels/\n/backend/vendor/\n')
+            (project / '.gitignore').write_text('__pycache__/\n/upstream-layer/\n/kernels/\n/backend/vendor/\n'
+                                                '/.prepared-sources.json\n')
             targets = {'upstream-layer/example.txt': 'src/layer.txt',
                        'kernels/example.hip': 'src/kernel.hip', 'backend/vendor/api.h': 'vendor/api.h'}
             files = {name: {'repository': 'amd', 'source': source,
@@ -178,6 +179,37 @@ class SubmodulesTest(unittest.TestCase):
             self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched\n')
             for name, data in committed.items():
                 (clone / name).write_bytes(data)
+
+            # A changed patch and lock update an unmodified prepared tree and
+            # remove the files they no longer produce; local edits stay refused.
+            changed = json.loads(json.dumps(lock))
+            del changed['files']['backend/vendor/api.h'], changed['outputs']['backend/vendor/api.h']
+            changed['outputs']['upstream-layer/example.txt'] = hashlib.sha256(b'patched again\n').hexdigest()
+            (clone / 'upstreams.lock.json').write_text(json.dumps(changed))
+            (clone / 'patches/linux-integration.patch').write_bytes(
+                committed['patches/linux-integration.patch'].replace(b'+patched\n', b'+patched again\n'))
+            (clone / 'backend/vendor/api.h').write_text('local edit\n')
+            edited = command(sys.executable, 'scripts/prepare-sources.py', cwd=clone, check=False)
+            self.assertNotEqual(edited.returncode, 0)
+            self.assertIn('local changes', edited.stderr)
+            self.assertEqual((clone / 'backend/vendor/api.h').read_text(), 'local edit\n')
+            (clone / 'backend/vendor/api.h').write_bytes(sources['vendor/api.h'])
+            command(sys.executable, 'scripts/prepare-sources.py', cwd=clone)
+            self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched again\n')
+            self.assertEqual((clone / 'kernels/example.hip').read_bytes(), b'kernel\n')
+            self.assertFalse((clone / 'backend/vendor/api.h').exists())
+            for name, data in committed.items():
+                (clone / name).write_bytes(data)
+            (clone / 'kernels/example.hip').write_text('local edit\n')
+            edited = command(sys.executable, 'scripts/prepare-sources.py', cwd=clone, check=False)
+            self.assertNotEqual(edited.returncode, 0)
+            self.assertIn('local changes', edited.stderr)
+            self.assertEqual((clone / 'kernels/example.hip').read_text(), 'local edit\n')
+            self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched again\n')
+            (clone / 'kernels/example.hip').write_bytes(sources['src/kernel.hip'])
+            command(sys.executable, 'scripts/prepare-sources.py', cwd=clone)
+            self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched\n')
+            self.assertEqual((clone / 'backend/vendor/api.h').read_bytes(), b'api\n')
 
             # Local URL overrides take precedence over .gitmodules and do not
             # alter provenance recorded in the lock. Repeated fetches are safe.

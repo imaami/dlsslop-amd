@@ -2,6 +2,7 @@
 /upstream-layer/
 /kernels/
 /backend/vendor/
+/.prepared-sources.json
 /build*/
 /assets/HIP/
 /assets/weights/
