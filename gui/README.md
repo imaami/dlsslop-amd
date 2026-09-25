@@ -37,11 +37,12 @@ Settings are grouped into neural passes, composition, image/HDR, motion,
 comparison/debug and model configuration. The four fixed model settings are
 visible and disabled. Writable settings have individual reset buttons.
 
-- Changes apply live. Slider writes are coalesced to one batch per 40 ms, with
-  a final write on release. Clicking anywhere along a slider places its handle
-  at that position immediately; keep the mouse button down to drag. Only edited
-  settings are written. Keyboard focus highlights the handle; arrow keys,
-  Page Up/Down and Home/End remain available.
+- Changes apply live. An edit is written at once; further edits within 40 ms
+  are coalesced into one batch, with a final write on slider release. Clicking
+  anywhere along a slider places its handle at that position immediately; keep
+  the mouse button down to drag. Only edited settings are written. Keyboard
+  focus highlights the handle; arrow keys, Page Up/Down and Home/End remain
+  available.
 - The mouse wheel scrolls the page. It edits a slider, numeric field or menu
   only after that control has focus.
 - Numeric fields accept six decimal places; arrow steps are 0.001, 0.01

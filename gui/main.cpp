@@ -128,9 +128,8 @@ class Window final : public QWidget {
     {
         if (!connected_) return;
         pending_[index] = value;
-        // Leading-edge timer: writes at most every 40 ms during a drag, not
-        // only after it ends. No process spawning, worker polling or UI blocking.
-        if (!throttle_.isActive()) throttle_.start(40);
+        // Write at once, then coalesce the next 40 ms of edits into one write.
+        if (!throttle_.isActive() && flush()) throttle_.start(40);
     }
 
     // Page scrolling must not edit a control the pointer happens to cross.
@@ -297,9 +296,11 @@ class Window final : public QWidget {
 
     void closeEvent(QCloseEvent* event) override
     {
+        // Committing typed text may write at once, and fail there.
+        const bool connected = connected_;
         for (auto& editor : editors_)
             if (editor.number && editor.number->hasFocus()) editor.number->interpretText();
-        if (!flush()) {
+        if (!flush() || connected_ != connected) {
             QMessageBox::warning(this, "Last change was not sent", "The control channel became unavailable. The final pending change was not applied.");
         }
         event->accept(); // Never stop the worker or restore settings on exit.
@@ -312,7 +313,7 @@ public:
         resize(1030, 800);
         setMinimumSize(790, 560);
         throttle_.setSingleShot(true);
-        connect(&throttle_, &QTimer::timeout, this, [this] { flush(); });
+        connect(&throttle_, &QTimer::timeout, this, [this] { if (!pending_.empty() && flush()) throttle_.start(40); });
         auto* outer = new QVBoxLayout(this);
         outer->setContentsMargins(28, 24, 28, 18);
         outer->setSpacing(14);

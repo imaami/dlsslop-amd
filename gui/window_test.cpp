@@ -118,6 +118,82 @@ void focusedEditorsTakeTheWheel(QWidget& window, const ShmHeader& header)
             "a wheel edit was not written to the channel");
 }
 
+void editsWriteAtOnceThenCoalesce(QWidget& window, const ShmHeader& header)
+{
+    auto* hold = named<QCheckBox>(window, "Hold");
+    auto* intensity = named<QDoubleSpinBox>(window, "Intensity");
+    QTest::qWait(200); // Let any earlier write windows close.
+    const uint32_t control = header.controlSeq.load();
+    hold->toggle();
+    require(header.controlSeq.load() == control + 1 && header.holdFrame.load() == hold->isChecked(),
+            "an edit was not written at once");
+    intensity->setValue(0.5);
+    intensity->setValue(0.25);
+    hold->toggle();
+    require(header.controlSeq.load() == control + 1, "edits within the write window were not coalesced");
+    require(QTest::qWaitFor([&] { return header.controlSeq.load() != control + 1; }, 1000),
+            "coalesced edits were never written");
+    require(header.controlSeq.load() == control + 2 && BitsToFloat(header.intensityBits.load()) == 0.25f &&
+            header.holdFrame.load() == hold->isChecked(), "coalesced edits were not written as one final batch");
+    QTest::qWait(100);
+    require(header.controlSeq.load() == control + 2, "an idle write window wrote again");
+    hold->toggle();
+    require(header.controlSeq.load() == control + 3, "an edit after an idle window was not written at once");
+}
+
+// Answers the controller's modal warnings, recording the last one's title.
+class WarningCloser : public QObject {
+public:
+    QString title;
+
+    WarningCloser() { startTimer(10); }
+
+protected:
+    void timerEvent(QTimerEvent*) override
+    {
+        auto* box = qobject_cast<QMessageBox*>(QApplication::activeModalWidget());
+        if (!box) return;
+        title = box->windowTitle();
+        box->done(QMessageBox::Ok);
+    }
+};
+
+// Shows the window with the text typed, not yet committed, into the focused
+// Intensity field, and no write window open.
+void typeIntensity(QWidget& window, const QString& text)
+{
+    window.show();
+    window.activateWindow();
+    require(QTest::qWaitForWindowActive(&window), "window not active");
+    window.findChild<QStackedWidget*>()->setCurrentIndex(0);
+    auto* intensity = named<QDoubleSpinBox>(window, "Intensity");
+    intensity->setFocus();
+    QApplication::processEvents();
+    require(intensity->hasFocus(), "test control did not take focus");
+    intensity->selectAll();
+    QTest::keyClicks(intensity, text);
+    require(intensity->text() == text && intensity->value() != text.toDouble(), "typed text was committed early");
+    QTest::qWait(200); // Let any earlier write windows close.
+}
+
+// Closing commits typed text, which writes at once when no write window is
+// open. If that write finds the channel gone, closing must still warn.
+void closingSendsTypedTextOrWarns(QWidget& window, const ShmHeader& header, const std::string& path)
+{
+    WarningCloser warnings;
+    const uint32_t control = header.controlSeq.load();
+    typeIntensity(window, "0.3");
+    window.close();
+    require(warnings.title.isEmpty(), "closing over a healthy channel warned");
+    require(header.controlSeq.load() == control + 1 && BitsToFloat(header.intensityBits.load()) == 0.3f,
+            "closing did not send the typed value");
+    typeIntensity(window, "0.4");
+    require(!unlink(path.c_str()), "unlink fixture");
+    window.close();
+    require(warnings.title == "Last change was not sent", "closing lost a typed change without a warning");
+    require(header.controlSeq.load() == control + 1, "a write reached the unlinked channel");
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -145,7 +221,10 @@ int main(int argc, char** argv)
         require(QTest::qWaitForWindowExposed(&window), "window not exposed");
         unfocusedEditorsScrollThePage(window, *header);
         focusedEditorsTakeTheWheel(window, *header);
-        std::puts("GUI window tests passed: page scrolling over unfocused controls and wheel edits of focused ones");
+        editsWriteAtOnceThenCoalesce(window, *header);
+        closingSendsTypedTextOrWarns(window, *header, path);
+        std::puts("GUI window tests passed: page scrolling over unfocused controls, wheel edits of focused ones, "
+                  "edits written at once then coalesced, and typed text sent or warned about on close");
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());
         result = 1;
