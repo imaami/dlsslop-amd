@@ -85,7 +85,7 @@ inline bool trace_valid_token(const std::string& token)
     for (unsigned char c : token)
         if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
               (c >= '0' && c <= '9') || c == '-' || c == '_')) return false;
-    return true;
+    return token != "request"; // DIR/request is the request file itself
 }
 
 inline void trace_write_text(const std::filesystem::path& file, const std::string& text)
@@ -250,7 +250,7 @@ public:
             throw std::runtime_error("claim trace request: " + std::string(std::strerror(errno)));
         }
         const int fd = open(claimed.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
-        unlink(claimed.c_str());
+        std::remove(claimed.c_str()); // Also clears a stray empty directory at DIR/request
         if (fd < 0) throw std::runtime_error("open diagnostic request");
         struct stat st{};
         char bytes[66]{};

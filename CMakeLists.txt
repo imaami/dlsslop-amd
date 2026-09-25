@@ -137,7 +137,7 @@ if(BUILD_TESTING)
     target_include_directories(temporal-test PRIVATE backend)
     add_test(NAME temporal COMMAND temporal-test)
     add_executable(trace-test tests/trace_test.cpp)
-    add_test(NAME trace COMMAND trace-test)
+    add_test(NAME trace COMMAND trace-test ${Python3_EXECUTABLE})
     add_executable(capture-writer-test tests/capture_writer_test.cpp
         ${LAYER_ROOT}/layer_linux/src/capture.cpp)
     target_include_directories(capture-writer-test PRIVATE

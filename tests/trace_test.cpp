@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "../backend/trace.h"
+#include <cstdlib>
+#include <initializer_list>
 #include <iterator>
 
 namespace {
@@ -10,10 +12,23 @@ std::string read_text(const std::filesystem::path& file) {
     std::ifstream in(file, std::ios::binary);
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
+// The client parses every file with Python's json module; nan, inf and a
+// missing separator must fail here, not in a diagnostic run.
+bool strict_json(const std::string& python, std::initializer_list<std::filesystem::path> files) {
+    std::string command = "'" + python + "' -c 'import json, sys\n"
+        "def constant(name): raise ValueError(name)\n"
+        "for name in sys.argv[1:]: json.load(open(name), parse_constant=constant)'";
+    for (const auto& file : files) command += " '" + file.string() + "'";
+    return std::system(command.c_str()) == 0;
+}
 }
 
-int main()
+int main(int argc, char** argv)
 {
+    if (argc != 2) {
+        std::fprintf(stderr, "usage: trace-test PYTHON\n");
+        return 2;
+    }
     char temporary[] = "/tmp/dlsslop-amd-trace-test-XXXXXX";
     const char* made = mkdtemp(temporary);
     if (!made) return 1;
@@ -45,8 +60,9 @@ int main()
         require(invalid.nonfinite[0] == 1 && invalid.json().find("\"mean\":null") != std::string::npos,
                 "nonfinite statistics must remain valid JSON");
         require(dlsslop::trace_valid_token("stage_01-A") && !dlsslop::trace_valid_token("../escape") &&
-                !dlsslop::trace_valid_token("") && !dlsslop::trace_valid_token(std::string(65, 'a')),
-                "safe bounded request tokens");
+                !dlsslop::trace_valid_token("") && !dlsslop::trace_valid_token(std::string(65, 'a')) &&
+                dlsslop::trace_valid_token(std::string(64, 'a')) && !dlsslop::trace_valid_token("request") &&
+                dlsslop::trace_valid_token("requests"), "safe bounded request tokens");
         {
             dlsslop::TraceRequests requests(directory.string(), "/tmp/example-shm", 22);
             require(read_text(directory / "owner.json").find("\"protocol_version\":22") != std::string::npos,
@@ -62,6 +78,7 @@ int main()
             auto frame = requests.take();
             require(frame && !requests.take(), "request consumed exactly once");
             frame->image("pass-01-input", rgba.data(), g, 4);
+            frame->image("pass-01-raw", rgba.data(), g, 4);
             require(!std::filesystem::exists(directory / "frame_1/summary.json"), "summary must complete last");
             require(!std::filesystem::exists(directory / "frame_1.done"), "no early root completion marker");
             // Exercise the serializer used by the worker, not a hand-written
@@ -101,7 +118,8 @@ int main()
                     "\"fit_x\":1", "\"fit_y\":1", "\"fit_width\":2", "\"fit_height\":2",
                     "\"fp16_proxy\":1", "\"fp16_feedback\":1", "\"motion\":0",
                     "\"intensity\":0.5", "\"local_tone\":1", "\"local_structure\":1",
-                    "\"sharpness\":0", "\"detail\":0.75", "\"color\":0.25"})
+                    "\"sharpness\":0", "\"detail\":0.75", "\"color\":0.25",
+                    "\"file\":\"pass-01-input.pfm\"", "\"file\":\"pass-01-raw.pfm\""})
                 require(summary.find(field) != std::string::npos, field);
             dlsslop::trace_write_text(directory / "request", "frame_1\n");
             bool duplicate = false;
@@ -112,10 +130,42 @@ int main()
             bool traversal = false;
             try { requests.take(); } catch (const std::runtime_error&) { traversal = true; }
             require(traversal, "reject path traversal");
+            // The protocol file's own name would make the evidence directory
+            // DIR/request, which the next claim would take as a request.
+            dlsslop::trace_write_text(directory / "request", "request\n");
+            bool reserved = false;
+            try { requests.take(); } catch (const std::runtime_error&) { reserved = true; }
+            require(reserved && !std::filesystem::exists(directory / "request"), "reject the reserved token");
+            std::filesystem::create_directory(directory / "request");
+            bool stray = false;
+            try { requests.take(); } catch (const std::runtime_error&) { stray = true; }
+            require(stray && !std::filesystem::exists(directory / "request") &&
+                    !std::filesystem::exists(directory / (".request-" + std::to_string(getpid()))),
+                    "a stray empty request directory is cleared, not left to block claims");
+            // A failed frame still publishes its summary and root marker, with
+            // the error escaped and no stage recorded after the failure.
+            dlsslop::trace_write_text(directory / "request", "frame_2\n");
+            auto failed = requests.take();
+            require(bool(failed), "later requests are claimed");
+            failed->image("pass-01-input", rgba.data(), g, 4);
+            failed->fail("bad \"quote\"\n\x01\\");
+            failed->image("pass-01-raw", rgba.data(), g, 4);
+            failed->finish("{\"frame_seq\":124}");
+            require(read_text(directory / "frame_2.done") == "frame_2/summary.json\n", "failed trace marker");
+            const auto failure = read_text(directory / "frame_2/summary.json");
+            for (const char* field : {"\"status\":\"failed\"", "\"metadata\":{\"frame_seq\":124}",
+                                      "\"error\":\"bad \\\"quote\\\"\\u000a\\u0001\\\\\"",
+                                      "\"file\":\"pass-01-input.pfm\""})
+                require(failure.find(field) != std::string::npos, field);
+            require(failure.find("pass-01-raw") == std::string::npos &&
+                    !std::filesystem::exists(directory / "frame_2/pass-01-raw.pfm"),
+                    "no stage after a failure");
+            require(strict_json(argv[1], {directory / "owner.json", directory / "frame_1/summary.json",
+                                          directory / "frame_2/summary.json"}), "summaries are strict JSON");
         }
         require(!std::filesystem::exists(directory / "owner.json"), "remove stale owner on shutdown");
         std::filesystem::remove_all(directory);
-        std::puts("trace: fitted RGB PFM, statistics, safe requests, ownership and completion passed");
+        std::puts("trace: fitted RGB PFM, statistics, safe requests, ownership, failure, completion and JSON passed");
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "trace test: %s\n", error.what());

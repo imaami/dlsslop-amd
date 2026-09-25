@@ -57,6 +57,8 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     assert default(helptext, 'modules') == str(installed_modules)
     assert default(helptext, 'shm') == str(channel)
     assert 'DLSSNR_SHM' in helptext and 'DLSSLOP_MODULES' in helptext
+    assert default(helptext, 'trace-dir').startswith('disabled')
+    assert "not 'request'" in helptext and 'ln it to DIR/request' in helptext
     assert not channel.exists(), '--help created a channel'
 
     # Relocated native executables locate modules without a generated wrapper,
@@ -93,6 +95,20 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
         assert '--assets and --modules are required for inference' in result.stderr
         assert not channel.exists(), 'invalid options created a channel'
 
+    # Tracing needs a nonempty directory and the serving mode; parsing rejects
+    # everything else before HIP, the channel or the directory is touched.
+    for options in (('-R', ''), ('--trace-dir=',)):
+        result = run(binary, *options, env=env, cwd=cwd, expected=1)
+        assert '--trace-dir requires a nonempty directory' in result.stderr, result.stderr
+    offline = ('-i', 'x', '-o', 'y', '-W', '1', '-H', '1')
+    for options in (('--self-test',), ('-S', '-r', '2'), ('-D',), ('--diagnose', '-d', '0'),
+                    ('--test-identity', *offline), ('-T',), offline):
+        for trace in (('-R', 'd'), ('--trace-dir', 'd')):
+            result = run(binary, *trace, *options, env=env, cwd=cwd, expected=1)
+            assert '--trace-dir requires serving real shared-memory inference' in result.stderr, \
+                (options, result.stderr)
+    assert not channel.exists() and not (cwd / 'd').exists(), 'rejected tracing touched the filesystem'
+
     # Invoke the relocated ELF directly and preserve literal path arguments.
     # Identity mode must still work when HIP/model paths are unavailable.
     input_path = cwd / "input '$() ` rgba"
@@ -124,5 +140,5 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
         for name in ('libamdhip64.so.7', 'libamdhip64.so.6', 'libamdhip64.so'):
             assert f'\n  /opt/rocm/lib/{name}: cannot open shared object file' in result.stderr, result.stderr
 
-print('worker CLI: native relocation, model/module defaults, environment contracts, HIP loader errors '
-      'and identity mode passed')
+print('worker CLI: native relocation, model/module defaults, environment contracts, trace-dir parsing, '
+      'HIP loader errors and identity mode passed')
