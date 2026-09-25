@@ -17,6 +17,8 @@ The presentation smoke drives Vulkan capture, an explicit identity worker,
 composition and presentation through a separate test layer that also admits
 software devices. It checks transport and composition, not HIP inference. Its
 linear-HDR mode runs under the Khronos validation layer when that is installed.
+It then stops the worker, and later kills one, and checks that presents neither
+publish to a stopped worker nor wait more than a moment for a killed one.
 The composition rebuild test changes the layer's model raster, colour domain
 and downscaler in place and fails when a dispatch binds a descriptor written for
 an image view that has since been destroyed. The smoke, this test and the HDR

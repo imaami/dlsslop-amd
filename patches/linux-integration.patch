@@ -1627,7 +1627,7 @@ index ec78533..e4f1a0e 100644
      return true;
  }
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..f04d2ac 100644
+index 4b37520..fa6b242 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -1759,7 +1759,7 @@ index 4b37520..f04d2ac 100644
  
      // How long this frame may wait, which is a question about whether anyone is listening.
      //
-@@ -378,12 +433,17 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -378,12 +433,19 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
      // once it is warm. Timing that out and giving up is how a working helper gets abandoned before it
      // has answered once.
      const bool warmingUp = !s.everAnswered;
@@ -1772,6 +1772,8 @@ index 4b37520..f04d2ac 100644
  
      // Wait for the helper (fail-open: present the original frame on timeout).
      const double tSignal = NowMs();
++    uint32_t beat = s.hdr->heartbeat.load();
++    double beatAt = 0.0;
      for (;;) {
 -        if (s.hdr->seq_resp.load() >= req) {
 +        const uint32_t response = s.hdr->seq_resp.load(std::memory_order_acquire);
@@ -1779,7 +1781,7 @@ index 4b37520..f04d2ac 100644
              s.timeouts = 0;
              s.everAnswered = true;
              // The helper's GPU wrote the answer into this region (or the memcpy below reads the
-@@ -396,7 +456,9 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -396,7 +458,9 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
              // the meantime, and seq_resp only counts. Composing that answer here would copy a
              // different number of bytes into these surfaces -- the row-shifted colour garbage this
              // check exists to refuse.
@@ -1790,13 +1792,22 @@ index 4b37520..f04d2ac 100644
                              s.hdr->answeredH.load() == h;
              if (!ok) Log("[shm] helper could not use frame %u (ok=%u)", req, s.hdr->seq_ok.load());
              if (ok && !answerFromFd && modelOut != (void*) s.outPixels) std::memcpy(modelOut, s.outPixels, bytes);
-@@ -413,8 +475,18 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -413,9 +477,32 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
          if (s.hdr->quit.load()) { s.dead = true; return false; }
          const double elapsed = NowMs() - tSignal;
          if (elapsed >= budgetMs) break;
 -        if (elapsed < 2.0) CpuYield();
 -        else std::this_thread::sleep_for(std::chrono::microseconds(200));
 +        if (NativeHipBackend()) {
++            // The worker ticks its heartbeat every 100 ms, also mid-frame. One that
++            // exits or dies (even by SIGKILL) will not answer; stop waiting for it.
++            if (s.hdr->helperState.load() != kHelperRunning) break;
++            if (const uint32_t b = s.hdr->heartbeat.load(); b != beat) {
++                beat = b;
++                beatAt = elapsed;
++            } else if (elapsed - beatAt > 500.0) {
++                break;
++            }
 +            // Shared futexes work across the two MAP_SHARED mappings. Comparing the
 +            // observed response value in the kernel closes the check-to-sleep race;
 +            // the deadline also lets a dead worker fail open and quit remain responsive.
@@ -1809,9 +1820,14 @@ index 4b37520..f04d2ac 100644
 +            std::this_thread::sleep_for(std::chrono::microseconds(200));
 +        }
      }
++    if (NativeHipBackend())
++        Log("[shm] worker did not answer frame %u in %.0f ms (state=%u heartbeat=%u); "
++            "presenting original frames until it answers", req, NowMs() - tSignal,
++            s.hdr->helperState.load(), s.hdr->heartbeat.load());
      // Four rather than eight, and with a pause before the next attempt, so giving up costs a
      // fraction of a second and retrying costs that again only every few seconds.
-@@ -851,6 +923,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+     if (++s.timeouts >= 4) {
+@@ -851,6 +938,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              for (size_t k = 0; k < kWantCount; ++k)
                      if (!std::strcmp(pCreateInfo->ppEnabledExtensionNames[i], kWantExts[k])) enabled[k] = true;
          for (size_t k = 0; k < kWantCount; ++k) {
@@ -1821,7 +1837,7 @@ index 4b37520..f04d2ac 100644
              if (!ic->surfaceMaintenance1 &&
                  !std::strcmp(kWantExts[k], VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME))
                  continue;
-@@ -886,6 +961,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -886,6 +976,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
  
      link->u.pLayerInfo = link->u.pLayerInfo->pNext;
      auto* const nextLayerInfo = link->u.pLayerInfo;
@@ -1844,7 +1860,7 @@ index 4b37520..f04d2ac 100644
      VkResult res = create(physicalDevice, effective, pAllocator, pDevice);
      if (res != VK_SUCCESS && effective != pCreateInfo) {
          // Nothing added here is worth failing a device creation over.
-@@ -893,6 +984,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -893,6 +999,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              (int) res);
          link->u.pLayerInfo = nextLayerInfo;
          addedSwapMaint = false;
@@ -1852,7 +1868,7 @@ index 4b37520..f04d2ac 100644
          res = create(physicalDevice, pCreateInfo, pAllocator, pDevice);
      }
      if (res != VK_SUCCESS) return res;
-@@ -910,19 +1002,32 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -910,19 +1017,32 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
      dc->table.Load(*pDevice);
      dc->releaseImages = addedSwapMaint && dc->vkReleaseSwapchainImagesEXT != nullptr;
      if (!dc->vkQueuePresentKHR || !dc->vkCreateSwapchainKHR || !ic) dc->inert = true;
@@ -1891,7 +1907,7 @@ index 4b37520..f04d2ac 100644
          }
      }
  
-@@ -1250,8 +1355,27 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
+@@ -1250,8 +1370,27 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
      }
      if (!dc || !dc->vkCreateSwapchainKHR) return VK_ERROR_INITIALIZATION_FAILED;
  
@@ -1920,7 +1936,7 @@ index 4b37520..f04d2ac 100644
          m.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
  
      VkResult res = dc->vkCreateSwapchainKHR(device, &m, pAllocator, pSwapchain);
-@@ -1269,14 +1393,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
+@@ -1269,14 +1408,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
      sc.width = pCreateInfo->imageExtent.width;
      sc.height = pCreateInfo->imageExtent.height;
      const bool tooSmall = sc.width < kMinW || sc.height < kMinH;
@@ -1940,7 +1956,7 @@ index 4b37520..f04d2ac 100644
                            : tooSmall ? " (too small)" : " (too large)") : "");
      dc->swapchains[*pSwapchain] = std::move(sc);
      return VK_SUCCESS;
-@@ -1335,6 +1462,23 @@ static bool SetLoaderData(DeviceChain* dc, void* object) {
+@@ -1335,6 +1477,23 @@ static bool SetLoaderData(DeviceChain* dc, void* object) {
  static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family) {
      VkDevice d = dc->self;
  
@@ -1964,7 +1980,7 @@ index 4b37520..f04d2ac 100644
      VkCommandPoolCreateInfo cpci{};
      cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
      cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-@@ -1403,6 +1547,16 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1403,6 +1562,19 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
                              bool* waitsConsumed) {
      if (waitsConsumed) *waitsConsumed = false;
      if (!sc.comp) return false;
@@ -1974,14 +1990,17 @@ index 4b37520..f04d2ac 100644
 +    // recording the GPU download, not just before publishing seq_req: the helper may
 +    // still be uploading those pixels or returning its result. While it finishes,
 +    // present the game's original image without blocking or overwriting the slot.
-+    if (NativeHipBackend() && dc->shm.hdr &&
-+        dc->shm.hdr->seq_req.load(std::memory_order_acquire) !=
-+        dc->shm.hdr->seq_resp.load(std::memory_order_acquire))
++    // Do the same while no worker serves (starting, failed or stopped): a request
++    // then would only stall this present and outlive the worker.
++    if (NativeHipBackend() &&
++        (dc->shm.hdr->helperState.load(std::memory_order_acquire) != kHelperRunning ||
++         dc->shm.hdr->seq_req.load(std::memory_order_acquire) !=
++         dc->shm.hdr->seq_resp.load(std::memory_order_acquire)))
 +        return false;
      VkDevice d = dc->self;
      VkCommandBuffer cb = sc.cb;
      const bool time = TimeEnabled();
-@@ -1437,19 +1591,26 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1437,19 +1609,26 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // frame on the 8-bit path it has always used. hdrActive doubles as the echo the helper reads, so
      // it builds the float images only for a layer that has said it will feed them.
      const uint32_t hdrMode = dc->shm.hdr ? dc->shm.hdr->hdrMode.load() : kHdrAuto;
@@ -2016,7 +2035,7 @@ index 4b37520..f04d2ac 100644
          uint32_t mw = 0, mh = 0;
          dlssnr::Composition::ModelExtent(sc.width, sc.height, fs, mw, mh);
          if (ShmMapFrames(dc->shm, size_t(mw) * mh * (hdrProxy ? 8 : 4)))
-@@ -1470,7 +1631,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1470,7 +1649,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // through, and the helper honours them on exactly the frame they were set for.
      sc.comp->SetDmaBuf(DmaBufEnabled());
  
@@ -2025,7 +2044,7 @@ index 4b37520..f04d2ac 100644
          Log("[layer] composition cannot run here: %s", sc.comp->Reason());
          return false;
      }
-@@ -1534,8 +1695,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1534,8 +1713,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // A capture is asked for by writing a frame count into the header; taking it clears the request,
      // so one press produces one run rather than one per frame for as long as nobody clears it.
      if (dc->shm.hdr) {
@@ -2041,7 +2060,7 @@ index 4b37520..f04d2ac 100644
      }
  
      VkCommandBufferBeginInfo bi{};
-@@ -1595,6 +1761,9 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1595,6 +1779,9 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          return false;
      }
      sc.comp->MarkModelFrame();
@@ -2051,7 +2070,7 @@ index 4b37520..f04d2ac 100644
      const double tHelper = time ? NowMs() : 0.0;
  
      // ---- leg 2: the answer, composed back ----
-@@ -1608,6 +1777,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1608,6 +1795,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // the top of the next frame, where the reused surfaces actually need it.
      if (!endAndSubmit(sc.fenceLeg2)) return false;
      sc.leg2Pending = true;
@@ -2065,7 +2084,7 @@ index 4b37520..f04d2ac 100644
      const double tReturn = time ? NowMs() : 0.0;
  
      if (dc->shm.hdr) {
-@@ -1851,7 +2027,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
+@@ -1851,7 +2045,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
      if (*pCount < 1) { *pCount = 1; return VK_INCOMPLETE; }
      std::memset(pProperties, 0, sizeof(*pProperties));
      std::strncpy(pProperties->layerName, VK_LAYER_NAME, VK_MAX_EXTENSION_NAME_SIZE - 1);

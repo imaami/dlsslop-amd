@@ -76,11 +76,28 @@ def main():
                     socket = Path("/tmp/.X11-unix") / ("X" + args.display.lstrip(":"))
                     wait_for(socket.exists, xvfb, "Xvfb")
                 layer_log = logs / "layer.log"
-                for mode in ("native", "reduced", "reduced-bgra", "native-fp16", "reduced-fp16", "native-linear"):
+                for mode in ("native", "reduced", "reduced-bgra", "native-fp16", "reduced-fp16", "native-linear",
+                             "stopped-worker", "killed-worker"):
+                    # A stopped worker gets no requests. A killed one still reads as
+                    # running; its silent heartbeat ends the one wait within a second.
+                    if mode == "stopped-worker":
+                        worker.terminate()
+                        if worker.wait(timeout=5):
+                            raise RuntimeError(f"identity worker exited with {worker.returncode} when stopped")
+                    elif mode == "killed-worker":
+                        with (logs / "worker-killed.log").open("w") as killed_log:
+                            worker = subprocess.Popen([str(build / "dlsslopd"), "--test-identity"],
+                                                      env=env, stdout=killed_log, stderr=subprocess.STDOUT)
+                        processes.append(worker)
+                        wait_for(lambda: "worker ready:" in (logs / "worker-killed.log").read_text(),
+                                 worker, "identity worker")
+                        worker.kill()
+                        worker.wait()
                     state = root / mode
                     env["XDG_STATE_HOME"] = str(state)
                     logged = layer_log.stat().st_size if layer_log.exists() else 0
-                    command = [str(build / "vulkan-smoke"), "--contention"]
+                    command = [str(build / "vulkan-smoke"),
+                               "--no-worker" if mode.endswith("worker") else "--contention"]
                     if args.headless:
                         command.append("--headless")
                     if mode.startswith("reduced"):
@@ -106,8 +123,14 @@ def main():
                         raise RuntimeError(f"{mode} emitted Vulkan validation errors; inspect {logs}")
                     with layer_log.open() as log:
                         log.seek(logged)
-                        if "cannot run here" in log.read():
-                            raise RuntimeError(f"{mode} composition could not be prepared; inspect {logs}")
+                        layer_output = log.read()
+                    if "cannot run here" in layer_output:
+                        raise RuntimeError(f"{mode} composition could not be prepared; inspect {logs}")
+                    if mode.endswith("worker"):
+                        if mode == "killed-worker" and "worker did not answer frame" not in layer_output:
+                            raise RuntimeError(f"layer did not log giving up on the killed worker; inspect {logs}")
+                        print(f"PASS: {mode}: the layer presented without blocking on it.")
+                        continue
                     captures = state / "dlssnr/captures"
                     manifest = dict(line.split(None, 1) for line in (captures / 'manifest.txt').read_text().splitlines()
                                     if line and not line.startswith('#') and len(line.split(None, 1)) == 2)

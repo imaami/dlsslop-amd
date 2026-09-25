@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -114,7 +115,8 @@ public:
     }
 };
 
-static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool proxy16, bool linear) {
+static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool proxy16, bool linear,
+                 bool noWorker) {
     Context c;
     const char* path = std::getenv("DLSSNR_SHM");
     require(path && *path, "set DLSSNR_SHM to a running --test-identity worker's channel");
@@ -133,7 +135,7 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
     h->nativeModelMaxWidth.store(reduced ? 160 : 0);
     h->nativeModelMaxHeight.store(reduced ? 96 : 0);
     h->transfer.store(reduced ? 2 : 1);
-    h->captureRequest.store(4);
+    h->captureRequest.store(noWorker ? 0 : 4);
     // Each smoke invocation starts a new layer process, whose frame counter
     // starts at zero even when the worker channel is reused between modes.
     h->layerFramesLo.store(0);
@@ -386,9 +388,24 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
         present.pSwapchains = &c.swapchain;
         present.pImageIndices = &index;
         const uint32_t previous = h->seq_req.load();
+        const uint32_t answered = h->seq_resp.load();
+        const auto started = std::chrono::steady_clock::now();
         check(vkQueuePresentKHR(queue, &present), "present frame");
+        const auto blocked = std::chrono::steady_clock::now() - started;
         check(vkQueueWaitIdle(queue), "wait queue idle");
         const uint32_t request = h->seq_req.load();
+        if (noWorker) {
+            // A killed worker still reads as running: the free slot takes one request,
+            // which the layer gives up on within the heartbeat window. A worker that
+            // is not running gets no request at all.
+            const bool running = h->helperState.load() == kHelperRunning;
+            require(request == previous + unsigned(running && previous == answered),
+                    running ? "layer did not publish exactly one request to the silent worker"
+                            : "layer published a request to a worker that is not running");
+            require(h->seq_resp.load() == answered, "a dead worker answered");
+            require(blocked < std::chrono::seconds(2), "layer blocked on a worker that cannot answer");
+            continue;
+        }
         if (contention && !frame) {
             require(request == previous, "contending layer overwrote another producer's slot");
             require(h->layerFramesLo.load() == uint32_t(initialFrames),
@@ -425,6 +442,11 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
         const size_t bytes = size_t(expectedWidth) * expectedHeight * (proxy16 ? 8 : 4);
         require(std::memcmp(input, output, bytes) == 0, "identity worker corrupted frame pixels");
     }
+    if (noWorker) {
+        std::printf("PASS: %u frames presented without blocking on a worker that cannot answer.\n",
+                    frames);
+        return 0;
+    }
     const uint64_t composed = uint64_t(h->layerFramesLo.load()) |
                               (uint64_t(h->layerFramesHi.load()) << 32);
     require(composed >= initialFrames + frames, "layer failed to compose all frames");
@@ -441,16 +463,16 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
 int main(int argc, char** argv) {
     try {
         bool headless = false, contention = false, reduced = false, bgra = false, proxy16 = false,
-             linear = false;
+             linear = false, noWorker = false;
         const option options[] = {
             {"help", no_argument, nullptr, 'h'}, {"headless", no_argument, nullptr, 'H'},
             {"contention", no_argument, nullptr, 'c'}, {"reduced", no_argument, nullptr, 'r'},
             {"bgra", no_argument, nullptr, 'b'}, {"proxy16", no_argument, nullptr, 'f'},
-            {"linear-hdr", no_argument, nullptr, 'l'},
+            {"linear-hdr", no_argument, nullptr, 'l'}, {"no-worker", no_argument, nullptr, 'n'},
             {nullptr, 0, nullptr, 0}
         };
         int value;
-        while ((value = getopt_long(argc, argv, "hHcrbfl", options, nullptr)) != -1) {
+        while ((value = getopt_long(argc, argv, "hHcrbfln", options, nullptr)) != -1) {
             switch (value) {
             case 'h':
                 std::printf("Usage: vulkan-smoke [OPTIONS]\n"
@@ -460,7 +482,9 @@ int main(int argc, char** argv) {
                     "  -r, --reduced      Use half-resolution model proxy (default: no)\n"
                     "  -b, --bgra         Select BGRA swapchain (default: no, RGBA)\n"
                     "  -f, --proxy16      Force FP16 encoded proxy transport (default: no, RGBA8)\n"
-                    "  -l, --linear-hdr   Compose in linear-HDR colour mode (default: no, colour auto)\n");
+                    "  -l, --linear-hdr   Compose in linear-HDR colour mode (default: no, colour auto)\n"
+                    "  -n, --no-worker    Expect a stopped or killed worker: present without\n"
+                    "                     blocking or composing (default: no, expect answers)\n");
                 return 0;
             case 'H': headless = true; break;
             case 'c': contention = true; break;
@@ -468,11 +492,12 @@ int main(int argc, char** argv) {
             case 'b': bgra = true; break;
             case 'f': proxy16 = true; break;
             case 'l': linear = true; break;
+            case 'n': noWorker = true; break;
             default: throw std::runtime_error("invalid option; use --help");
             }
         }
         require(optind == argc, "unexpected positional argument; use --help");
-        return smoke(headless, contention, reduced, bgra, proxy16, linear);
+        return smoke(headless, contention, reduced, bgra, proxy16, linear, noWorker);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "transport smoke: %s\n", e.what());
         return 1;
