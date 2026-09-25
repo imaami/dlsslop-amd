@@ -73,8 +73,8 @@ dlsslopd --diagnose
 dlsslopd --tier 1080 --self-test --self-test-runs 20 --output neural-test.ppm
 ```
 
-The first run checks the GPU codec against the CPU reference. Every later run
-must reproduce its raw FP32 answer and decoded output bit for bit, and the
+The first run checks the GPU codec bit for bit against the CPU reference. Every
+later run must reproduce its raw FP32 answer and decoded output exactly, and the
 summary reports the last run's timings, which exclude the reference checks.
 Repeat with `--passes 2` to exercise feedback. Successful execution and
 deterministic output are basic sanity checks; the self-test does not measure

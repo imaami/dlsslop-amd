@@ -5,7 +5,6 @@
 #include "temporal_gpu.h"
 #include "tuning.h"
 
-#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -66,25 +65,18 @@ inline void require(bool condition, const char* message)
     if (!condition) throw std::runtime_error(message);
 }
 
-inline float compare(const std::vector<float>& actual, const std::vector<float>& expected,
-                     float tolerance, const char* name, bool exact = false)
+// The GPU kernels and their CPU references compute the same IEEE operations
+// without contraction, so every result must match bit for bit.
+inline void compare(const std::vector<float>& actual, const std::vector<float>& expected, const char* name)
 {
     require(actual.size() == expected.size(), "control self-test output size mismatch");
-    float maximum = 0;
-    std::size_t worst = 0;
-    for (std::size_t i = 0; i < actual.size(); ++i) {
-        if (!std::isfinite(actual[i]))
-            throw std::runtime_error(std::string(name) + ": nonfinite GPU result at sample " + std::to_string(i));
-        const float error = std::fabs(actual[i] - expected[i]);
-        if (error > maximum) { maximum = error; worst = i; }
-    }
-    if (maximum > tolerance || (exact && std::memcmp(actual.data(), expected.data(), actual.size() * sizeof(float)))) {
-        std::fprintf(stderr, "%s mismatch: max_abs_error=%.9g tolerance=%.9g sample=%zu GPU=%.9g CPU=%.9g\n",
-                     name, double(maximum), double(tolerance), worst,
-                     double(actual[worst]), double(expected[worst]));
-        throw std::runtime_error(std::string(name) + " disagrees with CPU reference");
-    }
-    return maximum;
+    if (!std::memcmp(actual.data(), expected.data(), actual.size() * sizeof(float)))
+        return;
+    std::size_t first = 0;
+    while (!std::memcmp(&actual[first], &expected[first], sizeof(float))) ++first;
+    std::fprintf(stderr, "%s mismatch: first sample=%zu GPU=%.9g CPU=%.9g\n",
+                 name, first, double(actual[first]), double(expected[first]));
+    throw std::runtime_error(std::string(name) + " disagrees with CPU reference");
 }
 
 inline void check_tuning(hip_probe::Api& api, hip_probe::Handle stream, const std::string& modules)
@@ -106,14 +98,12 @@ inline void check_tuning(hip_probe::Api& api, hip_probe::Handle stream, const st
     GpuTuning tuning(api, stream, modules + "/linux_tuning.hsaco");
     const NativeTuning states[] = {{}, {0, 1, 1, 0}, {1.75f, .25f, 2.5f, .375f},
                                   {1, 0, 1, 0}, {1, 1, 0, 1}};
-    float maximum = 0;
-    for (unsigned i = 0; i < sizeof(states) / sizeof(states[0]); ++i) {
-        tune_neural_rgb(input.data(), model.data(), g, reference, states[i]);
-        tuning.apply(g, device_input.pointer, device_model.pointer, device_result.pointer, states[i]);
-        maximum = std::max(maximum, compare(device_result.read(), reference, 0.000001f,
-                          "GPU native tuning", i < 2));
+    for (const auto& state : states) {
+        tune_neural_rgb(input.data(), model.data(), g, reference, state);
+        tuning.apply(g, device_input.pointer, device_model.pointer, device_result.pointer, state);
+        compare(device_result.read(), reference, "GPU native tuning");
     }
-    std::printf("GPU control self-test: native tuning 5 states passed; max_abs_error=%.9g\n", double(maximum));
+    std::printf("GPU control self-test: native tuning 5 states exact\n");
     std::fflush(stdout);
 }
 
@@ -177,7 +167,7 @@ inline void check_temporal(hip_probe::Api& api, hip_probe::Handle stream, const 
             for (unsigned c = 0; c < 3; ++c) expected[p * 4 + c] = histories[pass][p * 3 + c];
             expected[p * 4 + 3] = 1;
         }
-        compare(warped, expected, 0, "GPU static temporal history", true);
+        compare(warped, expected, "GPU static temporal history");
         temporal.finish_pass(pass, results[pass]);
     }
     temporal.end();
@@ -235,7 +225,7 @@ inline void check_codec(hip_probe::Api& api, hip_probe::Handle stream, const std
     std::vector<float> reference, model(pixels * 3);
     encode_proxy(proxy.data(), g, true, reference);
     codec.encode(proxy.data(), g, device_input.pointer, true);
-    const float encode_error = compare(device_input.read(), reference, 1.0f / 1024.0f, "GPU FP16 proxy encode");
+    compare(device_input.read(), reference, "GPU FP16 proxy encode");
 
     // A constant signed/extended-range RGB fixture makes all decode resampling
     // exact and verifies that the FP16 route retains alpha and never UNORM-clamps.
@@ -263,11 +253,9 @@ inline void check_codec(hip_probe::Api& api, hip_probe::Handle stream, const std
     for (bool precision16 : {true, false}) {
         feedback_neural_rgb(model.data(), g, reference, precision16);
         codec.feedback(g, device_rgb.pointer, device_input.pointer, precision16);
-        compare(device_input.read(), reference, 0,
-                precision16 ? "GPU FP16 feedback" : "GPU UNORM8 feedback", true);
+        compare(device_input.read(), reference, precision16 ? "GPU FP16 feedback" : "GPU UNORM8 feedback");
     }
-    std::printf("GPU control self-test: FP16 proxy encode max_abs_error=%.9g; FP16 decode and 16/8-bit feedback exact\n",
-                double(encode_error));
+    std::printf("GPU control self-test: FP16 proxy encode, decode and 16/8-bit feedback exact\n");
     std::fflush(stdout);
 }
 

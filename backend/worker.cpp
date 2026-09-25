@@ -11,6 +11,7 @@
 #include "trace.h"
 #include "shm_protocol.h"
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -35,6 +36,7 @@
 #include <unistd.h>
 
 namespace {
+namespace selftest = dlsslop::control_selftest;
 volatile sig_atomic_t stopping;
 void stop_handler(int) { stopping = 1; }
 
@@ -532,38 +534,12 @@ public:
         if (gpu_codec_) {
             gpu_codec_->encode(input, g, device_input_, settings.fp16);
             if (verify) {
-                network_->Synchronize();
-                std::vector<float> reference, actual(size_t(g.width) * g.height * 4);
+                std::vector<float> reference;
                 dlsslop::encode_proxy(input, g, settings.fp16, reference);
-                api.Check(api.hipMemcpy(actual.data(), device_input_, actual.size() * sizeof(float), 2), "verify GPU codec input");
-                float maximum = 0;
-                size_t worst = 0, outside_tolerance = 0;
-                constexpr float tolerance = 1.0f / 1024.0f;
-                for (size_t i = 0; i < actual.size(); ++i) {
-                    if (!std::isfinite(actual[i])) {
-                        std::fprintf(stderr, "GPU encoder nonfinite sample: x=%zu y=%zu channel=%zu value=%g\n",
-                                     (i / 4) % g.width, (i / 4) / g.width, i % 4, double(actual[i]));
-                        throw std::runtime_error("GPU encoder produced nonfinite values");
-                    }
-                    const float error = std::fabs(actual[i] - reference[i]);
-                    if (error > maximum) { maximum = error; worst = i; }
-                    outside_tolerance += error > tolerance;
-                }
-                // Both paths round through binary16. One half ULP around 1.0 accounts
-                // for CPU/GPU contraction differences in fitted bilinear samples.
-                std::printf("GPU encode vs CPU reference max_abs_error=%.9g tolerance=%.9g outside_tolerance=%zu/%zu\n",
-                            double(maximum), double(tolerance), outside_tolerance, actual.size());
+                selftest::compare(selftest::Buffer::read_pointer(api, network_->Stream(), device_input_, reference.size()),
+                                  reference, "GPU encoder");
+                std::printf("GPU encode vs CPU reference: FP32 bit-identical\n");
                 std::fflush(stdout);
-                if (maximum > tolerance) {
-                    std::fprintf(stderr,
-                        "GPU encoder worst sample: x=%zu y=%zu channel=%zu GPU=%.9g CPU=%.9g; "
-                        "source=%ux%u network=%ux%u fit=%ux%u+%u+%u\n",
-                        (worst / 4) % g.width, (worst / 4) / g.width, worst % 4,
-                        double(actual[worst]), double(reference[worst]),
-                        g.source_width, g.source_height, g.width, g.height,
-                        g.fit_width, g.fit_height, g.x, g.y);
-                    throw std::runtime_error("GPU encoder disagrees with CPU reference");
-                }
             }
         } else {
             dlsslop::encode_proxy(input, g, settings.fp16, encoded_);
@@ -615,20 +591,9 @@ public:
                 if (gpu_codec_) {
                     gpu_codec_->feedback(g, answer, device_input_, settings.precision16);
                     if (verify) {
-                        network_->Synchronize();
                         dlsslop::feedback_neural_rgb(neural_.data(), g, feedback_, settings.precision16);
-                        std::vector<float> actual(feedback_.size());
-                        api.Check(api.hipMemcpy(actual.data(), device_input_, actual.size() * sizeof(float), 2),
-                                  "verify GPU feedback input");
-                        if (std::memcmp(actual.data(), feedback_.data(), actual.size() * sizeof(float))) {
-                            size_t first = 0;
-                            while (!std::memcmp(&actual[first], &feedback_[first], sizeof(float))) ++first;
-                            std::fprintf(stderr,
-                                "GPU feedback mismatch for pass %u/%u: x=%zu y=%zu channel=%zu GPU=%.9g CPU=%.9g\n",
-                                pass + 1, passes, (first / 4) % g.width, (first / 4) / g.width,
-                                first % 4, double(actual[first]), double(feedback_[first]));
-                            throw std::runtime_error("GPU inter-pass feedback disagrees with CPU reference");
-                        }
+                        selftest::compare(selftest::Buffer::read_pointer(api, network_->Stream(), device_input_,
+                                          feedback_.size()), feedback_, "GPU inter-pass feedback");
                         std::printf("GPU feedback for pass %u/%u vs CPU reference: FP32 bit-identical\n",
                                     pass + 1, passes);
                     }
@@ -685,20 +650,16 @@ public:
             if (verify) {
                 std::vector<uint8_t> reference;
                 dlsslop::decode_neural_proxy(input, g, settings.fp16, neural_.data(), reference);
-                unsigned maximum = 0;
-                size_t worst = 0;
-                for (size_t i = 0; i < reference.size(); ++i) {
-                    const unsigned error = unsigned(std::abs(int(output[i]) - int(reference[i])));
-                    if (error > maximum) { maximum = error; worst = i; }
-                }
-                std::printf("GPU decode vs CPU reference max_byte_error=%u\n", maximum);
-                std::fflush(stdout);
-                if (maximum > 2) {
-                    std::fprintf(stderr, "GPU decoder worst sample: x=%zu y=%zu channel=%zu GPU=%u CPU=%u\n",
-                                 (worst / 4) % w, (worst / 4) / w, worst % 4,
-                                 unsigned(output[worst]), unsigned(reference[worst]));
+                const size_t first = std::mismatch(reference.begin(), reference.end(), output).first - reference.begin();
+                if (first < reference.size()) {
+                    const size_t bpp = settings.fp16 ? 8 : 4;
+                    std::fprintf(stderr, "GPU decoder first mismatch: x=%zu y=%zu byte=%zu GPU=%u CPU=%u\n",
+                                 (first / bpp) % w, (first / bpp) / w, first % bpp,
+                                 unsigned(output[first]), unsigned(reference[first]));
                     throw std::runtime_error("GPU decoder disagrees with CPU reference");
                 }
+                std::printf("GPU decode vs CPU reference: bit-identical\n");
+                std::fflush(stdout);
             }
         } else {
             std::vector<uint8_t> result;
