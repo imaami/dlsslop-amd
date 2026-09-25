@@ -155,9 +155,8 @@ public:
             1, 1, 256, 1, 1, 0, stream_, args, nullptr), "prepare neural input for next pass");
     }
 
-    // decode belongs to the latest encode. Both execute on the network stream.
-    // Output receives the proxy-sized answer, even when it then fails: nonfinite
-    // FP16 neural samples throw explicitly, never becoming a reported answer.
+    // decode belongs to the latest encode. Both execute on the network stream;
+    // output holds the proxy-sized answer once finish() returns.
     void decode(const Geometry& g, void* neural_rgb, std::uint8_t* output)
     {
         if (std::memcmp(&uploaded_, &g, sizeof g) || !source_ || !neural_rgb)
@@ -168,6 +167,12 @@ public:
         api_.Check(api_.hipModuleLaunchKernel(uploaded_fp16_ ? decode16_ : decode_, (g.source_width * g.source_height + 255u) / 256u,
             1, 1, 256, 1, 1, 0, stream_, args, nullptr), "decode neural output to SDR");
         api_.Check(api_.hipMemcpyAsync(output, output_, bytes, 2, stream_), "read codec proxy");
+    }
+
+    // Waits for the stream. Nonfinite or FP16-overflow samples anywhere since
+    // the latest encode throw explicitly, never becoming a reported answer.
+    void finish()
+    {
         api_.Check(api_.hipStreamSynchronize(stream_), "codec decode completion");
         std::uint32_t invalid = 0;
         api_.Check(api_.hipMemcpy(&invalid, invalid_, sizeof invalid, 2), "read codec status");

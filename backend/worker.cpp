@@ -419,6 +419,15 @@ class Engine {
     std::vector<float> color_original_, color_raw_, color_result_;
     ProcessingSettings previous_settings_;
     unsigned previous_passes_ = 0;
+    // Stream events: frame start, uploaded, evaluated, answered. Timing never
+    // stalls the stream; the intervals are read once the answer is complete.
+    hip_probe::Handle marks_[4]{};
+
+    void mark(unsigned i)
+    {
+        auto& api = network_->Runtime();
+        api.Check(api.hipEventRecord(marks_[i], network_->Stream()), "record timing event");
+    }
 public:
     const char* color_backend() const { return gpu_color_ ? "gpu" : color_backend_checked_ ? "cpu" : "off"; }
     float upload_ms = 0, inference_ms = 0, readback_ms = 0;
@@ -429,6 +438,7 @@ public:
         if (!network_) return;
         auto& api = network_->Runtime();
         api.hipStreamSynchronize(network_->Stream());
+        for (auto event : marks_) api.hipEventDestroy(event);
         temporal_.reset();
         gpu_tuning_.reset();
         gpu_color_.reset();
@@ -451,6 +461,7 @@ public:
         network_ = std::make_unique<hip_reference::Network>(opt);
         network_->SetNoise({}); // Fast prefix uses procedural noise, not noise.f32.
         auto& api = network_->Runtime();
+        for (auto& event : marks_) api.Check(api.hipEventCreate(&event), "create timing event");
         if (!options_.cpu_codec)
             gpu_codec_ = std::make_unique<dlsslop::GpuCodec>(api, network_->Stream(), options_.modules + "/linux_codec.hsaco");
         const size_t pixels = size_t(w) * h;
@@ -511,13 +522,11 @@ public:
             gpu_tuning_ = std::make_unique<dlsslop::GpuTuning>(api, network_->Stream(), options_.modules + "/linux_tuning.hsaco");
             api.Check(api.hipMalloc(&device_tuned_, size_t(width_) * height_ * 12), "allocate native tuning output");
         }
-        auto now = [] { return std::chrono::steady_clock::now(); };
-        auto elapsed = [](auto a, auto b) { return std::chrono::duration<float, std::milli>(b - a).count(); };
-        auto start = now();
+        mark(0);
         if (gpu_codec_) {
             gpu_codec_->encode(input, g, device_input_, settings.fp16);
-            network_->Synchronize();
             if (options_.self_test) {
+                network_->Synchronize();
                 std::vector<float> reference, actual(size_t(g.width) * g.height * 4);
                 dlsslop::encode_proxy(input, g, settings.fp16, reference);
                 api.Check(api.hipMemcpy(actual.data(), device_input_, actual.size() * sizeof(float), 2), "verify GPU codec input");
@@ -577,7 +586,7 @@ public:
                 color_raw_.resize(size_t(width_) * height_ * 3);
             }
         }
-        auto uploaded = now();
+        mark(1);
         if (settings.motion) {
             if (!temporal_)
                 temporal_ = std::make_unique<dlsslop::GpuTemporal>(api, network_->Stream(), options_.modules + "/linux_temporal.hsaco");
@@ -659,20 +668,20 @@ public:
             }
         }
         if (settings.motion) temporal_->end();
-        network_->Synchronize();
+        mark(2);
         previous_settings_ = settings;
         previous_passes_ = passes;
-        auto evaluated = now();
         if (!gpu_codec_ || options_.self_test) {
+            network_->Synchronize();
             api.Check(api.hipMemcpy(neural_.data(), answer, neural_.size() * sizeof(float), 2),
                       "read final neural answer");
             for (float value : neural_)
                 if (!std::isfinite(value)) throw std::runtime_error("network produced nonfinite values");
         }
-        upload_ms = elapsed(start, uploaded);
-        inference_ms = elapsed(uploaded, evaluated);
         if (gpu_codec_) {
             gpu_codec_->decode(g, answer, output);
+            mark(3);
+            gpu_codec_->finish();
             if (options_.self_test) {
                 std::vector<uint8_t> reference;
                 dlsslop::decode_neural_proxy(input, g, settings.fp16, neural_.data(), reference);
@@ -698,8 +707,12 @@ public:
             else
                 dlsslop::decode_neural_proxy(input, g, settings.fp16, neural_.data(), result);
             std::memcpy(output, result.data(), result.size());
+            mark(3);
         }
-        readback_ms = elapsed(evaluated, now());
+        api.Check(api.hipEventSynchronize(marks_[3]), "timing event completion");
+        api.Check(api.hipEventElapsedTime(&upload_ms, marks_[0], marks_[1]), "upload interval");
+        api.Check(api.hipEventElapsedTime(&inference_ms, marks_[1], marks_[2]), "inference interval");
+        api.Check(api.hipEventElapsedTime(&readback_ms, marks_[2], marks_[3]), "readback interval");
     }
     // infer() reads this back on every self-test invocation, before decoding.
     const std::vector<float>& raw_result() const { return neural_; }

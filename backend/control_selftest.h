@@ -245,6 +245,7 @@ inline void check_codec(hip_probe::Api& api, hip_probe::Handle stream, const std
     device_rgb.upload(model);
     std::vector<std::uint8_t> decoded(proxy.size()), expected;
     codec.decode(g, device_rgb.pointer, decoded.data());
+    codec.finish();
     decode_neural_proxy(proxy.data(), g, true, model.data(), expected);
     require(decoded == expected, "GPU FP16 proxy decode disagrees on exact signed/extended-range fixture");
     std::uint16_t first_red, first_green;
