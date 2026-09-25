@@ -16,10 +16,13 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include <dirent.h>
 #include <fcntl.h>
 #include <getopt.h>
 #include <sys/file.h>
@@ -51,15 +54,26 @@ struct Context {
     int fd = -1;
     void* mapping = MAP_FAILED;
 
-    ~Context() {
-        if (device) vkDeviceWaitIdle(device);
+    void releaseDevice() {
+        if (!device) return;
+        vkDeviceWaitIdle(device);
         if (acquired) vkDestroySemaphore(device, acquired, nullptr);
         if (rendered) vkDestroySemaphore(device, rendered, nullptr);
         if (pool) vkDestroyCommandPool(device, pool, nullptr);
         if (pattern) vkDestroyBuffer(device, pattern, nullptr);
         if (patternMemory) vkFreeMemory(device, patternMemory, nullptr);
         if (swapchain) vkDestroySwapchainKHR(device, swapchain, nullptr);
-        if (device) vkDestroyDevice(device, nullptr);
+        vkDestroyDevice(device, nullptr);
+        acquired = rendered = VK_NULL_HANDLE;
+        pool = VK_NULL_HANDLE;
+        pattern = VK_NULL_HANDLE;
+        patternMemory = VK_NULL_HANDLE;
+        swapchain = VK_NULL_HANDLE;
+        device = VK_NULL_HANDLE;
+    }
+
+    ~Context() {
+        releaseDevice();
         if (surface) vkDestroySurfaceKHR(instance, surface, nullptr);
         if (instance) vkDestroyInstance(instance, nullptr);
         if (window) XDestroyWindow(display, window);
@@ -68,6 +82,30 @@ struct Context {
         if (fd >= 0) close(fd);
     }
 };
+
+// Counts this process's descriptors on the channel file or its producer lock, and its mappings
+// of the channel file. The kernel reports both by canonical path.
+static std::pair<int, int> ChannelHandles(const char* channel) {
+    char* canonical = realpath(channel, nullptr);
+    require(canonical, "cannot resolve the channel path");
+    const std::string path(canonical);
+    std::free(canonical);
+    int descriptors = 0, mappings = 0;
+    if (DIR* directory = opendir("/proc/self/fd")) {
+        while (const dirent* entry = readdir(directory)) {
+            char target[4096];
+            const std::string link = std::string("/proc/self/fd/") + entry->d_name;
+            const ssize_t length = readlink(link.c_str(), target, sizeof target);
+            descriptors += length > 0 && std::string(target, size_t(length)).rfind(path, 0) == 0;
+        }
+        closedir(directory);
+    }
+    std::ifstream maps("/proc/self/maps");
+    for (std::string line; std::getline(maps, line);)
+        mappings += line.size() > path.size() && line.compare(line.size() - path.size(), path.size(), path) == 0 &&
+                    line[line.size() - path.size() - 1] == ' ';
+    return {descriptors, mappings};
+}
 
 class ContendingProducer {
     pid_t child_ = -1;
@@ -455,13 +493,19 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
         const size_t bytes = size_t(expectedWidth) * expectedHeight * (proxy16 ? 8 : 4);
         require(std::memcmp(input, output, bytes) == 0, "identity worker corrupted frame pixels");
     }
+    // Destroying the device releases everything the layer holds on the channel. What remains is
+    // this test's own descriptor and mapping.
+    const uint64_t composed = uint64_t(h->layerFramesLo.load()) |
+                              (uint64_t(h->layerFramesHi.load()) << 32);
+    c.releaseDevice();
+    require(ChannelHandles(path) == std::make_pair(1, 1),
+            "destroying the device left a layer descriptor or mapping of the channel");
+    std::printf("PASS: destroying the device released the layer's channel descriptor and mappings.\n");
     if (noWorker) {
         std::printf("PASS: %u frames presented without blocking on a worker that cannot answer.\n",
                     frames);
         return 0;
     }
-    const uint64_t composed = uint64_t(h->layerFramesLo.load()) |
-                              (uint64_t(h->layerFramesHi.load()) << 32);
     require(composed >= initialFrames + frames, "layer failed to compose all frames");
     std::printf("PASS: %u Vulkan frames captured, RGBA pixels verified, worker answered, "
                 "composition submitted and presented (%ux%u).\n",

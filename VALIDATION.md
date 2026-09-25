@@ -25,7 +25,9 @@ Every mode runs under the Khronos validation layer (`vulkan-validationlayers`)
 with synchronization validation and fails on any validation error; the smoke
 skips when that layer is not installed. It then stops the worker, and later
 kills one, and checks that presents neither publish to a stopped worker nor wait
-more than a moment for a killed one.
+more than a moment for a killed one. Each mode then destroys its device and
+fails if the layer still holds a descriptor or mapping of the channel or its
+producer lock.
 The composition rebuild test changes the layer's model raster, colour domain
 and downscaler in place and fails when a dispatch binds a descriptor written for
 an image view that has since been destroyed. The smoke, this test and the HDR
