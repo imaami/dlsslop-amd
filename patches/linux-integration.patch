@@ -1,35 +1,3 @@
-diff --git a/backend/vendor/README.md b/backend/vendor/README.md
-new file mode 100644
-index 0000000..190b13c
---- /dev/null
-+++ b/backend/vendor/README.md
-@@ -0,0 +1,26 @@
-+Vendored from `lmxxf/dlss5-on-amd-9070xt-porting` at commit
-+`7ef24e7c1498bce59738277e174249866608c4ed` (September 23, 2026).
-+
-+Source mapping:
-+
-+- `hip_reference_network.h`, `packed_weights.h`, `hip_device_properties.h`,
-+  and `hip_api.h`: upstream `Development/HIP/`.
-+- `LmxxfProductionOptions.h`: upstream `src/`.
-+- `LICENSE.lmxxf`: upstream MIT license; HIP ABI declarations also retain AMD's
-+  license notices inside their headers.
-+
-+Local modifications:
-+
-+- `hip_api.h` loads Linux `libamdhip64.so.7`, `.so.6`, or the unversioned soname
-+  with `dlopen`/`dlsym`. `/opt/rocm/lib` and an explicit `DLSSLOP_HIP_LIBRARY`
-+  path are supported. All network execution remains native HIP.
-+- `hip_reference_network.h` rejects the Windows-only F8 hotkey option instead
-+  of calling Win32 keyboard APIs. The scheduler and mathematical operations are
-+  otherwise unchanged.
-+- The worker clears the production option's block-skip set by default; its
-+  `--performance` flag restores upstream's skipped blocks 42, 43 and 46.
-+
-+These host headers are ordinary C++17. Compiling the worker does not require a
-+HIP SDK or linking to a particular HIP runtime. Actual inference requires the
-+matching Linux GPU code objects, model weights, and a gfx1201-capable runtime.
-+No model weights are vendored here.
 diff --git a/backend/vendor/hip_api.h b/backend/vendor/hip_api.h
 index 1893e2c..2cc48ac 100644
 --- a/backend/vendor/hip_api.h
@@ -508,87 +476,6 @@ index 3d7bbfb..0b087a2 100644
   float8 sum[2]{};
   for(uint tile=0;tile<2;tile++){half8 a{};for(uint e=0;e<8;e++){uint k=tile*16+group*8+e;a[e]=(_Float16)(k<16?values[rc*16+k]:0.f);}
    for(uint col=0;col<2;col++){half8 b{};for(uint e=0;e<8;e++){uint k=tile*16+group*8+e;b[e]=(_Float16)(k<16?weights[(col*16+rc)*16+k]:0.f);}sum[col]=__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a,b,sum[col]);}
-diff --git a/upstream-layer/common/control_settings.h b/upstream-layer/common/control_settings.h
-new file mode 100644
-index 0000000..cae4e13
---- /dev/null
-+++ b/upstream-layer/common/control_settings.h
-@@ -0,0 +1,75 @@
-+// SPDX-License-Identifier: MIT
-+#pragma once
-+#include "shm_protocol.h"
-+#include <linux/input-event-codes.h>
-+
-+namespace dlsslop_control {
-+struct Setting {
-+    const char* name;
-+    char shortName;
-+    std::atomic<uint32_t> ShmHeader::*field;
-+    bool isFloat;
-+    double minimum;
-+    double maximum;
-+    const char* help;
-+};
-+
-+// All controls from the original interface. The captured network configuration
-+// is fixed for four fields; parsing rejects unsupported changes before mapping.
-+inline constexpr Setting kSettings[] = {
-+    {"color-preserve", 'L', &ShmHeader::colorPreserveBits, true, 0, 1, "Per-pass original-frame chroma anchoring (HIP when installed, otherwise CPU; 0 disables)"},
-+    {"enabled", 'e', &ShmHeader::enabled, false, 0, 1, "Enable neural rendering (0/1)"},
-+    {"hdr-mode", 'E', &ShmHeader::hdrMode, false, 0, 2, "Proxy precision: 0 auto (16-bit for HDR), 1 force 8-bit, 2 force 16-bit"},
-+    {"sdr16-multipass", 'B', &ShmHeader::sdr16Multipass, false, 0, 1, "SDR between-pass precision: 0 quantized 8-bit, 1 binary16; HDR stays binary16"},
-+    {"preset", 'N', &ShmHeader::preset, false, 0, 15, "Captured network preset; only 0 is supported"},
-+    {"style", 'y', &ShmHeader::style, false, 0, 2, "Captured network style; only 0 is supported"},
-+    {"auto-mask", 'M', &ShmHeader::autoMask, false, 0, 1, "Captured automatic-mask configuration; only 1 is supported"},
-+    {"intensity", 'i', &ShmHeader::intensityBits, true, 0, 4, "Native per-pass residual intensity"},
-+    {"local-tone", 'o', &ShmHeader::localToneBits, true, 0, 4, "Native per-pass low-frequency residual strength"},
-+    {"local-structure", 'j', &ShmHeader::localStructureBits, true, 0, 4, "Native per-pass high-frequency residual strength"},
-+    {"skin-structure", 'K', &ShmHeader::skinStructureBits, true, -1, 4, "Captured skin configuration; only -1 (follow structure) is supported"},
-+    {"sharpness", 'n', &ShmHeader::sharpnessBits, true, 0, 1, "Native per-pass sharpening strength"},
-+    {"rebuild-ms", 'J', &ShmHeader::rebuildSettleMs, false, 0, 5000, "Debounce native per-pass tuning updates for this many milliseconds"},
-+    {"mvec", 'V', &ShmHeader::mvecEnabled, false, 0, 1, "Estimate motion and reproject previous neural output (0/1)"},
-+    {"mvec-quality", 'Q', &ShmHeader::mvecQuality, false, 0, 2, "Motion search quality: 0 fast, 1 balanced, 2 quality"},
-+    {"mvec-units", 'U', &ShmHeader::mvecScaleMode, false, 0, 2, "Motion field units: 0 normalized, 1 pixels, 2 UV"},
-+    {"mvec-pixels", 'F', &ShmHeader::mvecPixelSize, false, 0, 3, "Motion grid spacing: 0=1px, 1=2px, 2=4px, 3=8px"},
-+    {"white-point", 'W', &ShmHeader::whitePointBits, true, 0.0001, 2000, "Manual paper white for linear-light input"},
-+    {"white-point-scale", 'G', &ShmHeader::whitePointScaleBits, true, 0.01, 100, "Multiplier on manual or measured white point"},
-+    {"white-point-source", 'O', &ShmHeader::whitePointSource, false, 0, 1, "0 manual paper white, 1 measured from frame"},
-+    {"white-point-trim", 'I', &ShmHeader::whitePointTrimBits, true, 0.01, 100, "Multiplier on measured white point only"},
-+    {"color-mode", 'Y', &ShmHeader::colourMode, false, 0, 2, "0 auto, 1 display-referred, 2 linear HDR"},
-+    {"reversible", 'Z', &ShmHeader::reversibleMode, false, 0, 4, "Proxy: 0 knee, 1 Neutwo, 2 Neutwo replace, 3 hybrid, 4 hybrid replace"},
-+    {"passes", 'P', &ShmHeader::passes, false, 1, kMaxPasses, "Successive neural evaluations per frame; each consumes the previous result"},
-+    {"detail", 'd', &ShmHeader::transferStrengthBits, true, 0, 4, "Strength of the neural edit"},
-+    {"color", 'C', &ShmHeader::colourStrengthBits, true, 0, 4, "Color contribution of the edit"},
-+    {"guard", 'g', &ShmHeader::maxRatioBits, true, 1, 30, "Maximum per-pixel gain or reciprocal gain"},
-+    {"transfer", 't', &ShmHeader::transfer, false, 0, 2, "0 classic, 1 matched residual, 2 native frame + edit"},
-+    {"bypass", 'b', &ShmHeader::compositionBypass, false, 0, 1, "0 compose the edit, 1 present the raw model result"},
-+    {"ratio-smooth", 'a', &ShmHeader::ratioSmoothPercent, false, 0, 100, "Neighbourhood contribution to relighting ratio (%)"},
-+    {"color-trust", 'u', &ShmHeader::colourTrustPercent, false, 0, 800, "Allowed color displacement, in hundredths"},
-+    {"debug-view", 'v', &ShmHeader::debugView, false, 0, 5, "0 off, 1 proxy, 2 model, 3 edit, 4/5 color-bound views"},
-+    {"debug-scale", 'D', &ShmHeader::debugScaleBits, true, 0.01, 100, "Debug-view intensity multiplier"},
-+    {"working-scale", 'w', &ShmHeader::workingScaleBits, true, 0.25, 2, "Proxy scale relative to game resolution, capped by worker tier"},
-+    {"downscaler", 'f', &ShmHeader::scalingDownscaler, false, 1, 7, "1 bicubic, 2 catmull, 3 lanczos2, 4 lanczos3, 5 kaiser2, 6 kaiser3, 7 magic"},
-+    {"compare", 'p', &ShmHeader::compareMode, false, 0, 2, "0 off, 1 side by side, 2 wipe"},
-+    {"compare-split", 'x', &ShmHeader::compareSplitBits, true, 0, 1, "Comparison split position"},
-+    {"compare-zoom", 'z', &ShmHeader::compareZoomBits, true, 1, 2, "Side-by-side comparison magnification"},
-+    {"compare-swap", 'X', &ShmHeader::compareSwap, false, 0, 1, "Swap comparison sides (0/1)"},
-+    {"apply-model", 'm', &ShmHeader::applyModel, false, 0, 1, "Apply the edit; 0 shows the clean frame but retains inference cost"},
-+    {"hold", 'H', &ShmHeader::holdFrame, false, 0, 1, "Freeze the input frame (0/1)"},
-+    {"toggle-key", 'k', &ShmHeader::toggleKey, false, 0, KEY_MAX, "Linux KEY_ code for the layer hotkey; 0 disables it"},
-+};
-+
-+inline bool fixed(const Setting& s)
-+{
-+    return s.field == &ShmHeader::preset || s.field == &ShmHeader::style ||
-+        s.field == &ShmHeader::autoMask || s.field == &ShmHeader::skinStructureBits;
-+}
-+inline bool tuning(const Setting& s)
-+{
-+    return s.field == &ShmHeader::colorPreserveBits || s.field == &ShmHeader::intensityBits || s.field == &ShmHeader::localToneBits ||
-+        s.field == &ShmHeader::localStructureBits || s.field == &ShmHeader::sharpnessBits ||
-+        s.field == &ShmHeader::rebuildSettleMs;
-+}
-+} // namespace dlsslop_control
 diff --git a/upstream-layer/common/shm_protocol.h b/upstream-layer/common/shm_protocol.h
 index fd7c1cd..3beeafe 100644
 --- a/upstream-layer/common/shm_protocol.h
@@ -1353,101 +1240,6 @@ index 757303b..c83fd8b 100644
      bool _captureRecorded = false;
  
      // Frame hold. The freeze point is the raw colour the encode reads, not the proxy: both the proxy
-diff --git a/upstream-layer/layer_linux/src/device_features.h b/upstream-layer/layer_linux/src/device_features.h
-new file mode 100644
-index 0000000..b46b03a
---- /dev/null
-+++ b/upstream-layer/layer_linux/src/device_features.h
-@@ -0,0 +1,89 @@
-+#pragma once
-+
-+#include <vulkan/vulkan.h>
-+#include <vulkan/vk_layer.h>
-+#include <memory>
-+#include <utility>
-+#include <vector>
-+
-+namespace dlssnr {
-+
-+inline const VkPhysicalDeviceFeatures2* CoreFeatures2(const VkDeviceCreateInfo& info) {
-+    for (auto* node = static_cast<const VkBaseInStructure*>(info.pNext); node; node = node->pNext)
-+        if (node->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2)
-+            return reinterpret_cast<const VkPhysicalDeviceFeatures2*>(node);
-+    return nullptr;
-+}
-+
-+inline bool HasFormatlessStorageWrites(const VkDeviceCreateInfo& info) {
-+    const auto* features2 = CoreFeatures2(info);
-+    const auto* features = features2 ? &features2->features : info.pEnabledFeatures;
-+    return features && features->shaderStorageImageWriteWithoutFormat;
-+}
-+
-+// Copy only the prefix ending at Features2, keeping all unknown trailing nodes
-+// untouched. Never write through the application's const pNext chain. Loader
-+// nodes and core feature nodes cover the usual Proton chains; an unknown prefix
-+// fails safely so the application can create its device and present untouched.
-+class FormatlessStorageFeatures {
-+    VkPhysicalDeviceFeatures legacy_{};
-+    std::vector<std::shared_ptr<void>> copies_;
-+
-+    template<class T> VkBaseOutStructure* Copy(const VkBaseInStructure* node) {
-+        auto copy = std::make_shared<T>(*reinterpret_cast<const T*>(node));
-+        auto* result = reinterpret_cast<VkBaseOutStructure*>(copy.get());
-+        copies_.push_back(std::move(copy));
-+        return result;
-+    }
-+
-+    VkBaseOutStructure* CopyPrefix(const VkBaseInStructure* node) {
-+        switch (node->sType) {
-+#define COPY(type, tag) case tag: return Copy<type>(node)
-+            COPY(VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO);
-+            COPY(VkPhysicalDeviceFeatures2, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
-+            COPY(VkPhysicalDeviceVulkan11Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES);
-+            COPY(VkPhysicalDeviceVulkan12Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES);
-+            COPY(VkPhysicalDeviceVulkan13Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES);
-+#ifdef VK_VERSION_1_4
-+            COPY(VkPhysicalDeviceVulkan14Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_4_FEATURES);
-+#endif
-+            COPY(VkDeviceGroupDeviceCreateInfo, VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO);
-+            COPY(VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT,
-+                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT);
-+#undef COPY
-+            default: return nullptr;
-+        }
-+    }
-+
-+public:
-+    bool Enable(VkDeviceCreateInfo& info) {
-+        if (HasFormatlessStorageWrites(info)) return true;
-+        if (!CoreFeatures2(info)) {
-+            legacy_ = info.pEnabledFeatures ? *info.pEnabledFeatures : VkPhysicalDeviceFeatures{};
-+            legacy_.shaderStorageImageWriteWithoutFormat = VK_TRUE;
-+            info.pEnabledFeatures = &legacy_;
-+            return true;
-+        }
-+        VkBaseOutStructure* first = nullptr;
-+        VkBaseOutStructure* previous = nullptr;
-+        for (auto* node = static_cast<const VkBaseInStructure*>(info.pNext); node; node = node->pNext) {
-+            auto* copy = CopyPrefix(node);
-+            if (!copy) {
-+                copies_.clear();
-+                return false;
-+            }
-+            if (!first) first = copy;
-+            if (previous) previous->pNext = copy;
-+            previous = copy;
-+            if (node->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
-+                reinterpret_cast<VkPhysicalDeviceFeatures2*>(copy)->features
-+                    .shaderStorageImageWriteWithoutFormat = VK_TRUE;
-+                info.pNext = first;
-+                return true;
-+            }
-+        }
-+        return false;
-+    }
-+};
-+
-+}  // namespace dlssnr
 diff --git a/upstream-layer/layer_linux/src/dlssnr/DlssNr_Common.h b/upstream-layer/layer_linux/src/dlssnr/DlssNr_Common.h
 index 2690bb9..90440b6 100644
 --- a/upstream-layer/layer_linux/src/dlssnr/DlssNr_Common.h
@@ -2394,7 +2186,7 @@ diff --git a/upstream-layer/tools/meson-build.sh b/upstream-layer/tools/meson-bu
 old mode 100644
 new mode 100755
 diff --git a/upstream-layer/tools/shmctl.cpp b/upstream-layer/tools/shmctl.cpp
-index 4e16702..5df58ff 100644
+index 4e16702..ad86a27 100644
 --- a/upstream-layer/tools/shmctl.cpp
 +++ b/upstream-layer/tools/shmctl.cpp
 @@ -1,168 +1,335 @@
@@ -2413,7 +2205,7 @@ index 4e16702..5df58ff 100644
 -// tool cannot disagree. Adding a field is now a recompile rather than an arithmetic exercise.
 -#include "../common/shm_protocol.h"
 +// Native Linux controls. Shared-memory offsets and defaults come from the protocol.
-+#include "../common/control_settings.h"
++#include "../../common/control_settings.h"
  
 +#include <cerrno>
 +#include <cmath>

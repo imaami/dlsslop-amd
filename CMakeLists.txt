@@ -65,7 +65,7 @@ add_custom_target(layer-shaders DEPENDS ${LAYER_SHADERS} ${METER}.h)
 function(add_neural_layer target)
     add_library(${target} SHARED ${LAYER_SOURCES})
     add_dependencies(${target} layer-shaders)
-    target_include_directories(${target} PRIVATE ${SHADER_DIR}
+    target_include_directories(${target} PRIVATE ${SHADER_DIR} layer
         ${LAYER_ROOT}/standalone_runner/third_party ${X11_HEADERS} ${XINPUT_HEADERS})
     target_link_libraries(${target} PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
     target_link_options(${target} PRIVATE
@@ -99,7 +99,7 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging_test.py)
     add_executable(vulkan-storage-test tests/vulkan_storage_test.cpp)
     add_dependencies(vulkan-storage-test layer-shaders)
-    target_include_directories(vulkan-storage-test PRIVATE ${SHADER_DIR}
+    target_include_directories(vulkan-storage-test PRIVATE ${SHADER_DIR} layer
         ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party)
     add_test(NAME vulkan-storage COMMAND vulkan-storage-test)
     add_executable(codec-test backend/codec_test.cpp backend/codec.cpp)

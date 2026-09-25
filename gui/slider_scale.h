@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "../upstream-layer/common/control_settings.h"
+#include "../common/control_settings.h"
 #include <algorithm>
 #include <cmath>
 

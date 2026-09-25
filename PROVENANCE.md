@@ -37,6 +37,14 @@ projects them into `upstream-layer/`, `kernels/` and `backend/vendor/`, and
 applies `patches/linux-integration.patch`. The patch adapts Linux loading and
 transport, extends controls and composition, and adds explicit shared-memory
 fences in affected HIP kernels. It leaves the upstream working trees unchanged.
+In `backend/vendor/`, the patch makes `hip_api.h` load the Linux HIP runtime
+(`libamdhip64.so.7`, `.so.6` or the unversioned soname, also from
+`/opt/rocm/lib` or an explicit `DLSSLOP_HIP_LIBRARY` path) with
+`dlopen`/`dlsym`, and makes `hip_reference_network.h` reject the Windows-only
+F8 hotkey option instead of calling Win32 keyboard APIs. The scheduler and the
+network mathematics are otherwise unchanged. The worker clears the production
+options' block-skip set unless `--performance` restores upstream's skipped
+blocks 42, 43 and 46.
 
 Preserve `upstream-layer/ATTRIBUTION.md` and all inherited notices. The layer's
 shader/dispatch lineage includes OptiScaler and Dagherbou/OptiScaler_DLSSNR,
