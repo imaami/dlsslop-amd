@@ -1290,7 +1290,7 @@ index 2690bb9..90440b6 100644
  
      // How much of the chroma-agreement gate to apply, 0..1. See colourTrustPercent.
 diff --git a/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl b/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
-index 67c5f9d..069e5db 100644
+index 67c5f9d..712c614 100644
 --- a/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
 +++ b/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
 @@ -29,7 +29,7 @@ cbuffer Params : register(b0)
@@ -1494,11 +1494,11 @@ index 67c5f9d..069e5db 100644
          // down as a power on the luminance ratio, so scaling the edit by it here as well spends it
          // twice.
 -        upgraded = max(original + edit * saturate(gTransferStrength), float3(0.0, 0.0, 0.0));
-+        upgraded = original + edit * saturate(gTransferStrength);
-+        // Negative BT.709 coordinates may encode a valid HDR10/BT.2020 color.
-+        // Clamp only after conversion back to the output gamut, not here.
-+        if (gPassthrough != 0 || gHdrProxy == 1)
-+            upgraded = max(upgraded, float3(0.0, 0.0, 0.0));
++        // A wide-gamut original keeps its own negative BT.709 coordinates; the edit adds none. Not
++        // on HdrProxy 1: nothing below falls back to the frame's hue for its wide-gamut pixels, and
++        // kept negatives would outweigh darkened positive channels in the output. Zero, as upstream.
++        upgraded = max(original + edit * saturate(gTransferStrength),
++                       gHdrProxy == 1 ? 0.0 : min(original, 0.0));
  
          // What bounds the sum. An addition says nothing about where the result lands, so the model's
          // verdict is read as a ratio on the pair it came from and the sum is held near it.
