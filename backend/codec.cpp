@@ -92,11 +92,10 @@ float unpack_half(const std::uint8_t* source)
     return result;
 }
 
+// The input must round to a finite binary16.
 void pack_half(float input, std::uint8_t* output)
 {
     const float rounded = half_round(input);
-    if (!std::isfinite(rounded))
-        throw std::range_error("neural output contains nonfinite or FP16-overflow samples");
     std::uint32_t bits;
     std::memcpy(&bits, &rounded, sizeof bits);
     const unsigned magnitude = bits & 0x7fffffffu;
@@ -110,7 +109,6 @@ void pack_half(float input, std::uint8_t* output)
 float saturate(float x)
 {
     // Nonfinite output must never be allowed to reach an integer conversion.
-    // A failed neural value is exposed as black rather than invoking UB.
     return std::isnan(x) ? 0.0f : std::clamp(x, 0.0f, 1.0f);
 }
 
@@ -257,8 +255,13 @@ Vec3 sample_network(const float* source, const Geometry& g, unsigned channels,
         return round_half ? Vec3{half_round(p[0]), half_round(p[1]), half_round(p[2])} :
                             Vec3{p[0], p[1], p[2]};
     };
-    return lerp(lerp(read(x0, y0), read(x1, y0), fx),
-                lerp(read(x0, y1), read(x1, y1), fx), fy);
+    const Vec3 c = lerp(lerp(read(x0, y0), read(x1, y0), fx),
+                        lerp(read(x0, y1), read(x1, y1), fx), fy);
+    // Like the GPU codec, reject a nonfinite or FP16-overflow texel. Even at zero
+    // weight it makes the result nonfinite (inf * 0 is NaN).
+    if (!std::isfinite(c.r) || !std::isfinite(c.g) || !std::isfinite(c.b))
+        throw std::range_error("neural output contains nonfinite or FP16-overflow samples");
+    return c;
 }
 
 } // namespace

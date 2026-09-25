@@ -141,11 +141,61 @@ void test_fit_and_output()
     for (std::size_t q = 0; q < pathological.size(); q += 3) {
         pathological[q] = -1.0f;
         pathological[q + 1] = 2.0f;
-        pathological[q + 2] = std::numeric_limits<float>::quiet_NaN();
+        pathological[q + 2] = 65519.0f; // Rounds to the largest finite binary16.
     }
     dlsslop::decode_neural_rgba8(source, g, pathological.data(), output);
-    require(output == std::vector<std::uint8_t>({0, 255, 0, 37}),
-            "UNORM clamp / NaN guard / alpha preservation");
+    require(output == std::vector<std::uint8_t>({0, 255, 255, 37}),
+            "UNORM clamp / alpha preservation");
+}
+
+void expect_decode_rejection(const std::vector<std::uint8_t>& source, const dlsslop::Geometry& g,
+                             const std::vector<float>& encoded, const std::vector<float>& neural)
+{
+    std::vector<std::uint8_t> output;
+    bool rejected = false;
+    try {
+        dlsslop::decode_neural_rgba8(source.data(), g, neural.data(), output);
+    } catch (const std::range_error&) { // A rejected frame, not a worker fault.
+        rejected = true;
+    }
+    require(rejected, "RGBA8 decode accepted a nonfinite/FP16-overflow neural sample");
+    rejected = false;
+    try {
+        dlsslop::decode_rgba8(source.data(), g, encoded.data(), neural.data(), output);
+    } catch (const std::range_error&) {
+        rejected = true;
+    }
+    require(rejected, "full composition accepted a nonfinite/FP16-overflow neural sample");
+}
+
+// Like the GPU codec, the CPU RGBA8 decodes reject an invalid neural sample
+// instead of painting it and its zero-weight bilinear neighbours black.
+void test_decode_invalid_samples()
+{
+    const auto g = dlsslop::geometry(1280, 720, 720);
+    const std::vector<std::uint8_t> source(std::size_t(g.source_width) * g.source_height * 4, 128);
+    std::vector<float> encoded;
+    dlsslop::encode_rgba8(source.data(), g, encoded);
+    const auto neural = identity_neural(encoded);
+    const std::size_t texel = (std::size_t(100) * g.width + 100) * 3;
+    for (float bad : {std::numeric_limits<float>::quiet_NaN(),
+                      std::numeric_limits<float>::infinity(),
+                      -std::numeric_limits<float>::infinity(), 65520.0f, -65520.0f}) {
+        std::vector<float> poisoned = neural;
+        poisoned[texel] = bad;
+        expect_decode_rejection(source, g, encoded, poisoned);
+        for (std::size_t q = 0; q < poisoned.size(); q += 3)
+            poisoned[q] = bad;
+        expect_decode_rejection(source, g, encoded, poisoned);
+    }
+    std::vector<float> limit = neural;
+    limit[texel] = 65519.0f;
+    limit[texel + 1] = -65519.0f;
+    std::vector<std::uint8_t> output;
+    dlsslop::decode_neural_rgba8(source.data(), g, limit.data(), output);
+    const std::size_t pixel = (std::size_t(100) * g.source_width + 100) * 4;
+    require(output[pixel] == 255 && output[pixel + 1] == 0 && output[pixel + 4] == 128 &&
+            output[pixel - 4] == 128, "RGBA8 decode rejected or spread the finite binary16 limits");
 }
 
 void test_feedback_precision_and_padding()
@@ -321,9 +371,10 @@ int main()
         test_fit_and_output();
         test_feedback_precision_and_padding();
         test_feedback_invalid_samples();
+        test_decode_invalid_samples();
         test_fp16_proxy();
         test_feedback_unorm8();
-        std::puts("codec: geometry, SDR/FP16 transport, reflection, round-trip, fitting, composition and 8/16-bit multi-pass feedback passed");
+        std::puts("codec: geometry, SDR/FP16 transport, reflection, round-trip, fitting, composition, invalid-sample rejection and 8/16-bit multi-pass feedback passed");
     } catch (const std::exception& e) {
         std::fprintf(stderr, "codec test failed: %s\n", e.what());
         return EXIT_FAILURE;

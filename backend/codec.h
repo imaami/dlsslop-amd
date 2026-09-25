@@ -44,14 +44,16 @@ void feedback_neural_rgb(const float* neural_rgb, const Geometry& g,
 
 // Raw neural view: undo aspect fitting and padding, round through the upstream
 // FP16 neural surface, clamp to UNORM8. The layer may then compose this with the
-// original frame. The neural buffer contains width*height*3 RGB32F values.
-// The original source's alpha is preserved. Input/output must not alias.
+// original frame. The neural buffer contains width*height*3 RGB32F values. Like
+// the GPU codec, a nonfinite or FP16-overflow neural sample that the resampling
+// reads throws std::range_error. The original source's alpha is preserved.
+// Input/output must not alias.
 void decode_neural_rgba8(const std::uint8_t* original, const Geometry& g,
                          const float* neural_rgb,
                          std::vector<std::uint8_t>& output);
 
-// Format-matched variant. FP16 output retains signed and >1 values, rounds the
-// resampled RGB to binary16, rejects nonfinite/overflow, and copies source alpha.
+// Format-matched variant with the same rejection. FP16 output retains signed and
+// >1 values, rounds the resampled RGB to binary16, and copies source alpha.
 void decode_neural_proxy(const std::uint8_t* original, const Geometry& g, bool fp16,
                          const float* neural_rgb,
                          std::vector<std::uint8_t>& output);
@@ -59,7 +61,8 @@ void decode_neural_proxy(const std::uint8_t* original, const Geometry& g, bool f
 // Full upstream SDR composition for offline validation or a layer bypass:
 // linear-light Upgrade + Oklab hue correction + AP1 gamut clamp, followed by
 // ColorStrength and sRGB output. encoded_rgba is the encode_rgba8 result.
-// Both strengths must be finite in [0,1]. Input/output must not alias.
+// Neural samples are rejected as above. Both strengths must be finite in [0,1].
+// Input/output must not alias.
 void decode_rgba8(const std::uint8_t* original, const Geometry& g,
                   const float* encoded_rgba, const float* neural_rgb,
                   std::vector<std::uint8_t>& output,
