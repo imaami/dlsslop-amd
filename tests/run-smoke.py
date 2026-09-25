@@ -53,7 +53,7 @@ def main():
         env.update(DISPLAY=args.display, XDG_DATA_HOME=str(root / "share"),
                    XDG_RUNTIME_DIR=str(root), DLSSNR_SHM=str(root / "shm.bin"),
                    DLSSLOP_AMD_ENABLE="1", DLSSNR_ENABLE="1", DLSSLOP_BACKEND="hip",
-                   DLSSNR_DMABUF="0", DLSSNR_IDLE_REPAINT="0", DLSSLOP_INPUT="off",
+                   DLSSNR_DMABUF="0", DLSSNR_IDLE_REPAINT="0",
                    DLSSNR_LOG=str(logs / "layer.log"), VK_KHRONOS_VALIDATION_VALIDATE_SYNC="true")
         env.pop("DLSSNR_DISABLE", None)
         env.pop("VKLayer_DLSS5", None)
