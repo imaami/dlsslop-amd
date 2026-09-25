@@ -96,7 +96,7 @@ void pack_half(float input, std::uint8_t* output)
 {
     const float rounded = half_round(input);
     if (!std::isfinite(rounded))
-        throw std::runtime_error("neural output contains nonfinite or FP16-overflow samples");
+        throw std::range_error("neural output contains nonfinite or FP16-overflow samples");
     std::uint32_t bits;
     std::memcpy(&bits, &rounded, sizeof bits);
     const unsigned magnitude = bits & 0x7fffffffu;
@@ -224,7 +224,7 @@ Vec3 read_proxy(const std::uint8_t* source, std::size_t pixel, bool fp16)
     const std::uint8_t* p = source + pixel * 8;
     const Vec3 c{unpack_half(p), unpack_half(p + 2), unpack_half(p + 4)};
     if (!std::isfinite(c.r) || !std::isfinite(c.g) || !std::isfinite(c.b))
-        throw std::runtime_error("FP16 proxy contains nonfinite RGB samples");
+        throw std::range_error("FP16 proxy contains nonfinite RGB samples");
     return c;
 }
 

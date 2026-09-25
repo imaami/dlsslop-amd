@@ -201,7 +201,8 @@ void usage(FILE* out)
         "                          Default: off; use the GPU codec\n"
         "  -p, --performance       Skip blocks 42,43,46, matching upstream preset\n"
         "                          Default: off; evaluate all 71 blocks\n"
-        "  -1, --once              Answer one shared-memory request and exit\n"
+        "  -1, --once              Answer one shared-memory request and exit,\n"
+        "                          with status 1 when that request failed\n"
         "                          Default: off; run until stopped\n"
         "  -R, --trace-dir DIR     Opt-in real-frame RGB float32 diagnostics\n"
         "                          Default: disabled; no readbacks or file checks\n"
@@ -502,7 +503,7 @@ public:
             // one history per pass. Do not silently mix those states.
             const char* adaptive = std::getenv("DLSS5_VIT_ADAPTIVE");
             if (adaptive && std::strtoul(adaptive, nullptr, 10))
-                throw std::runtime_error("multi-pass/motion/self-test requires DLSS5_VIT_ADAPTIVE=0 (uncached inference)");
+                throw std::range_error("multi-pass/motion/self-test requires DLSS5_VIT_ADAPTIVE=0 (uncached inference)");
         }
         const auto g = dlsslop::geometry(w, h, options_.tier);
         if (g.width != width_ || g.height != height_)
@@ -518,7 +519,7 @@ public:
             trace->image(name, trace_buffer.data(), g, channels);
         };
         if (settings.fp16 && options_.cpu_compose)
-            throw std::runtime_error("FP16 proxy transport requires Vulkan composition; disable --cpu-compose");
+            throw std::range_error("FP16 proxy transport requires Vulkan composition; disable --cpu-compose");
         const bool tuned = !dlsslop::native_tuning_is_default(settings.tuning);
         if (tuned && !gpu_tuning_) {
             gpu_tuning_ = std::make_unique<dlsslop::GpuTuning>(api, network_->Stream(), options_.modules + "/linux_tuning.hsaco");
@@ -566,7 +567,7 @@ public:
             api.Check(api.hipMemcpy(device_input_, encoded_.data(), encoded_.size() * sizeof(float), 1), "upload encoded frame");
         }
         if (!std::isfinite(settings.color_preserve) || settings.color_preserve < 0 || settings.color_preserve > 1)
-            throw std::runtime_error("invalid color preservation strength");
+            throw std::range_error("invalid color preservation strength");
         if (settings.color_preserve > 0) {
             if (!color_backend_checked_) {
                 const auto path = options_.modules + "/linux_color.hsaco";
@@ -597,6 +598,9 @@ public:
                 previous_settings_.precision16 != settings.precision16 ||
                 !same_tuning(previous_settings_.tuning, settings.tuning) ||
                 previous_settings_.color_preserve != settings.color_preserve;
+            previous_passes_ = 0; // Until the frame completes: a rejected one leaves no history.
+            // Until end(), throw no std::range_error: the worker would serve on with the
+            // history still pending, and the next begin() would fail.
             temporal_->begin(device_input_, g, settings.motion_quality, settings.motion_grid,
                              settings.motion_units, passes, reset);
         } else if (temporal_) {
@@ -666,19 +670,17 @@ public:
                 api.Check(api.hipMemcpy(neural_.data(), answer, neural_.size() * sizeof(float), 2),
                           "read neural answer");
                 for (float value : neural_)
-                    if (!std::isfinite(value)) throw std::runtime_error("network produced nonfinite values");
+                    if (!std::isfinite(value)) throw std::runtime_error("network produced nonfinite values between passes");
             }
         }
         if (settings.motion) temporal_->end();
         mark(2);
-        previous_settings_ = settings;
-        previous_passes_ = passes;
         if (!gpu_codec_ || options_.self_test) {
             network_->Synchronize();
             api.Check(api.hipMemcpy(neural_.data(), answer, neural_.size() * sizeof(float), 2),
                       "read final neural answer");
             for (float value : neural_)
-                if (!std::isfinite(value)) throw std::runtime_error("network produced nonfinite values");
+                if (!std::isfinite(value)) throw std::range_error("network produced nonfinite values");
         }
         if (gpu_codec_) {
             gpu_codec_->decode(g, answer, output);
@@ -711,6 +713,8 @@ public:
             std::memcpy(output, result.data(), result.size());
             mark(3);
         }
+        previous_settings_ = settings;
+        previous_passes_ = passes;
         api.Check(api.hipEventSynchronize(marks_[3]), "timing event completion");
         api.Check(api.hipEventElapsedTime(&upload_ms, marks_[0], marks_[1]), "upload interval");
         api.Check(api.hipEventElapsedTime(&inference_ms, marks_[1], marks_[2]), "inference interval");
@@ -865,7 +869,9 @@ void run_worker(const Options& o)
         h->modelUp.store(o.test_identity ? 0 : 1);
         h->helperFeatures.store(o.test_identity ? 0 : 1);
         h->helperState.store(kHelperRunning, std::memory_order_release);
-        mapping.reason(o.test_identity ? "IDENTITY TEST: no neural rendering" : "native HIP ready; display-encoded RGBA8/FP16 proxy");
+        const char* const ready = o.test_identity ? "IDENTITY TEST: no neural rendering"
+                                                  : "native HIP ready; display-encoded RGBA8/FP16 proxy";
+        mapping.reason(ready);
         std::fprintf(stderr, "worker ready: %s%s\n", o.shm.c_str(), o.test_identity ? " [IDENTITY TEST]" : "");
         if (!o.test_identity)
             std::fprintf(stderr, "neural tier=%u; processing=%ux%u; %s; live controls enabled\n",
@@ -876,6 +882,7 @@ void run_worker(const Options& o)
         unsigned previous_passes = 0;
         TuningLatch tuning(h);
         uint32_t last = h->seq_resp.load(std::memory_order_acquire);
+        std::string failure;
         while (!stopping && !h->quit.load(std::memory_order_relaxed)) {
             if (traces && !pending_trace) {
                 try {
@@ -894,24 +901,25 @@ void run_worker(const Options& o)
                 continue;
             }
             const unsigned w = h->width.load(), height = h->height.load();
+            last = request;
             try {
                 ProcessingSettings settings;
                 settings.fp16 = h->hdrEncode.load() != 0;
                 const bool hdr = h->hdrDetected.load() != kHdrNone && h->colourMode.load() != kColourDisplay;
                 settings.precision16 = hdr || h->sdr16Multipass.load() != 0;
                 settings.motion = h->mvecEnabled.load() != 0;
-                settings.motion_quality = h->mvecQuality.load();
-                settings.motion_grid = h->mvecPixelSize.load();
-                settings.motion_units = h->mvecScaleMode.load();
+                settings.motion_quality = ShmMVecQuality(h);
+                settings.motion_grid = ShmMVecPixelSize(h);
+                settings.motion_units = ShmMVecScaleMode(h);
                 settings.tuning = active_tuning;
                 settings.color_preserve = BitsToFloat(h->colorPreserveBits.load());
                 if (!w || !height || w > kMaxW || height > kMaxH || h->format.load() != 1)
-                    throw std::runtime_error("unsupported request dimensions or proxy format");
+                    throw std::range_error("unsupported request dimensions or proxy format");
                 // Older/external clients must not silently enable unmapped
                 // NVIDIA model controls that this fixed graph cannot honor.
                 if (h->preset.load() || h->style.load() || h->autoMask.load() != 1 ||
                     BitsToFloat(h->skinStructureBits.load()) != -1.0f)
-                    throw std::runtime_error("unmapped neural preset/style/skin-mask controls require their captured defaults");
+                    throw std::range_error("unmapped neural preset/style/skin-mask controls require their captured defaults");
                 const size_t bytes = size_t(w) * height * (settings.fp16 ? 8 : 4);
                 // A live control change takes effect on the next request;
                 // never shorten or extend a chain partway through a frame.
@@ -926,7 +934,7 @@ void run_worker(const Options& o)
                 engine.pin(mapping.input, mapping.output, bytes);
                 engine.infer(mapping.input, w, height, mapping.output, passes, settings, pending_trace.get());
                 if (h->seq_req.load(std::memory_order_acquire) != request)
-                    throw std::runtime_error("request changed during inference; old answer discarded");
+                    throw std::range_error("request changed during inference; old answer discarded");
                 std::string trace_metadata;
                 if (pending_trace) {
                     dlsslop::TraceFrameMetadata metadata;
@@ -955,6 +963,10 @@ void run_worker(const Options& o)
                     metadata.color = BitsToFloat(h->colourStrengthBits.load());
                     trace_metadata = metadata.json();
                 }
+                if (!failure.empty()) { // Serving recovered: the failure is no longer current.
+                    failure.clear();
+                    mapping.reason(ready);
+                }
                 h->answeredW.store(w);
                 h->answeredH.store(height);
                 h->helperEvalMsBits.store(FloatToBits(engine.inference_ms));
@@ -971,7 +983,6 @@ void run_worker(const Options& o)
                     pending_trace->finish(trace_metadata);
                     pending_trace.reset();
                 }
-                last = request;
                 if (o.once) break;
             } catch (const std::exception& e) {
                 if (pending_trace) {
@@ -979,15 +990,19 @@ void run_worker(const Options& o)
                     pending_trace->finish("{\"frame_seq\":" + std::to_string(request) + "}");
                     pending_trace.reset();
                 }
-                mapping.reason(e.what());
-                std::fprintf(stderr, "frame %u failed: %s\n", request, e.what());
+                if (failure != e.what()) { // Report a persistent rejection once, not every frame.
+                    mapping.reason(failure = e.what());
+                    std::fprintf(stderr, "frame %u failed: %s\n", request, e.what());
+                }
                 h->answeredW.store(0);
                 h->answeredH.store(0);
                 h->seq_resp.store(request, std::memory_order_release);
                 syscall(SYS_futex, reinterpret_cast<uint32_t*>(&h->seq_resp), FUTEX_WAKE,
                         1, nullptr, nullptr, 0);
-                last = request;
-                if (!o.test_identity) throw; // A HIP failure is not silently replaced by fake output.
+                // A rejection (std::range_error) is answered as failed and serving goes
+                // on. Any other failure ends the worker in every mode: a HIP or engine
+                // fault is never silently replaced by fake output.
+                if (o.once || !dynamic_cast<const std::range_error*>(&e)) throw;
             }
         }
     } catch (const std::exception& e) {

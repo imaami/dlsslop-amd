@@ -44,7 +44,7 @@ class GpuTemporal {
     }
     void configure(const Geometry& g, unsigned quality, unsigned grid, unsigned units, unsigned passes)
     {
-        if (quality > 2 || grid > 3 || units > 2 || !passes || passes > 30 ||
+        if (!passes || passes > 30 ||
             !g.width || !g.valid_height || g.valid_height > g.height ||
             g.height > 2 * g.valid_height - 2 || g.valid_width != g.width)
             throw std::invalid_argument("invalid temporal settings or geometry");
@@ -106,6 +106,7 @@ public:
 
     // Inputs are float4 raster data in the same encoding as the network. Commands
     // remain on its HIP stream; begin owns a copy before multi-pass feedback.
+    // Motion settings are in the ranges the protocol's ShmMVec* readers return.
     void begin(void* rgba, const Geometry& g, unsigned quality, unsigned grid,
                unsigned units, unsigned passes, bool reset_history = false)
     {

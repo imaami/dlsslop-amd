@@ -177,7 +177,7 @@ public:
         std::uint32_t invalid = 0;
         api_.Check(api_.hipMemcpy(&invalid, invalid_, sizeof invalid, 2), "read codec status");
         if (invalid)
-            throw std::runtime_error("proxy input, neural feedback or output contains nonfinite or FP16-overflow samples");
+            throw std::range_error("proxy input, neural feedback or output contains nonfinite or FP16-overflow samples");
     }
 };
 

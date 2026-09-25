@@ -258,7 +258,7 @@ void test_fp16_proxy()
     bool rejected = false;
     try {
         dlsslop::encode_proxy(source.data(), g, true, encoded);
-    } catch (const std::runtime_error&) {
+    } catch (const std::range_error&) { // A rejected frame, not a worker fault.
         rejected = true;
     }
     require(rejected, "FP16 proxy accepted nonfinite RGB input");
@@ -270,7 +270,7 @@ void test_fp16_proxy()
         rejected = false;
         try {
             dlsslop::decode_neural_proxy(source.data(), g, true, bad.data(), decoded);
-        } catch (const std::runtime_error&) {
+        } catch (const std::range_error&) {
             rejected = true;
         }
         require(rejected, "FP16 proxy decode accepted nonfinite/overflow neural sample");

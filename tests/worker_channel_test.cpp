@@ -95,6 +95,7 @@ public:
         require(!std::memcmp(input, output, bytes(fp16)), "identity answer differs from its request");
         return true;
     }
+    std::string reason() const { return ShmLoadString(h->helperReasonSeq, h->helperReason, kReasonBytes); }
 };
 
 class Worker {
@@ -176,6 +177,67 @@ void restart(const char* executable, const std::filesystem::path& directory)
             "a restarted worker reported a failed frame:\n" + worker.text());
     std::printf("PASS: a restarted worker failed the stale request and served new FP16 and RGBA8 ones\n");
 }
+
+size_t count(const std::string& text, const std::string& needle)
+{
+    size_t found = 0;
+    for (size_t at = text.find(needle); at != std::string::npos; at = text.find(needle, at + 1)) ++found;
+    return found;
+}
+
+// A rejected request is answered as failed and the worker keeps serving. A
+// rejection that repeats is logged and reported once; a served request makes
+// the worker report itself ready again.
+void rejection(const char* executable, const std::filesystem::path& directory)
+{
+    Channel channel((directory / "rejection.bin").string());
+    Worker worker(executable, channel, (directory / "rejection.log").string());
+    const std::string ready = channel.reason();
+    require(ready.find("IDENTITY") != std::string::npos, "an identity worker did not say so: " + ready);
+    const auto reports = [&channel](const char* rejection) {
+        require(channel.reason().rfind(rejection, 0) == 0, "the rejection is not the reason: " + channel.reason());
+    };
+    for (const bool fp16 : {false, true, false}) {
+        for (const uint8_t seed : {4, 5})
+            require(!channel.answered(channel.publish(fp16, seed, 2), fp16), "a malformed request succeeded");
+        reports("unsupported request");
+        require(channel.answered(channel.publish(fp16, 6), fp16), "the worker stopped serving after a rejection");
+        require(channel.reason() == ready, "a served request left the rejection as the reason: " + channel.reason());
+    }
+    channel.h->preset.store(1);
+    for (const uint8_t seed : {7, 8})
+        require(!channel.answered(channel.publish(false, seed), false), "an unmapped preset was accepted");
+    reports("unmapped");
+    require(!channel.answered(channel.publish(false, 9, 2), false), "a malformed request succeeded");
+    reports("unsupported request");
+    channel.h->preset.store(0);
+    require(channel.answered(channel.publish(false, 10), false), "the worker stopped serving after a rejection");
+    require(channel.reason() == ready, "a served request left the rejection as the reason: " + channel.reason());
+    require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
+    // Once per run of the same rejection: three malformed runs, the preset run
+    // and the malformed request that interrupted it.
+    const std::string log = worker.text();
+    require(count(log, " failed: unsupported request") == 4 && count(log, " failed: unmapped") == 1,
+            "each run of a rejection must be logged once:\n" + log);
+    std::printf("PASS: rejected requests were answered as failed while serving continued\n");
+}
+
+// --once exits after its one answer, with status 1 when that answer failed.
+void once(const char* executable, const std::filesystem::path& directory)
+{
+    Channel channel((directory / "once.bin").string());
+    for (const bool good : {false, true}) {
+        Worker worker(executable, channel, (directory / "once.log").string(), true);
+        const uint32_t request = channel.publish(true, 8, good ? 1 : 2);
+        require(channel.answered(request, true) == good, "--once answered its request wrongly");
+        require(worker.status() == (good ? 0 : 1), std::string("--once exit status after a ") +
+                (good ? "successful" : "failed") + " request:\n" + worker.text());
+        require(channel.h->helperState.load() == (good ? kHelperStopped : kHelperModelFailed),
+                "--once left the wrong helper state");
+        require(channel.h->seq_req.load() == request, "--once consumed another request");
+    }
+    std::printf("PASS: --once exited after one answer, reporting a failed one\n");
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -194,6 +256,8 @@ int main(int argc, char** argv)
     int result = 0;
     try {
         restart(argv[1], directory);
+        rejection(argv[1], directory);
+        once(argv[1], directory);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "worker channel: %s\n", e.what());
         result = 1;
