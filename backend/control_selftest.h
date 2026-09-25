@@ -234,7 +234,7 @@ inline void check_codec(hip_probe::Api& api, hip_probe::Handle stream, const std
     GpuCodec codec(api, stream, modules + "/linux_codec.hsaco");
     std::vector<float> reference, model(pixels * 3);
     encode_proxy(proxy.data(), g, true, reference);
-    codec.encode(proxy, g, device_input.pointer, true);
+    codec.encode(proxy.data(), g, device_input.pointer, true);
     const float encode_error = compare(device_input.read(), reference, 1.0f / 1024.0f, "GPU FP16 proxy encode");
 
     // A constant signed/extended-range RGB fixture makes all decode resampling
@@ -243,8 +243,8 @@ inline void check_codec(hip_probe::Api& api, hip_probe::Handle stream, const std
         model[p * 3] = -.25f; model[p * 3 + 1] = 1.5f; model[p * 3 + 2] = .5f;
     }
     device_rgb.upload(model);
-    std::vector<std::uint8_t> decoded, expected;
-    codec.decode(g, device_rgb.pointer, decoded);
+    std::vector<std::uint8_t> decoded(proxy.size()), expected;
+    codec.decode(g, device_rgb.pointer, decoded.data());
     decode_neural_proxy(proxy.data(), g, true, model.data(), expected);
     require(decoded == expected, "GPU FP16 proxy decode disagrees on exact signed/extended-range fixture");
     std::uint16_t first_red, first_green;

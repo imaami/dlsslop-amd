@@ -6,11 +6,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
-#include <vector>
 
 namespace dlsslop {
 
@@ -19,6 +19,8 @@ static_assert(sizeof(Geometry) == 40 && offsetof(Geometry, fit_height) == 36 &&
               std::is_trivially_copyable<Geometry>::value, "GPU codec geometry ABI");
 
 class GpuCodec {
+    using HostRegister = int (*)(void*, std::size_t, unsigned);
+    using HostUnregister = int (*)(void*);
     hip_probe::Api& api_;
     hip_probe::Handle stream_{};
     hip_probe::Handle module_{}, encode_{}, encode16_{}, feedback_{}, decode_{}, decode16_{};
@@ -26,8 +28,20 @@ class GpuCodec {
     void* output_ = nullptr;
     void* invalid_ = nullptr;
     std::size_t capacity_ = 0;
+    // Resolved here so the vendored loader stays as upstream adapted it.
+    HostRegister host_register_ = reinterpret_cast<HostRegister>(dlsym(api_.dll, "hipHostRegister"));
+    HostUnregister host_unregister_ = reinterpret_cast<HostUnregister>(dlsym(api_.dll, "hipHostUnregister"));
+    std::uint8_t* pinned_[2]{};
+    std::size_t pinned_bytes_ = 0;
     Geometry uploaded_{};
     bool uploaded_fp16_ = false;
+
+    void unpin() noexcept
+    {
+        if (pinned_bytes_)
+            for (auto* slot : pinned_) host_unregister_(slot);
+        pinned_bytes_ = 0;
+    }
 
     void reserve(std::size_t bytes)
     {
@@ -53,6 +67,7 @@ class GpuCodec {
     void release() noexcept
     {
         api_.hipStreamSynchronize(stream_);
+        unpin();
         if (source_) api_.hipFree(source_);
         if (output_) api_.hipFree(output_);
         if (invalid_) api_.hipFree(invalid_);
@@ -82,19 +97,39 @@ public:
     GpuCodec& operator=(const GpuCodec&) = delete;
     ~GpuCodec() { release(); }
 
+    // Serving: page-lock growing prefixes of the channel's frame slots so the
+    // encode and decode copies DMA straight from and to shared memory. The
+    // slots must outlive this codec; call only between frames. On failure the
+    // slots stay pageable, which costs HIP staging copies but remains correct.
+    void pin(std::uint8_t* input, std::uint8_t* output, std::size_t bytes)
+    {
+        if (!host_register_ || (bytes <= pinned_bytes_ && input == pinned_[0] && output == pinned_[1]))
+            return;
+        unpin();
+        pinned_[0] = input;
+        pinned_[1] = output;
+        if (!host_register_(input, bytes, 0)) {
+            if (!host_register_(output, bytes, 0)) {
+                pinned_bytes_ = bytes;
+                return;
+            }
+            host_unregister_(input);
+        }
+        host_register_ = nullptr;
+        std::fprintf(stderr, "shared-memory pinning unavailable; using staged HIP transfers\n");
+    }
+
     // The caller keeps the HIP device current and the network's stream alive.
-    // Upload is synchronous; encode is queued on the same stream as inference.
-    void encode(const std::vector<std::uint8_t>& input, const Geometry& g,
-                void* device_rgba, bool fp16 = false)
+    // Upload and encode are queued on the inference stream; input must stay
+    // unchanged until the stream reaches them (pageable input is staged).
+    void encode(const std::uint8_t* input, const Geometry& g, void* device_rgba, bool fp16 = false)
     {
         const auto expected = geometry(g.source_width, g.source_height, g.valid_height);
         if (std::memcmp(&expected, &g, sizeof g) || !device_rgba)
             throw std::invalid_argument("invalid GPU encode geometry or output");
         const std::size_t bytes = std::size_t(g.source_width) * g.source_height * (fp16 ? 8 : 4);
-        if (input.size() != bytes)
-            throw std::invalid_argument("GPU encode input size mismatch");
         reserve(bytes);
-        api_.Check(api_.hipMemcpy(source_, input.data(), bytes, 1), "upload codec proxy");
+        api_.Check(api_.hipMemcpyAsync(source_, input, bytes, 1, stream_), "upload codec proxy");
         api_.Check(api_.hipMemsetAsync(invalid_, 0, sizeof(std::uint32_t), stream_), "reset codec status");
         Geometry parameters = g;
         void* args[] = {&source_, &device_rgba, &invalid_, &parameters};
@@ -121,23 +156,23 @@ public:
     }
 
     // decode belongs to the latest encode. Both execute on the network stream.
-    // Nonfinite FP16 neural samples fail explicitly, never becoming fake output.
-    void decode(const Geometry& g, void* neural_rgb, std::vector<std::uint8_t>& output)
+    // Output receives the proxy-sized answer, even when it then fails: nonfinite
+    // FP16 neural samples throw explicitly, never becoming a reported answer.
+    void decode(const Geometry& g, void* neural_rgb, std::uint8_t* output)
     {
         if (std::memcmp(&uploaded_, &g, sizeof g) || !source_ || !neural_rgb)
             throw std::invalid_argument("GPU decode without matching encode");
         const std::size_t bytes = std::size_t(g.source_width) * g.source_height * (uploaded_fp16_ ? 8 : 4);
-        output.resize(bytes);
         Geometry parameters = g;
         void* args[] = {&source_, &neural_rgb, &output_, &invalid_, &parameters};
         api_.Check(api_.hipModuleLaunchKernel(uploaded_fp16_ ? decode16_ : decode_, (g.source_width * g.source_height + 255u) / 256u,
             1, 1, 256, 1, 1, 0, stream_, args, nullptr), "decode neural output to SDR");
+        api_.Check(api_.hipMemcpyAsync(output, output_, bytes, 2, stream_), "read codec proxy");
         api_.Check(api_.hipStreamSynchronize(stream_), "codec decode completion");
         std::uint32_t invalid = 0;
         api_.Check(api_.hipMemcpy(&invalid, invalid_, sizeof invalid, 2), "read codec status");
         if (invalid)
             throw std::runtime_error("proxy input, neural feedback or output contains nonfinite or FP16-overflow samples");
-        api_.Check(api_.hipMemcpy(output.data(), output_, bytes, 2), "read codec proxy");
     }
 };
 

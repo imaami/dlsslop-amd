@@ -469,13 +469,21 @@ public:
         if (options_.self_test)
             dlsslop::check_gpu_controls(api, network_->Stream(), options_.modules);
     }
-    void infer(const std::vector<uint8_t>& input, unsigned w, unsigned h,
-               std::vector<uint8_t>& output, unsigned passes,
+    // Serving only: DMA the channel's frame slots directly (see GpuCodec::pin).
+    void pin(uint8_t* input, uint8_t* output, size_t bytes)
+    {
+        if (gpu_codec_) gpu_codec_->pin(input, output, bytes);
+    }
+    // Input and output are w * h RGBA8, or RGBA16F with settings.fp16.
+    void infer(const uint8_t* input, unsigned w, unsigned h, uint8_t* output, unsigned passes,
                const ProcessingSettings& settings = {}, dlsslop::FrameTrace* trace = nullptr)
     {
         if (!passes || passes > kMaxPasses)
             throw std::invalid_argument("invalid neural pass count");
-        if (options_.test_identity) { output = input; return; }
+        if (options_.test_identity) {
+            std::memcpy(output, input, size_t(w) * h * (settings.fp16 ? 8 : 4));
+            return;
+        }
         if (passes > 1 || options_.self_test || settings.motion) {
             // The optional upstream approximate cache has one history, not
             // one history per pass. Do not silently mix those states.
@@ -511,7 +519,7 @@ public:
             network_->Synchronize();
             if (options_.self_test) {
                 std::vector<float> reference, actual(size_t(g.width) * g.height * 4);
-                dlsslop::encode_proxy(input.data(), g, settings.fp16, reference);
+                dlsslop::encode_proxy(input, g, settings.fp16, reference);
                 api.Check(api.hipMemcpy(actual.data(), device_input_, actual.size() * sizeof(float), 2), "verify GPU codec input");
                 float maximum = 0;
                 size_t worst = 0, outside_tolerance = 0;
@@ -543,7 +551,7 @@ public:
                 }
             }
         } else {
-            dlsslop::encode_proxy(input.data(), g, settings.fp16, encoded_);
+            dlsslop::encode_proxy(input, g, settings.fp16, encoded_);
             api.Check(api.hipMemcpy(device_input_, encoded_.data(), encoded_.size() * sizeof(float), 1), "upload encoded frame");
         }
         if (!std::isfinite(settings.color_preserve) || settings.color_preserve < 0 || settings.color_preserve > 1)
@@ -667,10 +675,10 @@ public:
             gpu_codec_->decode(g, answer, output);
             if (options_.self_test) {
                 std::vector<uint8_t> reference;
-                dlsslop::decode_neural_proxy(input.data(), g, settings.fp16, neural_.data(), reference);
+                dlsslop::decode_neural_proxy(input, g, settings.fp16, neural_.data(), reference);
                 unsigned maximum = 0;
                 size_t worst = 0;
-                for (size_t i = 0; i < output.size(); ++i) {
+                for (size_t i = 0; i < reference.size(); ++i) {
                     const unsigned error = unsigned(std::abs(int(output[i]) - int(reference[i])));
                     if (error > maximum) { maximum = error; worst = i; }
                 }
@@ -683,10 +691,14 @@ public:
                     throw std::runtime_error("GPU decoder disagrees with CPU reference");
                 }
             }
-        } else if (options_.cpu_compose)
-            dlsslop::decode_rgba8(input.data(), g, encoded_.data(), neural_.data(), output);
-        else
-            dlsslop::decode_neural_proxy(input.data(), g, settings.fp16, neural_.data(), output);
+        } else {
+            std::vector<uint8_t> result;
+            if (options_.cpu_compose)
+                dlsslop::decode_rgba8(input, g, encoded_.data(), neural_.data(), result);
+            else
+                dlsslop::decode_neural_proxy(input, g, settings.fp16, neural_.data(), result);
+            std::memcpy(output, result.data(), result.size());
+        }
         readback_ms = elapsed(evaluated, now());
     }
     // infer() reads this back on every self-test invocation, before decoding.
@@ -696,7 +708,7 @@ public:
 void run_self_test(const Options& o, Engine& engine)
 {
     constexpr unsigned w = 640, h = 360;
-    std::vector<uint8_t> input(size_t(w) * h * 4), output;
+    std::vector<uint8_t> input(size_t(w) * h * 4), output(input.size());
     for (unsigned y = 0; y < h; ++y) for (unsigned x = 0; x < w; ++x) {
         const size_t p = (size_t(y) * w + x) * 4;
         input[p] = static_cast<uint8_t>(x * 255 / (w - 1));
@@ -708,7 +720,7 @@ void run_self_test(const Options& o, Engine& engine)
     const auto g = dlsslop::geometry(w, h, o.tier);
     std::vector<float> first_raw;
     for (unsigned run = 0; run < repeats; ++run) {
-        engine.infer(input, w, h, output, o.passes);
+        engine.infer(input.data(), w, h, output.data(), o.passes);
         const auto& raw = engine.raw_result();
         if (raw.size() != size_t(g.width) * g.height * 3)
             throw std::runtime_error("self-test raw network output size mismatch");
@@ -756,7 +768,6 @@ void run_self_test(const Options& o, Engine& engine)
                     engine.upload_ms, engine.inference_ms, engine.readback_ms);
         std::fflush(stdout);
     }
-    if (output.size() != input.size()) throw std::runtime_error("self-test output size mismatch");
     uint64_t hash = 14695981039346656037ull;
     unsigned low = 255, high = 0;
     size_t changed = 0;
@@ -789,11 +800,11 @@ void run_offline(const Options& o, Engine& engine)
     std::ifstream in(o.input, std::ios::binary | std::ios::ate);
     if (!in || in.tellg() != static_cast<std::streamoff>(bytes))
         throw std::runtime_error("offline input size must equal width * height * 4");
-    std::vector<uint8_t> pixels(bytes), result;
+    std::vector<uint8_t> pixels(bytes), result(bytes);
     in.seekg(0);
     if (!in.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(bytes)))
         throw std::runtime_error("read offline input");
-    engine.infer(pixels, o.width, o.height, result, o.passes);
+    engine.infer(pixels.data(), o.width, o.height, result.data(), o.passes);
     std::ofstream out(o.output, std::ios::binary);
     if (!out.write(reinterpret_cast<const char*>(result.data()), static_cast<std::streamsize>(result.size())))
         throw std::runtime_error("write offline output");
@@ -850,7 +861,6 @@ void run_worker(const Options& o)
         unsigned previous_passes = 0;
         TuningLatch tuning(h);
         uint32_t last = h->seq_resp.load(std::memory_order_acquire);
-        std::vector<uint8_t> input, output;
         while (!stopping && !h->quit.load(std::memory_order_relaxed)) {
             if (traces && !pending_trace) {
                 try {
@@ -889,7 +899,6 @@ void run_worker(const Options& o)
                     BitsToFloat(h->skinStructureBits.load()) != -1.0f)
                     throw std::runtime_error("unmapped neural preset/style/skin-mask controls require their captured defaults");
                 const size_t bytes = size_t(w) * height * (settings.fp16 ? 8 : 4);
-                input.assign(mapping.input, mapping.input + bytes);
                 // A live control change takes effect on the next request;
                 // never shorten or extend a chain partway through a frame.
                 const unsigned passes = ShmPasses(h);
@@ -900,9 +909,8 @@ void run_worker(const Options& o)
                     std::fprintf(stderr, "neural passes=%u; one final composition per frame\n", passes);
                     previous_passes = passes;
                 }
-                engine.infer(input, w, height, output, passes, settings, pending_trace.get());
-                if (output.size() != bytes)
-                    throw std::runtime_error("worker output does not match proxy payload size");
+                engine.pin(mapping.input, mapping.output, bytes);
+                engine.infer(mapping.input, w, height, mapping.output, passes, settings, pending_trace.get());
                 if (h->seq_req.load(std::memory_order_acquire) != request)
                     throw std::runtime_error("request changed during inference; old answer discarded");
                 std::string trace_metadata;
@@ -916,8 +924,8 @@ void run_worker(const Options& o)
                     metadata.held_input = held_input;
                     metadata.held_input_end = h->holdFrame.load();
                     metadata.source_proxy_hash = 14695981039346656037ull;
-                    for (unsigned char byte : input)
-                        metadata.source_proxy_hash = (metadata.source_proxy_hash ^ byte) * 1099511628211ull;
+                    for (size_t i = 0; i < bytes; ++i)
+                        metadata.source_proxy_hash = (metadata.source_proxy_hash ^ mapping.input[i]) * 1099511628211ull;
                     metadata.passes = passes;
                     metadata.geometry = dlsslop::geometry(w, height, o.tier);
                     metadata.fp16_proxy = settings.fp16;
@@ -933,7 +941,6 @@ void run_worker(const Options& o)
                     metadata.color = BitsToFloat(h->colourStrengthBits.load());
                     trace_metadata = metadata.json();
                 }
-                std::memcpy(mapping.output, output.data(), bytes);
                 h->answeredW.store(w);
                 h->answeredH.store(height);
                 h->helperEvalMsBits.store(FloatToBits(engine.inference_ms));
