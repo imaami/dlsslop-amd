@@ -23,10 +23,11 @@ weights (0.2126, 0.7152, 0.0722); it is not linear-light luminance. Filtering
 clamps to the fitted viewport and leaves padded pixels unchanged.
 
 Brightness and achromatic detail remain. Uniform color shifts are removed at
-full strength, but high-frequency chroma changes can remain. Chroma is
-compressed toward gray when needed to keep channels in [0,1] if luma is already
-in that range. Out-of-range luma remains for the existing codec. The filter can
-also remove intended relighting color.
+full strength, but high-frequency chroma changes can remain. When luma is in
+[0,1], the correction, never the pass output's own chroma, is shortened by one
+factor so that no channel leaves [0,1] or goes further outside it than the pass
+put it. Out-of-range luma takes the full correction and keeps its headroom for
+the existing codec. The filter can also remove intended relighting color.
 
 ## GPU and CPU paths
 
