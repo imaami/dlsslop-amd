@@ -380,11 +380,13 @@ public:
         h->answerExportSeq.store(0);
         h->layerProxySeq.store(0);
         h->layerAnswerSeq.store(0);
-        h->proxyFormat.store(kProxyRgba8);
-        h->hdrActive.store(0);
         h->helperPassCeiling.store(kMaxPasses);
         h->modelUp.store(0);
         h->seq_ok.store(0);
+        // Answer a request left by a previous worker as failed, so the layer
+        // presents its own frame; requests made from here on are served.
+        h->seq_resp.store(h->seq_req.load(std::memory_order_acquire), std::memory_order_release);
+        syscall(SYS_futex, reinterpret_cast<uint32_t*>(&h->seq_resp), FUTEX_WAKE, 1, nullptr, nullptr, 0);
         h->helperState.store(kHelperStarting);
     }
     Mapping(const Mapping&) = delete;
@@ -903,8 +905,7 @@ void run_worker(const Options& o)
                 settings.motion_units = h->mvecScaleMode.load();
                 settings.tuning = active_tuning;
                 settings.color_preserve = BitsToFloat(h->colorPreserveBits.load());
-                if (!w || !height || w > kMaxW || height > kMaxH || h->format.load() != 1 ||
-                    h->proxyFormat.load() != (settings.fp16 ? kProxyRgba16F : kProxyRgba8))
+                if (!w || !height || w > kMaxW || height > kMaxH || h->format.load() != 1)
                     throw std::runtime_error("unsupported request dimensions or proxy format");
                 // Older/external clients must not silently enable unmapped
                 // NVIDIA model controls that this fixed graph cannot honor.

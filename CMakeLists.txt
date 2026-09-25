@@ -95,6 +95,9 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/launcher-cli.py)
     add_test(NAME worker-cli COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/worker-cli.py $<TARGET_FILE:dlsslopd>)
+    add_executable(worker-channel-test tests/worker_channel_test.cpp)
+    target_include_directories(worker-channel-test PRIVATE ${LAYER_ROOT}/common)
+    add_test(NAME worker-channel COMMAND worker-channel-test $<TARGET_FILE:dlsslopd>)
     add_test(NAME packaging COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging_test.py)
     add_executable(vulkan-storage-test tests/vulkan_storage_test.cpp)

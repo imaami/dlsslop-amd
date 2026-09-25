@@ -477,7 +477,7 @@ index 3d7bbfb..0b087a2 100644
   for(uint tile=0;tile<2;tile++){half8 a{};for(uint e=0;e<8;e++){uint k=tile*16+group*8+e;a[e]=(_Float16)(k<16?values[rc*16+k]:0.f);}
    for(uint col=0;col<2;col++){half8 b{};for(uint e=0;e<8;e++){uint k=tile*16+group*8+e;b[e]=(_Float16)(k<16?weights[(col*16+rc)*16+k]:0.f);}sum[col]=__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a,b,sum[col]);}
 diff --git a/upstream-layer/common/shm_protocol.h b/upstream-layer/common/shm_protocol.h
-index fd7c1cd..3beeafe 100644
+index fd7c1cd..c76b3c9 100644
 --- a/upstream-layer/common/shm_protocol.h
 +++ b/upstream-layer/common/shm_protocol.h
 @@ -14,11 +14,11 @@
@@ -492,8 +492,8 @@ index fd7c1cd..3beeafe 100644
 +// The proxy is RGBA8 or RGBA16F. The legacy Windows helper publishes its supported
 +// format; its HDR proxy carries white-point-normalized linear light. Native HIP
 +// v22 uses display-encoded proxies in either precision, including HDR normalized
-+// by the layer, and the layer publishes proxyFormat with each request. hdrEncode
-+// is the per-request precision flag. `format` remains 1 for compatibility.
++// by the layer; hdrEncode is the per-request precision flag. `format` remains 1
++// for compatibility.
  #include <atomic>
  #include <cstdint>
  #include <cstdlib>
@@ -537,19 +537,7 @@ index fd7c1cd..3beeafe 100644
      kHdrForce = 2,  // float16 proxy even for an SDR swapchain (an A/B tool, not a preference)
  };
  
-@@ -153,8 +162,9 @@ enum HdrKind : uint32_t {
-     kHdrPq10 = 2,       // 10-bit with a PQ/BT.2020 colour space: ST 2084 code
- };
- 
--// What the crossing images actually are, published by the helper: the model decides, and the layer
--// encodes to match rather than to hope.
-+// Crossing-image format. The legacy Windows helper publishes the format it built.
-+// For native HIP v22 the layer publishes the format with each request, alongside
-+// hdrEncode and dimensions, before releasing seq_req.
- enum ProxyFormat : uint32_t {
-     kProxyUnknown = 0,
-     kProxyRgba8 = 1,
-@@ -203,6 +213,14 @@ inline std::string ShmRuntimeDir() {
+@@ -203,6 +212,14 @@ inline std::string ShmRuntimeDir() {
  
  inline std::string ShmDefaultPath() { return ShmRuntimeDir() + "/shm.bin"; }
  
@@ -564,7 +552,7 @@ index fd7c1cd..3beeafe 100644
  inline size_t ShmTotalBytes() { return kHeaderBytes + kMaxFrame * 2; }
  
  // One pass's overrides. Every field is present; `overrideMask` says which of them mean anything.
-@@ -316,7 +334,7 @@ struct ShmHeader {
+@@ -316,7 +333,7 @@ struct ShmHeader {
      // Only useful where the layer can read the keyboard at all: an X11 or XWayland session, inside
      // gamescope, or anywhere the user is in the 'input' group. A game presenting through winewayland
      // is a Wayland client whose keys never reach this process, and keyboards get no uaccess ACL, so
@@ -573,19 +561,7 @@ index fd7c1cd..3beeafe 100644
      std::atomic<uint32_t> toggleKey;
  
      // Which proxy the model is shown, and whether its answer is composed or substituted. See
-@@ -449,18 +467,18 @@ struct ShmHeader {
- 
-     // The HDR input path. hdrMode is the user's choice (see HdrMode); hdrDetected and hdrKind are the
-     // layer's reading of the primary swapchain's format and colour space; hdrActive is the decision
--    // the layer actually encoded this frame under, and proxyFormat is what the helper built the
--    // crossing images as. The layer uses the float16 path only while both agree it exists -- if the
--    // model refused the float input, proxyFormat stays 8-bit and the encode tone maps as before.
-+    // the layer actually encoded this frame under. Legacy proxyFormat describes
-+    // helper-built crossing images; the layer waits for its float16 support.
-+    // Native v22 proxyFormat instead describes this request's payload, published
-+    // by the layer before seq_req; native HIP supports both formats.
-     std::atomic<uint32_t> hdrMode;
-     std::atomic<uint32_t> hdrDetected;
+@@ -457,10 +474,9 @@ struct ShmHeader {
      std::atomic<uint32_t> hdrActive;
      std::atomic<uint32_t> proxyFormat;
      // What the proxy bytes in the shared region actually are for the request being made: the layer
@@ -593,13 +569,13 @@ index fd7c1cd..3beeafe 100644
 -    // that announced the pixels. It lags hdrActive by the frames it takes to switch the crossing
 -    // images over, and the helper refuses a frame whose width does not match what it built -- which
 -    // is one presented-as-is frame at a toggle, never a misread one.
-+    // writes this immediately before seq_req. Native HIP uses it directly as
-+    // the payload precision. Legacy Windows transport may lag hdrActive while
++    // writes this immediately before seq_req. Native HIP uses it directly as the payload
++    // precision, without proxyFormat. Legacy Windows transport may lag hdrActive while
 +    // crossing images are rebuilt; mismatched frames are refused, never misread.
      std::atomic<uint32_t> hdrEncode;
  
      // trip, which is what it has always been; N takes an answer up only on a frame whose count is a
-@@ -533,6 +551,12 @@ struct ShmHeader {
+@@ -533,6 +549,12 @@ struct ShmHeader {
      std::atomic<uint32_t> sdr16Multipass;
      std::atomic<uint32_t> mvecPixelSize;
  
@@ -612,7 +588,7 @@ index fd7c1cd..3beeafe 100644
  };
  
  static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region");
-@@ -548,7 +572,7 @@ static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region")
+@@ -548,7 +570,7 @@ static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region")
  // The version check already existed to prevent exactly that; what was missing was anything to make
  // someone remember to use it. If these fire, the layout changed: bump kShmVersion in the same commit,
  // then update these numbers.
@@ -621,7 +597,7 @@ index fd7c1cd..3beeafe 100644
  
  static_assert(offsetof(ShmHeader, enabled) == 44, "layout changed -- bump kShmVersion");
  static_assert(offsetof(ShmHeader, transferStrengthBits) == 88, "layout changed -- bump kShmVersion");
-@@ -615,6 +639,7 @@ inline void ShmResetSettings(ShmHeader* h) {
+@@ -615,6 +637,7 @@ inline void ShmResetSettings(ShmHeader* h) {
          uint32_t answerExportSeq, answerPid, answerFd, answerGen;
          uint32_t layerProxySeq, layerAnswerSeq;
          uint32_t hdrDetected, hdrActive, proxyFormat, hdrEncode;
@@ -629,7 +605,7 @@ index fd7c1cd..3beeafe 100644
      } v;
  #define DLSSNR_SAVE(f) v.f = h->f.load()
      DLSSNR_SAVE(seq_req); DLSSNR_SAVE(seq_resp); DLSSNR_SAVE(width); DLSSNR_SAVE(height);
-@@ -633,6 +658,7 @@ inline void ShmResetSettings(ShmHeader* h) {
+@@ -633,6 +656,7 @@ inline void ShmResetSettings(ShmHeader* h) {
      DLSSNR_SAVE(answerExportSeq); DLSSNR_SAVE(answerPid); DLSSNR_SAVE(answerFd);
      DLSSNR_SAVE(answerGen); DLSSNR_SAVE(layerProxySeq); DLSSNR_SAVE(layerAnswerSeq);
      DLSSNR_SAVE(hdrDetected); DLSSNR_SAVE(hdrActive); DLSSNR_SAVE(proxyFormat); DLSSNR_SAVE(hdrEncode);
@@ -637,7 +613,7 @@ index fd7c1cd..3beeafe 100644
  #undef DLSSNR_SAVE
      char helperReason[kReasonBytes], layerReason[kReasonBytes], gameName[kNameBytes];
      std::memcpy(helperReason, h->helperReason, sizeof(helperReason));
-@@ -657,7 +683,14 @@ inline void ShmResetSettings(ShmHeader* h) {
+@@ -657,7 +681,14 @@ inline void ShmResetSettings(ShmHeader* h) {
      DLSSNR_LOAD(answerExportSeq); DLSSNR_LOAD(answerPid); DLSSNR_LOAD(answerFd);
      DLSSNR_LOAD(answerGen); DLSSNR_LOAD(layerProxySeq); DLSSNR_LOAD(layerAnswerSeq);
      DLSSNR_LOAD(hdrDetected); DLSSNR_LOAD(hdrActive); DLSSNR_LOAD(proxyFormat); DLSSNR_LOAD(hdrEncode);
@@ -652,7 +628,7 @@ index fd7c1cd..3beeafe 100644
      std::memcpy(h->helperReason, helperReason, sizeof(helperReason));
      std::memcpy(h->layerReason, layerReason, sizeof(layerReason));
      std::memcpy(h->gameName, gameName, sizeof(gameName));
-@@ -681,6 +714,7 @@ inline void ShmInitDefaults(ShmHeader* h) {
+@@ -681,6 +712,7 @@ inline void ShmInitDefaults(ShmHeader* h) {
      h->localStructureBits.store(FloatToBits(1.0f));
      h->skinStructureBits.store(FloatToBits(-1.0f));
      h->sharpnessBits.store(FloatToBits(0.0f));
@@ -660,7 +636,7 @@ index fd7c1cd..3beeafe 100644
  
      h->transferStrengthBits.store(FloatToBits(1.0f));
      h->colourStrengthBits.store(FloatToBits(1.0f));
-@@ -733,6 +767,20 @@ inline void ShmInitDefaults(ShmHeader* h) {
+@@ -733,6 +765,20 @@ inline void ShmInitDefaults(ShmHeader* h) {
      }
  }
  
@@ -1651,7 +1627,7 @@ index ec78533..e4f1a0e 100644
      return true;
  }
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..55dd74b 100644
+index 4b37520..f04d2ac 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -1774,16 +1750,7 @@ index 4b37520..55dd74b 100644
      static const bool on = [] {
          const char* v = getenv("DLSSNR_DMABUF");
          return !(v && !strcmp(v, "0"));
-@@ -354,6 +407,8 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
-     // Say what the bytes ARE before announcing them: the helper sizes its read by this, never by
-     // what it hopes the layer has switched to. The release fence below covers it like the pixels.
-     s.hdr->hdrEncode.store(hdrEncode ? 1u : 0u);
-+    if (NativeHipBackend())
-+        s.hdr->proxyFormat.store(hdrEncode ? kProxyRgba16F : kProxyRgba8);
-     uint32_t req = s.hdr->seq_req.load() + 1;
-     // The release pairs with the helper's acquire on seq_resp: everything this process wrote --
-     // the proxy, whether by the GPU into the imported region or by the memcpy above -- is visible
-@@ -361,6 +416,8 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -361,6 +414,8 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
      // by leg 1's vkWaitForFences; this fence covers the host-visible ordering across processes.)
      std::atomic_thread_fence(std::memory_order_release);
      s.hdr->seq_req.store(req);
@@ -1792,7 +1759,7 @@ index 4b37520..55dd74b 100644
  
      // How long this frame may wait, which is a question about whether anyone is listening.
      //
-@@ -378,12 +435,17 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -378,12 +433,17 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
      // once it is warm. Timing that out and giving up is how a working helper gets abandoned before it
      // has answered once.
      const bool warmingUp = !s.everAnswered;
@@ -1812,7 +1779,7 @@ index 4b37520..55dd74b 100644
              s.timeouts = 0;
              s.everAnswered = true;
              // The helper's GPU wrote the answer into this region (or the memcpy below reads the
-@@ -396,7 +458,9 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -396,7 +456,9 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
              // the meantime, and seq_resp only counts. Composing that answer here would copy a
              // different number of bytes into these surfaces -- the row-shifted colour garbage this
              // check exists to refuse.
@@ -1823,7 +1790,7 @@ index 4b37520..55dd74b 100644
                              s.hdr->answeredH.load() == h;
              if (!ok) Log("[shm] helper could not use frame %u (ok=%u)", req, s.hdr->seq_ok.load());
              if (ok && !answerFromFd && modelOut != (void*) s.outPixels) std::memcpy(modelOut, s.outPixels, bytes);
-@@ -413,8 +477,18 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -413,8 +475,18 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
          if (s.hdr->quit.load()) { s.dead = true; return false; }
          const double elapsed = NowMs() - tSignal;
          if (elapsed >= budgetMs) break;
@@ -1844,7 +1811,7 @@ index 4b37520..55dd74b 100644
      }
      // Four rather than eight, and with a pause before the next attempt, so giving up costs a
      // fraction of a second and retrying costs that again only every few seconds.
-@@ -851,6 +925,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -851,6 +923,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              for (size_t k = 0; k < kWantCount; ++k)
                      if (!std::strcmp(pCreateInfo->ppEnabledExtensionNames[i], kWantExts[k])) enabled[k] = true;
          for (size_t k = 0; k < kWantCount; ++k) {
@@ -1854,7 +1821,7 @@ index 4b37520..55dd74b 100644
              if (!ic->surfaceMaintenance1 &&
                  !std::strcmp(kWantExts[k], VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME))
                  continue;
-@@ -886,6 +963,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -886,6 +961,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
  
      link->u.pLayerInfo = link->u.pLayerInfo->pNext;
      auto* const nextLayerInfo = link->u.pLayerInfo;
@@ -1877,7 +1844,7 @@ index 4b37520..55dd74b 100644
      VkResult res = create(physicalDevice, effective, pAllocator, pDevice);
      if (res != VK_SUCCESS && effective != pCreateInfo) {
          // Nothing added here is worth failing a device creation over.
-@@ -893,6 +986,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -893,6 +984,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              (int) res);
          link->u.pLayerInfo = nextLayerInfo;
          addedSwapMaint = false;
@@ -1885,7 +1852,7 @@ index 4b37520..55dd74b 100644
          res = create(physicalDevice, pCreateInfo, pAllocator, pDevice);
      }
      if (res != VK_SUCCESS) return res;
-@@ -910,19 +1004,32 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -910,19 +1002,32 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
      dc->table.Load(*pDevice);
      dc->releaseImages = addedSwapMaint && dc->vkReleaseSwapchainImagesEXT != nullptr;
      if (!dc->vkQueuePresentKHR || !dc->vkCreateSwapchainKHR || !ic) dc->inert = true;
@@ -1924,7 +1891,7 @@ index 4b37520..55dd74b 100644
          }
      }
  
-@@ -1250,8 +1357,27 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
+@@ -1250,8 +1355,27 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
      }
      if (!dc || !dc->vkCreateSwapchainKHR) return VK_ERROR_INITIALIZATION_FAILED;
  
@@ -1953,7 +1920,7 @@ index 4b37520..55dd74b 100644
          m.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
  
      VkResult res = dc->vkCreateSwapchainKHR(device, &m, pAllocator, pSwapchain);
-@@ -1269,14 +1395,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
+@@ -1269,14 +1393,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
      sc.width = pCreateInfo->imageExtent.width;
      sc.height = pCreateInfo->imageExtent.height;
      const bool tooSmall = sc.width < kMinW || sc.height < kMinH;
@@ -1973,7 +1940,7 @@ index 4b37520..55dd74b 100644
                            : tooSmall ? " (too small)" : " (too large)") : "");
      dc->swapchains[*pSwapchain] = std::move(sc);
      return VK_SUCCESS;
-@@ -1335,6 +1464,23 @@ static bool SetLoaderData(DeviceChain* dc, void* object) {
+@@ -1335,6 +1462,23 @@ static bool SetLoaderData(DeviceChain* dc, void* object) {
  static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family) {
      VkDevice d = dc->self;
  
@@ -1997,7 +1964,7 @@ index 4b37520..55dd74b 100644
      VkCommandPoolCreateInfo cpci{};
      cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
      cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-@@ -1403,6 +1549,16 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1403,6 +1547,16 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
                              bool* waitsConsumed) {
      if (waitsConsumed) *waitsConsumed = false;
      if (!sc.comp) return false;
@@ -2014,7 +1981,7 @@ index 4b37520..55dd74b 100644
      VkDevice d = dc->self;
      VkCommandBuffer cb = sc.cb;
      const bool time = TimeEnabled();
-@@ -1437,19 +1593,26 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1437,19 +1591,26 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // frame on the 8-bit path it has always used. hdrActive doubles as the echo the helper reads, so
      // it builds the float images only for a layer that has said it will feed them.
      const uint32_t hdrMode = dc->shm.hdr ? dc->shm.hdr->hdrMode.load() : kHdrAuto;
@@ -2049,7 +2016,7 @@ index 4b37520..55dd74b 100644
          uint32_t mw = 0, mh = 0;
          dlssnr::Composition::ModelExtent(sc.width, sc.height, fs, mw, mh);
          if (ShmMapFrames(dc->shm, size_t(mw) * mh * (hdrProxy ? 8 : 4)))
-@@ -1470,7 +1633,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1470,7 +1631,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // through, and the helper honours them on exactly the frame they were set for.
      sc.comp->SetDmaBuf(DmaBufEnabled());
  
@@ -2058,7 +2025,7 @@ index 4b37520..55dd74b 100644
          Log("[layer] composition cannot run here: %s", sc.comp->Reason());
          return false;
      }
-@@ -1534,8 +1697,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1534,8 +1695,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // A capture is asked for by writing a frame count into the header; taking it clears the request,
      // so one press produces one run rather than one per frame for as long as nobody clears it.
      if (dc->shm.hdr) {
@@ -2074,7 +2041,7 @@ index 4b37520..55dd74b 100644
      }
  
      VkCommandBufferBeginInfo bi{};
-@@ -1595,6 +1763,9 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1595,6 +1761,9 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          return false;
      }
      sc.comp->MarkModelFrame();
@@ -2084,7 +2051,7 @@ index 4b37520..55dd74b 100644
      const double tHelper = time ? NowMs() : 0.0;
  
      // ---- leg 2: the answer, composed back ----
-@@ -1608,6 +1779,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1608,6 +1777,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // the top of the next frame, where the reused surfaces actually need it.
      if (!endAndSubmit(sc.fenceLeg2)) return false;
      sc.leg2Pending = true;
@@ -2098,7 +2065,7 @@ index 4b37520..55dd74b 100644
      const double tReturn = time ? NowMs() : 0.0;
  
      if (dc->shm.hdr) {
-@@ -1851,7 +2029,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
+@@ -1851,7 +2027,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
      if (*pCount < 1) { *pCount = 1; return VK_INCOMPLETE; }
      std::memset(pProperties, 0, sizeof(*pProperties));
      std::strncpy(pProperties->layerName, VK_LAYER_NAME, VK_MAX_EXTENSION_NAME_SIZE - 1);

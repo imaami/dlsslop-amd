@@ -6,11 +6,12 @@ parts of the integration.
 
 ## Automated tests
 
-CTest covers CLI parsing and defaults, launchers, storage-image handling, CPU
-codec/tuning/temporal behaviour, color preservation, trace serialization,
-capture writing, color-diagnostic orchestration, and offline imports with
-filtered dependency fetches and source preparation. With the GUI enabled it
-also checks the shared-memory controller backend.
+CTest covers CLI parsing and defaults, launchers, an identity worker's handling
+of shared-memory requests, storage-image handling, CPU codec/tuning/temporal
+behaviour, color preservation, trace serialization, capture writing,
+color-diagnostic orchestration, and offline imports with filtered dependency
+fetches and source preparation. With the GUI enabled it also checks the
+shared-memory controller backend.
 
 The presentation smoke drives Vulkan capture, an explicit identity worker,
 composition and presentation through a separate test layer that also admits

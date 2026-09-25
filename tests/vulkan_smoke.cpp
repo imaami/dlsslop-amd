@@ -421,9 +421,7 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
                         "GPU proxy pixel differs from clear color");
             }
         }
-        require(h->hdrEncode.load() == (proxy16 ? 1u : 0u) &&
-                h->proxyFormat.load() == (proxy16 ? kProxyRgba16F : kProxyRgba8),
-                "request transport precision mismatch");
+        require(h->hdrEncode.load() == (proxy16 ? 1u : 0u), "request transport precision mismatch");
         const size_t bytes = size_t(expectedWidth) * expectedHeight * (proxy16 ? 8 : 4);
         require(std::memcmp(input, output, bytes) == 0, "identity worker corrupted frame pixels");
     }
