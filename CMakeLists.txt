@@ -161,9 +161,21 @@ if(BUILD_TESTING)
         ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party)
     target_link_libraries(hdr-shader-test PRIVATE ${VULKAN_LOADER} Threads::Threads)
     add_test(NAME hdr-shader COMMAND hdr-shader-test)
+    add_executable(composition-rebuild-test tests/composition_rebuild_test.cpp
+        ${LAYER_ROOT}/layer_linux/src/composition.cpp
+        ${LAYER_ROOT}/layer_linux/src/capture.cpp
+        ${LAYER_ROOT}/layer_linux/src/scaler_vk.cpp
+        ${LAYER_ROOT}/layer_linux/src/dlssnr_pass.cpp
+        ${LAYER_ROOT}/layer_linux/src/shader_vk.cpp)
+    add_dependencies(composition-rebuild-test layer-shaders)
+    target_include_directories(composition-rebuild-test PRIVATE ${SHADER_DIR}
+        ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party)
+    target_link_libraries(composition-rebuild-test PRIVATE ${VULKAN_LOADER} Threads::Threads)
+    add_test(NAME composition-rebuild COMMAND composition-rebuild-test)
     add_test(NAME vulkan-smoke COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/run-smoke.py
         --build-dir ${CMAKE_CURRENT_BINARY_DIR} --headless)
-    set_tests_properties(color-gpu lds-barriers codec-isa hdr-shader PROPERTIES SKIP_RETURN_CODE 77)
+    set_tests_properties(color-gpu lds-barriers codec-isa hdr-shader composition-rebuild
+        PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 # The GUI is an optional standalone client. No Qt dependency reaches the worker

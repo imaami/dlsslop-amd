@@ -1572,8 +1572,39 @@ index 67c5f9d..069e5db 100644
 +        ? result : max(result, float3(0.0, 0.0, 0.0));
 +    gTarget[id.xy] = float4(stored, originalSample.a);
  }
+diff --git a/upstream-layer/layer_linux/src/dlssnr_pass.cpp b/upstream-layer/layer_linux/src/dlssnr_pass.cpp
+index 6ea685d..e2721a6 100644
+--- a/upstream-layer/layer_linux/src/dlssnr_pass.cpp
++++ b/upstream-layer/layer_linux/src/dlssnr_pass.cpp
+@@ -166,26 +166,6 @@ bool DlssNrPass::CreateDummy(VkCommandBuffer cmdList) {
+ void DlssNrPass::WriteDescriptors(VkDescriptorSet set, VkDeviceSize constantOffset, VkImageView source,
+                                   VkImageView model, VkImageView original, VkImageView motion, VkImageView target,
+                                   VkImageView keep, VkImageLayout sourceLayout, VkImageLayout motionLayout) {
+-    const VkImageView boundViews[] = {
+-        source != VK_NULL_HANDLE ? source : _dummyView,
+-        model != VK_NULL_HANDLE ? model : _dummyView,
+-        original != VK_NULL_HANDLE ? original : _dummyView,
+-        motion != VK_NULL_HANDLE ? motion : _dummyView,
+-        target != VK_NULL_HANDLE ? target : _dummyView,
+-        keep != VK_NULL_HANDLE ? keep : _dummyView,
+-    };
+-    const uint32_t slot = uint32_t(set == VK_NULL_HANDLE ? 0 : (_slot + kSlots - 1) % kSlots);
+-    DescriptorState& state = _descriptorState[slot];
+-    bool same = state.valid && state.offset == constantOffset &&
+-                state.sourceLayout == sourceLayout && state.motionLayout == motionLayout;
+-    for (uint32_t i = 0; same && i < 6; ++i) same = state.views[i] == boundViews[i];
+-    if (same) return;
+-    state.valid = true;
+-    state.offset = constantOffset;
+-    state.sourceLayout = sourceLayout;
+-    state.motionLayout = motionLayout;
+-    for (uint32_t i = 0; i < 6; ++i) state.views[i] = boundViews[i];
+-
+     VkDescriptorBufferInfo bufferInfo { _constantBuffer, constantOffset, sizeof(DlssNrConstants) };
+ 
+     const auto readInfo = [&](VkImageView v, VkImageLayout layout) {
 diff --git a/upstream-layer/layer_linux/src/dlssnr_pass.h b/upstream-layer/layer_linux/src/dlssnr_pass.h
-index 0941c93..dc24acd 100644
+index 0941c93..4fc25d2 100644
 --- a/upstream-layer/layer_linux/src/dlssnr_pass.h
 +++ b/upstream-layer/layer_linux/src/dlssnr_pass.h
 @@ -2,8 +2,8 @@
@@ -1587,6 +1618,22 @@ index 0941c93..dc24acd 100644
  //
  // Three things are worth knowing before reading the implementation.
  //
+@@ -34,15 +34,6 @@ class DlssNrPass : public Shader_Vk {
+     VkDeviceSize _slotStride = 0;  // sizeof(DlssNrConstants), rounded up to the device's alignment
+     uint32_t _slot = 0;            // next slot to hand out, wrapping
+ 
+-    struct DescriptorState {
+-        bool valid = false;
+-        VkDeviceSize offset = 0;
+-        VkImageView views[6]{};
+-        VkImageLayout sourceLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+-        VkImageLayout motionLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+-    };
+-    DescriptorState _descriptorState[kSlots]{};
+-
+     // Stands in for a resource a given mode does not read. One pixel, never sampled for its content,
+     // present only because Vulkan will not accept an unwritten binding.
+     VkImage _dummyImage = VK_NULL_HANDLE;
 diff --git a/upstream-layer/layer_linux/src/hotkey.cpp b/upstream-layer/layer_linux/src/hotkey.cpp
 index ec78533..e4f1a0e 100644
 --- a/upstream-layer/layer_linux/src/hotkey.cpp
@@ -2060,6 +2107,57 @@ index 4b37520..55dd74b 100644
                   VK_MAX_DESCRIPTION_SIZE - 1);
      pProperties->specVersion = VK_MAKE_VERSION(1, 3, 0);
      pProperties->implementationVersion = 1;
+diff --git a/upstream-layer/layer_linux/src/scaler_vk.cpp b/upstream-layer/layer_linux/src/scaler_vk.cpp
+index 87ee50e..e50d231 100644
+--- a/upstream-layer/layer_linux/src/scaler_vk.cpp
++++ b/upstream-layer/layer_linux/src/scaler_vk.cpp
+@@ -125,19 +125,6 @@ bool ScalerVk::Dispatch(VkCommandBuffer cb, VkImageView source, VkImageView dest
+     std::memcpy((char*) _mappedConstantBuffer + offset, &c, sizeof(c));
+ 
+     VkDescriptorSet set = _descriptorSets[slot];
+-    DescriptorState& state = _descriptorState[slot];
+-    const bool same = state.valid && state.offset == offset && state.source == source && state.dest == dest &&
+-                      state.srcWidth == c.srcWidth && state.srcHeight == c.srcHeight &&
+-                      state.destWidth == c.destWidth && state.destHeight == c.destHeight;
+-    if (!same) {
+-        state.valid = true;
+-        state.offset = offset;
+-        state.source = source;
+-        state.dest = dest;
+-        state.srcWidth = c.srcWidth;
+-        state.srcHeight = c.srcHeight;
+-        state.destWidth = c.destWidth;
+-        state.destHeight = c.destHeight;
+     VkDescriptorBufferInfo bufferInfo{ _constantBuffer, offset, sizeof(ScalerConstants) };
+     VkDescriptorImageInfo sourceInfo{ VK_NULL_HANDLE, source, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+     VkDescriptorImageInfo destInfo{ VK_NULL_HANDLE, dest, VK_IMAGE_LAYOUT_GENERAL };
+@@ -154,7 +141,6 @@ bool ScalerVk::Dispatch(VkCommandBuffer cb, VkImageView source, VkImageView dest
+           nullptr, nullptr },
+     };
+     _vk->vkUpdateDescriptorSets(_device, uint32_t(sizeof(writes) / sizeof(writes[0])), writes, 0, nullptr);
+-    }
+ 
+     _vk->vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, _pipeline);
+     _vk->vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, _pipelineLayout, 0, 1, &set, 0, nullptr);
+diff --git a/upstream-layer/layer_linux/src/scaler_vk.h b/upstream-layer/layer_linux/src/scaler_vk.h
+index 542f559..9fdcbda 100644
+--- a/upstream-layer/layer_linux/src/scaler_vk.h
++++ b/upstream-layer/layer_linux/src/scaler_vk.h
+@@ -50,14 +50,6 @@ class ScalerVk : public Shader_Vk {
+     uint32_t _filter = kScalerLanczos3;
+     VkDeviceSize _slotStride = 0;
+     uint32_t _slot = 0;
+-    struct DescriptorState {
+-        bool valid = false;
+-        VkDeviceSize offset = 0;
+-        VkImageView source = VK_NULL_HANDLE;
+-        VkImageView dest = VK_NULL_HANDLE;
+-        int32_t srcWidth = 0, srcHeight = 0, destWidth = 0, destHeight = 0;
+-    };
+-    DescriptorState _descriptorState[kSlots]{};
+ 
+   public:
+     ScalerVk(const DeviceTable* InVk, const InstanceTable* InInstance, VkDevice InDevice,
 diff --git a/upstream-layer/layer_linux/src/shader_vk.cpp b/upstream-layer/layer_linux/src/shader_vk.cpp
 index 935db58..71e2bda 100644
 --- a/upstream-layer/layer_linux/src/shader_vk.cpp
