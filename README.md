@@ -88,13 +88,14 @@ Compilation does not require a GPU, ROCm runtime or model weights. Qt uses the
 distribution's shared Qt 6 libraries; the worker and layer have no Qt dependency.
 For an independent GUI build, see [gui/README.md](gui/README.md).
 
-On a successful push, pull request or manual Actions run, CI packages fresh
+On a successful push or manual Actions run, CI packages fresh
 runtime outputs as `dist/dlsslop-amd-linux-gfx1201.tar.xz` in the
 `dlsslop-amd-linux-gfx1201` artifact. The archive contains the installer, compiled
 binaries and HIP modules, runtime Python tools, and required notices; it contains
 no source tree or model weights. Extract it, enter the extracted directory and
 check `sha256sum --check PACKAGE-SHA256SUMS` before installation.
-`licenses/SOURCES` identifies the corresponding source revision.
+`licenses/SOURCES` identifies the corresponding source revision. Pull-request
+runs check the package without uploading it: their merge commit is temporary.
 
 ## Install and import weights
 
