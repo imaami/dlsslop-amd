@@ -48,6 +48,44 @@ float random(unsigned x, unsigned y)
     v ^= v >> 16; v *= 0x45d9f3b; v ^= v >> 16;
     return float(v & 65535) / 65535;
 }
+// A pillarboxed and letterboxed picture on a 16x8 raster. The bars' history is a sentinel that no
+// fitted pixel may blend in, even when sub-pixel motion points into a bar. The bars' previous luma
+// is black, as encode_proxy writes them, so blending it in fails the luma check and falls back.
+void letterbox()
+{
+    constexpr unsigned width = 16, height = 8, left = 3, top = 2, fit_width = 10, fit_height = 4;
+    constexpr unsigned right = left + fit_width - 1, bottom = top + fit_height - 1;
+    constexpr float sentinel = 1000, fallback_value = .125f;
+    std::vector<float> rgba(width * height * 4, .5f), gray(width * height, .5f);
+    std::vector<float> history(width * height * 3, sentinel), fallback(rgba.size(), fallback_value);
+    std::vector<float> output(rgba.size());
+    std::vector<dlsslop_temporal::Flow> flow(width * height);
+    const auto inside = [](unsigned x, unsigned y) { return float(x) + float(y) * width; };
+    for (unsigned y = 0; y < height; ++y)
+        for (unsigned x = 0; x < width; ++x)
+            if (x < left || x > right || y < top || y > bottom) gray[y * width + x] = 0;
+    for (unsigned y = top; y <= bottom; ++y)
+        for (unsigned x = left; x <= right; ++x)
+            for (unsigned c = 0; c < 3; ++c) history[(y * width + x) * 3 + c] = inside(x, y);
+    const dlsslop_temporal::Warp w{{width, height}, {width, height}, height, 1, 1, left, top, fit_width, fit_height};
+    struct Case { float dx, dy; unsigned x, y; float expected; const char* message; };
+    const Case cases[] = {
+        {.75f, 0, right, 3, inside(right, 3), "rightward sub-pixel motion did not return the edge history"},
+        {0, .75f, 5, bottom, inside(5, bottom), "downward sub-pixel motion did not return the edge history"},
+        {.75f, .75f, right, bottom, inside(right, bottom), "diagonal sub-pixel motion did not return the edge history"},
+        {.25f, .5f, 7, 3, inside(7, 3) + .25f + .5f * width, "interior sub-pixel motion was not interpolated"},
+        {1, 0, right, 3, fallback_value, "motion from outside the fit did not fall back"},
+        {-.75f, 0, left, 3, fallback_value, "motion from the left bar did not fall back"},
+        {0, -.75f, 5, top, fallback_value, "motion from the top bar did not fall back"},
+        {0, 0, left - 1, 3, fallback_value, "a bar pixel did not fall back"},
+    };
+    for (const Case& t : cases) {
+        std::fill(flow.begin(), flow.end(), dlsslop_temporal::Flow{t.dx, t.dy, 0});
+        const unsigned index = t.y * width + t.x;
+        dlsslop_temporal::warp(rgba.data(), gray.data(), history.data(), fallback.data(), flow.data(), output.data(), w, index);
+        for (unsigned c = 0; c < 3; ++c) require(output[index * 4 + c] == t.expected, t.message);
+    }
+}
 void run()
 {
     constexpr unsigned width = 128, height = 96;
@@ -111,6 +149,7 @@ void run()
     std::fill(pixels.pixels.begin(), pixels.pixels.end(), dlsslop_temporal::Flow{-6, 3, .5f});
     dlsslop_temporal::warp(rgba.data(), previous.pixels.data(), history.data(), fallback.data(), pixels.pixels.data(), output.data(), w, y * width + x);
     require(output[(y * width + x) * 4] == .125f, "rejected motion contaminated history");
+    letterbox();
     std::puts("temporal tests passed");
 }
 }

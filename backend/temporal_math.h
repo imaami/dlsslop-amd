@@ -127,13 +127,17 @@ DLSSLOP_TEMPORAL_INLINE void warp(const float* current, const float* previous_gr
         f.x *= float(w.image.width) / denominator; f.y *= float(w.image.height) / denominator;
     }
     const float px = float(x) + f.x, py = float(y) + f.y;
+    // Both samples weight only the fitted picture; the bars' history is the network's answer for
+    // black. Validity below already requires px >= w.x and py >= w.y.
+    const float right = float(w.x + w.fit_width - 1), bottom = float(w.y + w.fit_height - 1);
+    const float sx = px < right ? px : right, sy = py < bottom ? py : bottom;
     const float luma = current[pixel * 4] * .2126f + current[pixel * 4 + 1] * .7152f + current[pixel * 4 + 2] * .0722f;
-    const float error = absolute(luma - sample(previous_gray, w.image, px, py));
+    const float error = absolute(luma - sample(previous_gray, w.image, sx, sy));
     const bool valid = x >= w.x && y >= w.y && x < w.x + w.fit_width && y < w.y + w.fit_height &&
                        px >= float(w.x) && py >= float(w.y) && px < float(w.x + w.fit_width) &&
                        py < float(w.y + w.fit_height) && f.error < .075f && error < .1f;
     for (unsigned channel = 0; channel < 3; ++channel)
-        output[index * 4 + channel] = valid ? sample_rgb(history, w.image, px, py, channel) : fallback[pixel * 4 + channel];
+        output[index * 4 + channel] = valid ? sample_rgb(history, w.image, sx, sy, channel) : fallback[pixel * 4 + channel];
     output[index * 4 + 3] = 1;
 }
 } // namespace dlsslop_temporal
