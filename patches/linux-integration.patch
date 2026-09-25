@@ -1204,7 +1204,7 @@ index dc344c4..f7d1120 100644
  
  
 diff --git a/upstream-layer/layer_linux/src/composition.h b/upstream-layer/layer_linux/src/composition.h
-index 757303b..d7706a5 100644
+index 757303b..2b3bb1a 100644
 --- a/upstream-layer/layer_linux/src/composition.h
 +++ b/upstream-layer/layer_linux/src/composition.h
 @@ -33,6 +33,7 @@ namespace dlssnr {
@@ -1247,7 +1247,7 @@ index 757303b..d7706a5 100644
  
      // Point the transport buffers at the shared-memory pixel regions so the GPU reads and writes
      // them directly, with no host copy in between. Null pointers fall back to private host-visible
-@@ -198,7 +205,12 @@ class Composition {
+@@ -198,8 +205,15 @@ class Composition {
      void MarkModelFrame() { _haveModel = true; }
  
      // Write this many matched before/after pairs, starting with the next composed frame.
@@ -1259,9 +1259,12 @@ index 757303b..d7706a5 100644
 +        _captureMetadata.okSeq = ok;
 +    }
      bool CaptureActive() const { return _capture.Active(); }
++    // This frame's compose recorded a pair; an active capture without its host buffer records none.
++    bool CaptureRecorded() const { return _captureRecorded; }
  
      // Called after leg 2's fence, when the readback the compose recorded has landed.
-@@ -273,6 +285,7 @@ class Composition {
+     void WriteCapturedFrame();
+@@ -273,6 +287,7 @@ class Composition {
      VkFormat _keepFormat = VK_FORMAT_UNDEFINED;
      bool _linearHdr = false;
      bool _hdrProxy = false;
@@ -1269,7 +1272,7 @@ index 757303b..d7706a5 100644
      uint32_t _hdrTransfer = 0;
      bool _haveModel = false;
  
-@@ -322,6 +335,7 @@ class Composition {
+@@ -322,6 +337,7 @@ class Composition {
      bool _answerViaFd = false;
  
      CaptureWriter _capture;
@@ -1675,7 +1678,7 @@ index ec78533..e4f1a0e 100644
      return true;
  }
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..74370d3 100644
+index 4b37520..9bdea53 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -2284,7 +2287,7 @@ index 4b37520..74370d3 100644
          dc->vkEndCommandBuffer(cb);
          return false;
      }
-@@ -1595,20 +1811,32 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1595,20 +1811,33 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          return false;
      }
      sc.comp->MarkModelFrame();
@@ -2312,9 +2315,10 @@ index 4b37520..74370d3 100644
      sc.leg2Pending = true;
 -    const double tReturn = time ? NowMs() : 0.0;
 +    // A diagnostic request must finish even if a paused application presents
-+    // no subsequent frame. Ordinary frames keep the asynchronous leg-2 path.
++    // no subsequent frame. Frames without a recorded pair keep the asynchronous
++    // leg-2 path, including every frame of a capture whose buffer failed.
 +    // The semaphore is signalled either way, so a failed wait still presents.
-+    if (sc.comp->CaptureActive() && waitAndReset(sc.fenceLeg2)) {
++    if (sc.comp->CaptureRecorded() && waitAndReset(sc.fenceLeg2)) {
 +        sc.leg2Pending = false;
 +        sc.comp->WriteCapturedFrame();
 +    }
@@ -2322,7 +2326,7 @@ index 4b37520..74370d3 100644
  
      if (dc->shm.hdr) {
          ShmStore64(dc->shm.hdr->layerFramesLo, dc->shm.hdr->layerFramesHi, ++dc->framesComposed);
-@@ -1650,11 +1878,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1650,11 +1879,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
      dc->lastPresentMs.store(NowMs(), std::memory_order_relaxed);
  
      // Whether this call's wait semaphores have already been consumed by a submit of ours. They are
@@ -2337,7 +2341,7 @@ index 4b37520..74370d3 100644
  
      // Held from here to the present at the end, alongside Hook_QueueSubmit{,2}. Vulkan requires
      // external synchronization for every operation on a queue; the repaint uses the application's
-@@ -1679,6 +1909,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1679,6 +1910,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
                  if (k < 3) Log("[layer] present: swapchain %p is not primary", (void*)pPresentInfo->pSwapchains[i]);
                  continue;
              }
@@ -2347,7 +2351,7 @@ index 4b37520..74370d3 100644
              sc.queue = queue;
              if (!sc.ready && !dc->shm.dead) {
                  if (!CreateResources(dc, sc, family)) {
-@@ -1700,11 +1933,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1700,11 +1934,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
              }
              const uint32_t waitCount = waitsConsumed ? 0u : pPresentInfo->waitSemaphoreCount;
              bool submittedWaits = false;
@@ -2362,7 +2366,7 @@ index 4b37520..74370d3 100644
              if (VerboseEnabled()) {
                  Log("[present] swapchain=%p image=%u seq=%u composed=%d",
                      (void*)pPresentInfo->pSwapchains[i], pPresentInfo->pImageIndices[i],
-@@ -1723,13 +1957,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1723,13 +1958,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
          }
      }
  
@@ -2379,7 +2383,7 @@ index 4b37520..74370d3 100644
      return dc->vkQueuePresentKHR(queue, &pi);
  }
  
-@@ -1851,7 +2085,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
+@@ -1851,7 +2086,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
      if (*pCount < 1) { *pCount = 1; return VK_INCOMPLETE; }
      std::memset(pProperties, 0, sizeof(*pProperties));
      std::strncpy(pProperties->layerName, VK_LAYER_NAME, VK_MAX_EXTENSION_NAME_SIZE - 1);

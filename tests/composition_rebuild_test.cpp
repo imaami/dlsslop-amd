@@ -1,13 +1,17 @@
 // Drive the layer's composition through in-place rebuilds and check that no
 // dispatch binds a descriptor set written with an image view that has since
 // been destroyed. Drivers recycle view handles, so a descriptor cache keyed on
-// handle values can bind a set that still points at a freed image.
+// handle values can bind a set that still points at a freed image. Then check
+// that a capture whose host buffer cannot be allocated records no pair, which
+// is what keeps the layer's leg 2 asynchronous until the buffer exists.
 #include <vulkan/vulkan.h>
 #include "composition.h"
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -30,6 +34,8 @@ struct Tracker {
     PFN_vkAllocateDescriptorSets allocate = nullptr;
     PFN_vkUpdateDescriptorSets update = nullptr;
     PFN_vkCmdBindDescriptorSets bind = nullptr;
+    PFN_vkAllocateMemory allocateMemory = nullptr;
+    bool refuseMemory = false;
     std::set<VkImageView> live;
     std::map<VkImageView, unsigned> generation;  // bumped whenever a handle value is created
     std::map<VkDescriptorSet, std::map<uint32_t, std::pair<VkImageView, unsigned>>> written;
@@ -86,6 +92,12 @@ VKAPI_ATTR void VKAPI_CALL Bind(VkCommandBuffer cb, VkPipelineBindPoint point, V
         }
     }
     tracker.bind(cb, point, layout, first, count, sets, dynamicCount, dynamicOffsets);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL AllocateMemory(VkDevice device, const VkMemoryAllocateInfo* info,
+                                              const VkAllocationCallbacks* allocator, VkDeviceMemory* memory) {
+    if (tracker.refuseMemory) return VK_ERROR_OUT_OF_HOST_MEMORY;
+    return tracker.allocateMemory(device, info, allocator, memory);
 }
 
 struct Context {
@@ -185,6 +197,7 @@ struct Context {
         tracker.allocate = std::exchange(deviceTable.vkAllocateDescriptorSets, Allocate);
         tracker.update = std::exchange(deviceTable.vkUpdateDescriptorSets, Update);
         tracker.bind = std::exchange(deviceTable.vkCmdBindDescriptorSets, Bind);
+        tracker.allocateMemory = std::exchange(deviceTable.vkAllocateMemory, AllocateMemory);
         return true;
     }
 
@@ -243,6 +256,40 @@ struct Step {
     uint32_t downscaler;
 };
 
+// One presented frame: leg 1, the identity answer, then leg 2 with device-memory allocations refused or not.
+bool ComposeFrame(Context& context, dlssnr::Composition& composition, const dlssnr::FrameSettings& settings,
+                  uint32_t width, uint32_t height, VkFormat format, bool linearHdr, bool refuseMemory = false) {
+    if (!composition.Prepare(width, height, format, settings, linearHdr))
+        throw std::runtime_error(std::string("prepare failed: ") + composition.Reason());
+    composition.RecordCapture(context.Begin(), context.swapchain, settings);
+    context.Submit();
+    std::memcpy(composition.ModelPixels(), composition.ProxyPixels(), composition.ModelBytes());
+    tracker.refuseMemory = refuseMemory;
+    const bool composed = composition.RecordCompose(context.Begin(), context.swapchain, settings);
+    tracker.refuseMemory = false;
+    context.Submit();
+    return composed;
+}
+
+// Captures go under XDG_STATE_HOME; keep them out of the user's state directory.
+struct StateHome {
+    std::filesystem::path path;
+    StateHome() {
+        char pattern[] = "/tmp/dlsslop-amd-composition-XXXXXX";
+        if (!mkdtemp(pattern)) throw std::runtime_error("create a temporary state directory");
+        path = pattern;
+        if (setenv("XDG_STATE_HOME", pattern, 1) != 0) {
+            std::error_code ignored;
+            std::filesystem::remove(path, ignored);
+            throw std::runtime_error("set XDG_STATE_HOME");
+        }
+    }
+    ~StateHome() {
+        std::error_code ignored;
+        std::filesystem::remove_all(path, ignored);
+    }
+};
+
 }  // namespace
 
 int main() {
@@ -284,15 +331,8 @@ int main() {
             dlssnr::FrameSettings settings;
             settings.workingScale = step.workingScale;
             settings.downscaler = step.downscaler;
-            for (int frame = 0; frame < 3; ++frame) {
-                if (!composition.Prepare(width, height, format, settings, step.linearHdr))
-                    throw std::runtime_error(std::string("prepare failed: ") + composition.Reason());
-                composition.RecordCapture(context.Begin(), context.swapchain, settings);
-                context.Submit();
-                std::memcpy(composition.ModelPixels(), composition.ProxyPixels(), composition.ModelBytes());
-                composed += composition.RecordCompose(context.Begin(), context.swapchain, settings) ? 1u : 0u;
-                context.Submit();
-            }
+            for (int frame = 0; frame < 3; ++frame)
+                composed += ComposeFrame(context, composition, settings, width, height, format, step.linearHdr);
         }
         std::printf("%u frames composed, %u descriptor set binds, %u view handles recycled, "
                     "%u stale bindings bound\n", composed, tracker.binds, tracker.recycled, tracker.stale);
@@ -301,6 +341,27 @@ int main() {
         if (tracker.stale) throw std::runtime_error("a dispatch bound a descriptor for a destroyed view");
         std::printf("PASS: no descriptor outlived its image view across %zu builds\n",
                     sizeof(steps) / sizeof(steps[0]));
+
+        const StateHome state;
+        const dlssnr::FrameSettings settings;
+        composition.RequestCapture(1, 7);
+        for (int frame = 0; frame < 2; ++frame) {
+            if (!ComposeFrame(context, composition, settings, width, height, format, false, true))
+                throw std::runtime_error("a frame whose capture buffer failed was not composed");
+            if (!composition.CaptureActive() || composition.CaptureRecorded())
+                throw std::runtime_error("a capture without its host buffer recorded a pair");
+        }
+        if (!ComposeFrame(context, composition, settings, width, height, format, false) ||
+            !composition.CaptureRecorded())
+            throw std::runtime_error("the capture did not record its pair once the buffer existed");
+        composition.WriteCapturedFrame();
+        if (composition.CaptureActive() ||
+            !std::filesystem::is_regular_file(state.path / "dlssnr/captures/manifest.txt"))
+            throw std::runtime_error("the recorded pair did not complete the capture");
+        if (!ComposeFrame(context, composition, settings, width, height, format, false) ||
+            composition.CaptureRecorded())
+            throw std::runtime_error("a frame after the capture recorded a pair");
+        std::printf("PASS: a capture records pairs only into an allocated host buffer\n");
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "composition rebuild test: %s\n", error.what());
