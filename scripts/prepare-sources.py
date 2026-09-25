@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -11,12 +12,19 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 DIRECTORIES = ('upstream-layer', 'kernels', 'backend/vendor')
+# The staging repository must not inherit Git configuration, attributes or
+# GIT_* variables: diff.noprefix, color, core.autocrlf, apply.whitespace, hooks,
+# signing, eol attributes or a calling hook's GIT_DIR or GIT_INDEX_FILE would
+# silently change or break the patch.
+STAGE_ENV = dict({key: value for key, value in os.environ.items() if not key.startswith('GIT_')},
+                 GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1', GIT_ATTR_NOSYSTEM='1', GIT_CONFIG_COUNT='1',
+                 GIT_CONFIG_KEY_0='core.attributesFile', GIT_CONFIG_VALUE_0=os.devnull)
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
-def run(*args, cwd=ROOT):
-    return subprocess.check_output(args, cwd=cwd)
+def run(*args, cwd=ROOT, env=None):
+    return subprocess.check_output(args, cwd=cwd, env=env)
 
 def prepare(destination):
     lock = json.loads((ROOT / 'upstreams.lock.json').read_text())
@@ -26,7 +34,7 @@ def prepare(destination):
             raise RuntimeError(f"wrong submodule revision: {repo}; run python3 scripts/fetch-submodules.py")
     with tempfile.TemporaryDirectory(prefix='dlsslop-amd-sources-') as temp:
         stage = Path(temp)
-        run('git', 'init', '-q', cwd=stage)
+        run('git', 'init', '-q', cwd=stage, env=STAGE_ENV)
         for name, row in lock['files'].items():
             repo = lock['repositories'][row['repository']]
             data = run('git', 'show', repo['commit'] + ':' + row['source'], cwd=ROOT / repo['path'])
@@ -35,7 +43,7 @@ def prepare(destination):
             target = stage / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(data)
-        run('git', 'apply', '--binary', str(ROOT / 'patches/linux-integration.patch'), cwd=stage)
+        run('git', 'apply', '--binary', str(ROOT / 'patches/linux-integration.patch'), cwd=stage, env=STAGE_ENV)
         for name, expected in lock['outputs'].items():
             if digest(stage / name) != expected:
                 raise RuntimeError(f'patched source hash mismatch: {name}')

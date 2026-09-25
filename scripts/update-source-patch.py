@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -10,6 +11,13 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
+# The staging repository must not inherit Git configuration, attributes or
+# GIT_* variables: diff.noprefix, color, core.autocrlf, apply.whitespace, hooks,
+# signing, eol attributes or a calling hook's GIT_DIR or GIT_INDEX_FILE would
+# silently change or break the patch.
+STAGE_ENV = dict({key: value for key, value in os.environ.items() if not key.startswith('GIT_')},
+                 GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1', GIT_ATTR_NOSYSTEM='1', GIT_CONFIG_COUNT='1',
+                 GIT_CONFIG_KEY_0='core.attributesFile', GIT_CONFIG_VALUE_0=os.devnull)
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, add_help=False)
@@ -19,7 +27,7 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         stage = Path(tmp)
         def git(*args):
-            return subprocess.check_output(['git','-C',str(stage),*args])
+            return subprocess.check_output(['git','-C',str(stage),*args],env=STAGE_ENV)
         git('init','-q')
         for name,row in lock['files'].items():
             repo = lock['repositories'][row['repository']]

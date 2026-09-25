@@ -15,13 +15,14 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def command(*args, cwd, check=True):
-    env = os.environ.copy()
-    env.update({'GIT_AUTHOR_NAME': 'Fixture', 'GIT_AUTHOR_EMAIL': 'fixture@example.invalid',
-                'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid',
-                'GIT_TERMINAL_PROMPT': '0', 'GIT_CONFIG_NOSYSTEM': '1',
-                'GIT_CONFIG_GLOBAL': os.devnull})
-    result = subprocess.run(args, cwd=cwd, env=env, text=True,
+def command(*args, cwd, check=True, env=None):
+    settings = os.environ.copy()
+    settings.update({'GIT_AUTHOR_NAME': 'Fixture', 'GIT_AUTHOR_EMAIL': 'fixture@example.invalid',
+                     'GIT_COMMITTER_NAME': 'Fixture', 'GIT_COMMITTER_EMAIL': 'fixture@example.invalid',
+                     'GIT_TERMINAL_PROMPT': '0', 'GIT_CONFIG_NOSYSTEM': '1',
+                     'GIT_CONFIG_GLOBAL': os.devnull})
+    settings.update(env or {})
+    result = subprocess.run(args, cwd=cwd, env=settings, text=True,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
     if check and result.returncode:
         raise AssertionError(f'{args}\n{result.stdout}\n{result.stderr}')
@@ -64,7 +65,8 @@ class SubmodulesTest(unittest.TestCase):
 
             project = base / 'source-import'
             (project / 'scripts').mkdir(parents=True)
-            for name in ('init-repo.py', 'fetch-submodules.py', 'submodule_support.py', 'prepare-sources.py'):
+            for name in ('init-repo.py', 'fetch-submodules.py', 'submodule_support.py', 'prepare-sources.py',
+                         'update-source-patch.py'):
                 shutil.copyfile(ROOT / 'scripts' / name, project / 'scripts' / name)
             (project / '.gitmodules').write_text('[submodule "amd"]\n\tpath = external/amd\n'
                                                 f'\turl = {mirror}\n')
@@ -148,10 +150,34 @@ class SubmodulesTest(unittest.TestCase):
             self.assertLess(sum(path.stat().st_size for path in (clone / '.git/modules/amd/objects').rglob('*.pack')),
                             128 * 1024)
             self.assertEqual(git('config', '--get', 'remote.origin.url', cwd=module), mirror)
-            command(sys.executable, 'scripts/prepare-sources.py', cwd=clone)
+            # User Git configuration, attributes and GIT_* variables must not
+            # reach the staging repository, where they break or corrupt the patch.
+            hostile_home = base / 'hostile-home'
+            (hostile_home / 'git').mkdir(parents=True)
+            (hostile_home / 'git/attributes').write_text('* text eol=crlf -diff\n')
+            (hostile_home / 'gitconfig').write_text('[core]\n\tautocrlf = true\n[diff]\n\tnoprefix = true\n'
+                                                    '[color]\n\tui = always\n[apply]\n\twhitespace = error\n'
+                                                    '[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n')
+            hostile_index = base / 'hostile-index'
+            hostile = {'GIT_CONFIG_GLOBAL': str(hostile_home / 'gitconfig'), 'XDG_CONFIG_HOME': str(hostile_home),
+                       'GIT_CONFIG_PARAMETERS': "'diff.noprefix'='true' 'core.autocrlf'='true'",
+                       'GIT_INDEX_FILE': str(hostile_index)}
+            command(sys.executable, 'scripts/prepare-sources.py', cwd=clone, env=hostile)
             self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched\n')
             self.assertEqual((clone / 'kernels/example.hip').read_bytes(), b'kernel\n')
             self.assertEqual((clone / 'backend/vendor/api.h').read_bytes(), b'api\n')
+            committed = {name: (clone / name).read_bytes()
+                         for name in ('upstreams.lock.json', 'patches/linux-integration.patch')}
+            command(sys.executable, 'scripts/update-source-patch.py', cwd=clone, env=hostile)
+            patch = (clone / 'patches/linux-integration.patch').read_text()
+            self.assertTrue(patch.startswith('diff --git a/upstream-layer/example.txt b/upstream-layer/example.txt\n'))
+            self.assertNotIn('\x1b', patch)
+            self.assertIn('\n-original\n+patched\n', patch)
+            self.assertFalse(hostile_index.exists())
+            command(sys.executable, 'scripts/prepare-sources.py', cwd=clone)
+            self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched\n')
+            for name, data in committed.items():
+                (clone / name).write_bytes(data)
 
             # Local URL overrides take precedence over .gitmodules and do not
             # alter provenance recorded in the lock. Repeated fetches are safe.
