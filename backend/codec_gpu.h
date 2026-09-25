@@ -134,7 +134,7 @@ public:
         Geometry parameters = g;
         void* args[] = {&source_, &device_rgba, &invalid_, &parameters};
         api_.Check(api_.hipModuleLaunchKernel(fp16 ? encode16_ : encode_, (g.width * g.height + 255u) / 256u,
-            1, 1, 256, 1, 1, 0, stream_, args, nullptr), "encode SDR to neural input");
+            1, 1, 256, 1, 1, 0, stream_, args, nullptr), "encode proxy to neural input");
         uploaded_ = g;
         uploaded_fp16_ = fp16;
     }
@@ -165,7 +165,7 @@ public:
         Geometry parameters = g;
         void* args[] = {&source_, &neural_rgb, &output_, &invalid_, &parameters};
         api_.Check(api_.hipModuleLaunchKernel(uploaded_fp16_ ? decode16_ : decode_, (g.source_width * g.source_height + 255u) / 256u,
-            1, 1, 256, 1, 1, 0, stream_, args, nullptr), "decode neural output to SDR");
+            1, 1, 256, 1, 1, 0, stream_, args, nullptr), "decode neural output to proxy");
         api_.Check(api_.hipMemcpyAsync(output, output_, bytes, 2, stream_), "read codec proxy");
     }
 

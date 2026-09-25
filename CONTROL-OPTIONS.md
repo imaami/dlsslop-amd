@@ -42,8 +42,8 @@ opening or modifying the control channel.
 | `whitepointscale` | `-G`, `--white-point-scale` | Multiplies the selected manual or measured white point. |
 | `whitepointsource` | `-O`, `--white-point-source` | Selects manual white point or GPU frame measurement. |
 | `whitepointtrim` | `-I`, `--white-point-trim` | Adjusts measured white point only. |
-| `workingscale` | `-w`, `--working-scale` | Sets proxy scale, bounded by the worker's neural raster. |
-| `downscaler` | `-f`, `--downscaler` | Selects the down-leg filter when the model raster exceeds display size. |
+| `workingscale` | `-w`, `--working-scale` | Sets proxy scale; `dlsslopd` caps it at 1 and at its tier raster unless run with `--cpu-compose` or `--test-identity`. |
+| `downscaler` | `-f`, `--downscaler` | Selects the down-leg filter when the model raster exceeds display size, which only `--working-scale` above 1 with `dlsslopd --cpu-compose` or `--test-identity` produces. |
 | `compare` | `-p`, `--compare` | Enables side-by-side or wipe comparison. |
 | `comparesplit` | `-x`, `--compare-split` | Sets the comparison divider. |
 | `comparezoom` | `-z`, `--compare-zoom` | Sets side-by-side magnification. |

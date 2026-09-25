@@ -458,7 +458,7 @@ index 3d7bbfb..0b087a2 100644
   for(uint tile=0;tile<2;tile++){half8 a{};for(uint e=0;e<8;e++){uint k=tile*16+group*8+e;a[e]=(_Float16)(k<16?values[rc*16+k]:0.f);}
    for(uint col=0;col<2;col++){half8 b{};for(uint e=0;e<8;e++){uint k=tile*16+group*8+e;b[e]=(_Float16)(k<16?weights[(col*16+rc)*16+k]:0.f);}sum[col]=__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a,b,sum[col]);}
 diff --git a/upstream-layer/common/shm_protocol.h b/upstream-layer/common/shm_protocol.h
-index fd7c1cd..8c2d2b6 100644
+index fd7c1cd..328d05e 100644
 --- a/upstream-layer/common/shm_protocol.h
 +++ b/upstream-layer/common/shm_protocol.h
 @@ -14,11 +14,11 @@
@@ -472,13 +472,13 @@ index fd7c1cd..8c2d2b6 100644
 -// and is always 1.
 +// The proxy is RGBA8 or RGBA16F. The legacy Windows helper publishes its supported
 +// format; its HDR proxy carries white-point-normalized linear light. Native HIP
-+// v22 uses display-encoded proxies in either precision, including HDR normalized
-+// by the layer; hdrEncode is the per-request precision flag. `format` remains 1
-+// for compatibility.
++// uses display-encoded proxies in either precision, including HDR normalized by
++// the layer; hdrEncode is the per-request precision flag. `format` remains 1 for
++// compatibility.
  #include <atomic>
  #include <cstdint>
  #include <cstdlib>
-@@ -37,7 +37,13 @@ static constexpr uint32_t kShmMagic = 0x32524E47;
+@@ -37,7 +37,14 @@ static constexpr uint32_t kShmMagic = 0x32524E47;
  // 64 KiB because VK_EXT_external_memory_host demands the imported pointer meet
  // minImportedHostPointerAlignment and NVIDIA answers 64 KiB, and the dma-buf exchange and HDR
  // and round-trip attribution. A stale mapping of either lineage must be re-created, not half-read.
@@ -489,11 +489,12 @@ index fd7c1cd..8c2d2b6 100644
 +// v22: the native worker accepts negotiated RGBA16F display-encoded proxies,
 +// and exposes native per-pass tuning, precision and motion controls. Old native
 +// workers interpret this payload as RGBA8 and must not share the channel.
++// v23: appends colorPreserveBits, the native per-pass color anchoring.
 +static constexpr uint32_t kShmVersion = 23;
  
  
  static constexpr uint32_t kMaxW = 7680, kMaxH = 4320;
-@@ -46,6 +52,8 @@ static constexpr uint32_t kMaxW = 7680, kMaxH = 4320;
+@@ -46,6 +53,8 @@ static constexpr uint32_t kMaxW = 7680, kMaxH = 4320;
  // (Xid 109, CTX SWITCH TIMEOUT), taking the game down with it. 300x300 is known good; nothing below
  // this is a frame worth composing anyway.
  static constexpr uint32_t kMinW = 64, kMinH = 64;
@@ -502,7 +503,7 @@ index fd7c1cd..8c2d2b6 100644
  // Eight bytes a pixel: the float16 proxy needs them, and the 8-bit path simply uses the first half of
  // each region. The mapping is file-backed and sparse, so an SDR session never commits the second half.
  static constexpr size_t kMaxFrame = size_t(kMaxW) * kMaxH * 8;
-@@ -139,11 +147,12 @@ enum HelperState : uint32_t {
+@@ -139,11 +148,12 @@ enum HelperState : uint32_t {
  };
  
  // How the motion field the helper hands the model is scaled. From bmitch87's motion-vector work.
@@ -518,7 +519,7 @@ index fd7c1cd..8c2d2b6 100644
      kHdrForce = 2,  // float16 proxy even for an SDR swapchain (an A/B tool, not a preference)
  };
  
-@@ -203,6 +212,14 @@ inline std::string ShmRuntimeDir() {
+@@ -203,6 +213,14 @@ inline std::string ShmRuntimeDir() {
  
  inline std::string ShmDefaultPath() { return ShmRuntimeDir() + "/shm.bin"; }
  
@@ -533,7 +534,7 @@ index fd7c1cd..8c2d2b6 100644
  inline size_t ShmTotalBytes() { return kHeaderBytes + kMaxFrame * 2; }
  
  // One pass's overrides. Every field is present; `overrideMask` says which of them mean anything.
-@@ -316,7 +333,7 @@ struct ShmHeader {
+@@ -316,7 +334,7 @@ struct ShmHeader {
      // Only useful where the layer can read the keyboard at all: an X11 or XWayland session, inside
      // gamescope, or anywhere the user is in the 'input' group. A game presenting through winewayland
      // is a Wayland client whose keys never reach this process, and keyboards get no uaccess ACL, so
@@ -542,7 +543,7 @@ index fd7c1cd..8c2d2b6 100644
      std::atomic<uint32_t> toggleKey;
  
      // Which proxy the model is shown, and whether its answer is composed or substituted. See
-@@ -457,10 +474,9 @@ struct ShmHeader {
+@@ -457,10 +475,9 @@ struct ShmHeader {
      std::atomic<uint32_t> hdrActive;
      std::atomic<uint32_t> proxyFormat;
      // What the proxy bytes in the shared region actually are for the request being made: the layer
@@ -556,7 +557,7 @@ index fd7c1cd..8c2d2b6 100644
      std::atomic<uint32_t> hdrEncode;
  
      // trip, which is what it has always been; N takes an answer up only on a frame whose count is a
-@@ -533,6 +549,12 @@ struct ShmHeader {
+@@ -533,6 +550,12 @@ struct ShmHeader {
      std::atomic<uint32_t> sdr16Multipass;
      std::atomic<uint32_t> mvecPixelSize;
  
@@ -569,7 +570,7 @@ index fd7c1cd..8c2d2b6 100644
  };
  
  static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region");
-@@ -548,7 +570,7 @@ static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region")
+@@ -548,7 +571,7 @@ static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region")
  // The version check already existed to prevent exactly that; what was missing was anything to make
  // someone remember to use it. If these fire, the layout changed: bump kShmVersion in the same commit,
  // then update these numbers.
@@ -578,7 +579,7 @@ index fd7c1cd..8c2d2b6 100644
  
  static_assert(offsetof(ShmHeader, enabled) == 44, "layout changed -- bump kShmVersion");
  static_assert(offsetof(ShmHeader, transferStrengthBits) == 88, "layout changed -- bump kShmVersion");
-@@ -615,6 +637,7 @@ inline void ShmResetSettings(ShmHeader* h) {
+@@ -615,6 +638,7 @@ inline void ShmResetSettings(ShmHeader* h) {
          uint32_t answerExportSeq, answerPid, answerFd, answerGen;
          uint32_t layerProxySeq, layerAnswerSeq;
          uint32_t hdrDetected, hdrActive, proxyFormat, hdrEncode;
@@ -586,7 +587,7 @@ index fd7c1cd..8c2d2b6 100644
      } v;
  #define DLSSNR_SAVE(f) v.f = h->f.load()
      DLSSNR_SAVE(seq_req); DLSSNR_SAVE(seq_resp); DLSSNR_SAVE(width); DLSSNR_SAVE(height);
-@@ -633,6 +656,7 @@ inline void ShmResetSettings(ShmHeader* h) {
+@@ -633,6 +657,7 @@ inline void ShmResetSettings(ShmHeader* h) {
      DLSSNR_SAVE(answerExportSeq); DLSSNR_SAVE(answerPid); DLSSNR_SAVE(answerFd);
      DLSSNR_SAVE(answerGen); DLSSNR_SAVE(layerProxySeq); DLSSNR_SAVE(layerAnswerSeq);
      DLSSNR_SAVE(hdrDetected); DLSSNR_SAVE(hdrActive); DLSSNR_SAVE(proxyFormat); DLSSNR_SAVE(hdrEncode);
@@ -594,7 +595,7 @@ index fd7c1cd..8c2d2b6 100644
  #undef DLSSNR_SAVE
      char helperReason[kReasonBytes], layerReason[kReasonBytes], gameName[kNameBytes];
      std::memcpy(helperReason, h->helperReason, sizeof(helperReason));
-@@ -657,7 +681,14 @@ inline void ShmResetSettings(ShmHeader* h) {
+@@ -657,7 +682,14 @@ inline void ShmResetSettings(ShmHeader* h) {
      DLSSNR_LOAD(answerExportSeq); DLSSNR_LOAD(answerPid); DLSSNR_LOAD(answerFd);
      DLSSNR_LOAD(answerGen); DLSSNR_LOAD(layerProxySeq); DLSSNR_LOAD(layerAnswerSeq);
      DLSSNR_LOAD(hdrDetected); DLSSNR_LOAD(hdrActive); DLSSNR_LOAD(proxyFormat); DLSSNR_LOAD(hdrEncode);
@@ -609,7 +610,7 @@ index fd7c1cd..8c2d2b6 100644
      std::memcpy(h->helperReason, helperReason, sizeof(helperReason));
      std::memcpy(h->layerReason, layerReason, sizeof(layerReason));
      std::memcpy(h->gameName, gameName, sizeof(gameName));
-@@ -681,6 +712,7 @@ inline void ShmInitDefaults(ShmHeader* h) {
+@@ -681,6 +713,7 @@ inline void ShmInitDefaults(ShmHeader* h) {
      h->localStructureBits.store(FloatToBits(1.0f));
      h->skinStructureBits.store(FloatToBits(-1.0f));
      h->sharpnessBits.store(FloatToBits(0.0f));
@@ -617,7 +618,7 @@ index fd7c1cd..8c2d2b6 100644
  
      h->transferStrengthBits.store(FloatToBits(1.0f));
      h->colourStrengthBits.store(FloatToBits(1.0f));
-@@ -733,6 +765,20 @@ inline void ShmInitDefaults(ShmHeader* h) {
+@@ -733,6 +766,20 @@ inline void ShmInitDefaults(ShmHeader* h) {
      }
  }
  
@@ -1203,7 +1204,7 @@ index dc344c4..f7d1120 100644
  
  
 diff --git a/upstream-layer/layer_linux/src/composition.h b/upstream-layer/layer_linux/src/composition.h
-index 757303b..c83fd8b 100644
+index 757303b..d7706a5 100644
 --- a/upstream-layer/layer_linux/src/composition.h
 +++ b/upstream-layer/layer_linux/src/composition.h
 @@ -33,6 +33,7 @@ namespace dlssnr {
@@ -1227,9 +1228,9 @@ index 757303b..c83fd8b 100644
      // the encode writes normalised linear light instead of an sRGB picture. hdrTransfer = 1 says the
      // swapchain itself carries PQ. Both are honoured only while the device can hold a float16 proxy;
      // Prepare reports the decision it actually made through HdrProxyActive().
-+    // Native HIP uses an sRGB-encoded proxy even with FP16 transport: its network
-+    // cannot consume the NGX linear-light float proxy. nativeEncodedProxy selects
-+    // this contract; hdrTransfer remains meaningful for an RGBA8 proxy too.
++    // Native HIP is the exception: its network cannot consume the NGX linear-light
++    // float proxy, so nativeEncodedProxy keeps an sRGB-encoded proxy at either
++    // precision and honours hdrTransfer with an RGBA8 proxy too.
      bool Prepare(uint32_t width, uint32_t height, VkFormat swapchainFormat, const FrameSettings& s,
 -                 bool linearHdr, bool hdrProxy = false, uint32_t hdrTransfer = 0);
 +                 bool linearHdr, bool hdrProxy = false, uint32_t hdrTransfer = 0,
@@ -1291,18 +1292,21 @@ index 2690bb9..90440b6 100644
  
      // How much of the chroma-agreement gate to apply, 0..1. See colourTrustPercent.
 diff --git a/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl b/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
-index 67c5f9d..007a7e7 100644
+index 67c5f9d..d5f9443 100644
 --- a/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
 +++ b/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
-@@ -29,7 +29,7 @@ cbuffer Params : register(b0)
+@@ -29,9 +29,9 @@ cbuffer Params : register(b0)
      uint  gApplyModel;     // 0 output the clean frame (pass still runs), 1 apply the model's edit
      uint  gUseGameExposure;// D3D12 source-1 only: 1 = read the game's live exposure in-shader (t4)
      float gExposurePreMul; // preExposure * trim, so the live white point is gExposurePreMul / exposure
 -    uint  gHdrProxy;       // 1: the proxy surface is float16 carrying linear HDR normalised by the
 +    uint  gHdrProxy;       // 2: native encoded FP16; 1: the proxy surface is float16 carrying linear HDR normalised by the
                             //    white point -- no knee, no sRGB, no ceiling. Off is the SDR path.
-     uint  gHdrTransfer;    // 1 with gHdrProxy: the swapchain carries PQ (ST 2084), so the frame is
+-    uint  gHdrTransfer;    // 1 with gHdrProxy: the swapchain carries PQ (ST 2084), so the frame is
++    uint  gHdrTransfer;    // 1: the swapchain carries PQ (ST 2084), so the frame is
                             //    PQ-decoded on the way in and PQ-encoded on the way out.
+     float gColourTrust;    // maximum chroma displacement from the frame, in normalized units
+     float gRatioSmooth;    // how much of the relighting ratio to take from the neighbourhood
 @@ -303,26 +303,46 @@ static const float kPqC3 = 18.6875;           // 2392 / 4096 * 32
  // this is the divisor that puts a UI white at 1.0. The user's white point scales it from there.
  static const float kPqPaperWhite = 0.0203;
@@ -1671,7 +1675,7 @@ index ec78533..e4f1a0e 100644
      return true;
  }
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..23b7dab 100644
+index 4b37520..15bcf4e 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -1721,7 +1725,7 @@ index 4b37520..23b7dab 100644
      return v;
  }
  
-+// The native HIP helper is deliberately opt-in. Its transport is host-staged RGBA8;
++// The native HIP helper is deliberately opt-in. Its transport is host-staged RGBA8 or RGBA16F;
 +// it does not import NGX's exported images or require NVIDIA driver extensions.
 +static bool NativeHipBackend() {
 +    static const bool enabled = [] {
@@ -2024,7 +2028,7 @@ index 4b37520..23b7dab 100644
 +            Log("[layer] backend %s inert on device (vendor %#x): %s",
 +                NativeHipBackend() ? "hip" : "ngx", props.vendorID, deviceName);
 +        } else if (NativeHipBackend()) {
-+            Log("[layer] native HIP backend: SDR host-staging transport on %s", deviceName);
++            Log("[layer] native HIP backend: host-staging transport on %s", deviceName);
          }
      }
  
@@ -2589,7 +2593,7 @@ diff --git a/upstream-layer/tools/meson-build.sh b/upstream-layer/tools/meson-bu
 old mode 100644
 new mode 100755
 diff --git a/upstream-layer/tools/shmctl.cpp b/upstream-layer/tools/shmctl.cpp
-index 4e16702..be5008b 100644
+index 4e16702..b6578fd 100644
 --- a/upstream-layer/tools/shmctl.cpp
 +++ b/upstream-layer/tools/shmctl.cpp
 @@ -1,168 +1,351 @@
@@ -2782,7 +2786,7 @@ index 4e16702..be5008b 100644
 +        "directory is created automatically. Settings persist in the shared-memory\n"
 +        "channel, not a configuration file; worker startup may reapply its own settings.\n"
 +        "\n"
-+        "Native HIP supports SDR and successive neural passes; --passes changes the next\n"
++        "Native HIP supports SDR, HDR and successive neural passes; --passes changes the next\n"
 +        "frame's inference chain. Each added pass adds another network evaluation.\n"
 +        "Intensity, local tone/structure and sharpness are native residual/sharpening\n"
 +        "operations after each network pass, not NVIDIA NGX parameter implementations.\n"
