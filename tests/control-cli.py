@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 import re
+import struct
 import subprocess
 import tempfile
 
@@ -39,13 +40,16 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
 
     helptext = run('--help')
     assert not channel.exists(), '--help created the channel'
-    assert '--working-scale' in helptext and 'default: 1' in helptext
+    assert 'Actions run after parsing: reset, explicit settings, toggle, stop/resume, capture;' in helptext
+    assert 'and --toggle-key (DLSSNR_TOGGLE_KEY).' in helptext
+    assert '-c, --capture N         Request 0..64 matched before/after frames;' in helptext
     assert 'effective default: ' + str(channel) in helptext
     assert '1 with worker --cpu-compose or --test-identity' in helptext
     shared_header = Path(__file__).resolve().parent.parent / 'upstream-layer/common/shm_protocol.h'
     tier = re.search(r'kNativeDefaultTier\s*=\s*(\d+)', shared_header.read_text())[1]
     max_passes = int(re.search(r'kMaxPasses\s*=\s*(\d+)', shared_header.read_text())[1])
     version = int(re.search(r'kShmVersion\s*=\s*(\d+)', shared_header.read_text())[1])
+    magic = int(re.search(r'kShmMagic\s*=\s*(0x[0-9A-Fa-f]+)', shared_header.read_text())[1], 16)
     assert f'worker default: {tier}' in helptext
     assert run('-h') == helptext
     run('--settings', expected=1)
@@ -111,6 +115,19 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     for options in invalid_options:
         run(*options, expected=2)
         assert header() == original, ('invalid option mutated channel', options)
+
+    # getopt names the offending argument, even inside a cluster or after a path.
+    for options, named in [
+        (('-%S',), "invalid option -- '%'"), (('--shm', '/nonexistent', '-%S'), "invalid option -- '%'"),
+        (('--status', '-%S'), "invalid option -- '%'"), (('-Sc',), "requires an argument -- 'c'"),
+        (('--capture',), "'--capture' requires an argument"), (('--nope',), "unrecognized option '--nope'"),
+        (('--sh', 'x'), "'--sh' is ambiguous"), (('--status=1',), "'--status' doesn't allow an argument"),
+    ]:
+        error = run(*options, expected=2, errors=True)
+        assert named in error, (options, error)
+    error = run('--capture', '65', expected=2, errors=True)
+    assert "--capture: expected an integer from 0 through 64, got '65'\n" in error, error
+    assert header() == original
 
     # Every advertised bound is accepted, and so is the value --settings then
     # prints, although binary32 stores some float minimums below themselves.
@@ -195,8 +212,28 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     assert all(current == default for current, default in reset.values())
     assert 'quit=1\n' in run('-S'), '--reset erased transport state'
     assert 'quit=0\n' in run('-R', '-S')
-    run('-c', '0')
-    run('--capture=64')
+
+    # A capture publishes a new control generation and --status reports it.
+    def control_sequence(output):
+        return int(re.search(r'^control_seq=(\d+)$', output, re.MULTILINE)[1])
+
+    sequence = control_sequence(run('-S'))
+    status = run('-c', '3', '-S')
+    assert control_sequence(status) == sequence + 1
+    assert status.endswith(f'\ncapture_control_seq={sequence + 1}\n'), status
+    assert 'capture_control_seq=' not in run('-S') + run('--capture=64', '-l') + run('-c', '0')
+
+    # Every other setting takes its short option too: set the bound that is not
+    # the default and read it back by name.
+    for name, (_, default) in values.items():
+        if name in fixed:
+            continue
+        option = re.search(r'-(\w), --' + re.escape(name) + r'\s+VALUE[^\n]*\n\s*Range: (\S+?)\.\.([^;]+);', helptext)
+        assert option, name
+        bound = option[3] if float(option[3]) != default else option[2]
+        stored = struct.unpack('f', struct.pack('f', float(bound)))[0]
+        assert settings(run('-' + option[1], bound, '-l'))[name][0] == stored, (name, option[1], bound)
+    run('-r')
 
     # Explicit path wins over the environment; reads never initialise bad headers.
     other = Path(directory) / 'another channel.bin'
@@ -229,7 +266,8 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     stale[4:8] = (version - 1).to_bytes(4, 'little')
     with channel.open('r+b') as stream:
         stream.write(stale)
-    run('-S', expected=1)
+    error = run('-S', expected=1, errors=True)
+    assert f'magic {magic:#x} version {version - 1}, expected {magic:#x} version {version}' in error, error
     assert header() == stale
     warning = run('--reset', errors=True)
     assert f"'{channel}' held protocol v{version - 1} and is re-initialised as v{version};" in warning, warning

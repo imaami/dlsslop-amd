@@ -477,7 +477,7 @@ index 3d7bbfb..0b087a2 100644
   for(uint tile=0;tile<2;tile++){half8 a{};for(uint e=0;e<8;e++){uint k=tile*16+group*8+e;a[e]=(_Float16)(k<16?values[rc*16+k]:0.f);}
    for(uint col=0;col<2;col++){half8 b{};for(uint e=0;e<8;e++){uint k=tile*16+group*8+e;b[e]=(_Float16)(k<16?weights[(col*16+rc)*16+k]:0.f);}sum[col]=__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a,b,sum[col]);}
 diff --git a/upstream-layer/common/shm_protocol.h b/upstream-layer/common/shm_protocol.h
-index fd7c1cd..c76b3c9 100644
+index fd7c1cd..8c2d2b6 100644
 --- a/upstream-layer/common/shm_protocol.h
 +++ b/upstream-layer/common/shm_protocol.h
 @@ -14,11 +14,11 @@
@@ -557,7 +557,7 @@ index fd7c1cd..c76b3c9 100644
      // gamescope, or anywhere the user is in the 'input' group. A game presenting through winewayland
      // is a Wayland client whose keys never reach this process, and keyboards get no uaccess ACL, so
 -    // there the answer is a desktop shortcut bound to 'dlssnr-shmctl toggle enabled' instead.
-+    // there the answer is a desktop shortcut bound to 'dlsslopctl --enabled 0' or '--enabled 1' instead.
++    // there the answer is a desktop shortcut bound to 'dlsslopctl --toggle enabled' instead.
      std::atomic<uint32_t> toggleKey;
  
      // Which proxy the model is shown, and whether its answer is composed or substituted. See
@@ -2592,10 +2592,10 @@ diff --git a/upstream-layer/tools/meson-build.sh b/upstream-layer/tools/meson-bu
 old mode 100644
 new mode 100755
 diff --git a/upstream-layer/tools/shmctl.cpp b/upstream-layer/tools/shmctl.cpp
-index 4e16702..4af340d 100644
+index 4e16702..be5008b 100644
 --- a/upstream-layer/tools/shmctl.cpp
 +++ b/upstream-layer/tools/shmctl.cpp
-@@ -1,168 +1,355 @@
+@@ -1,168 +1,351 @@
 -// dlssnr-shmctl — read and write the shared-memory header from shell.
 -//
 -// This exists because the helper CLI used to poke the header with
@@ -2760,12 +2760,12 @@ index 4e16702..4af340d 100644
 +        "  -r, --reset             Restore supported settings before explicit changes (default: off)\n"
 +        "  -q, --quit              Request worker/layer stop (default: off; initial quit flag: 0)\n"
 +        "  -R, --resume            Clear stop request; does not restart the worker (default: off)\n"
-+        "  -c, --capture N         Request 0..64 matched before/after frames; 0 clears a pending request\n"
++        "  -c, --capture N         Request %g..%g matched before/after frames; 0 clears a pending request\n"
 +        "                         (default: unchanged; initial: 0; active captures continue)\n"
 +        "  -T, --toggle-enabled    Toggle enabled once, useful for a key binding (default: off)\n"
 +        "  -A, --toggle NAME       Toggle a boolean setting once; repeat for different settings (default: none)\n"
 +        "  -h, --help              Print help without accessing the channel (default: off)\n"
-+        "\nSettings (all require a value):\n", DefaultPath().c_str());
++        "\nSettings (all require a value):\n", DefaultPath().c_str(), kCapture.minimum, kCapture.maximum);
 +    for (const auto& s : kSettings) {
 +        const uint32_t raw = (defaults.*s.field).load();
 +        const double value = s.isFloat ? BitsToFloat(raw) : raw;
@@ -2778,7 +2778,7 @@ index 4e16702..4af340d 100644
 +    }
 +    std::fprintf(stream,
 +        "\n"
-+        "Actions run after parsing: reset, explicit settings, toggle, capture, stop/resume;\n"
++        "Actions run after parsing: reset, explicit settings, toggle, stop/resume, capture;\n"
 +        "requested status/settings are printed last. Repeated settings use the last value.\n"
 +        "--quit and --resume conflict. A setting cannot be both assigned and toggled.\n"
 +        "Changes require an existing channel parent directory; the default private\n"
@@ -2801,7 +2801,8 @@ index 4e16702..4af340d 100644
 +        "dlsslopd --tier (worker default: %u), not by this tool.\n"
 +        "Composition controls apply to the Vulkan composition path; --cpu-compose\n"
 +        "uses the worker's own composition. Layer environment overrides take precedence\n"
-+        "over --ratio-smooth (DLSSNR_RATIO_SMOOTH) and --color-trust (DLSSNR_COLOUR_TRUST).\n"
++        "over --ratio-smooth (DLSSNR_RATIO_SMOOTH), --color-trust (DLSSNR_COLOUR_TRUST)\n"
++        "and --toggle-key (DLSSNR_TOGGLE_KEY).\n"
 +        "\n"
 +        "Examples:\n"
 +        "  dlsslopctl --working-scale 1 --transfer 2\n"
@@ -2874,14 +2875,13 @@ index 4e16702..4af340d 100644
 +        {"toggle", required_argument, nullptr, 'A'},
 +        {"help", no_argument, nullptr, 'h'},
 +    };
-+    std::string shortOptions = "+:s:SlrqRc:TA:h";
++    std::string shortOptions = "+s:SlrqRc:TA:h";
 +    for (const auto& s : kSettings) {
 +        longOptions.push_back({s.name, required_argument, nullptr, s.shortName});
 +        shortOptions += s.shortName;
 +        shortOptions += ':';
 +    }
 +    longOptions.push_back({nullptr, 0, nullptr, 0});
-+    opterr = 0;
 +    int code;
 +    while ((code = getopt_long(argc, argv, shortOptions.c_str(), longOptions.data(), nullptr)) != -1) {
 +        switch (code) {
@@ -2915,21 +2915,16 @@ index 4e16702..4af340d 100644
 +        case 'h': options.help = true; break;
 +        case 'c':
 +            if (!ParseValue(optarg, kCapture, options.capture)) {
-+                std::fprintf(stderr, "--capture: expected an integer from 0 through 64, got '%s'\n", optarg);
++                std::fprintf(stderr, "--capture: expected an integer from %g through %g, got '%s'\n",
++                             kCapture.minimum, kCapture.maximum, optarg);
 +                return false;
 +            }
 +            options.captureSet = true;
 +            break;
-+        case ':':
-+            std::fprintf(stderr, "option requires a value: %s\n", argv[optind - 1]);
-+            return false;
-+        case '?':
-+            std::fprintf(stderr, "unknown or ambiguous option: %s\n", argv[optind - 1]);
-+            return false;
 +        default: {
 +            const Setting* setting = nullptr;
 +            for (const auto& s : kSettings) if (code == s.shortName) setting = &s;
-+            if (!setting) return false;
++            if (!setting) return false;  // '?': getopt has named the bad argument
 +            uint32_t& value = options.values[setting - kSettings];
 +            if (!ParseValue(optarg, *setting, value)) {
 +                std::fprintf(stderr, "--%s: expected a finite %s in [%g, %g], got '%s'\n",
@@ -3051,7 +3046,8 @@ index 4e16702..4af340d 100644
 +bool Attach(ShmHeader* h, bool create, const char* path) {
 +    if (Initialised(h)) return true;
 +    if (!create) {
-+        std::fprintf(stderr, "channel '%s' is uninitialised or has an incompatible protocol\n", path);
++        std::fprintf(stderr, "channel '%s' is uninitialised or incompatible: magic %#x version %u, expected %#x version %u\n",
++                     path, h->magic.load(), h->version.load(), kShmMagic, kShmVersion);
 +        return false;
 +    }
 +    if (h->magic.load() == kShmMagic)
@@ -3083,7 +3079,7 @@ index 4e16702..4af340d 100644
  }
  
  void PrintStatus(const ShmHeader* h) {
-@@ -171,11 +358,20 @@ void PrintStatus(const ShmHeader* h) {
+@@ -171,11 +354,20 @@ void PrintStatus(const ShmHeader* h) {
      if (!Initialised(h)) return;
      std::printf("seq_req=%u\nseq_resp=%u\n", h->seq_req.load(), h->seq_resp.load());
      std::printf("width=%u\nheight=%u\n", h->width.load(), h->height.load());
@@ -3106,7 +3102,7 @@ index 4e16702..4af340d 100644
      std::printf("layer_pid=%u\nlayer_composition_up=%u\nlayer_frames=%llu\nlayer_ms=%.2f\n",
                  h->layerPid.load(),
                  h->layerCompositionUp.load(),
-@@ -189,99 +385,70 @@ void PrintStatus(const ShmHeader* h) {
+@@ -189,99 +381,70 @@ void PrintStatus(const ShmHeader* h) {
      if (!reason.empty()) std::printf("helper_reason=%s\n", reason.c_str());
  }
  
