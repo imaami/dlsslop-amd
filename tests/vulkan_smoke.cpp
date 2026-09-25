@@ -130,6 +130,8 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
     h->enabled.store(1);
     h->hdrMode.store(proxy16 ? kHdrForce : kHdrOff);
     h->colourMode.store(linear ? kColourLinearHdr : kColourAuto);
+    // Linear HDR also exercises the measured white point's copy into the resolve's constants.
+    h->whitePointSource.store(linear ? kWhitePointMeasured : kWhitePointManual);
     h->workingScaleBits.store(FloatToBits(1.0f));
     h->compositionBypass.store(0);  // Exercise the resolve shader as well as the copy path.
     h->nativeModelMaxWidth.store(reduced ? 160 : 0);

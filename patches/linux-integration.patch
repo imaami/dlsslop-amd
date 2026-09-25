@@ -944,7 +944,7 @@ index db0dc5d..0c88a64 100644
  
  }  // namespace dlssnr
 diff --git a/upstream-layer/layer_linux/src/composition.cpp b/upstream-layer/layer_linux/src/composition.cpp
-index dc344c4..c1f3c2c 100644
+index dc344c4..f7d1120 100644
 --- a/upstream-layer/layer_linux/src/composition.cpp
 +++ b/upstream-layer/layer_linux/src/composition.cpp
 @@ -69,6 +69,9 @@ bool ColourIsLinearHdr(VkFormat swapchainFormat, uint32_t colourMode) {
@@ -1105,7 +1105,40 @@ index dc344c4..c1f3c2c 100644
          MakeImage(_keep, width, height, _keepFormat, sampled | storage) &&
          MakeImage(_proxy, width, height, proxyFormat, sampled | storage | src) &&
          MakeImage(_model, modelW, modelH, proxyFormat, sampled | src | dst) &&
-@@ -1146,7 +1156,7 @@ float Composition::ResolvedWhitePoint(const FrameSettings& s) const {
+@@ -1088,20 +1098,18 @@ void Composition::TransitionSwapchain(VkCommandBuffer cb, VkImage image, VkImage
+     b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+     b.image = image;
+     b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+-    VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+-    VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+-    if (from == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR && to == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+-        b.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+-        b.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+-        srcStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+-        dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+-    } else if (from == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL && to == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR) {
+-        b.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+-        b.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+-        srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+-        dstStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+-    }
+-    _vk->vkCmdPipelineBarrier(cb, srcStage, dstStage, 0, 0,
++    // A transfer layout carries its transfer access. PRESENT_SRC needs only an execution
++    // dependency: BOTTOM_OF_PIPE is every prior command as a source and nothing as a destination.
++    const auto access = [](VkImageLayout l) -> VkAccessFlags {
++        return l == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL ? VK_ACCESS_TRANSFER_READ_BIT
++             : l == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ? VK_ACCESS_TRANSFER_WRITE_BIT : 0;
++    };
++    const auto stage = [](VkAccessFlags a) -> VkPipelineStageFlags {
++        return a ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
++    };
++    b.srcAccessMask = access(from);
++    b.dstAccessMask = access(to);
++    _vk->vkCmdPipelineBarrier(cb, stage(b.srcAccessMask), stage(b.dstAccessMask), 0, 0,
+                               nullptr, 0, nullptr, 1, &b);
+ }
+ 
+@@ -1146,7 +1154,7 @@ float Composition::ResolvedWhitePoint(const FrameSettings& s) const {
  DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
      DlssNrConstants c{};
  
@@ -1114,7 +1147,7 @@ index dc344c4..c1f3c2c 100644
      c.TransferStrength = s.transferStrength;
      c.ColourStrength = s.colourStrength;
      c.MaxRatio = s.maxRatio;
-@@ -1178,7 +1188,7 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
+@@ -1178,7 +1186,7 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
              c.ReversibleMode = s.reversibleMode >= 3 ? 4u : 2u;
          } else {
              c.DebugView = 2;
@@ -1123,7 +1156,7 @@ index dc344c4..c1f3c2c 100644
          }
      }
  
-@@ -1194,8 +1204,9 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
+@@ -1194,8 +1202,9 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
      c.GuideHeight = _height;
      c.UseGameExposure = 0;
      c.ExposurePreMul = 1.0f;
@@ -1135,7 +1168,18 @@ index dc344c4..c1f3c2c 100644
      c.ColourTrust = s.colourTrust;
      c.RatioSmooth = s.ratioSmooth;
      return c;
-@@ -1293,7 +1304,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1287,13 +1296,18 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+                             VK_NULL_HANDLE, VK_NULL_HANDLE, _meter.view, VK_NULL_HANDLE)) {
+             if (!_meterStateCleared) {
+                 _vk->vkCmdFillBuffer(cb, _meterState, 0, VK_WHOLE_SIZE, 0);
++                // The reduce reads and writes what the fill cleared.
++                const VkMemoryBarrier cleared{ VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_TRANSFER_WRITE_BIT,
++                                               VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT };
++                _vk->vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
++                                          0, 1, &cleared, 0, nullptr, 0, nullptr);
+                 _meterStateCleared = true;
+             }
+             MeterPush pc{};
              pc.manual = s.whitePointManual;
              pc.scale = s.whitePointScale;
              pc.trim = s.whitePointTrim;
@@ -1144,7 +1188,7 @@ index dc344c4..c1f3c2c 100644
              pc.source = s.whitePointSource;
              pc.hold = _holding && _frameCaptured ? 1u : 0u;
              _vk->vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, _meterPipeline);
-@@ -1552,6 +1563,23 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1552,6 +1566,23 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
      // presented it and the frame the model edited, for the same frame.
      _captureRecorded = false;
      if (_capture.Active()) {
@@ -1168,7 +1212,7 @@ index dc344c4..c1f3c2c 100644
          const size_t bytes = size_t(_width) * _height * (_workFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 4);
          if (_captureBuf.buffer || MakeHostBuffer(_captureBuf, bytes * 2, VK_BUFFER_USAGE_TRANSFER_DST_BIT)) {
              Transition(cb, _frame, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-@@ -1578,7 +1606,7 @@ void Composition::WriteCapturedFrame() {
+@@ -1578,7 +1609,7 @@ void Composition::WriteCapturedFrame() {
      _captureRecorded = false;
      const size_t bytes = size_t(_width) * _height * (_workFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 4);
      const uint8_t* base = (const uint8_t*) _captureBuf.mapped;
@@ -1549,9 +1593,18 @@ index 67c5f9d..712c614 100644
 +    gTarget[id.xy] = float4(stored, originalSample.a);
  }
 diff --git a/upstream-layer/layer_linux/src/dlssnr_pass.cpp b/upstream-layer/layer_linux/src/dlssnr_pass.cpp
-index 6ea685d..e2721a6 100644
+index 6ea685d..d412f9d 100644
 --- a/upstream-layer/layer_linux/src/dlssnr_pass.cpp
 +++ b/upstream-layer/layer_linux/src/dlssnr_pass.cpp
+@@ -34,7 +34,7 @@ DlssNrPass::DlssNrPass(const DeviceTable* InVk, const InstanceTable* InInstance,
+     _slotStride = ((sizeof(DlssNrConstants) + alignment - 1) / alignment) * alignment;
+ 
+     if (!CreateBufferResource(&_constantBuffer, &_constantBufferMemory, _slotStride * kSlots,
+-                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
++                              VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
+         Log("[pass] could not allocate the constant ring");
+         return;
 @@ -166,26 +166,6 @@ bool DlssNrPass::CreateDummy(VkCommandBuffer cmdList) {
  void DlssNrPass::WriteDescriptors(VkDescriptorSet set, VkDeviceSize constantOffset, VkImageView source,
                                    VkImageView model, VkImageView original, VkImageView motion, VkImageView target,
@@ -1627,7 +1680,7 @@ index ec78533..e4f1a0e 100644
      return true;
  }
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..fa6b242 100644
+index 4b37520..83afeba 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -2060,7 +2113,21 @@ index 4b37520..fa6b242 100644
      }
  
      VkCommandBufferBeginInfo bi{};
-@@ -1595,6 +1779,9 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1559,7 +1743,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+         si.pWaitDstStageMask = nullptr;
+     };
+ 
++    // A fence wait does not make device writes visible to the host, and the host reads what both
++    // legs copy out: the proxy, the meter mirror and the capture pair.
++    static constexpr VkMemoryBarrier kToHost{ VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
++                                              VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT };
+     const auto endAndSubmit = [&](VkFence fence) {
++        dc->vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &kToHost,
++                                 0, nullptr, 0, nullptr);
+         if (!NoteVk(dc, dc->vkEndCommandBuffer(cb), "vkEndCommandBuffer")) return false;
+         if (!NoteVk(dc, dc->vkQueueSubmit(queue, 1, &si, fence), "vkQueueSubmit")) return false;
+         if (waitsConsumed && si.waitSemaphoreCount != 0) *waitsConsumed = true;
+@@ -1595,6 +1785,9 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          return false;
      }
      sc.comp->MarkModelFrame();
@@ -2070,7 +2137,7 @@ index 4b37520..fa6b242 100644
      const double tHelper = time ? NowMs() : 0.0;
  
      // ---- leg 2: the answer, composed back ----
-@@ -1608,6 +1795,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1608,6 +1801,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // the top of the next frame, where the reused surfaces actually need it.
      if (!endAndSubmit(sc.fenceLeg2)) return false;
      sc.leg2Pending = true;
@@ -2084,7 +2151,7 @@ index 4b37520..fa6b242 100644
      const double tReturn = time ? NowMs() : 0.0;
  
      if (dc->shm.hdr) {
-@@ -1851,7 +2045,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
+@@ -1851,7 +2051,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
      if (*pCount < 1) { *pCount = 1; return VK_INCOMPLETE; }
      std::memset(pProperties, 0, sizeof(*pProperties));
      std::strncpy(pProperties->layerName, VK_LAYER_NAME, VK_MAX_EXTENSION_NAME_SIZE - 1);
