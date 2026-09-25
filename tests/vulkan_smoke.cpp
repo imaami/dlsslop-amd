@@ -181,6 +181,7 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
     // starts at zero even when the worker channel is reused between modes.
     h->layerFramesLo.store(0);
     h->layerFramesHi.store(0);
+    h->layerMsBits.store(0);
     h->controlSeq.fetch_add(1);
 
     constexpr uint32_t width = 320, height = 192, frames = 5;
@@ -507,6 +508,8 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
         return 0;
     }
     require(composed >= initialFrames + frames, "layer failed to compose all frames");
+    // Measured on every composed frame, not only under DLSSNR_TIME.
+    require(BitsToFloat(h->layerMsBits.load()) > 0, "layer did not publish its per-frame cost");
     std::printf("PASS: %u Vulkan frames captured, RGBA pixels verified, worker answered, "
                 "composition submitted and presented (%ux%u).\n",
                 frames, swap.imageExtent.width, swap.imageExtent.height);

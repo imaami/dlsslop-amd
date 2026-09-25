@@ -1675,7 +1675,7 @@ index ec78533..e4f1a0e 100644
      return true;
  }
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..15bcf4e 100644
+index 4b37520..74370d3 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -2149,7 +2149,7 @@ index 4b37520..15bcf4e 100644
  
      if (!dc->instance) return false;
      sc.comp = std::make_unique<dlssnr::Composition>(&dc->table, &dc->instance->table, d, dc->physical);
-@@ -1383,26 +1567,40 @@ static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
+@@ -1383,30 +1567,44 @@ static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
      return false;
  }
  
@@ -2196,6 +2196,11 @@ index 4b37520..15bcf4e 100644
      VkDevice d = dc->self;
      VkCommandBuffer cb = sc.cb;
      const bool time = TimeEnabled();
+-    const double t0 = time ? NowMs() : 0.0;
++    const double t0 = NowMs();
+ 
+     // The previous frame's compose, if it is still running, must finish before anything here
+     // touches the surfaces it reads or the command buffer it was recorded into. Waiting here rather
 @@ -1437,19 +1635,26 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // frame on the 8-bit path it has always used. hdrActive doubles as the echo the helper reads, so
      // it builds the float images only for a layer that has said it will feed them.
@@ -2279,7 +2284,7 @@ index 4b37520..15bcf4e 100644
          dc->vkEndCommandBuffer(cb);
          return false;
      }
-@@ -1595,19 +1811,31 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1595,20 +1811,32 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          return false;
      }
      sc.comp->MarkModelFrame();
@@ -2305,6 +2310,7 @@ index 4b37520..15bcf4e 100644
 +    si.pSignalSemaphores = &sc.leg2Done[index];
      if (!endAndSubmit(sc.fenceLeg2)) return false;
      sc.leg2Pending = true;
+-    const double tReturn = time ? NowMs() : 0.0;
 +    // A diagnostic request must finish even if a paused application presents
 +    // no subsequent frame. Ordinary frames keep the asynchronous leg-2 path.
 +    // The semaphore is signalled either way, so a failed wait still presents.
@@ -2312,9 +2318,10 @@ index 4b37520..15bcf4e 100644
 +        sc.leg2Pending = false;
 +        sc.comp->WriteCapturedFrame();
 +    }
-     const double tReturn = time ? NowMs() : 0.0;
++    const double tReturn = NowMs();
  
      if (dc->shm.hdr) {
+         ShmStore64(dc->shm.hdr->layerFramesLo, dc->shm.hdr->layerFramesHi, ++dc->framesComposed);
 @@ -1650,11 +1878,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
      dc->lastPresentMs.store(NowMs(), std::memory_order_relaxed);
  
