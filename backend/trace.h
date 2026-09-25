@@ -184,12 +184,21 @@ class FrameTrace {
     std::filesystem::path directory_;
     std::vector<std::string> stages_;
     std::string error_;
+    bool finished_ = false;
 public:
     explicit FrameTrace(const std::filesystem::path& directory) : directory_(directory) {
         if (!std::filesystem::create_directory(directory_))
             throw std::runtime_error("diagnostic token already exists: " + directory_.string());
         if (chmod(directory_.c_str(), 0700))
             throw std::runtime_error("make diagnostic directory private");
+    }
+    FrameTrace(const FrameTrace&) = delete;
+    // A claimed request always gets its summary and marker, even when the
+    // worker stops or unwinds first; the client need not wait for a timeout.
+    ~FrameTrace() {
+        if (finished_) return;
+        if (error_.empty()) error_ = "worker stopped before a traced frame completed";
+        finish("{}");
     }
     void image(const std::string& name, const float* data, const Geometry& g, unsigned channels) noexcept {
         if (!error_.empty()) return;
@@ -200,6 +209,7 @@ public:
         } catch (const std::exception& error) { error_ = error.what(); }
     }
     void finish(const std::string& metadata) noexcept {
+        finished_ = true;
         try {
             std::ostringstream out;
             out << "{\"schema\":1,\"status\":" << trace_json_string(error_.empty() ? "complete" : "failed")

@@ -185,8 +185,28 @@ int main(int argc, char** argv)
             require(failure.find("pass-01-raw") == std::string::npos &&
                     !std::filesystem::exists(directory / "frame_2/pass-01-raw.pfm"),
                     "no stage after a failure");
+            // A trace dropped unfinished, as when the worker stops after the
+            // claim, still publishes a failed summary and its root marker.
+            dlsslop::trace_write_text(directory / "request", "frame_3\n");
+            requests.take()->image("pass-01-input", rgba.data(), g, 4);
+            require(read_text(directory / "frame_3.done") == "frame_3/summary.json\n", "abandoned trace marker");
+            const auto abandoned = read_text(directory / "frame_3/summary.json");
+            for (const char* field : {"\"status\":\"failed\"", "\"metadata\":{}",
+                                      "\"error\":\"worker stopped before a traced frame completed\"",
+                                      "\"file\":\"pass-01-input.pfm\""})
+                require(abandoned.find(field) != std::string::npos, field);
+            // A failure recorded but not finished keeps its own error.
+            dlsslop::trace_write_text(directory / "request", "frame_4\n");
+            requests.take()->fail("inference failed");
+            require(read_text(directory / "frame_4/summary.json").find("\"error\":\"inference failed\"") !=
+                    std::string::npos, "an unfinished failure keeps its error");
+            // A finished trace is published once, not again on destruction.
+            std::filesystem::remove(directory / "frame_2.done");
+            failed.reset();
+            require(!std::filesystem::exists(directory / "frame_2.done"), "finish publishes once");
             require(strict_json(argv[1], {directory / "owner.json", directory / "frame_1/summary.json",
-                                          directory / "frame_2/summary.json"}), "summaries are strict JSON");
+                                          directory / "frame_2/summary.json", directory / "frame_3/summary.json",
+                                          directory / "frame_4/summary.json"}), "summaries are strict JSON");
         }
         require(!std::filesystem::exists(directory / "owner.json"), "remove stale owner on shutdown");
         std::filesystem::remove_all(directory);
