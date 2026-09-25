@@ -143,6 +143,8 @@ importer's `--output` and worker's `--assets` options for a different location.
 The importer reads coefficient files only, checks all 184 required tables and
 their exact sizes, and writes a SHA-256 inventory. It does not execute packaged
 Windows programs. Size checks do not establish numerical model compatibility.
+`dlsslop-setup --check ~/.local/share/dlsslop-amd/model` checks an imported
+model's sizes and its inventory again, for example after a disk error.
 Weights are external to this repository, its source licenses and CI artifacts.
 
 ## Run

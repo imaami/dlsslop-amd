@@ -95,6 +95,8 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/launcher-cli.py)
     add_test(NAME kernels-cli COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/kernels-cli.py)
+    add_test(NAME setup-cli COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/setup-cli.py)
     # No RPATH is recorded, so a copied stub cannot find its dependency.
     add_library(hip-loader-stub-dependency SHARED tests/hip_loader_stub.cpp)
     target_compile_definitions(hip-loader-stub-dependency PRIVATE HIP_LOADER_STUB_DEPENDENCY)

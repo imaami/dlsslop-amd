@@ -54,6 +54,11 @@ def sha256(path):
     return digest.hexdigest()
 
 
+def checksum_text(records):
+    """WEIGHTS-SHA256SUMS in sha256sum format, as the import writes it."""
+    return "".join(f'{r["sha256"]}  {r["file"]}\n' for r in records)
+
+
 def validate_asset_dir(path):
     found = []
     missing = []
@@ -81,6 +86,10 @@ def import_assets(args):
         return
     if args.check:
         records = validate_asset_dir(args.check)
+        sums = args.check / "WEIGHTS-SHA256SUMS"
+        if sums.exists() and sums.read_text() != checksum_text(records):
+            raise ValueError(f"{sums}: recorded hashes do not match the weights; "
+                             f"run sha256sum --check WEIGHTS-SHA256SUMS in {args.check}")
         print(f"Complete model: {len(records)} weights; {sum(x['bytes'] for x in records):,} bytes")
         return
     if not args.source:
@@ -90,12 +99,10 @@ def import_assets(args):
     if source == output:
         raise ValueError("source and output must be different directories; use --check instead")
     output.parent.mkdir(parents=True, exist_ok=True)
-    if output.exists():
-        # Preserve independently built HIP subdirectory; never overwrite weights.
-        names = {base + ext for base in weight_manifest() for ext in [".f16", ".f32"]}
-        if any((output / name).exists() for name in names):
-            raise ValueError(f"weights already exist in {output}; choose a new output or use --check")
     wanted = {base + ext for base in weight_manifest() for ext in [".f16", ".f32"]}
+    # Preserve independently built HIP subdirectory; never overwrite weights.
+    if any((output / name).exists() for name in wanted):
+        raise ValueError(f"weights already exist in {output}; choose a new output or use --check")
     provenance = {"source": str(source), "source_sha256": sha256(source) if source.is_file() else None}
     with tempfile.TemporaryDirectory(prefix=".dlsslop-amd-assets-", dir=output.parent) as temp:
         stage = Path(temp)
@@ -132,7 +139,7 @@ def import_assets(args):
                 item.unlink()
         provenance["weights"] = records
         (stage / "weights-provenance.json").write_text(json.dumps(provenance, indent=2) + "\n")
-        (stage / "WEIGHTS-SHA256SUMS").write_text("".join(f'{r["sha256"]}  {r["file"]}\n' for r in records))
+        (stage / "WEIGHTS-SHA256SUMS").write_text(checksum_text(records))
         output.mkdir(parents=True, exist_ok=True)
         for item in stage.iterdir():
             os.replace(item, output / item.name)
@@ -150,7 +157,8 @@ def main():
                         help="import destination (default: %(default)s, from XDG_DATA_HOME or ~/.local/share; "
                              "ignored with --check or --print-manifest)")
     parser.add_argument("-c", "--check", type=Path,
-                        help="validate a previously imported model without importing files (default: unset; import --source)")
+                        help="validate a model's weight sizes and, when its WEIGHTS-SHA256SUMS exists, the recorded "
+                             "hashes, without importing files (default: unset; import --source)")
     parser.add_argument("-p", "--print-manifest", action="store_true",
                         help="print required weight names and element counts without importing files (default: off)")
     parser.add_argument("-h", "--help", action="help", help="show this help and exit (default: off)")
