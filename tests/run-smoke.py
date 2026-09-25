@@ -75,9 +75,11 @@ def main():
                     processes.append(xvfb)
                     socket = Path("/tmp/.X11-unix") / ("X" + args.display.lstrip(":"))
                     wait_for(socket.exists, xvfb, "Xvfb")
-                for mode in ("native", "reduced", "reduced-bgra", "native-fp16", "reduced-fp16"):
+                layer_log = logs / "layer.log"
+                for mode in ("native", "reduced", "reduced-bgra", "native-fp16", "reduced-fp16", "native-linear"):
                     state = root / mode
                     env["XDG_STATE_HOME"] = str(state)
+                    logged = layer_log.stat().st_size if layer_log.exists() else 0
                     command = [str(build / "vulkan-smoke"), "--contention"]
                     if args.headless:
                         command.append("--headless")
@@ -87,14 +89,25 @@ def main():
                         command.append("--bgra")
                     if mode.endswith("fp16"):
                         command.append("--proxy16")
-                    result = subprocess.run(command, env=env, text=True,
+                    # Software Vulkan accepts descriptor pools that lack a type the
+                    # set layout needs; the validation layer (when installed) reports
+                    # what RADV refuses.
+                    mode_env = env
+                    if mode.endswith("linear"):
+                        command.append("--linear-hdr")
+                        mode_env = dict(env, VK_INSTANCE_LAYERS="VK_LAYER_KHRONOS_validation")
+                    result = subprocess.run(command, env=mode_env, text=True,
                                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
                     (logs / f"smoke-{mode}.log").write_text(result.stdout)
                     print(result.stdout, end="")
                     if result.returncode:
                         raise RuntimeError(f"{mode} smoke test failed ({result.returncode}); inspect {logs}")
-                    if "Validation Error" in result.stdout:
+                    if "Validation Error" in result.stdout or "AllocateDescriptorSets" in result.stdout:
                         raise RuntimeError(f"{mode} emitted Vulkan validation errors; inspect {logs}")
+                    with layer_log.open() as log:
+                        log.seek(logged)
+                        if "cannot run here" in log.read():
+                            raise RuntimeError(f"{mode} composition could not be prepared; inspect {logs}")
                     captures = state / "dlssnr/captures"
                     manifest = dict(line.split(None, 1) for line in (captures / 'manifest.txt').read_text().splitlines()
                                     if line and not line.startswith('#') and len(line.split(None, 1)) == 2)

@@ -14,9 +14,10 @@ also checks the shared-memory controller backend.
 
 The presentation smoke drives Vulkan capture, an explicit identity worker,
 composition and presentation through a separate test layer that also admits
-software devices. It checks transport and composition, not HIP inference. It
-and the HDR shader test prefer software Vulkan (Mesa lavapipe) and fall back to
-a hardware device; the HDR shader test skips when no suitable device is
+software devices. It checks transport and composition, not HIP inference. Its
+linear-HDR mode runs under the Khronos validation layer when that is installed.
+It and the HDR shader test prefer software Vulkan (Mesa lavapipe) and fall back
+to a hardware device; the HDR shader test skips when no suitable device is
 available.
 
 Two checks disassemble the built HIP modules and need `llvm-objdump`. The
@@ -45,6 +46,15 @@ checks color correction without model weights. To run it alone:
 
 Exit 77 means the module, runtime or device is unavailable, not a passing
 hardware test.
+
+Software Vulkan accepts descriptor pools that the Radeon driver rejects, so
+repeat the presentation smoke on RADV. It fails when the layer cannot build a
+composition, including the linear-HDR one used by HDR swapchains:
+
+```bash
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/radeon_icd.json python3 tests/run-smoke.py --headless
+```
+
 After installation and external weight import, run:
 
 ```bash

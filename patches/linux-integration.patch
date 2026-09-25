@@ -968,7 +968,7 @@ index db0dc5d..0c88a64 100644
  
  }  // namespace dlssnr
 diff --git a/upstream-layer/layer_linux/src/composition.cpp b/upstream-layer/layer_linux/src/composition.cpp
-index dc344c4..5846c8f 100644
+index dc344c4..c1f3c2c 100644
 --- a/upstream-layer/layer_linux/src/composition.cpp
 +++ b/upstream-layer/layer_linux/src/composition.cpp
 @@ -69,6 +69,9 @@ bool ColourIsLinearHdr(VkFormat swapchainFormat, uint32_t colourMode) {
@@ -1003,7 +1003,42 @@ index dc344c4..5846c8f 100644
      DropImage(_frame);
      DropImage(_keep);
      DropImage(_proxy);
-@@ -686,6 +697,17 @@ void Composition::DropMeterState() {
+@@ -498,6 +509,7 @@ void Composition::SetTransport(void* inRegion, void* outRegion, size_t bytes) {
+ // and the descriptor's image binding follow the meter image.
+ bool Composition::BuildMeterPipeline() {
+     if (_meterPipeline) return true;
++    DropMeterObjects();  // whatever a failed attempt left behind
+     if (!_vk->vkCreateShaderModule || !_vk->vkCmdPushConstants || !_vk->vkCmdFillBuffer) return false;
+ 
+     VkShaderModuleCreateInfo smci{};
+@@ -553,12 +565,13 @@ bool Composition::BuildMeterPipeline() {
+         return false;
+     }
+ 
+-    VkDescriptorPoolSize poolSize{ VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 };
++    const VkDescriptorPoolSize poolSizes[] = { { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1 },
++                                               { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1 } };
+     VkDescriptorPoolCreateInfo dpci{};
+     dpci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+     dpci.maxSets = 1;
+-    dpci.poolSizeCount = 1;
+-    dpci.pPoolSizes = &poolSize;
++    dpci.poolSizeCount = 2;
++    dpci.pPoolSizes = poolSizes;
+     if (_vk->vkCreateDescriptorPool(_device, &dpci, nullptr, &_meterDescriptorPool) != VK_SUCCESS) {
+         _vk->vkDestroyShaderModule(_device, module, nullptr);
+         return false;
+@@ -623,7 +636,8 @@ bool Composition::MakeMeterState() {
+     VkBufferCreateInfo bci{};
+     bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+     bci.size = kMeterStateBytes;
+-    bci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
++    bci.usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
++                VK_BUFFER_USAGE_TRANSFER_DST_BIT;  // vkCmdFillBuffer clears it
+     bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+     if (_vk->vkCreateBuffer(_device, &bci, nullptr, &_meterState) != VK_SUCCESS) return false;
+     VkMemoryRequirements req{};
+@@ -686,6 +700,17 @@ void Composition::DropMeterState() {
  // pathologically small window from producing a degenerate raster.
  void Composition::ModelExtent(uint32_t width, uint32_t height, const FrameSettings& s,
                                uint32_t& modelW, uint32_t& modelH) {
@@ -1021,7 +1056,7 @@ index dc344c4..5846c8f 100644
      const auto scaled = [&](uint32_t v) {
          if (s.workingScale == 1.0f) return v;
          return std::max<uint32_t>(64, uint32_t(std::lround(double(v) * double(s.workingScale))));
-@@ -695,7 +717,7 @@ void Composition::ModelExtent(uint32_t width, uint32_t height, const FrameSettin
+@@ -695,7 +720,7 @@ void Composition::ModelExtent(uint32_t width, uint32_t height, const FrameSettin
  }
  
  bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFormat, const FrameSettings& s,
@@ -1030,7 +1065,7 @@ index dc344c4..5846c8f 100644
      if (!_usable) return false;
  
      VkFormat work = CompositionFormat(swapchainFormat);
-@@ -733,25 +755,9 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -733,25 +758,9 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
          }
      }
  
@@ -1059,7 +1094,7 @@ index dc344c4..5846c8f 100644
      uint32_t modelW = 0, modelH = 0;
      ModelExtent(width, height, s, modelW, modelH);
      const bool superSample = modelW > width || modelH > height;
-@@ -767,13 +773,13 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -767,13 +776,13 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
          if ((fp16.optimalTilingFeatures & need) != need) {
              if (!_hdrProxy) Log("[comp] float16 proxy requested but not supported here; staying 8-bit");
              hdrProxy = false;
@@ -1075,7 +1110,7 @@ index dc344c4..5846c8f 100644
          return true;
  
      Log("[comp] building %ux%u, model %ux%u, %s%s%s", width, height, modelW, modelH,
-@@ -820,7 +826,8 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -820,7 +829,8 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
      _blitSwapchain = blit;
      _linearHdr = linearHdr;
      _hdrProxy = hdrProxy;
@@ -1085,7 +1120,7 @@ index dc344c4..5846c8f 100644
      const VkFormat proxyFormat = _hdrProxy ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
  
      // The untouched copy is float only when the frame it holds is: on a display-referred frame the
-@@ -833,7 +840,7 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -833,7 +843,7 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
      const VkImageUsageFlags dst = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
  
      const bool ok =
@@ -1094,7 +1129,7 @@ index dc344c4..5846c8f 100644
          MakeImage(_keep, width, height, _keepFormat, sampled | storage) &&
          MakeImage(_proxy, width, height, proxyFormat, sampled | storage | src) &&
          MakeImage(_model, modelW, modelH, proxyFormat, sampled | src | dst) &&
-@@ -1146,7 +1153,7 @@ float Composition::ResolvedWhitePoint(const FrameSettings& s) const {
+@@ -1146,7 +1156,7 @@ float Composition::ResolvedWhitePoint(const FrameSettings& s) const {
  DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
      DlssNrConstants c{};
  
@@ -1103,7 +1138,7 @@ index dc344c4..5846c8f 100644
      c.TransferStrength = s.transferStrength;
      c.ColourStrength = s.colourStrength;
      c.MaxRatio = s.maxRatio;
-@@ -1178,7 +1185,7 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
+@@ -1178,7 +1188,7 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
              c.ReversibleMode = s.reversibleMode >= 3 ? 4u : 2u;
          } else {
              c.DebugView = 2;
@@ -1112,7 +1147,7 @@ index dc344c4..5846c8f 100644
          }
      }
  
-@@ -1194,8 +1201,9 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
+@@ -1194,8 +1204,9 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
      c.GuideHeight = _height;
      c.UseGameExposure = 0;
      c.ExposurePreMul = 1.0f;
@@ -1124,7 +1159,7 @@ index dc344c4..5846c8f 100644
      c.ColourTrust = s.colourTrust;
      c.RatioSmooth = s.ratioSmooth;
      return c;
-@@ -1293,7 +1301,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1293,7 +1304,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
              pc.manual = s.whitePointManual;
              pc.scale = s.whitePointScale;
              pc.trim = s.whitePointTrim;
@@ -1133,7 +1168,7 @@ index dc344c4..5846c8f 100644
              pc.source = s.whitePointSource;
              pc.hold = _holding && _frameCaptured ? 1u : 0u;
              _vk->vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, _meterPipeline);
-@@ -1552,6 +1560,23 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1552,6 +1563,23 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
      // presented it and the frame the model edited, for the same frame.
      _captureRecorded = false;
      if (_capture.Active()) {
@@ -1157,7 +1192,7 @@ index dc344c4..5846c8f 100644
          const size_t bytes = size_t(_width) * _height * (_workFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 4);
          if (_captureBuf.buffer || MakeHostBuffer(_captureBuf, bytes * 2, VK_BUFFER_USAGE_TRANSFER_DST_BIT)) {
              Transition(cb, _frame, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-@@ -1578,7 +1603,7 @@ void Composition::WriteCapturedFrame() {
+@@ -1578,7 +1606,7 @@ void Composition::WriteCapturedFrame() {
      _captureRecorded = false;
      const size_t bytes = size_t(_width) * _height * (_workFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 4);
      const uint8_t* base = (const uint8_t*) _captureBuf.mapped;

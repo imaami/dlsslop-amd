@@ -114,7 +114,7 @@ public:
     }
 };
 
-static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool proxy16) {
+static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool proxy16, bool linear) {
     Context c;
     const char* path = std::getenv("DLSSNR_SHM");
     require(path && *path, "set DLSSNR_SHM to a running --test-identity worker's channel");
@@ -127,7 +127,7 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
             "worker protocol mismatch");
     h->enabled.store(1);
     h->hdrMode.store(proxy16 ? kHdrForce : kHdrOff);
-    h->colourMode.store(kColourAuto);
+    h->colourMode.store(linear ? kColourLinearHdr : kColourAuto);
     h->workingScaleBits.store(FloatToBits(1.0f));
     h->compositionBypass.store(0);  // Exercise the resolve shader as well as the copy path.
     h->nativeModelMaxWidth.store(reduced ? 160 : 0);
@@ -405,7 +405,8 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
                 h->answeredH.load() == expectedHeight, "response dimensions differ");
         const auto* input = static_cast<const uint8_t*>(c.mapping) + kHeaderBytes;
         const auto* output = input + kMaxFrame;
-        for (unsigned channel = 0; !reduced && channel != 4; ++channel) {
+        // A linear-HDR proxy carries encoded light, not the swapchain's code values.
+        for (unsigned channel = 0; !reduced && !linear && channel != 4; ++channel) {
             const int expected = int(std::lround(color.float32[channel] * 255.0f));
             if (proxy16) {
                 uint16_t half;
@@ -441,15 +442,17 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
 
 int main(int argc, char** argv) {
     try {
-        bool headless = false, contention = false, reduced = false, bgra = false, proxy16 = false;
+        bool headless = false, contention = false, reduced = false, bgra = false, proxy16 = false,
+             linear = false;
         const option options[] = {
             {"help", no_argument, nullptr, 'h'}, {"headless", no_argument, nullptr, 'H'},
             {"contention", no_argument, nullptr, 'c'}, {"reduced", no_argument, nullptr, 'r'},
             {"bgra", no_argument, nullptr, 'b'}, {"proxy16", no_argument, nullptr, 'f'},
+            {"linear-hdr", no_argument, nullptr, 'l'},
             {nullptr, 0, nullptr, 0}
         };
         int value;
-        while ((value = getopt_long(argc, argv, "hHcrbf", options, nullptr)) != -1) {
+        while ((value = getopt_long(argc, argv, "hHcrbfl", options, nullptr)) != -1) {
             switch (value) {
             case 'h':
                 std::printf("Usage: vulkan-smoke [OPTIONS]\n"
@@ -458,18 +461,20 @@ int main(int argc, char** argv) {
                     "  -c, --contention   Test producer lock contention (default: no)\n"
                     "  -r, --reduced      Use half-resolution model proxy (default: no)\n"
                     "  -b, --bgra         Select BGRA swapchain (default: no, RGBA)\n"
-                    "  -f, --proxy16      Force FP16 encoded proxy transport (default: no, RGBA8)\n");
+                    "  -f, --proxy16      Force FP16 encoded proxy transport (default: no, RGBA8)\n"
+                    "  -l, --linear-hdr   Compose in linear-HDR colour mode (default: no, colour auto)\n");
                 return 0;
             case 'H': headless = true; break;
             case 'c': contention = true; break;
             case 'r': reduced = true; break;
             case 'b': bgra = true; break;
             case 'f': proxy16 = true; break;
+            case 'l': linear = true; break;
             default: throw std::runtime_error("invalid option; use --help");
             }
         }
         require(optind == argc, "unexpected positional argument; use --help");
-        return smoke(headless, contention, reduced, bgra, proxy16);
+        return smoke(headless, contention, reduced, bgra, proxy16, linear);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "transport smoke: %s\n", e.what());
         return 1;
