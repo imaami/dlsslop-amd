@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 // Exercises Vulkan WSI -> layer capture -> native worker -> composition -> present.
 // Requires X11 or VK_EXT_headless_surface and a worker launched with --test-identity.
+// Runs under the Khronos validation layer and exits 77 when it is not installed.
 // Tests transport and composition; does not execute HIP neural inference.
 #define VK_USE_PLATFORM_XLIB_KHR
 #include <vulkan/vulkan.h>
@@ -167,7 +168,16 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
     ici.pApplicationInfo = &ai;
     ici.enabledExtensionCount = 2;
     ici.ppEnabledExtensionNames = instanceExtensions;
-    check(vkCreateInstance(&ici, nullptr, &c.instance), "vkCreateInstance");
+    // Below the implicit layer under test, so it validates what that layer records too.
+    const char* validation = "VK_LAYER_KHRONOS_validation";
+    ici.enabledLayerCount = 1;
+    ici.ppEnabledLayerNames = &validation;
+    const VkResult created = vkCreateInstance(&ici, nullptr, &c.instance);
+    if (created == VK_ERROR_LAYER_NOT_PRESENT) {
+        std::fprintf(stderr, "transport smoke: skipped, %s is not installed\n", validation);
+        return 77;
+    }
+    check(created, "vkCreateInstance");
 
     if (headless) {
         auto create = reinterpret_cast<PFN_vkCreateHeadlessSurfaceEXT>(
@@ -347,7 +357,8 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
         barrier.image = images[index];
         barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        // The stage the acquire semaphore is waited at, so the transition follows the acquire.
+        vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
                               0, 0, nullptr, 0, nullptr, 1, &barrier);
         VkClearColorValue color{};
         color.float32[0] = float(frame + 1) / 8.0f;

@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Exercise real Vulkan capture/resolve/present with an explicitly fake neural worker.
 
-Needs Pillow, a Vulkan ICD (Mesa lavapipe is sufficient), and Xvfb unless
---headless is selected. The test layer is
-separately compiled with DLSSLOP_TEST_LAVAPIPE; production never admits CPU ICDs.
+Needs Pillow, a Vulkan ICD (Mesa lavapipe is sufficient), the Khronos validation
+layer, and Xvfb unless --headless is selected. Every mode runs under core and
+synchronization validation and fails on any validation error; exits 77 without
+the validation layer. The test layer is separately compiled with
+DLSSLOP_TEST_LAVAPIPE; production never admits CPU ICDs.
 """
 import argparse
 import json
@@ -11,6 +13,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 from PIL import Image, ImageChops
@@ -51,7 +54,7 @@ def main():
                    XDG_RUNTIME_DIR=str(root), DLSSNR_SHM=str(root / "shm.bin"),
                    DLSSLOP_AMD_ENABLE="1", DLSSNR_ENABLE="1", DLSSLOP_BACKEND="hip",
                    DLSSNR_DMABUF="0", DLSSNR_IDLE_REPAINT="0", DLSSLOP_INPUT="off",
-                   DLSSNR_LOG=str(logs / "layer.log"))
+                   DLSSNR_LOG=str(logs / "layer.log"), VK_KHRONOS_VALIDATION_VALIDATE_SYNC="true")
         env.pop("DLSSNR_DISABLE", None)
         env.pop("VKLayer_DLSS5", None)
         layer = root / "share/vulkan/implicit_layer.d/test.json"
@@ -106,19 +109,18 @@ def main():
                         command.append("--bgra")
                     if mode.endswith("fp16"):
                         command.append("--proxy16")
-                    # Software Vulkan accepts descriptor pools that lack a type the
-                    # set layout needs; the validation layer (when installed) reports
-                    # what RADV refuses.
-                    mode_env = env
                     if mode.endswith("linear"):
                         command.append("--linear-hdr")
-                        mode_env = dict(env, VK_INSTANCE_LAYERS="VK_LAYER_KHRONOS_validation")
-                    result = subprocess.run(command, env=mode_env, text=True,
+                    result = subprocess.run(command, env=env, text=True,
                                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
                     (logs / f"smoke-{mode}.log").write_text(result.stdout)
                     print(result.stdout, end="")
+                    if result.returncode == 77:
+                        sys.exit(77)
                     if result.returncode:
                         raise RuntimeError(f"{mode} smoke test failed ({result.returncode}); inspect {logs}")
+                    # Software Vulkan accepts descriptor pools that lack a type the set
+                    # layout needs; the validation layer reports what RADV refuses.
                     if "Validation Error" in result.stdout or "AllocateDescriptorSets" in result.stdout:
                         raise RuntimeError(f"{mode} emitted Vulkan validation errors; inspect {logs}")
                     with layer_log.open() as log:

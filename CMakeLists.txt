@@ -177,7 +177,7 @@ if(BUILD_TESTING)
     add_test(NAME composition-rebuild COMMAND composition-rebuild-test)
     add_test(NAME vulkan-smoke COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/run-smoke.py
         --build-dir ${CMAKE_CURRENT_BINARY_DIR} --headless)
-    set_tests_properties(color-gpu lds-barriers codec-isa hdr-shader composition-rebuild
+    set_tests_properties(color-gpu lds-barriers codec-isa hdr-shader composition-rebuild vulkan-smoke
         PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
