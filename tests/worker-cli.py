@@ -13,6 +13,8 @@ import tempfile
 parser = argparse.ArgumentParser(description=__doc__, add_help=False)
 parser.add_argument('-h', '--help', action='help', help='show help and exit (default: off)')
 parser.add_argument('worker', type=Path, help='dlsslopd executable (required; no default)')
+parser.add_argument('hip_stub', type=Path,
+                    help='shared library whose dependency is unreachable (required; no default)')
 args = parser.parse_args()
 worker = args.worker.resolve()
 assert worker.read_bytes().startswith(b'\x7fELF'), 'worker tests require the native ELF'
@@ -104,4 +106,23 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     assert 'IDENTITY TEST MODE' in result.stderr
     assert not channel.exists(), 'offline identity mode created a channel'
 
-print('worker CLI: native relocation, model/module defaults, environment contracts and identity mode passed')
+    # The HIP loader names why every candidate failed, so a runtime that is
+    # installed but cannot load is not blamed on an unrelated absent path. A
+    # set DLSSLOP_HIP_LIBRARY is the only candidate; an empty one is unset.
+    stubs = root / 'broken HIP runtime'
+    stubs.mkdir()
+    for name in ('libamdhip64.so.7', 'libamdhip64.so.6', 'libamdhip64.so'):
+        shutil.copy2(args.hip_stub, stubs / name)
+    missing = 'libhip-loader-stub-dependency.so: cannot open shared object file'
+    pinned = stubs / 'libamdhip64.so.7'
+    result = run(binary, '--diagnose', env=dict(env, DLSSLOP_HIP_LIBRARY=str(pinned)), cwd=cwd, expected=1)
+    assert result.stderr.endswith(f'DLSSLOP_HIP_LIBRARY:\n  {missing}: No such file or directory\n'), result.stderr
+    if not any(Path('/opt/rocm/lib').glob('libamdhip64.so*')):
+        result = run(binary, '--diagnose', env=dict(env, DLSSLOP_HIP_LIBRARY='', LD_LIBRARY_PATH=str(stubs)),
+                     cwd=cwd, expected=1)
+        assert result.stderr.count(missing) == 3, result.stderr
+        for name in ('libamdhip64.so.7', 'libamdhip64.so.6', 'libamdhip64.so'):
+            assert f'\n  /opt/rocm/lib/{name}: cannot open shared object file' in result.stderr, result.stderr
+
+print('worker CLI: native relocation, model/module defaults, environment contracts, HIP loader errors '
+      'and identity mode passed')

@@ -1,16 +1,8 @@
 diff --git a/backend/vendor/hip_api.h b/backend/vendor/hip_api.h
-index 1893e2c..2cc48ac 100644
+index 1893e2c..0a95a22 100644
 --- a/backend/vendor/hip_api.h
 +++ b/backend/vendor/hip_api.h
-@@ -1,5 +1,6 @@
- #pragma once
--// Minimal Windows dynamic HIP ABI used by probes, from ROCm/HIP rocm-7.1.1 hip_runtime_api.h.
-+// Linux dynamic HIP ABI, adapted from the upstream Windows loader.
-+// Public ABI declarations from ROCm/HIP rocm-7.1.1 hip_runtime_api.h.
- // Copyright (c) 2015-2023 Advanced Micro Devices, Inc. MIT license:
- // Permission is hereby granted, free of charge, to any person obtaining a copy of this software
- // and associated documentation files (the "Software"), to deal in the Software without restriction,
-@@ -12,7 +13,8 @@
+@@ -12,7 +12,8 @@
  // NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
  // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
@@ -20,7 +12,7 @@ index 1893e2c..2cc48ac 100644
  #include <filesystem>
  #include <fstream>
  #include <vector>
-@@ -33,7 +35,7 @@ struct MemAllocationProp {unsigned type;unsigned requestedHandleType;struct {uns
+@@ -33,7 +34,7 @@ struct MemAllocationProp {unsigned type;unsigned requestedHandleType;struct {uns
  struct MemAccessDesc {struct {unsigned type;int id;} location;unsigned flags;};
  static_assert(sizeof(MemoryDesc)==104&&sizeof(BufferDesc)==88&&sizeof(SemaphoreDesc)==96&&sizeof(SignalParams)==144&&sizeof(WaitParams)==144,"HIP external resource ABI");
  struct Api {
@@ -29,7 +21,7 @@ index 1893e2c..2cc48ac 100644
   #define HIP_FN(name,args) using name##Fn=int(*)args;name##Fn name{}
   HIP_FN(hipGetDevicePropertiesR0600,(DevicePropertiesR0600*,int));HIP_FN(hipModuleLoadData,(Handle*,const void*));
   HIP_FN(hipInit,(unsigned));HIP_FN(hipRuntimeGetVersion,(int*));HIP_FN(hipGetDeviceCount,(int*));HIP_FN(hipDeviceGetName,(char*,int,int));HIP_FN(hipSetDevice,(int));
-@@ -51,8 +53,17 @@ struct Api {
+@@ -51,8 +52,13 @@ struct Api {
   HIP_FN(hipModuleLoad,(Handle*,const char*));HIP_FN(hipModuleGetFunction,(Handle*,Handle,const char*));HIP_FN(hipModuleLaunchKernel,(Handle,unsigned,unsigned,unsigned,unsigned,unsigned,unsigned,unsigned,Handle,void**,void**));HIP_FN(hipModuleUnload,(Handle));
   #undef HIP_FN
   using ErrorNameFn=const char*(*)(int);ErrorNameFn hipGetErrorName{};
@@ -37,35 +29,24 @@ index 1893e2c..2cc48ac 100644
 - explicit Api(unsigned version=7){const wchar_t*name=version==6?L"amdhip64_6.dll":L"amdhip64_7.dll";dll=LoadLibraryExW(name,nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);if(!dll)throw std::runtime_error("HIP runtime not found in System32");
 + template<class T>void Load(T&f,const char*n){f=reinterpret_cast<T>(dlsym(dll,n));if(!f)throw std::runtime_error(std::string("missing HIP export ")+n);}
 + explicit Api(unsigned version=7){
-+  (void)version;
-+  if(const char* explicit_path=std::getenv("DLSSLOP_HIP_LIBRARY");explicit_path&&*explicit_path) {
-+   dll=dlopen(explicit_path,RTLD_NOW|RTLD_LOCAL);
-+  } else {
-+   const char* names[]={"libamdhip64.so.7","libamdhip64.so.6","libamdhip64.so","/opt/rocm/lib/libamdhip64.so.7","/opt/rocm/lib/libamdhip64.so.6","/opt/rocm/lib/libamdhip64.so"};
-+   for(const char* name:names)if((dll=dlopen(name,RTLD_NOW|RTLD_LOCAL)))break;
-+  }
-+  if(!dll){const char* error=dlerror();throw std::runtime_error(std::string("Linux HIP runtime not found; install gfx1201-capable ROCm userspace (libamdhip64), or set DLSSLOP_HIP_LIBRARY: ")+(error?error:"unknown loader error"));}
-+
++  // A set DLSSLOP_HIP_LIBRARY is the only candidate. Report every candidate's loader error.
++  const char*names[]={std::getenv("DLSSLOP_HIP_LIBRARY"),"libamdhip64.so.7","libamdhip64.so.6","libamdhip64.so","/opt/rocm/lib/libamdhip64.so.7","/opt/rocm/lib/libamdhip64.so.6","/opt/rocm/lib/libamdhip64.so"};
++  std::string errors;
++  for(const char*name:names){if(!name||!*name)continue;if((dll=dlopen(name,RTLD_NOW|RTLD_LOCAL)))break;errors+=std::string("\n  ")+dlerror();if(name==names[0])break;}
++  if(!dll)throw std::runtime_error("Linux HIP runtime not found; install gfx1201-capable ROCm userspace (libamdhip64), or set DLSSLOP_HIP_LIBRARY:"+errors);
   #define LOAD(name) Load(name,#name)
   LOAD(hipGetDevicePropertiesR0600);LOAD(hipModuleLoadData);LOAD(hipEventCreate);LOAD(hipEventRecord);LOAD(hipEventElapsedTime);LOAD(hipEventDestroy);LOAD(hipEventSynchronize);LOAD(hipHostMalloc);LOAD(hipInit);LOAD(hipRuntimeGetVersion);LOAD(hipGetDeviceCount);LOAD(hipDeviceGetName);LOAD(hipSetDevice);LOAD(hipMemGetInfo);LOAD(hipMalloc);LOAD(hipFree);LOAD(hipMemcpy);LOAD(hipMemcpyAsync);LOAD(hipMemsetAsync);LOAD(hipDeviceSynchronize);LOAD(hipStreamCreate);LOAD(hipStreamSynchronize);LOAD(hipStreamDestroy);LOAD(hipImportExternalMemory);LOAD(hipExternalMemoryGetMappedBuffer);LOAD(hipDestroyExternalMemory);LOAD(hipImportExternalSemaphore);LOAD(hipSignalExternalSemaphoresAsync);LOAD(hipWaitExternalSemaphoresAsync);LOAD(hipDestroyExternalSemaphore);LOAD(hipModuleLoad);LOAD(hipModuleGetFunction);LOAD(hipModuleLaunchKernel);LOAD(hipModuleUnload);LOAD(hipGetErrorName);
   #undef LOAD
 diff --git a/backend/vendor/hip_reference_network.h b/backend/vendor/hip_reference_network.h
-index eee312c..fd5f874 100644
+index eee312c..e365ecc 100644
 --- a/backend/vendor/hip_reference_network.h
 +++ b/backend/vendor/hip_reference_network.h
-@@ -1,5 +1,5 @@
- #pragma once
--// SDKless HIP host graph. Scalar numerical validation path, not a realtime backend.
-+// Upstream HIP host graph with Linux portability patch. Production fast kernels selected by LmxxfProductionOptions.
- #include "hip_api.h"
- #include "packed_weights.h"
- #include <cstdint>
-@@ -309,7 +309,7 @@ class Network {
+@@ -308,8 +308,6 @@ class Network {
+  bool adaptive_active=false;U adaptive_n=0;std::chrono::steady_clock::time_point adaptive_last{};
   Tensor AdaptiveVitGroup(Tensor input,U n){
    const char*mode_s=std::getenv("DLSS5_VIT_ADAPTIVE");U mode=mode_s?U(std::stoul(mode_s)):0;
-   const char*hotkey=std::getenv("DLSS5_VIT_REUSE_HOTKEY");
+-  const char*hotkey=std::getenv("DLSS5_VIT_REUSE_HOTKEY");
 -  if(hotkey&&!strcmp(hotkey,"1")){bool down=(GetAsyncKeyState(VK_F8)&0x8000)!=0;if(down&&!adaptive_key_down)adaptive_user_disabled=!adaptive_user_disabled;adaptive_key_down=down;if(adaptive_user_disabled)mode=0;}
-+  if(hotkey&&!strcmp(hotkey,"1"))throw std::runtime_error("DLSS5_VIT_REUSE_HOTKEY is Windows-only; use layer toggle controls on Linux");
    AdaptivePreviewState.store(mode?1:0);if(mode!=adaptive_last_mode){adaptive_dirty=true;adaptive_last_mode=mode;}
    if(!mode){Tensor full=input;for(U b=31;b<=38;b++)full=Vit(full,n,b);return full;}++adaptive_frame;
    if(mode>3||opt.graph||!opt.fast_deep||!opt.pooled||opt.vit_byte_stream||std::any_of(opt.skip_blocks.begin(),opt.skip_blocks.end(),[](U b){return b>=31&&b<=38;}))throw std::runtime_error("adaptive ViT requires fast pooled graph-off non-byte-stream unskipped network, mode1..3");

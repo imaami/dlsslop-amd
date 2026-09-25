@@ -95,8 +95,14 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/launcher-cli.py)
     add_test(NAME kernels-cli COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/kernels-cli.py)
+    # No RPATH is recorded, so a copied stub cannot find its dependency.
+    add_library(hip-loader-stub-dependency SHARED tests/hip_loader_stub.cpp)
+    target_compile_definitions(hip-loader-stub-dependency PRIVATE HIP_LOADER_STUB_DEPENDENCY)
+    add_library(hip-loader-stub SHARED tests/hip_loader_stub.cpp)
+    target_link_libraries(hip-loader-stub PRIVATE hip-loader-stub-dependency)
     add_test(NAME worker-cli COMMAND ${Python3_EXECUTABLE}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/worker-cli.py $<TARGET_FILE:dlsslopd>)
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/worker-cli.py $<TARGET_FILE:dlsslopd>
+        $<TARGET_FILE:hip-loader-stub>)
     add_executable(worker-channel-test tests/worker_channel_test.cpp)
     target_include_directories(worker-channel-test PRIVATE ${LAYER_ROOT}/common)
     add_test(NAME worker-channel COMMAND worker-channel-test $<TARGET_FILE:dlsslopd>)
