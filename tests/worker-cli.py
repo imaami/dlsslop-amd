@@ -5,9 +5,12 @@ import os
 from pathlib import Path
 import pwd
 import re
+import select
 import shutil
+import signal
 import subprocess
 import tempfile
+import time
 
 
 parser = argparse.ArgumentParser(description=__doc__, add_help=False)
@@ -15,6 +18,8 @@ parser.add_argument('-h', '--help', action='help', help='show help and exit (def
 parser.add_argument('worker', type=Path, help='dlsslopd executable (required; no default)')
 parser.add_argument('hip_stub', type=Path,
                     help='shared library whose dependency is unreachable (required; no default)')
+parser.add_argument('hip_fake', type=Path,
+                    help='fake HIP runtime listing HIP_FAKE_ARCHS devices (required; no default)')
 args = parser.parse_args()
 worker = args.worker.resolve()
 assert worker.read_bytes().startswith(b'\x7fELF'), 'worker tests require the native ELF'
@@ -25,6 +30,28 @@ def run(executable, *options, env, cwd, expected=0):
                             text=True, capture_output=True, timeout=10)
     assert result.returncode == expected, (options, result.returncode, result.stdout, result.stderr)
     return result
+
+
+def signalled(executable, *options, ready, number, env, cwd):
+    """Deliver signal `number` once stderr shows `ready`; return the exit status."""
+    process = subprocess.Popen([str(executable), *options], env=env, cwd=cwd,
+                               stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+    try:
+        deadline = time.monotonic() + 10
+        seen = b''
+        while ready not in seen:
+            remaining = deadline - time.monotonic()
+            assert remaining > 0 and select.select([process.stderr], [], [], remaining)[0], (options, seen)
+            chunk = os.read(process.stderr.fileno(), 4096)
+            assert chunk, (options, process.wait(), seen)
+            seen += chunk
+        process.send_signal(number)
+        return process.wait(timeout=10)
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        process.stderr.close()
 
 
 def default(helptext, option):
@@ -110,7 +137,8 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     assert not channel.exists() and not (cwd / 'd').exists(), 'rejected tracing touched the filesystem'
 
     # An existing channel directory must be private to this user: mode 0700
-    # and not a symlink. (trace_test checks that a created one is made so.)
+    # and not a symlink. (The signal checks below and trace_test check that
+    # a created one is made so.)
     shared = root / 'shared channel directory'
     shared.mkdir(mode=0o755)
     shared.chmod(0o755)
@@ -135,6 +163,20 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     assert 'IDENTITY TEST MODE' in result.stderr
     assert not channel.exists(), 'offline identity mode created a channel'
 
+    # Only serving stops gracefully on SIGINT or SIGTERM; any other mode, here
+    # offline input blocked opening a FIFO, ends at once by the signal.
+    fifo = cwd / 'input fifo'
+    os.mkfifo(fifo)
+    serving = root / 'created channel directory'
+    for number in (signal.SIGINT, signal.SIGTERM):
+        status = signalled(binary, '--test-identity', '-i', str(fifo), '-o', str(output_path), '-W', '1', '-H', '1',
+                           ready=b'IDENTITY TEST MODE', number=number, env=env, cwd=cwd)
+        assert status == -number, (number, status)
+        status = signalled(binary, '--test-identity', '-s', str(serving / 'shm.bin'),
+                           ready=b'worker ready:', number=number, env=env, cwd=cwd)
+        assert status == 0, (number, status)
+    assert serving.stat().st_mode & 0o777 == 0o700, 'a created channel directory is private'
+
     # The HIP loader names why every candidate failed, so a runtime that is
     # installed but cannot load is not blamed on an unrelated absent path. A
     # set DLSSLOP_HIP_LIBRARY is the only candidate; an empty one is unset.
@@ -153,5 +195,25 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
         for name in ('libamdhip64.so.7', 'libamdhip64.so.6', 'libamdhip64.so'):
             assert f'\n  /opt/rocm/lib/{name}: cannot open shared object file' in result.stderr, result.stderr
 
+    # --diagnose reports the device serving would use, or fails with the
+    # startup error: gfx1201 with any feature suffix qualifies, and a
+    # requested index must name one.
+    fake = dict(env, DLSSLOP_HIP_LIBRARY=str(args.hip_fake.resolve()))
+    none = 'no gfx1201 device found (RX 9070/9070 XT required); check HIP_VISIBLE_DEVICES'
+    unusable = 'selected device is unavailable or is not gfx1201'
+    for archs, options, status, verdict in (
+            ('', ('-D',), 1, none),
+            ('gfx1030,gfx12010,gfx120', ('--diagnose',), 1, none),
+            ('gfx1030,gfx1201,gfx1201', ('-D',), 0, 'selected device 1'),
+            ('gfx1201:sramecc+:xnack-', ('--diagnose',), 0, 'selected device 0'),
+            ('gfx1030,gfx1201,gfx1201', ('-D', '-d', '2'), 0, 'selected device 2'),
+            ('gfx1030,gfx1201', ('--diagnose', '--device', '0'), 1, unusable),
+            ('gfx1030,gfx1201', ('-D', '-d', '2'), 1, unusable)):
+        result = run(binary, *options, env=dict(fake, HIP_FAKE_ARCHS=archs), cwd=cwd, expected=status)
+        count = len(archs.split(',')) if archs else 0
+        assert f'HIP runtime=60443000, visible devices={count}\n' in result.stderr, result.stderr
+        assert result.stderr.endswith(('dlsslopd: ' if status else '') + verdict + '\n'), (archs, options, result.stderr)
+    assert not channel.exists(), '--diagnose created a channel'
+
 print('worker CLI: native relocation, model/module defaults, environment contracts, trace-dir parsing, '
-      'HIP loader errors and identity mode passed')
+      'HIP loader errors, device selection, signals and identity mode passed')

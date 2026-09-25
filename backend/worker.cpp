@@ -181,8 +181,8 @@ void usage(FILE* out)
         "                          Sets startup count; live control may change it\n"
         "  -d, --device INDEX      HIP device index\n"
         "                          Default: auto, first visible gfx1201 device\n"
-        "  -D, --diagnose          Enumerate Linux HIP devices and exit\n"
-        "                          Default: off\n"
+        "  -D, --diagnose          Enumerate HIP devices, report the selection, exit\n"
+        "                          Default: off; exit status 1 if none is usable\n"
         "  -S, --self-test         Real model test on a deterministic gradient\n"
         "                          Also checks tuning, motion history and FP16 codec\n"
         "                          Default: off\n"
@@ -303,7 +303,7 @@ Options parse(int argc, char** argv)
     return o;
 }
 
-int select_device(int requested, bool diagnose)
+int select_device(int requested)
 {
     hip_probe::Api api;
     api.Check(api.hipInit(0), "hipInit (check /dev/kfd permissions and ROCm userspace)");
@@ -320,7 +320,6 @@ int select_device(int requested, bool diagnose)
                             (!p.gcnArchName[7] || p.gcnArchName[7] == ':');
         if (gfx1201 && ((requested < 0 && selected < 0) || requested == i)) selected = i;
     }
-    if (diagnose) return selected;
     if (selected < 0) throw std::runtime_error(requested < 0
         ? "no gfx1201 device found (RX 9070/9070 XT required); check HIP_VISIBLE_DEVICES"
         : "selected device is unavailable or is not gfx1201");
@@ -841,6 +840,10 @@ void run_worker(const Options& o)
         mapping.reason(o.test_identity ? "IDENTITY TEST: inference disabled" : "initializing native HIP model");
         Engine engine(o);
         engine.prepare();
+        // Only serving stops gracefully, from the ready announcement on.
+        // Before it, and in every other mode, SIGINT and SIGTERM terminate.
+        std::signal(SIGINT, stop_handler);
+        std::signal(SIGTERM, stop_handler);
         h->modelUp.store(o.test_identity ? 0 : 1);
         h->helperFeatures.store(o.test_identity ? 0 : 1);
         h->helperState.store(kHelperRunning, std::memory_order_release);
@@ -1003,13 +1006,11 @@ int main(int argc, char** argv)
 {
     try {
         Options o = parse(argc, argv);
-        std::signal(SIGINT, stop_handler);
-        std::signal(SIGTERM, stop_handler);
-        if (o.diagnose) { select_device(o.device, true); return 0; }
+        if (o.diagnose) { std::fprintf(stderr, "selected device %d\n", select_device(o.device)); return 0; }
         if (o.test_identity)
             std::fprintf(stderr, "IDENTITY TEST MODE: no model, no HIP, no neural rendering.\n");
         else
-            o.device = select_device(o.device, false);
+            o.device = select_device(o.device);
         if (o.self_test || !o.input.empty()) {
             Engine engine(o);
             engine.prepare();

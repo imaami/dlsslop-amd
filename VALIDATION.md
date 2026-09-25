@@ -6,16 +6,17 @@ parts of the integration.
 
 ## Automated tests
 
-CTest covers CLI parsing and defaults, launchers, an identity worker's handling
-of shared-memory requests, storage-image handling, CPU codec/tuning/temporal
-behaviour, color preservation, trace serialization, capture writing,
-color-diagnostic orchestration, offline imports with filtered dependency
-fetches and source preparation, the kernel build's compiler selection, and the
-model import's SHA-256 inventory, which `dlsslop-setup --check` verifies. With
-the GUI enabled it also checks the controller's option parsing without a
-display, its shared-memory backend and slider, that an edit is written at once
-and later ones coalesced, and that the wheel scrolls a page without editing the
-unfocused controls it crosses.
+CTest covers CLI parsing and defaults, launchers, the worker's signal handling
+and its `--diagnose` device selection against a fake HIP runtime, an identity
+worker's handling of shared-memory requests, storage-image handling, CPU
+codec/tuning/temporal behaviour, color preservation, trace serialization,
+capture writing, color-diagnostic orchestration, offline imports with filtered
+dependency fetches and source preparation, the kernel build's compiler
+selection, and the model import's SHA-256 inventory, which
+`dlsslop-setup --check` verifies. With the GUI enabled it also checks the
+controller's option parsing without a display, its shared-memory backend and
+slider, that an edit is written at once and later ones coalesced, and that the
+wheel scrolls a page without editing the unfocused controls it crosses.
 
 The presentation smoke drives Vulkan capture, an explicit identity worker,
 composition and presentation through a separate test layer that also admits
