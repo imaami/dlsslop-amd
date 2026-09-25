@@ -1,8 +1,5 @@
-// Minimal compiler reproducer; no GPU or HIP SDK headers required.
-// amdclang++ -x hip --cuda-device-only --no-gpu-bundle-output \
-//   --offload-arch=gfx1201 -mcode-object-version=5 -nogpuinc -nogpulib \
-//   -O3 -std=c++17 -I kernels -c tests/lds_barrier_probe.hip -o probe.hsaco
-// llvm-objdump -d probe.hsaco
+// Positive control for tests/check-lds-barriers.py --compiler, which compiles
+// it like the production modules; no GPU or HIP SDK headers required.
 // unsafe_lds deliberately lacks the release/acquire ordering. Do not use it
 // in production. fenced_lds must drain LDS before signalling the barrier.
 

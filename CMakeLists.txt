@@ -131,6 +131,13 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_metrics_test.py)
     add_test(NAME color-orchestrator COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_orchestrator_test.py)
+    # Scans the code objects from scripts/build-kernels.py; skips without them.
+    find_program(LLVM_OBJDUMP NAMES llvm-objdump-22 llvm-objdump)
+    find_program(HIP_CLANG NAMES clang++-22)
+    add_test(NAME lds-barriers COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/check-lds-barriers.py --objdump ${LLVM_OBJDUMP}
+        --compiler=$<$<BOOL:${HIP_CLANG}>:${HIP_CLANG}>)
+    set_tests_properties(lds-barriers PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/vulkan_smoke.cpp")

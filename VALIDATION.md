@@ -9,7 +9,11 @@ parts of the integration.
 CTest covers CLI parsing and defaults, launchers, storage-image handling, CPU
 codec/tuning/temporal behaviour, color preservation, trace serialization,
 capture writing and color-diagnostic orchestration. With the GUI enabled it
-also checks the shared-memory controller backend. The HDR shader test prefers
+also checks the shared-memory controller backend. The LDS-barrier check
+disassembles every built HIP kernel and fails when a shared-memory access can
+still be outstanding at a workgroup barrier; with `clang++-22` it first proves
+itself on a deliberately unfenced probe kernel. It needs `llvm-objdump` and
+skips until `scripts/build-kernels.py` has run. The HDR shader test prefers
 software Vulkan (Mesa lavapipe), falls back to a hardware device and can skip
 when no suitable device is available; inspect the CTest result for skips. These
 checks do not establish neural image quality.

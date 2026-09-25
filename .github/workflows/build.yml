@@ -16,7 +16,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update || exit $?
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git curl xz-utils build-essential cmake ninja-build python3 python3-numpy python3-pil qt6-base-dev libx11-dev libxi-dev libvulkan-dev mesa-vulkan-drivers glslang-tools spirv-tools clang-22 lld-22 || exit $?
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git curl xz-utils build-essential cmake ninja-build python3 python3-numpy python3-pil qt6-base-dev libx11-dev libxi-dev libvulkan-dev mesa-vulkan-drivers glslang-tools spirv-tools clang-22 lld-22 llvm-22 || exit $?
       - uses: actions/checkout@v6
         with:
           submodules: false

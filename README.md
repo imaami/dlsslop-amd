@@ -64,7 +64,8 @@ sudo apt-get update
 sudo apt-get install --no-install-recommends \
     ca-certificates git curl xz-utils build-essential cmake ninja-build \
     python3 python3-numpy python3-pil qt6-base-dev libx11-dev libxi-dev \
-    libvulkan-dev mesa-vulkan-drivers glslang-tools spirv-tools clang-22 lld-22
+    libvulkan-dev mesa-vulkan-drivers glslang-tools spirv-tools clang-22 lld-22 \
+    llvm-22
 ```
 
 Install DXC 1.9.2607 using the exact download URL and SHA-256 in the workflow.
