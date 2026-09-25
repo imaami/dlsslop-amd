@@ -3,6 +3,7 @@
 #include "../backend/color_gpu.h"
 #include "../backend/color_preserve.h"
 #include <getopt.h>
+#include <unistd.h>
 #include <cstdio>
 #include <memory>
 
@@ -20,7 +21,7 @@ int main(int argc,char** argv)
                 " -d, --device N     HIP device (default: auto, first gfx1201)\n"
                 " -h, --help         Show help (default: off)\n"
                 "Tests correction against CPU reference, then times a 1080-tier kernel.\n"
-                "No model assets required. Exit 77 means HIP runtime/device unavailable.");return 0;
+                "No model assets required. Exit 77 means the module, HIP runtime or device is unavailable.");return 0;
         }
         if(code=='m') {module=optarg;continue;}
         if(code=='d') {
@@ -31,6 +32,7 @@ int main(int argc,char** argv)
         return 2;
     }
     if(optind!=argc || module.empty()) return 2;
+    if(access(module.c_str(),R_OK)) {std::fprintf(stderr,"SKIP: cannot read module: %s\n",module.c_str());return 77;}
     std::unique_ptr<hip_probe::Api> holder;
     try { holder=std::make_unique<hip_probe::Api>(); }
     catch(const std::exception& e) {std::fprintf(stderr,"SKIP: %s\n",e.what());return 77;}

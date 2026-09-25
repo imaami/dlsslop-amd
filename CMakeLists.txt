@@ -107,6 +107,9 @@ if(BUILD_TESTING)
     add_executable(color-gpu-test tests/color_gpu_test.cpp)
     target_link_libraries(color-gpu-test PRIVATE ${CMAKE_DL_LIBS})
     target_compile_options(color-gpu-test PRIVATE -ffp-contract=off)
+    # Uses the GPU when the HIP runtime, a gfx1201 device and the module exist.
+    set(HIP_MODULES ${CMAKE_CURRENT_SOURCE_DIR}/assets/HIP/gfx1201)
+    add_test(NAME color-gpu COMMAND color-gpu-test --module ${HIP_MODULES}/linux_color.hsaco)
     add_executable(color-kernel-host-test tests/color_kernel_host_test.cpp)
     target_compile_options(color-kernel-host-test PRIVATE -ffp-contract=off -Wno-attributes -Wno-unknown-pragmas)
     add_test(NAME color-kernel-host COMMAND color-kernel-host-test)
@@ -131,16 +134,17 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_metrics_test.py)
     add_test(NAME color-orchestrator COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_orchestrator_test.py)
-    # Scans the code objects from scripts/build-kernels.py; skips without them.
+    add_test(NAME submodules COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/submodules.py)
+    # Inspect the code objects from scripts/build-kernels.py; skip without them.
     find_program(LLVM_OBJDUMP NAMES llvm-objdump-22 llvm-objdump)
     find_program(HIP_CLANG NAMES clang++-22)
     add_test(NAME lds-barriers COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/check-lds-barriers.py --objdump ${LLVM_OBJDUMP}
         --compiler=$<$<BOOL:${HIP_CLANG}>:${HIP_CLANG}>)
-    set_tests_properties(lds-barriers PROPERTIES SKIP_RETURN_CODE 77)
-endif()
-
-if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/vulkan_smoke.cpp")
+    add_test(NAME codec-isa COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/check-codec-isa.py --objdump ${LLVM_OBJDUMP}
+        ${HIP_MODULES}/linux_codec.hsaco)
     add_neural_layer(VkLayer_DLSSLOP_test)
     target_compile_definitions(VkLayer_DLSSLOP_test PRIVATE DLSSLOP_TEST_LAVAPIPE=1)
     find_library(VULKAN_LOADER NAMES vulkan libvulkan.so.1 REQUIRED)
@@ -157,7 +161,9 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/vulkan_smoke.cpp"
         ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party)
     target_link_libraries(hdr-shader-test PRIVATE ${VULKAN_LOADER} Threads::Threads)
     add_test(NAME hdr-shader COMMAND hdr-shader-test)
-    set_tests_properties(hdr-shader PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME vulkan-smoke COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/run-smoke.py
+        --build-dir ${CMAKE_CURRENT_BINARY_DIR} --headless)
+    set_tests_properties(color-gpu lds-barriers codec-isa hdr-shader PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 # The GUI is an optional standalone client. No Qt dependency reaches the worker

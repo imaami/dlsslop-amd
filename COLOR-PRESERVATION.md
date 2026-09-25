@@ -41,8 +41,9 @@ python3 scripts/build-kernels.py --only linux_color \
 
 The test needs a compatible HIP runtime and Radeon, but no weights or game.
 It compares four strengths with the CPU reference, checks retained-reference
-isolation and prints kernel timing. Exit 77 means no compatible runtime or device
-is available. See [VALIDATION.md](VALIDATION.md) for integration tests.
+isolation and prints kernel timing. Exit 77 means the module or a compatible
+runtime or device is unavailable. See [VALIDATION.md](VALIDATION.md) for
+integration tests.
 
 When correction is enabled, the worker logs `color preservation backend: GPU
 (HIP)` if the module is available. The GPU path retains the reference using an

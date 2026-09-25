@@ -8,38 +8,43 @@ parts of the integration.
 
 CTest covers CLI parsing and defaults, launchers, storage-image handling, CPU
 codec/tuning/temporal behaviour, color preservation, trace serialization,
-capture writing and color-diagnostic orchestration. With the GUI enabled it
-also checks the shared-memory controller backend. The LDS-barrier check
-disassembles every built HIP kernel and fails when a shared-memory access can
-still be outstanding at a workgroup barrier; with `clang++-22` it first proves
-itself on a deliberately unfenced probe kernel. It needs `llvm-objdump` and
-skips until `scripts/build-kernels.py` has run. The HDR shader test prefers
-software Vulkan (Mesa lavapipe), falls back to a hardware device and can skip
-when no suitable device is available; inspect the CTest result for skips. These
-checks do not establish neural image quality.
+capture writing, color-diagnostic orchestration, and offline imports with
+filtered dependency fetches and source preparation. With the GUI enabled it
+also checks the shared-memory controller backend.
 
-After the build described in README.md:
+The presentation smoke drives Vulkan capture, an explicit identity worker,
+composition and presentation through a separate test layer that also admits
+software devices. It checks transport and composition, not HIP inference. It
+and the HDR shader test prefer software Vulkan (Mesa lavapipe) and fall back to
+a hardware device; the HDR shader test skips when no suitable device is
+available.
+
+Two checks disassemble the built HIP modules and need `llvm-objdump`. The
+LDS-barrier check fails when a shared-memory access can still be outstanding at
+a workgroup barrier in any kernel; with `clang++-22` it first proves itself on
+a deliberately unfenced probe kernel. The codec ISA check counts the binary16
+conversions in the GPU codec, which a known compiler substitution breaks. Both
+skip until `scripts/build-kernels.py` has run, as does the color GPU test,
+which also skips without a HIP runtime and `gfx1201` device.
+
+Inspect the CTest result for skips. These checks do not establish neural image
+quality. After the build described in README.md:
 
 ```bash
 QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
-python3 tests/run-smoke.py --build-dir build --headless
 ```
-
-The optional presentation smoke uses an explicit identity worker and a
-separate test layer that also admits software devices. It prefers software
-Vulkan and falls back to a hardware device. It checks transport and
-composition, not HIP inference.
 
 ## Hardware checks
 
-With a compatible HIP runtime and `gfx1201` GPU, test color correction without
-model weights:
+With a compatible HIP runtime and `gfx1201` GPU, CTest's `color-gpu` test
+checks color correction without model weights. To run it alone:
 
 ```bash
 ./build/color-gpu-test --module assets/HIP/gfx1201/linux_color.hsaco
 ```
 
-Exit 77 means the runtime/device is unavailable, not a passing hardware test.
+Exit 77 means the module, runtime or device is unavailable, not a passing
+hardware test.
 After installation and external weight import, run:
 
 ```bash

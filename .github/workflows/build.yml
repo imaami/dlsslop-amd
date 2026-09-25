@@ -21,8 +21,6 @@ jobs:
         with:
           submodules: false
           persist-credentials: false
-      - name: Check offline imports and filtered dependency fetches
-        run: python3 tests/submodules.py
       - name: Fetch only the pinned build dependencies
         timeout-minutes: 20
         run: |

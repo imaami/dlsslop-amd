@@ -5,7 +5,8 @@ A helper named half_round can collide with AMD Clang's OpenCL builtin
 recognition: at -O3, llvm.round.f32 can replace explicit inline assembly and
 quantize the encoder input to zero and one. Source-level CPU tests cannot
 detect that substitution; inspect all five kernel symbols, including the
-inter-pass feedback and RGBA16F boundary conversions.
+inter-pass feedback and RGBA16F boundary conversions. Exit status 77 means
+the disassembler or the module is missing.
 
 Usage: python3 tests/check-codec-isa.py --objdump /path/to/llvm-objdump \
            assets/HIP/gfx1201/linux_codec.hsaco
@@ -27,8 +28,10 @@ def main():
     parser.add_argument("-d", "--objdump", default="llvm-objdump", help="AMDGPU-capable disassembler")
     args = parser.parse_args()
     objdump = shutil.which(args.objdump)
-    if not objdump:
-        parser.error(f"AMDGPU-enabled llvm-objdump not found: {args.objdump}")
+    if not objdump or not args.module.is_file():
+        print(f"SKIP: need an AMDGPU-enabled disassembler ({args.objdump}) and {args.module}",
+              file=sys.stderr)
+        return 77
     result = subprocess.run([objdump, "--disassemble", str(args.module)],
                             text=True, capture_output=True)
     if result.returncode:
