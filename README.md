@@ -46,8 +46,8 @@ python3 scripts/prepare-sources.py
 The fetch helper uses exact commits, filtered downloads and selected working-tree
 paths, avoiding upstream binary payloads. A shallow clone alone does not omit
 those files. The helper fails if the server cannot provide blob filtering. The
-preparation script verifies pinned inputs, applies `patches/linux-integration.patch`,
-and checks the resulting hashes. It generates `upstream-layer/`, `kernels/` and
+preparation script verifies the hashes of the pinned inputs and applies
+`patches/linux-integration.patch`. It generates `upstream-layer/`, `kernels/` and
 `backend/vendor/`; those directories are not tracked in the parent repository.
 Run it again after a pull: it updates files it prepared, deletes those the patch
 no longer produces and refuses to overwrite local edits.
@@ -227,5 +227,5 @@ color shifts. Normal inference never substitutes an identity filter;
 arrives, the layer presents the original frame.
 
 When changing prepared upstream sources, use `scripts/update-source-patch.py`
-to update the local patch and output hashes, then review both before committing.
+to update the local patch, then review it before committing.
 Keep the pins and all license/attribution notices intact.

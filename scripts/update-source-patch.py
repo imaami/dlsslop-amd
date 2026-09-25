@@ -40,23 +40,15 @@ def main():
         git('add','-f','.')
         git('-c','user.name=Source snapshot','-c','user.email=snapshot@localhost','commit','-qm','Pinned originals')
         for folder in ('upstream-layer','kernels','backend/vendor'):
+            for path in (ROOT/folder).rglob('*'):
+                if path.is_symlink():
+                    raise RuntimeError('symlink in prepared source: '+str(path))
             shutil.rmtree(stage/folder)
             shutil.copytree(ROOT/folder,stage/folder)
         git('add','-f','.')
         patch = git('diff','--cached','--binary','--no-ext-diff','--no-renames')
-        outputs = {}; modes = {}
-        for folder in ('upstream-layer','kernels','backend/vendor'):
-            for path in sorted((ROOT/folder).rglob('*')):
-                if path.is_file():
-                    if path.is_symlink():
-                        raise RuntimeError('symlink in prepared source: '+str(path))
-                    name=path.relative_to(ROOT).as_posix()
-                    outputs[name]=hashlib.sha256(path.read_bytes()).hexdigest()
-                    modes[name]=path.stat().st_mode & 0o777
-        lock['outputs']=outputs;lock['modes']=modes
         (ROOT/'patches/linux-integration.patch').write_bytes(patch)
-        (ROOT/'upstreams.lock.json').write_text(json.dumps(lock,indent=2)+'\n')
-    print('Updated patch and hashes. Review both before committing.')
+    print('Updated patch. Review it before committing.')
 
 if __name__=='__main__':
     try:

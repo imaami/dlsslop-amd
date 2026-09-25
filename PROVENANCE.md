@@ -32,11 +32,11 @@ integration patches and local source, not complete upstream copies.
 | AMD neural scheduler and HIP kernels | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) | `7ef24e7c1498bce59738277e174249866608c4ed` | MIT |
 | Eight scaling shader sources | [optiscaler/OptiScaler](https://github.com/optiscaler/OptiScaler) | `6ded74bfa4fbb932fda7184c1263fc45380d5b1d` | GPL-3.0; individual files retain additional notices |
 
-`prepare-sources.py` projects selected originals into `upstream-layer/`,
-`kernels/` and `backend/vendor/`, applies `patches/linux-integration.patch`, and
-verifies output hashes. The patch adapts Linux loading and transport, extends
-controls and composition, and adds explicit shared-memory fences in affected
-HIP kernels. It leaves the upstream working trees unchanged.
+`prepare-sources.py` verifies selected originals against their recorded hashes,
+projects them into `upstream-layer/`, `kernels/` and `backend/vendor/`, and
+applies `patches/linux-integration.patch`. The patch adapts Linux loading and
+transport, extends controls and composition, and adds explicit shared-memory
+fences in affected HIP kernels. It leaves the upstream working trees unchanged.
 
 Preserve `upstream-layer/ATTRIBUTION.md` and all inherited notices. The layer's
 shader/dispatch lineage includes OptiScaler and Dagherbou/OptiScaler_DLSSNR,

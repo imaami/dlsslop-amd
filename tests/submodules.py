@@ -77,15 +77,14 @@ class SubmodulesTest(unittest.TestCase):
             files = {name: {'repository': 'amd', 'source': source,
                             'sha256': hashlib.sha256(sources[source]).hexdigest()}
                      for name, source in targets.items()}
-            outputs = {name: entry['sha256'] for name, entry in files.items()}
-            outputs['upstream-layer/example.txt'] = hashlib.sha256(b'patched\n').hexdigest()
             lock = {'version': 1, 'repositories': {'amd': {'path': 'external/amd',
                     'url': 'https://original-provenance.invalid/upstream.git', 'commit': pin}},
-                    'files': files, 'outputs': outputs}
+                    'files': files}
             (project / 'upstreams.lock.json').write_text(json.dumps(lock))
             (project / 'patches').mkdir()
             (project / 'patches/linux-integration.patch').write_text(
                 'diff --git a/upstream-layer/example.txt b/upstream-layer/example.txt\n'
+                'old mode 100644\nnew mode 100755\n'
                 '--- a/upstream-layer/example.txt\n+++ b/upstream-layer/example.txt\n'
                 '@@ -1 +1 @@\n-original\n+patched\n')
 
@@ -167,14 +166,26 @@ class SubmodulesTest(unittest.TestCase):
             self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched\n')
             self.assertEqual((clone / 'kernels/example.hip').read_bytes(), b'kernel\n')
             self.assertEqual((clone / 'backend/vendor/api.h').read_bytes(), b'api\n')
+            # The patch alone carries file modes into the prepared tree.
+            self.assertTrue(os.access(clone / 'upstream-layer/example.txt', os.X_OK))
+            self.assertFalse(os.access(clone / 'kernels/example.hip', os.X_OK))
             committed = {name: (clone / name).read_bytes()
                          for name in ('upstreams.lock.json', 'patches/linux-integration.patch')}
             command(sys.executable, 'scripts/update-source-patch.py', cwd=clone, env=hostile)
             patch = (clone / 'patches/linux-integration.patch').read_text()
-            self.assertTrue(patch.startswith('diff --git a/upstream-layer/example.txt b/upstream-layer/example.txt\n'))
+            self.assertTrue(patch.startswith('diff --git a/upstream-layer/example.txt b/upstream-layer/example.txt\n'
+                                             'old mode 100644\nnew mode 100755\n'))
             self.assertNotIn('\x1b', patch)
             self.assertIn('\n-original\n+patched\n', patch)
             self.assertFalse(hostile_index.exists())
+            self.assertEqual((clone / 'upstreams.lock.json').read_bytes(), committed['upstreams.lock.json'])
+            # A symlink would be recorded as its target's content.
+            (clone / 'kernels/link.hip').symlink_to('example.hip')
+            linked = command(sys.executable, 'scripts/update-source-patch.py', cwd=clone, check=False)
+            self.assertNotEqual(linked.returncode, 0)
+            self.assertIn('symlink in prepared source', linked.stderr)
+            self.assertEqual((clone / 'patches/linux-integration.patch').read_text(), patch)
+            (clone / 'kernels/link.hip').unlink()
             command(sys.executable, 'scripts/prepare-sources.py', cwd=clone)
             self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched\n')
             for name, data in committed.items():
@@ -183,8 +194,7 @@ class SubmodulesTest(unittest.TestCase):
             # A changed patch and lock update an unmodified prepared tree and
             # remove the files they no longer produce; local edits stay refused.
             changed = json.loads(json.dumps(lock))
-            del changed['files']['backend/vendor/api.h'], changed['outputs']['backend/vendor/api.h']
-            changed['outputs']['upstream-layer/example.txt'] = hashlib.sha256(b'patched again\n').hexdigest()
+            del changed['files']['backend/vendor/api.h']
             (clone / 'upstreams.lock.json').write_text(json.dumps(changed))
             (clone / 'patches/linux-integration.patch').write_bytes(
                 committed['patches/linux-integration.patch'].replace(b'+patched\n', b'+patched again\n'))
