@@ -2,28 +2,23 @@
 # Steam launch options: /home/USER/.local/bin/dlsslop-run -- %command%
 
 channel_default=${DLSSNR_SHM:-/tmp/dlsslop-amd-${UID}/shm.bin}
+[[ $channel_default == /* ]] || channel_default=$PWD/$channel_default
 
 usage() {
-    local default_directory=${channel_default%/*}
-    if [[ $channel_default != */* ]]; then
-        default_directory=.
-    elif [[ -z $default_directory ]]; then
-        default_directory=/
-    fi
-    local log_default=${DLSSNR_LOG:-${default_directory%/}/layer.log}
     cat <<HELP
 Usage: dlsslop-run [OPTIONS] [--] COMMAND [ARGUMENTS...]
 Run a game with the native AMD presentation layer and an existing worker.
 
 Options:
   -s, --shm PATH   Worker channel (default: ${channel_default}).
-  -l, --log PATH   Layer log (default: ${log_default}).
+  -l, --log PATH   Layer log (default: ${DLSSNR_LOG:-${channel_default%/*}/layer.log}).
   -h, --help       Show this help and exit (default: off).
   --              End launcher options (default: first COMMAND ends options).
 
 Environment defaults:
   DLSSNR_SHM      /tmp/dlsslop-amd-\$UID/shm.bin (UID=${UID}); --shm overrides it.
   DLSSNR_LOG      <channel directory>/layer.log; --log overrides it.
+Relative paths are resolved against the launcher's working directory.
 
 The launcher sets these values for COMMAND, overriding inherited values:
   DLSSLOP_AMD_ENABLE=1  DLSSNR_ENABLE=1  DLSSLOP_BACKEND=hip
@@ -92,6 +87,8 @@ if (( ! $# )); then
     printf '%s\n' 'Usage: dlsslop-run [OPTIONS] [--] COMMAND [ARGUMENTS...]' >&2
     exit 2
 fi
+[[ $channel == /* ]] || channel=$PWD/$channel
+[[ -z $log_override || $log_override == /* ]] || log_override=$PWD/$log_override
 export DLSSNR_SHM=$channel
 if [[ ! -f $DLSSNR_SHM ]]; then
     printf 'Start dlsslopd on the host first (missing %s).\n' "$DLSSNR_SHM" >&2
@@ -113,13 +110,7 @@ else
 fi
 export DLSSLOP_AMD_ENABLE=1 DLSSNR_ENABLE=1 DLSSLOP_BACKEND=hip
 export DLSSNR_DMABUF=0 DLSSNR_IDLE_REPAINT=0
-channel_directory=${DLSSNR_SHM%/*}
-if [[ $DLSSNR_SHM != */* ]]; then
-    channel_directory=.
-elif [[ -z $channel_directory ]]; then
-    channel_directory=/
-fi
-export DLSSNR_LOG=${log_override:-${channel_directory%/}/layer.log}
+export DLSSNR_LOG=${log_override:-${DLSSNR_SHM%/*}/layer.log}
 unset DLSSNR_DISABLE VKLayer_DLSS5
 shopt -s execfail
 exec -- "$@"

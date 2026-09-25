@@ -14,8 +14,8 @@ LAUNCHER = ROOT / "scripts/dlsslop-run"
 BASH = "/usr/bin/bash"
 
 
-def run(argv, expected=0, env=None):
-    result = subprocess.run(argv, env=env, text=True, capture_output=True)
+def run(argv, expected=0, env=None, cwd=None):
+    result = subprocess.run(argv, env=env, cwd=cwd, text=True, capture_output=True)
     if result.returncode != expected:
         raise AssertionError(f"{argv!r}: exit {result.returncode}, expected {expected}\n"
                              f"stdout={result.stdout}\nstderr={result.stderr}")
@@ -24,7 +24,8 @@ def run(argv, expected=0, env=None):
 
 def main():
     with tempfile.TemporaryDirectory(prefix="dlsslop-amd-launcher-") as temporary:
-        base = Path(temporary)
+        # The launcher resolves relative paths against getcwd(), which is physical.
+        base = Path(temporary).resolve()
         channel = base / "worker channel" / "shm.bin"
         channel.parent.mkdir(mode=0o700)
         clean_env = {key: value for key, value in os.environ.items()
@@ -39,6 +40,14 @@ def main():
         help_text = run([BASH, str(LAUNCHER), "--help"], env=env).stdout
         assert "--shm" in help_text and "--log" in help_text and "default:" in help_text
         assert str(channel) in help_text
+        assert "resolved against the launcher's working directory" in help_text
+        relative_help = run([BASH, str(LAUNCHER), "--help"], cwd=base,
+                            env=dict(clean_env, DLSSNR_SHM="worker channel/shm.bin")).stdout
+        assert f"(default: {channel})" in relative_help
+        assert f"(default: {channel.parent}/layer.log)" in relative_help
+        root_help = run([BASH, str(LAUNCHER), "--help"],
+                        env=dict(clean_env, DLSSNR_SHM="/shm.bin")).stdout
+        assert "(default: /layer.log)" in root_help
         for option in ("--help", "-h"):
             run([BASH, str(LAUNCHER), option], env=env)
         run([BASH, str(LAUNCHER)], expected=2, env=env)
@@ -98,11 +107,29 @@ def main():
             override_env = dict(launch_env, DLSSNR_SHM=str(base / "missing"),
                                 DLSSNR_LOG="inherited.log")
             result = run([BASH, str(LAUNCHER), f"--shm={channel}", "-l", "selected log", str(recorder)],
-                         expected=37, env=override_env)
-            assert json.loads(result.stdout)["env"]["DLSSNR_LOG"] == "selected log"
+                         expected=37, env=override_env, cwd=base)
+            assert json.loads(result.stdout)["env"]["DLSSNR_LOG"] == str(base / "selected log")
             result = run([BASH, str(LAUNCHER), f"-s{channel}", "-lselected log", str(recorder)],
-                         expected=37, env=override_env)
-            assert json.loads(result.stdout)["env"]["DLSSNR_LOG"] == "selected log"
+                         expected=37, env=override_env, cwd=base)
+            assert json.loads(result.stdout)["env"]["DLSSNR_LOG"] == str(base / "selected log")
+            result = run([BASH, str(LAUNCHER), f"--shm={channel}", "--log=/absolute.log", str(recorder)],
+                         expected=37, env=override_env, cwd=base)
+            assert json.loads(result.stdout)["env"]["DLSSNR_LOG"] == "/absolute.log"
+            result = run([BASH, str(LAUNCHER), f"--shm={channel}", str(recorder)],
+                         expected=37, env=override_env, cwd=base)
+            assert json.loads(result.stdout)["env"]["DLSSNR_LOG"] == str(base / "inherited.log")
+            # A game that changes directory must still reach the checked channel.
+            for relative in (["-s", "worker channel/shm.bin"], ["--shm=./worker channel/shm.bin"]):
+                result = run([BASH, str(LAUNCHER), *relative, str(recorder)],
+                             expected=37, env=launch_env, cwd=base)
+                got = json.loads(result.stdout)["env"]
+                assert os.path.normpath(got["DLSSNR_SHM"]) == str(channel), got["DLSSNR_SHM"]
+                assert os.path.normpath(got["DLSSNR_LOG"]) == str(channel.parent / "layer.log")
+            result = run([BASH, str(LAUNCHER), str(recorder)], expected=37, cwd=channel.parent,
+                         env=dict(launch_env, DLSSNR_SHM="shm.bin"))
+            got = json.loads(result.stdout)["env"]
+            assert got["DLSSNR_SHM"] == str(channel)
+            assert got["DLSSNR_LOG"] == str(channel.parent / "layer.log")
             result = run([BASH, str(LAUNCHER), "missing-dlsslop-amd-command"], expected=127, env=env)
             assert "could not execute" in result.stderr
 
