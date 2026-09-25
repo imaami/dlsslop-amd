@@ -223,9 +223,10 @@ dlsslop-test --trace-dir "$HOME/.local/state/dlsslop-amd/color-trace" \
 ```
 
 The report directory must be new. The diagnostic holds one input, captures
-comparison stages and restores changed controls. Do not adjust controls during
-it. Raw tracing adds readbacks, disk use and timing overhead. Reports locate
-color shifts. Normal inference never substitutes an identity filter;
+comparison stages, moves its capture batches and raw traces into the report
+and restores changed controls. Do not adjust controls during it. Raw tracing
+adds readbacks, disk use and timing overhead. Reports locate color shifts.
+Normal inference never substitutes an identity filter;
 `--test-identity` is an explicit transport-test mode. If no valid worker result
 arrives, the layer presents the original frame.
 

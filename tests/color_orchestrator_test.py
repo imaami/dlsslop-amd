@@ -5,10 +5,12 @@ The fake control is a separate process and publishes real PNG captures/manifests
 These checks validate orchestration and observations, not Radeon execution.
 """
 
+import fcntl
 import json
 import os
 from pathlib import Path
 import select
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -33,6 +35,7 @@ import os
 from pathlib import Path
 import struct
 import sys
+import time
 import zlib
 
 state_path = Path(os.environ['FAKE_CONTROL_STATE'])
@@ -62,6 +65,7 @@ while args:
 if changed:
     state['seq'] += 1
 status_seq = state['seq']
+state['calls'] = state.get('calls', []) + [sys.argv[1:]]
 
 def png(path, pixels):
     def chunk(kind, value):
@@ -111,9 +115,20 @@ if capture:
             meta['apply_model'] = '1'
     content = ''.join('%s %s\n' % item for item in meta.items())
     (batch / 'manifest.txt').write_text(content)
-    temporary = captures / 'manifest.tmp'
-    temporary.write_text(content)
-    temporary.replace(captures / 'manifest.txt')
+    def publish():
+        temporary = captures / ('manifest-%d.tmp' % number)
+        temporary.write_text(content)
+        temporary.replace(captures / 'manifest.txt')
+    if state['mode'] != 'delayed':
+        publish()
+    elif os.fork() == 0:
+        # Like the layer, publish frames after the control request returned.
+        null = os.open(os.devnull, os.O_RDWR)
+        for descriptor in (0, 1, 2):
+            os.dup2(null, descriptor)
+        time.sleep(0.2)
+        publish()
+        os._exit(0)
 
 if '--settings' in requests and state['captures'] == 6 and state['mode'] == 'concurrent' and not state.get('concurrent_change'):
     settings['detail'] = '0.73'
@@ -201,6 +216,7 @@ while True:
         metadata['control_seq_end'] += 1
     elif mode == 'changed-tuning':
         metadata['tuning_seq_end'] += 1
+    status, error = ('failed', 'synthetic worker failure') if mode == 'failed-trace' else ('complete', '')
     trace = directory / token
     trace.mkdir()
     stages = []
@@ -210,7 +226,7 @@ while True:
             pfm(trace / name, offset)
             stages.append({'file': name})
     (trace / 'summary.json').write_text(json.dumps({
-        'schema': 1, 'status': 'complete', 'metadata': metadata, 'stages': stages,
+        'schema': 1, 'status': status, 'metadata': metadata, 'error': error, 'stages': stages,
     }))
     temporary = directory / (token + '.tmp')
     temporary.write_text('complete\n')
@@ -303,6 +319,85 @@ class ColorOrchestratorTest(unittest.TestCase):
         for case in cases:
             self.assertTrue((self.output / case["directory"] / "manifest.txt").is_file())
         self.assertTrue((self.output / "report.md").is_file())
+        # Batches move into the report instead of piling up in the capture directory.
+        self.assertEqual([path.name for path in self.captures.iterdir()], ["manifest.txt"])
+
+    def assert_ignores_earlier_manifest(self, sequence):
+        # The public manifest survives the channel, whose generations restart.
+        (self.captures / "earlier-batch").mkdir()
+        (self.captures / "manifest.txt").write_text(
+            f"capture_metadata_version 1\ncapture_control_seq {sequence}\n"
+            f"frame_control_seq {sequence}\nbatch_dir earlier-batch\n")
+        result = self.invoke("delayed")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(self.outcome()["completed"])
+        self.assertEqual(self.current(), INITIAL)
+        self.assertEqual(json.loads(self.state.read_text())["captures"], 6)
+        cases = json.loads((self.output / "captures.json").read_text())
+        self.assertNotIn("earlier-batch", {case["manifest"]["batch_dir"] for case in cases})
+
+    def test_earlier_manifest_above_first_token_is_ignored(self):
+        self.assert_ignores_earlier_manifest(103)
+
+    def test_earlier_manifest_far_ahead_is_ignored(self):
+        self.assert_ignores_earlier_manifest(5000)
+
+    def test_running_diagnostic_refuses_before_reading_settings(self):
+        with (self.directory / "color-test.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self.invoke("success")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Another dlsslop-test is using this channel", result.stderr)
+        self.assertFalse(self.output.exists())
+        state = json.loads(self.state.read_text())
+        self.assertEqual((state["seq"], state["captures"]), (100, 0))
+        self.assertEqual(self.current(), INITIAL)
+        self.assertFalse([call for call in state["calls"] if "--status" not in call])
+
+    def test_help_states_each_default_once(self):
+        text = subprocess.run([sys.executable, str(PROGRAM), "--help"], env=dict(os.environ, COLUMNS="500"),
+                              text=True, capture_output=True, check=True).stdout
+        self.assertNotIn("None", text)
+        self.assertEqual(text.count("(default:"), 8, text)
+        self.assertIn("--trace-dir (default: unset; no raw tensors)", text)
+        self.assertIn("else /tmp/dlssnr-captures)", text)
+        self.assertIn("invocation (default: 60)", text)
+
+    def test_capture_directory_follows_the_layer(self):
+        probe = ("import json, runpy, sys; "
+                 "print(runpy.run_path(sys.argv[1])['capture_directory'](json.loads(sys.argv[2])))")
+
+        def resolve(status, env):
+            return subprocess.run([sys.executable, "-c", probe, str(PROGRAM), json.dumps(status)],
+                                  env=env, text=True, capture_output=True, check=True).stdout.strip()
+
+        terminal = {key: value for key, value in os.environ.items()
+                    if key not in ("XDG_STATE_HOME", "HOME")}
+        busy = dict(terminal, XDG_STATE_HOME="/terminal-state", HOME="/home/terminal")
+        sleep = shutil.which("sleep")
+        for game, expected in (
+                ({"XDG_STATE_HOME": "/state", "HOME": "/home/game"}, "/state/dlssnr/captures"),
+                ({"XDG_STATE_HOME": "", "HOME": "/home/game"}, "/home/game/.local/state/dlssnr/captures"),
+                ({"HOME": "/home/game"}, "/home/game/.local/state/dlssnr/captures"),
+                ({"XDG_STATE_HOME": "", "HOME": ""}, "/tmp/dlssnr-captures"),
+                ({}, "/tmp/dlssnr-captures")):
+            process = subprocess.Popen([sleep, "30"], env=game)
+            try:
+                with self.subTest(game=game):
+                    self.assertEqual(resolve({"layer_pid": str(process.pid)}, busy), expected)
+            finally:
+                process.kill()
+                process.wait()
+        # An unreadable game environment falls back to this process's by the same rule.
+        # /proc/0 never exists, so PID 0 is unreadable even to root or in a PID namespace.
+        for status in ({}, {"layer_pid": "0"}, {"layer_pid": "not a pid"}):
+            for env, expected in (
+                    (busy, "/terminal-state/dlssnr/captures"),
+                    (dict(terminal, XDG_STATE_HOME="", HOME="/home/terminal"),
+                     "/home/terminal/.local/state/dlssnr/captures"),
+                    (terminal, "/tmp/dlssnr-captures")):
+                with self.subTest(status=status, env=expected):
+                    self.assertEqual(resolve(status, env), expected)
 
     def test_concurrent_generation_retries_capture(self):
         result = self.invoke("generation-bump")
@@ -377,6 +472,9 @@ class ColorOrchestratorTest(unittest.TestCase):
             for comparison in trace["per_pass_changes"].values():
                 self.assertAlmostEqual(comparison["red_excess_delta"], 0.05, places=6)
             self.assertTrue((self.output / name / f"pass-{passes:02}-raw.pfm").is_file())
+        # Traces move into the report with their completion markers removed.
+        self.assertEqual([path.name for path in (self.directory / "traces").iterdir()],
+                         ["owner.json"])
 
     def assert_preflight_failure(self, mode, message):
         result = self.invoke("success", trace_mode=mode)
@@ -428,6 +526,9 @@ class ColorOrchestratorTest(unittest.TestCase):
     def test_missing_hold_end_is_incompatible_metadata(self):
         result, _ = self.assert_failed_raw_trace("missing-held-end", "incompatible")
         self.assertNotIn("input was not held", result.stderr)
+
+    def test_failed_trace_reports_the_worker_error(self):
+        self.assert_failed_raw_trace("failed-trace", "synthetic worker failure")
 
     def test_old_trace_metadata_retains_evidence(self):
         self.assert_failed_raw_trace("old-summary", "incompatible")

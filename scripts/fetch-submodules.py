@@ -77,7 +77,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, add_help=False,
                                      epilog='Default: all repositories in upstreams.lock.json; no full-clone fallback.')
     parser.add_argument('-t', '--timeout', type=positive_seconds, default=300,
-                        help='timeout per network or checkout operation, in seconds (default: 300)')
+                        help='timeout per network or checkout operation, in seconds (default: %(default)s)')
     parser.add_argument('-h', '--help', action='help', help='show help (default: off)')
     args = parser.parse_args()
     try:

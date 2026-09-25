@@ -108,17 +108,20 @@ class Control:
 
 
 def capture_directory(status):
-    # The game can have a different XDG_STATE_HOME from this terminal.
+    # The layer's CaptureWriter::Directory() rule, applied to the game's
+    # environment, which can differ from this terminal's, or to this
+    # process's environment if the game's is unreadable.
+    env = os.environb
     try:
         data = Path(f"/proc/{int(status['layer_pid'])}/environ").read_bytes()
         env = dict(part.split(b'=', 1) for part in data.split(b'\0') if b'=' in part)
-        if env.get(b'XDG_STATE_HOME'):
-            return Path(os.fsdecode(env[b'XDG_STATE_HOME'])) / 'dlssnr/captures'
-        if env.get(b'HOME'):
-            return Path(os.fsdecode(env[b'HOME'])) / '.local/state/dlssnr/captures'
     except (OSError, ValueError, KeyError):
         pass
-    return Path(os.environ.get('XDG_STATE_HOME', str(Path.home() / '.local/state'))) / 'dlssnr/captures'
+    if env.get(b'XDG_STATE_HOME'):
+        return Path(os.fsdecode(env[b'XDG_STATE_HOME'])) / 'dlssnr/captures'
+    if env.get(b'HOME'):
+        return Path(os.fsdecode(env[b'HOME'])) / '.local/state/dlssnr/captures'
+    return Path('/tmp/dlssnr-captures')
 
 
 def safe_child(root, name):
@@ -172,13 +175,16 @@ class Run:
         # can publish a control generation between the token and the frame.
         # Wait for real capture completion, then retry under the settled token.
         deadline = time.monotonic() + self.args.timeout
+        # The public manifest outlives the channel, whose generations restart
+        # near zero; only a batch published after this point can answer.
+        seen = manifest_values(self.captures / 'manifest.txt').get('batch_dir')
         while True:
             status = self.control.call('--capture', '1', '--status')
             token = status.get('capture_control_seq', status['control_seq'])
             def completed():
                 manifest = manifest_values(self.captures / 'manifest.txt')
                 generation = manifest.get('capture_control_seq', '-1')
-                return manifest if int(generation) >= int(token) else None
+                return manifest if manifest.get('batch_dir') != seen and int(generation) >= int(token) else None
             manifest = self.events.wait(completed, max(0, deadline - time.monotonic()),
                                         f'{name} capture token {token}')
             if manifest.get('capture_control_seq') == token and manifest.get('frame_control_seq') == token:
@@ -208,9 +214,8 @@ class Run:
             self.before_hash = manifest['before_hash']
         elif self.before_hash != manifest.get('before_hash'):
             raise RuntimeError('Held input changed; stage comparisons would be invalid.')
-        source = safe_child(self.captures, manifest['batch_dir'])
-        destination = self.output / name
-        shutil.copytree(source, destination)
+        # The batch is this run's; moving it keeps batches from piling up.
+        shutil.move(safe_child(self.captures, manifest['batch_dir']), self.output / name)
         case = {'name': name, 'directory': name, 'manifest': manifest,
                 'settings': self.control.call('--settings')}
         self.cases.append(case)
@@ -247,11 +252,13 @@ class Run:
         # Keep rejected evidence too: a metadata failure must not discard the
         # summary needed to diagnose it. Only validated traces enter analysis.
         self.failed_raw_traces.append(destination.name)
-        shutil.copytree(source, destination)
+        shutil.move(source, destination)
+        completion.unlink(missing_ok=True)
         summary = json.loads((destination / 'summary.json').read_text())
         metadata = summary.get('metadata', {})
         if summary.get('status') != 'complete' or summary.get('schema') != 1:
-            raise RuntimeError('Worker could not complete the raw neural trace')
+            raise RuntimeError('Worker could not complete the raw neural trace: ' +
+                               str(summary.get('error') or 'no reason reported'))
         required = ('held_input', 'held_input_end', 'control_seq', 'control_seq_end',
                     'tuning_seq', 'tuning_seq_end', 'source_proxy_hash')
         missing = [key for key in required if key not in metadata]
@@ -393,25 +400,27 @@ def analyse(output, cases, raw_traces=(), *, completed=True, error=None):
 
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__, add_help=False,
-                                     formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser = argparse.ArgumentParser(description=__doc__, add_help=False)
     parser.add_argument('-h', '--help', action='help', help='show help (default: off)')
     parser.add_argument('-o', '--output-dir', type=Path,
                         default=Path('dlsslop-amd-color-' + time.strftime('%Y%m%d-%H%M%S')),
-                        help='new report directory; existing paths are refused')
+                        help='new report directory; existing paths are refused (default: %(default)s)')
     parser.add_argument('-C', '--control', default=shutil.which('dlsslopctl') or 'dlsslopctl',
-                        help='control executable')
+                        help='control executable (default: %(default)s)')
     parser.add_argument('-s', '--shm', type=Path,
                         default=Path(os.environ.get('DLSSNR_SHM') or f'/tmp/dlsslop-amd-{os.getuid()}/shm.bin'),
-                        help='shared-memory channel')
+                        help='shared-memory channel (default: %(default)s)')
     parser.add_argument('-c', '--capture-dir', type=Path, default=None,
-                        help='capture directory (default: detect from game environment, then XDG_STATE_HOME or ~/.local/state/dlssnr/captures)')
+                        help='capture directory (default: unset; the layer\'s rule in the game environment, '
+                             'or in this process\'s environment if that is unreadable: '
+                             '$XDG_STATE_HOME/dlssnr/captures, else $HOME/.local/state/dlssnr/captures, '
+                             'else /tmp/dlssnr-captures)')
     parser.add_argument('-r', '--trace-dir', type=Path, default=None,
-                        help='optional directory passed to worker --trace-dir; None means no raw tensors')
+                        help='directory passed to worker --trace-dir (default: unset; no raw tensors)')
     parser.add_argument('-P', '--max-passes', type=int, choices=range(1, 4), default=3,
-                        help='capture model/composed views at counts 1 through this value')
+                        help='capture model/composed views at counts 1 through this value (default: %(default)s)')
     parser.add_argument('-t', '--timeout', type=float, default=60,
-                        help='seconds allowed per capture or control invocation')
+                        help='seconds allowed per capture or control invocation (default: %(default)s)')
     args = parser.parse_args(argv)
     if not 1 <= args.timeout <= 600:
         parser.error('--timeout must be 1..600 seconds')
@@ -433,14 +442,18 @@ def main(argv=None):
         raise RuntimeError('A running neural worker and game using the layer are required')
     if 'IDENTITY' in status.get('helper_reason', ''):
         raise RuntimeError('The identity worker cannot diagnose neural color')
+    # Lock before reading settings: another run's temporary ones are not original.
+    lock = (args.shm.parent / 'color-test.lock').open('a')
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        raise RuntimeError('Another dlsslop-test is using this channel') from None
     original = control.call('--settings')
     captures = (args.capture_dir or capture_directory(status)).expanduser().resolve()
     captures.mkdir(parents=True, exist_ok=True)
     output = args.output_dir.expanduser().resolve()
     output.mkdir(parents=True, exist_ok=False)
     write_json(output / 'initial.json', {'status': status, 'settings': original})
-    lock = (args.shm.parent / 'color-test.lock').open('a')
-    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     run = Run(args, control, output, captures, trace_owner)
     outcome = {'completed': False, 'restored': False, 'raw_traces': [], 'failed_raw_traces': []}
     try:

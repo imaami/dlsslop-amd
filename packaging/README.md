@@ -118,5 +118,6 @@ dlsslop-test --trace-dir "$HOME/.local/state/dlsslop-amd/color-trace" \
 ```
 
 Choose a new report directory. The diagnostic temporarily holds input, captures
-comparison stages and restores its changed controls. Do not adjust controls while
-it runs. Tracing adds readbacks and disk use; omit `--trace-dir` for ordinary play.
+comparison stages, moves its captures and traces into the report and restores
+its changed controls. Do not adjust controls while it runs. Tracing adds
+readbacks and disk use; omit `--trace-dir` for ordinary play.
