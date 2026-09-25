@@ -42,15 +42,11 @@ jobs:
             printf 'DXC archive did not provide the expected executable and libraries under %s\n' "$dxc_root" >&2
             exit 1
           fi
-          LD_LIBRARY_PATH="$dxc_root/lib" "$dxc_root/bin/dxc" --version || exit $?
-      - name: Compile every native-layer shader
-        env:
-          LD_LIBRARY_PATH: ${{ runner.temp }}/dxc/lib
-        run: python3 scripts/build-all-shaders.py --dxc "$RUNNER_TEMP/dxc/bin/dxc"
+          "$dxc_root/bin/dxc" --version || exit $?
       - name: Compile all 28 gfx1201 HIP modules including color preservation
         run: python3 scripts/build-kernels.py --compiler clang++-22 --linker /usr/bin/ld.lld-22
       - name: Configure worker, layer, CLI, Qt Widgets GUI and tests
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDLSSLOP_BUILD_GUI=ON -DBUILD_TESTING=ON -DPython3_EXECUTABLE=/usr/bin/python3
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDXC="$RUNNER_TEMP/dxc/bin/dxc" -DDLSSLOP_BUILD_GUI=ON -DBUILD_TESTING=ON -DPython3_EXECUTABLE=/usr/bin/python3
       - name: Compile all native targets
         run: cmake --build build --parallel 2
       - name: Run host and software Vulkan tests

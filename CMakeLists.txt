@@ -20,9 +20,52 @@ set(LAYER_SOURCES
     ${LAYER_ROOT}/layer_linux/src/scaler_vk.cpp
     ${LAYER_ROOT}/layer_linux/src/hotkey.cpp)
 
+# Every layer shader is compiled from its prepared source into the build tree,
+# where the layer's quoted includes find it. Pass -DDXC=<path> for a DXC that
+# is not on PATH.
+find_program(DXC dxc REQUIRED)
+find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
+find_program(SPIRV_VAL spirv-val REQUIRED)
+set(SHADER_SOURCE ${LAYER_ROOT}/layer_linux/src)
+set(SHADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
+if(EXISTS ${SHADER_SOURCE}/dlssnr/DlssNr_Shader_Vk.h)
+    message(FATAL_ERROR "Stale prepared shader headers would shadow the generated ones; "
+        "delete upstream-layer/ and run scripts/prepare-sources.py again.")
+endif()
+file(MAKE_DIRECTORY ${SHADER_DIR}/dlssnr ${SHADER_DIR}/scaling)
+macro(add_hlsl source output)
+    get_filename_component(symbol ${source} NAME_WE)
+    add_custom_command(OUTPUT ${SHADER_DIR}/${output}.h ${SHADER_DIR}/${output}.spv
+        COMMAND ${DXC} -spirv -D VK_MODE -T cs_6_0 -E CSMain -Vn ${symbol}_spv
+            -Fo ${SHADER_DIR}/${output}.spv -Fh ${SHADER_DIR}/${output}.h ${SHADER_SOURCE}/${source}
+        COMMAND ${SPIRV_VAL} --target-env vulkan1.0 ${SHADER_DIR}/${output}.spv
+        DEPENDS ${SHADER_SOURCE}/${source} VERBATIM)
+    list(APPEND LAYER_SHADERS ${SHADER_DIR}/${output}.h)
+endmacro()
+add_hlsl(dlssnr/dlssnr.hlsl dlssnr/DlssNr_Shader_Vk)
+foreach(name bcus bcds_bicubic bcds_catmull bcds_lanczos2 bcds_lanczos3 bcds_kaiser2 bcds_kaiser3 bcds_magc)
+    add_hlsl(scaling/${name}.hlsl scaling/${name}_Shader_Vk)
+endforeach()
+set(METER ${SHADER_DIR}/shaders/meter_reduce)
+add_custom_command(OUTPUT ${METER}.h ${METER}.spv
+    COMMAND ${GLSLANG_VALIDATOR} --quiet -V -o ${METER}.spv ${SHADER_SOURCE}/shaders/meter_reduce.comp
+    COMMAND ${SPIRV_VAL} --target-env vulkan1.0 ${METER}.spv
+    COMMAND ${GLSLANG_VALIDATOR} --quiet -V --vn kMeterReduceSpv -o ${METER}.h
+        ${SHADER_SOURCE}/shaders/meter_reduce.comp
+    DEPENDS ${SHADER_SOURCE}/shaders/meter_reduce.comp VERBATIM)
+# Keep upstream's kMeterReduceSpv/kMeterReduceSpvLen header contract.
+file(CONFIGURE OUTPUT ${METER}_spv.h CONTENT [[#pragma once
+#include <cstddef>
+#include <cstdint>
+#include "meter_reduce.h"
+static const size_t kMeterReduceSpvLen = sizeof(kMeterReduceSpv) / sizeof(kMeterReduceSpv[0]);
+]])
+add_custom_target(layer-shaders DEPENDS ${LAYER_SHADERS} ${METER}.h)
+
 function(add_neural_layer target)
     add_library(${target} SHARED ${LAYER_SOURCES})
-    target_include_directories(${target} PRIVATE
+    add_dependencies(${target} layer-shaders)
+    target_include_directories(${target} PRIVATE ${SHADER_DIR}
         ${LAYER_ROOT}/standalone_runner/third_party ${X11_HEADERS} ${XINPUT_HEADERS})
     target_link_libraries(${target} PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
     target_link_options(${target} PRIVATE
@@ -55,7 +98,8 @@ if(BUILD_TESTING)
     add_test(NAME packaging COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging_test.py)
     add_executable(vulkan-storage-test tests/vulkan_storage_test.cpp)
-    target_include_directories(vulkan-storage-test PRIVATE
+    add_dependencies(vulkan-storage-test layer-shaders)
+    target_include_directories(vulkan-storage-test PRIVATE ${SHADER_DIR}
         ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party)
     add_test(NAME vulkan-storage COMMAND vulkan-storage-test)
     add_executable(codec-test backend/codec_test.cpp backend/codec.cpp)
@@ -101,7 +145,8 @@ if(BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/vulkan_smoke.cpp"
     add_executable(hdr-shader-test tests/hdr_shader_test.cpp
         ${LAYER_ROOT}/layer_linux/src/dlssnr_pass.cpp
         ${LAYER_ROOT}/layer_linux/src/shader_vk.cpp)
-    target_include_directories(hdr-shader-test PRIVATE
+    add_dependencies(hdr-shader-test layer-shaders)
+    target_include_directories(hdr-shader-test PRIVATE ${SHADER_DIR}
         ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party)
     target_link_libraries(hdr-shader-test PRIVATE ${VULKAN_LOADER} Threads::Threads)
     add_test(NAME hdr-shader COMMAND hdr-shader-test)

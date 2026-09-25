@@ -72,10 +72,8 @@ Set `DXC_DIR` to the extracted directory containing `bin/` and `lib/` (inside
 the archive's top-level directory), then build from the prepared checkout:
 
 ```bash
-LD_LIBRARY_PATH="$DXC_DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-    python3 scripts/build-all-shaders.py --dxc "$DXC_DIR/bin/dxc"
 python3 scripts/build-kernels.py --compiler clang++-22 --linker /usr/bin/ld.lld-22
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDXC="$DXC_DIR/bin/dxc" \
     -DDLSSLOP_BUILD_GUI=ON -DBUILD_TESTING=ON -DPython3_EXECUTABLE=/usr/bin/python3
 cmake --build build --parallel 2
 QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
@@ -83,6 +81,8 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 
 This compiles and validates ten Vulkan shaders, compiles 28 `gfx1201` HIP modules
 (including `linux_color`), and builds the worker, layer, CLI, Qt GUI and tests.
+CMake builds the shaders from their prepared sources; `-DDXC` defaults to `dxc`
+on `PATH`.
 Compilation does not require a GPU, ROCm runtime or model weights. Qt uses the
 distribution's shared Qt 6 libraries; the worker and layer have no Qt dependency.
 For an independent GUI build, see [gui/README.md](gui/README.md).

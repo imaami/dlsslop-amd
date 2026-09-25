@@ -223,16 +223,6 @@
       "source": "layer_linux/src/dlssnr/DlssNr_Layout.h",
       "sha256": "c15948312e20559102284ed6c05754e001cf1b2a463073e7717b1ba70750d3b8"
     },
-    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Shader_Vk.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/dlssnr/DlssNr_Shader_Vk.h",
-      "sha256": "c82dc37155995b9d8d3b99dd689393787b18b9120e9bb41b371250b3286633b5"
-    },
-    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Shader_Vk.spv": {
-      "repository": "layer",
-      "source": "layer_linux/src/dlssnr/DlssNr_Shader_Vk.spv",
-      "sha256": "8243fb57dcc29bdd037633086b1aa326ede70624ba0a5cef9d4a55dafd94a534"
-    },
     "upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl": {
       "repository": "layer",
       "source": "layer_linux/src/dlssnr/dlssnr.hlsl",
@@ -283,86 +273,6 @@
       "source": "layer_linux/src/scaler_vk.h",
       "sha256": "b80938043f9a2a175e7cf1ea93e7576189c60dc4bb8e3bda6fecfa5527262b5a"
     },
-    "upstream-layer/layer_linux/src/scaling/bcds_bicubic_Shader_Vk.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcds_bicubic_Shader_Vk.h",
-      "sha256": "61395cb0cd7d8b0d44e9e7d992c1db843f02acc9ffe8eaa56ddb22f7f5bd40aa"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_bicubic_Shader_Vk.spv": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcds_bicubic_Shader_Vk.spv",
-      "sha256": "4ac02bc2c0195e7bb3534b429802d7755536f0fff1abfa9f93690bf890623a78"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_catmull_Shader_Vk.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcds_catmull_Shader_Vk.h",
-      "sha256": "608e78f0e3520066e7ce7298eda565ad20f2e9814329d9e68ed2d8bd2eeecc13"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_catmull_Shader_Vk.spv": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcds_catmull_Shader_Vk.spv",
-      "sha256": "5de62230c9fd7fdb3d72295d851eb623bab9a2601af3838b15499d93164b7bed"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.h",
-      "sha256": "57605564e71e923eccda8323db306b69e40e41ffebc0fec4fb392fd420c99deb"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.spv": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.spv",
-      "sha256": "5117ebca23f97ddacbb04abbe2a11fc433cc7a1dc99f198707b3e6ca31607cc8"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.h",
-      "sha256": "57b4c6fb8a39db0649b2ddb37bb1609b5a194c7e3c92db4eb32ceae9168bc8d3"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.spv": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.spv",
-      "sha256": "5f6a2ca0abac100eee754d032d0cb99120473cb5f139e77abc351fc7faafc6d5"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.h",
-      "sha256": "1cc1770bf3068f87ec3b0fb57612c056e24754e0e9e708587a9decc8a5aed330"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.spv": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.spv",
-      "sha256": "ee9ebbdc0e833309cebe42bf80e4acf05dceec8b1fa6aab7320a61edecc5f859"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.h",
-      "sha256": "7bcce1e0c655928daf9877dc6a5efefaddcd4decddb2a7ac5d5f99388a6fbcab"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.spv": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.spv",
-      "sha256": "5dcf95eb63a86c0d7fd3ac5e38ce46f1fb6e4de78ba7ad8c3272fbaf4f78f550"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_magc_Shader_Vk.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcds_magc_Shader_Vk.h",
-      "sha256": "9bac7d92cb7b15ec575995d1365199e86f24ff5213a898e22f0532071e82f567"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_magc_Shader_Vk.spv": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcds_magc_Shader_Vk.spv",
-      "sha256": "7a144ff7c067c4e4d9002e997f8a4f93407e3a4f36b2afc80ff6ba3b7c780f19"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcus_Shader_Vk.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcus_Shader_Vk.h",
-      "sha256": "73f6e92f6e4b5e419b6c5618f6ce3901238949cb3346291fb539c7342972d395"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcus_Shader_Vk.spv": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaling/bcus_Shader_Vk.spv",
-      "sha256": "f1317d2ebc422a4d2cc1f4cbf248463b344e0797dcd421777942af3cf6d9e8fa"
-    },
     "upstream-layer/layer_linux/src/shader_vk.cpp": {
       "repository": "layer",
       "source": "layer_linux/src/shader_vk.cpp",
@@ -377,11 +287,6 @@
       "repository": "layer",
       "source": "layer_linux/src/shaders/meter_reduce.comp",
       "sha256": "ad8048f747a709a859e0f7f2ce856c225267f271147ba465c455759bc5a412aa"
-    },
-    "upstream-layer/layer_linux/src/shaders/meter_reduce_spv.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/shaders/meter_reduce_spv.h",
-      "sha256": "7fa639f98d3bc25795e7130f8f27f97fbd20b73747e517bafc554b6884db43e1"
     },
     "upstream-layer/layer_linux/src/vk_table.h": {
       "repository": "layer",
@@ -938,8 +843,6 @@
     "upstream-layer/layer_linux/src/dlssnr/DEVELOPMENT.md": "94123e30d793e67dc188737d8aef9a3be4fd59077bc5d543a74bd5bd6404015e",
     "upstream-layer/layer_linux/src/dlssnr/DlssNr_Common.h": "03a2e4da293345c372b1918a386ba33fe7376f476c1c61ae776d7b7381ad2061",
     "upstream-layer/layer_linux/src/dlssnr/DlssNr_Layout.h": "c15948312e20559102284ed6c05754e001cf1b2a463073e7717b1ba70750d3b8",
-    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Shader_Vk.h": "83970365cfaaccce2a7a3d5a685c14f02406b3bf14797060a39e211cbae13c0c",
-    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Shader_Vk.spv": "f7faa516f26e153b86dd3fa34bd9618a98ab07c354241437e671d39793a623f6",
     "upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl": "74c5ba09833772c9ea0e73c57df16f40e046a68377d0b86aea73a4d8217cb395",
     "upstream-layer/layer_linux/src/dlssnr/frame-hold.md": "7a2266a95a11811360954b001175c60db1d06931b5d077703a916306b950b7f4",
     "upstream-layer/layer_linux/src/dlssnr_pass.cpp": "a6a5ca738f6a5e87fb63ac883540e99cb304cbe41da54ac075299ba07e434269",
@@ -951,33 +854,16 @@
     "upstream-layer/layer_linux/src/scaler_vk.cpp": "498681ea2715ae9da4a0bd0009db952923cf61c0c7ae8b7bd5e1c73bef0cff42",
     "upstream-layer/layer_linux/src/scaler_vk.h": "b80938043f9a2a175e7cf1ea93e7576189c60dc4bb8e3bda6fecfa5527262b5a",
     "upstream-layer/layer_linux/src/scaling/bcds_bicubic.hlsl": "426a9fb342dd469e5b5e81c65435a9935c8095204725bacea817090db5cf29ca",
-    "upstream-layer/layer_linux/src/scaling/bcds_bicubic_Shader_Vk.h": "61395cb0cd7d8b0d44e9e7d992c1db843f02acc9ffe8eaa56ddb22f7f5bd40aa",
-    "upstream-layer/layer_linux/src/scaling/bcds_bicubic_Shader_Vk.spv": "4ac02bc2c0195e7bb3534b429802d7755536f0fff1abfa9f93690bf890623a78",
     "upstream-layer/layer_linux/src/scaling/bcds_catmull.hlsl": "f5b2ca7ff84da9462d289069a0e6a95e4ff0f33f8bc81700c8808e92fd942403",
-    "upstream-layer/layer_linux/src/scaling/bcds_catmull_Shader_Vk.h": "608e78f0e3520066e7ce7298eda565ad20f2e9814329d9e68ed2d8bd2eeecc13",
-    "upstream-layer/layer_linux/src/scaling/bcds_catmull_Shader_Vk.spv": "5de62230c9fd7fdb3d72295d851eb623bab9a2601af3838b15499d93164b7bed",
     "upstream-layer/layer_linux/src/scaling/bcds_kaiser2.hlsl": "cb09cd0899109cb5cf24b51787dc7647626c6f5f7327de24b74e2c79b1c3f86e",
-    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.h": "57605564e71e923eccda8323db306b69e40e41ffebc0fec4fb392fd420c99deb",
-    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.spv": "5117ebca23f97ddacbb04abbe2a11fc433cc7a1dc99f198707b3e6ca31607cc8",
     "upstream-layer/layer_linux/src/scaling/bcds_kaiser3.hlsl": "9289c946c2a63ee2233cdffbf24b93934a1a7d049919175245c36939ea9ac870",
-    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.h": "57b4c6fb8a39db0649b2ddb37bb1609b5a194c7e3c92db4eb32ceae9168bc8d3",
-    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.spv": "5f6a2ca0abac100eee754d032d0cb99120473cb5f139e77abc351fc7faafc6d5",
     "upstream-layer/layer_linux/src/scaling/bcds_lanczos2.hlsl": "8c1248e510f2019ac43c62db5e0e93ff408bb035c0f2733ccb19ae3cc7e854f0",
-    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.h": "1cc1770bf3068f87ec3b0fb57612c056e24754e0e9e708587a9decc8a5aed330",
-    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.spv": "ee9ebbdc0e833309cebe42bf80e4acf05dceec8b1fa6aab7320a61edecc5f859",
     "upstream-layer/layer_linux/src/scaling/bcds_lanczos3.hlsl": "d50d850bd9819c3755fab3fe4404c3b117490c00270e02bb7436fdb6ba6619f9",
-    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.h": "7bcce1e0c655928daf9877dc6a5efefaddcd4decddb2a7ac5d5f99388a6fbcab",
-    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.spv": "5dcf95eb63a86c0d7fd3ac5e38ce46f1fb6e4de78ba7ad8c3272fbaf4f78f550",
     "upstream-layer/layer_linux/src/scaling/bcds_magc.hlsl": "bc9d1bf5bde9855cd36a085beaa772891e1c40999926cbd39c673a49465ab3f1",
-    "upstream-layer/layer_linux/src/scaling/bcds_magc_Shader_Vk.h": "9bac7d92cb7b15ec575995d1365199e86f24ff5213a898e22f0532071e82f567",
-    "upstream-layer/layer_linux/src/scaling/bcds_magc_Shader_Vk.spv": "7a144ff7c067c4e4d9002e997f8a4f93407e3a4f36b2afc80ff6ba3b7c780f19",
     "upstream-layer/layer_linux/src/scaling/bcus.hlsl": "a2c0d83a34dff92ad02fbc53c5a4733201d107823b550ab8777ec4a4319fc57b",
-    "upstream-layer/layer_linux/src/scaling/bcus_Shader_Vk.h": "73f6e92f6e4b5e419b6c5618f6ce3901238949cb3346291fb539c7342972d395",
-    "upstream-layer/layer_linux/src/scaling/bcus_Shader_Vk.spv": "f1317d2ebc422a4d2cc1f4cbf248463b344e0797dcd421777942af3cf6d9e8fa",
     "upstream-layer/layer_linux/src/shader_vk.cpp": "1d3ba72b0866e5bd675352f351141f49cb000f29466da166b30c306fff297289",
     "upstream-layer/layer_linux/src/shader_vk.h": "8538f531c1d3ca806a1fc020469b88bae42b261a4e2d84230eca368a34906933",
     "upstream-layer/layer_linux/src/shaders/meter_reduce.comp": "ad8048f747a709a859e0f7f2ce856c225267f271147ba465c455759bc5a412aa",
-    "upstream-layer/layer_linux/src/shaders/meter_reduce_spv.h": "7fa639f98d3bc25795e7130f8f27f97fbd20b73747e517bafc554b6884db43e1",
     "upstream-layer/layer_linux/src/storage_shader.h": "834fa642ea9ef9309c6ed3ac8c0f001c6d55a79ae0de077d4f806b6b52ccba55",
     "upstream-layer/layer_linux/src/vk_table.h": "07c025a1115e5e2ec7905e0b79a820422bf6c13db07ce82012efbb88af8af6af",
     "upstream-layer/local_install.sh": "7287c1c4146d5ecff9b5f2f472b2dda5517f8bbe8149430104fc98c7e551935b",
@@ -1120,8 +1006,6 @@
     "upstream-layer/layer_linux/src/dlssnr/DEVELOPMENT.md": 420,
     "upstream-layer/layer_linux/src/dlssnr/DlssNr_Common.h": 420,
     "upstream-layer/layer_linux/src/dlssnr/DlssNr_Layout.h": 420,
-    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Shader_Vk.h": 420,
-    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Shader_Vk.spv": 420,
     "upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl": 420,
     "upstream-layer/layer_linux/src/dlssnr/frame-hold.md": 420,
     "upstream-layer/layer_linux/src/dlssnr_pass.cpp": 420,
@@ -1133,33 +1017,16 @@
     "upstream-layer/layer_linux/src/scaler_vk.cpp": 420,
     "upstream-layer/layer_linux/src/scaler_vk.h": 420,
     "upstream-layer/layer_linux/src/scaling/bcds_bicubic.hlsl": 420,
-    "upstream-layer/layer_linux/src/scaling/bcds_bicubic_Shader_Vk.h": 420,
-    "upstream-layer/layer_linux/src/scaling/bcds_bicubic_Shader_Vk.spv": 420,
     "upstream-layer/layer_linux/src/scaling/bcds_catmull.hlsl": 420,
-    "upstream-layer/layer_linux/src/scaling/bcds_catmull_Shader_Vk.h": 420,
-    "upstream-layer/layer_linux/src/scaling/bcds_catmull_Shader_Vk.spv": 420,
     "upstream-layer/layer_linux/src/scaling/bcds_kaiser2.hlsl": 420,
-    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.h": 420,
-    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2_Shader_Vk.spv": 420,
     "upstream-layer/layer_linux/src/scaling/bcds_kaiser3.hlsl": 420,
-    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.h": 420,
-    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3_Shader_Vk.spv": 420,
     "upstream-layer/layer_linux/src/scaling/bcds_lanczos2.hlsl": 420,
-    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.h": 420,
-    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2_Shader_Vk.spv": 420,
     "upstream-layer/layer_linux/src/scaling/bcds_lanczos3.hlsl": 420,
-    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.h": 420,
-    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3_Shader_Vk.spv": 420,
     "upstream-layer/layer_linux/src/scaling/bcds_magc.hlsl": 420,
-    "upstream-layer/layer_linux/src/scaling/bcds_magc_Shader_Vk.h": 420,
-    "upstream-layer/layer_linux/src/scaling/bcds_magc_Shader_Vk.spv": 420,
     "upstream-layer/layer_linux/src/scaling/bcus.hlsl": 420,
-    "upstream-layer/layer_linux/src/scaling/bcus_Shader_Vk.h": 420,
-    "upstream-layer/layer_linux/src/scaling/bcus_Shader_Vk.spv": 420,
     "upstream-layer/layer_linux/src/shader_vk.cpp": 420,
     "upstream-layer/layer_linux/src/shader_vk.h": 420,
     "upstream-layer/layer_linux/src/shaders/meter_reduce.comp": 420,
-    "upstream-layer/layer_linux/src/shaders/meter_reduce_spv.h": 420,
     "upstream-layer/layer_linux/src/storage_shader.h": 420,
     "upstream-layer/layer_linux/src/vk_table.h": 420,
     "upstream-layer/local_install.sh": 493,
