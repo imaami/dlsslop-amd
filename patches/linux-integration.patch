@@ -1678,7 +1678,7 @@ index ec78533..e4f1a0e 100644
      return true;
  }
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..9bdea53 100644
+index 4b37520..dc0d64e 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -1807,7 +1807,27 @@ index 4b37520..9bdea53 100644
      static const bool on = [] {
          const char* v = getenv("DLSSNR_DMABUF");
          return !(v && !strcmp(v, "0"));
-@@ -361,6 +420,8 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -332,6 +391,19 @@ static bool DmaBufEnabled() {
+     return on;
+ }
+ 
++static bool IdleRepaintWanted() {
++    static const bool wanted = [] {
++        const char* v = getenv("DLSSNR_IDLE_REPAINT");
++        return !(v && v[0] == '0');
++    }();
++    return wanted;
++}
++
++// The application's own acquires, submits and queue waits take the device lock only while a
++// repaint thread may use its queue or a dma-buf import may wait for the whole device inside a
++// present. Otherwise they go straight down the chain instead of queueing behind the round trip.
++static bool QueueHooksNeeded() { return IdleRepaintWanted() || DmaBufEnabled(); }
++
+ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, const void* proxy,
+                           void* modelOut, bool proxyInRegion, bool answerFromFd, bool hdrEncode) {
+     if (s.dead) return false;
+@@ -361,6 +433,8 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
      // by leg 1's vkWaitForFences; this fence covers the host-visible ordering across processes.)
      std::atomic_thread_fence(std::memory_order_release);
      s.hdr->seq_req.store(req);
@@ -1816,7 +1836,7 @@ index 4b37520..9bdea53 100644
  
      // How long this frame may wait, which is a question about whether anyone is listening.
      //
-@@ -378,12 +439,19 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -378,12 +452,19 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
      // once it is warm. Timing that out and giving up is how a working helper gets abandoned before it
      // has answered once.
      const bool warmingUp = !s.everAnswered;
@@ -1838,7 +1858,7 @@ index 4b37520..9bdea53 100644
              s.timeouts = 0;
              s.everAnswered = true;
              // The helper's GPU wrote the answer into this region (or the memcpy below reads the
-@@ -396,7 +464,9 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -396,7 +477,9 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
              // the meantime, and seq_resp only counts. Composing that answer here would copy a
              // different number of bytes into these surfaces -- the row-shifted colour garbage this
              // check exists to refuse.
@@ -1849,7 +1869,7 @@ index 4b37520..9bdea53 100644
                              s.hdr->answeredH.load() == h;
              if (!ok) Log("[shm] helper could not use frame %u (ok=%u)", req, s.hdr->seq_ok.load());
              if (ok && !answerFromFd && modelOut != (void*) s.outPixels) std::memcpy(modelOut, s.outPixels, bytes);
-@@ -413,9 +483,32 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -413,9 +496,32 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
          if (s.hdr->quit.load()) { s.dead = true; return false; }
          const double elapsed = NowMs() - tSignal;
          if (elapsed >= budgetMs) break;
@@ -1884,7 +1904,7 @@ index 4b37520..9bdea53 100644
      // Four rather than eight, and with a pause before the next attempt, so giving up costs a
      // fraction of a second and retrying costs that again only every few seconds.
      if (++s.timeouts >= 4) {
-@@ -477,13 +570,17 @@ struct SwapchainState {
+@@ -477,13 +583,17 @@ struct SwapchainState {
      uint32_t width = 0, height = 0;
      // Two fences, not one. Leg 1's must be waited on before the proxy is handed to the helper --
      // the sequence number is the helper's only ordering signal, and it may not be bumped ahead of
@@ -1906,7 +1926,7 @@ index 4b37520..9bdea53 100644
      VkCommandPool pool = VK_NULL_HANDLE;
      VkCommandBuffer cb = VK_NULL_HANDLE;
      // Reused by the present path; resizing only occurs when an unusual caller supplies more waits.
-@@ -751,7 +848,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_EnumeratePhysicalDevices(
+@@ -751,7 +861,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_EnumeratePhysicalDevices(
  // ---------------------------------------------------------------------------
  // Both declared here for the idle repaint, which draws a frame the application did not ask for.
  static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
@@ -1915,7 +1935,7 @@ index 4b37520..9bdea53 100644
                             bool repaint, bool* waitsConsumed);
  
  // Put the captured frame back, for when the effect is switched off while the picture is still.
-@@ -759,12 +856,19 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -759,12 +869,19 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
  // No model and no round trip: the composed result is replaced by the frame it was made from, which
  // is what the application drew and what it would draw again if it were running. Without this,
  // switching the effect off while paused leaves the edit on screen until something else redraws.
@@ -1937,7 +1957,7 @@ index 4b37520..9bdea53 100644
          dc->vkEndCommandBuffer(sc.cb);
          return false;
      }
-@@ -772,12 +876,12 @@ static bool RestorePresent(DeviceChain* dc, SwapchainState& sc, VkImage swapchai
+@@ -772,12 +889,12 @@ static bool RestorePresent(DeviceChain* dc, SwapchainState& sc, VkImage swapchai
      VkSubmitInfo si{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
      si.commandBufferCount = 1;
      si.pCommandBuffers = &sc.cb;
@@ -1955,7 +1975,7 @@ index 4b37520..9bdea53 100644
      {
          static std::once_flag said;
          std::call_once(said, [] { Log("[layer] idle repaint: put the captured frame back"); });
-@@ -851,6 +955,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -851,6 +968,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              for (size_t k = 0; k < kWantCount; ++k)
                      if (!std::strcmp(pCreateInfo->ppEnabledExtensionNames[i], kWantExts[k])) enabled[k] = true;
          for (size_t k = 0; k < kWantCount; ++k) {
@@ -1965,7 +1985,7 @@ index 4b37520..9bdea53 100644
              if (!ic->surfaceMaintenance1 &&
                  !std::strcmp(kWantExts[k], VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME))
                  continue;
-@@ -886,6 +993,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -886,6 +1006,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
  
      link->u.pLayerInfo = link->u.pLayerInfo->pNext;
      auto* const nextLayerInfo = link->u.pLayerInfo;
@@ -1988,7 +2008,7 @@ index 4b37520..9bdea53 100644
      VkResult res = create(physicalDevice, effective, pAllocator, pDevice);
      if (res != VK_SUCCESS && effective != pCreateInfo) {
          // Nothing added here is worth failing a device creation over.
-@@ -893,6 +1016,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -893,6 +1029,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              (int) res);
          link->u.pLayerInfo = nextLayerInfo;
          addedSwapMaint = false;
@@ -1996,7 +2016,7 @@ index 4b37520..9bdea53 100644
          res = create(physicalDevice, pCreateInfo, pAllocator, pDevice);
      }
      if (res != VK_SUCCESS) return res;
-@@ -910,19 +1034,32 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -910,19 +1047,32 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
      dc->table.Load(*pDevice);
      dc->releaseImages = addedSwapMaint && dc->vkReleaseSwapchainImagesEXT != nullptr;
      if (!dc->vkQueuePresentKHR || !dc->vkCreateSwapchainKHR || !ic) dc->inert = true;
@@ -2035,7 +2055,20 @@ index 4b37520..9bdea53 100644
          }
      }
  
-@@ -1089,11 +1226,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -950,11 +1100,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+     // was enabled and no helper was running.
+     //
+     // DLSSNR_IDLE_REPAINT=0 turns it off.
+-    static const bool repaintWanted = [] {
+-        const char* v = getenv("DLSSNR_IDLE_REPAINT");
+-        return !(v && v[0] == '0');
+-    }();
+-    if (repaintWanted && !dc->inert) {
++    if (IdleRepaintWanted() && !dc->inert) {
+         dc->repaintThread = std::thread([dc] {
+             while (dc->repaintRun.load(std::memory_order_relaxed)) {
+                 std::this_thread::sleep_for(std::chrono::milliseconds(60));
+@@ -1089,11 +1235,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
                  }
  
                  const bool drew =
@@ -2051,7 +2084,7 @@ index 4b37520..9bdea53 100644
                      pi.swapchainCount = 1;
                      pi.pSwapchains = &swapchain;
                      pi.pImageIndices = &index;
-@@ -1159,6 +1297,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
+@@ -1159,6 +1306,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
              sc.comp.reset();
              if (sc.fenceLeg1) dc->vkDestroyFence(device, sc.fenceLeg1, nullptr);
              if (sc.fenceLeg2) dc->vkDestroyFence(device, sc.fenceLeg2, nullptr);
@@ -2059,7 +2092,7 @@ index 4b37520..9bdea53 100644
              if (sc.repaintFence) dc->vkDestroyFence(device, sc.repaintFence, nullptr);
              if (sc.pool) dc->vkDestroyCommandPool(device, sc.pool, nullptr);
          }
-@@ -1250,8 +1389,27 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
+@@ -1250,8 +1398,27 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
      }
      if (!dc || !dc->vkCreateSwapchainKHR) return VK_ERROR_INITIALIZATION_FAILED;
  
@@ -2088,7 +2121,7 @@ index 4b37520..9bdea53 100644
          m.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
  
      VkResult res = dc->vkCreateSwapchainKHR(device, &m, pAllocator, pSwapchain);
-@@ -1269,14 +1427,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
+@@ -1269,14 +1436,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
      sc.width = pCreateInfo->imageExtent.width;
      sc.height = pCreateInfo->imageExtent.height;
      const bool tooSmall = sc.width < kMinW || sc.height < kMinH;
@@ -2108,7 +2141,7 @@ index 4b37520..9bdea53 100644
                            : tooSmall ? " (too small)" : " (too large)") : "");
      dc->swapchains[*pSwapchain] = std::move(sc);
      return VK_SUCCESS;
-@@ -1303,6 +1464,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
+@@ -1303,6 +1473,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
          sc.comp.reset();
          if (sc.fenceLeg1) dc->vkDestroyFence(device, sc.fenceLeg1, nullptr);
          if (sc.fenceLeg2) dc->vkDestroyFence(device, sc.fenceLeg2, nullptr);
@@ -2116,7 +2149,7 @@ index 4b37520..9bdea53 100644
          if (sc.repaintFence) dc->vkDestroyFence(device, sc.repaintFence, nullptr);
          if (sc.pool) dc->vkDestroyCommandPool(device, sc.pool, nullptr);
          dc->swapchains.erase(it);
-@@ -1335,6 +1497,23 @@ static bool SetLoaderData(DeviceChain* dc, void* object) {
+@@ -1335,6 +1506,23 @@ static bool SetLoaderData(DeviceChain* dc, void* object) {
  static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family) {
      VkDevice d = dc->self;
  
@@ -2140,7 +2173,7 @@ index 4b37520..9bdea53 100644
      VkCommandPoolCreateInfo cpci{};
      cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
      cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-@@ -1352,6 +1531,11 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
+@@ -1352,6 +1540,11 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
      fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
      if (dc->vkCreateFence(d, &fci, nullptr, &sc.fenceLeg1) != VK_SUCCESS) return false;
      if (dc->vkCreateFence(d, &fci, nullptr, &sc.fenceLeg2) != VK_SUCCESS) return false;
@@ -2152,7 +2185,7 @@ index 4b37520..9bdea53 100644
  
      if (!dc->instance) return false;
      sc.comp = std::make_unique<dlssnr::Composition>(&dc->table, &dc->instance->table, d, dc->physical);
-@@ -1383,30 +1567,44 @@ static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
+@@ -1383,30 +1576,44 @@ static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
      return false;
  }
  
@@ -2204,7 +2237,7 @@ index 4b37520..9bdea53 100644
  
      // The previous frame's compose, if it is still running, must finish before anything here
      // touches the surfaces it reads or the command buffer it was recorded into. Waiting here rather
-@@ -1437,19 +1635,26 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1437,19 +1644,26 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // frame on the 8-bit path it has always used. hdrActive doubles as the echo the helper reads, so
      // it builds the float images only for a layer that has said it will feed them.
      const uint32_t hdrMode = dc->shm.hdr ? dc->shm.hdr->hdrMode.load() : kHdrAuto;
@@ -2239,7 +2272,7 @@ index 4b37520..9bdea53 100644
          uint32_t mw = 0, mh = 0;
          dlssnr::Composition::ModelExtent(sc.width, sc.height, fs, mw, mh);
          if (ShmMapFrames(dc->shm, size_t(mw) * mh * (hdrProxy ? 8 : 4)))
-@@ -1470,7 +1675,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1470,7 +1684,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // through, and the helper honours them on exactly the frame they were set for.
      sc.comp->SetDmaBuf(DmaBufEnabled());
  
@@ -2248,7 +2281,7 @@ index 4b37520..9bdea53 100644
          Log("[layer] composition cannot run here: %s", sc.comp->Reason());
          return false;
      }
-@@ -1534,8 +1739,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1534,8 +1748,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // A capture is asked for by writing a frame count into the header; taking it clears the request,
      // so one press produces one run rather than one per frame for as long as nobody clears it.
      if (dc->shm.hdr) {
@@ -2264,7 +2297,7 @@ index 4b37520..9bdea53 100644
      }
  
      VkCommandBufferBeginInfo bi{};
-@@ -1559,7 +1769,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1559,7 +1778,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          si.pWaitDstStageMask = nullptr;
      };
  
@@ -2278,7 +2311,7 @@ index 4b37520..9bdea53 100644
          if (!NoteVk(dc, dc->vkEndCommandBuffer(cb), "vkEndCommandBuffer")) return false;
          if (!NoteVk(dc, dc->vkQueueSubmit(queue, 1, &si, fence), "vkQueueSubmit")) return false;
          if (waitsConsumed && si.waitSemaphoreCount != 0) *waitsConsumed = true;
-@@ -1574,7 +1790,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1574,7 +1799,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
  
      // ---- leg 1: the frame the model is shown ----
      if (!NoteVk(dc, dc->vkBeginCommandBuffer(cb, &bi), "vkBeginCommandBuffer")) return false;
@@ -2287,7 +2320,7 @@ index 4b37520..9bdea53 100644
          dc->vkEndCommandBuffer(cb);
          return false;
      }
-@@ -1595,20 +1811,33 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1595,20 +1820,33 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          return false;
      }
      sc.comp->MarkModelFrame();
@@ -2326,7 +2359,7 @@ index 4b37520..9bdea53 100644
  
      if (dc->shm.hdr) {
          ShmStore64(dc->shm.hdr->layerFramesLo, dc->shm.hdr->layerFramesHi, ++dc->framesComposed);
-@@ -1650,11 +1879,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1650,11 +1888,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
      dc->lastPresentMs.store(NowMs(), std::memory_order_relaxed);
  
      // Whether this call's wait semaphores have already been consumed by a submit of ours. They are
@@ -2341,7 +2374,7 @@ index 4b37520..9bdea53 100644
  
      // Held from here to the present at the end, alongside Hook_QueueSubmit{,2}. Vulkan requires
      // external synchronization for every operation on a queue; the repaint uses the application's
-@@ -1679,6 +1910,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1679,6 +1919,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
                  if (k < 3) Log("[layer] present: swapchain %p is not primary", (void*)pPresentInfo->pSwapchains[i]);
                  continue;
              }
@@ -2351,7 +2384,7 @@ index 4b37520..9bdea53 100644
              sc.queue = queue;
              if (!sc.ready && !dc->shm.dead) {
                  if (!CreateResources(dc, sc, family)) {
-@@ -1700,11 +1934,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1700,11 +1943,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
              }
              const uint32_t waitCount = waitsConsumed ? 0u : pPresentInfo->waitSemaphoreCount;
              bool submittedWaits = false;
@@ -2366,7 +2399,7 @@ index 4b37520..9bdea53 100644
              if (VerboseEnabled()) {
                  Log("[present] swapchain=%p image=%u seq=%u composed=%d",
                      (void*)pPresentInfo->pSwapchains[i], pPresentInfo->pImageIndices[i],
-@@ -1723,13 +1958,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1723,13 +1967,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
          }
      }
  
@@ -2383,7 +2416,35 @@ index 4b37520..9bdea53 100644
      return dc->vkQueuePresentKHR(queue, &pi);
  }
  
-@@ -1851,7 +2086,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
+@@ -1793,11 +2037,12 @@ static PFN_vkVoidFunction LookupHook(const char* n) {
+     if (!std::strcmp(n, "vkGetDeviceQueue2")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue2;
+     if (!std::strcmp(n, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)Hook_CreateSwapchainKHR;
+     if (!std::strcmp(n, "vkDestroySwapchainKHR")) return (PFN_vkVoidFunction)Hook_DestroySwapchainKHR;
++    if (!std::strcmp(n, "vkQueuePresentKHR")) return (PFN_vkVoidFunction)Hook_QueuePresentKHR;
++    if (!QueueHooksNeeded()) return nullptr;
+     if (!std::strcmp(n, "vkAcquireNextImageKHR")) return (PFN_vkVoidFunction)Hook_AcquireNextImageKHR;
+     if (!std::strcmp(n, "vkQueueSubmit")) return (PFN_vkVoidFunction)Hook_QueueSubmit;
+     if (!std::strcmp(n, "vkQueueSubmit2")) return (PFN_vkVoidFunction)Hook_QueueSubmit2;
+     if (!std::strcmp(n, "vkQueueWaitIdle")) return (PFN_vkVoidFunction)Hook_QueueWaitIdle;
+-    if (!std::strcmp(n, "vkQueuePresentKHR")) return (PFN_vkVoidFunction)Hook_QueuePresentKHR;
+     return nullptr;
+ }
+ 
+@@ -1807,11 +2052,12 @@ static PFN_vkVoidFunction LookupDeviceHook(const char* n) {
+     if (!std::strcmp(n, "vkGetDeviceQueue2")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue2;
+     if (!std::strcmp(n, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)Hook_CreateSwapchainKHR;
+     if (!std::strcmp(n, "vkDestroySwapchainKHR")) return (PFN_vkVoidFunction)Hook_DestroySwapchainKHR;
++    if (!std::strcmp(n, "vkQueuePresentKHR")) return (PFN_vkVoidFunction)Hook_QueuePresentKHR;
++    if (!QueueHooksNeeded()) return nullptr;
+     if (!std::strcmp(n, "vkAcquireNextImageKHR")) return (PFN_vkVoidFunction)Hook_AcquireNextImageKHR;
+     if (!std::strcmp(n, "vkQueueSubmit")) return (PFN_vkVoidFunction)Hook_QueueSubmit;
+     if (!std::strcmp(n, "vkQueueSubmit2")) return (PFN_vkVoidFunction)Hook_QueueSubmit2;
+     if (!std::strcmp(n, "vkQueueWaitIdle")) return (PFN_vkVoidFunction)Hook_QueueWaitIdle;
+-    if (!std::strcmp(n, "vkQueuePresentKHR")) return (PFN_vkVoidFunction)Hook_QueuePresentKHR;
+     return nullptr;
+ }
+ 
+@@ -1851,7 +2097,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
      if (*pCount < 1) { *pCount = 1; return VK_INCOMPLETE; }
      std::memset(pProperties, 0, sizeof(*pProperties));
      std::strncpy(pProperties->layerName, VK_LAYER_NAME, VK_MAX_EXTENSION_NAME_SIZE - 1);
