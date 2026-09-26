@@ -509,7 +509,7 @@ while :; do
 			mv "$tmp/input.next" "$tmp/input.json"
 	fi
 	jq -n \
-		--arg model "${OPENAI_MODEL:-gpt-5.6-sol}" \
+		--arg model "${OPENAI_MODEL:-gpt-6-astra}" \
 		--arg effort "${OPENAI_REASONING_EFFORT:-xhigh}" \
 		--argjson max_out "$max_output_tokens" \
 		--arg choice "$choice" \

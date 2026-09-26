@@ -56,7 +56,7 @@ proposed action. Then STOP and wait for explicit approval.
   `coderabbitai` for CodeRabbit, `chatgpt-codex-connector` for
   Codex, `copilot-pull-request-reviewer` for Copilot, and for GPT
   the model name verbatim from its review header (the fetch row's
-  `model` field, e.g. `gpt-5.6-sol` — never hardcoded, it follows
+  `model` field, e.g. `gpt-6-astra` — never hardcoded, it follows
   the workflow's model setting). Push ONCE after all fixes. Then
   per thread:
   reply with what changed + the commit SHA, then resolve.

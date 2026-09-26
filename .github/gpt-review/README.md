@@ -73,7 +73,7 @@ The API is billed separately from a ChatGPT Plus subscription.
 Optional repository Actions variables:
 
 ```text
-OPENAI_REVIEW_MODEL=gpt-5.6-sol
+OPENAI_REVIEW_MODEL=gpt-6-astra
 OPENAI_REVIEW_REASONING=xhigh
 ```
 
