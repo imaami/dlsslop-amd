@@ -35,17 +35,32 @@ DLSSLOP_TEMPORAL_INLINE float sample(const float* image, Extent e, float x, floa
     const float c = image[hy * e.width + ix], d = image[hy * e.width + hx];
     return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy;
 }
-DLSSLOP_TEMPORAL_INLINE float patch_cost(const float* current, const float* previous,
-                                      Extent e, float x, float y, float dx, float dy, unsigned patch)
+// A square patch of the current frame around (x, y), row by row. Its size is
+// static and both patch loops unroll fully (25 is the largest patch), so the
+// samples stay in registers across all candidates and each candidate's loads
+// issue together.
+template<int patch> using Patch = float[(2 * patch + 1) * (2 * patch + 1)];
+template<int patch>
+DLSSLOP_TEMPORAL_INLINE void sample_patch(Patch<patch>& reference, const float* current, Extent e, float x, float y)
+{
+    constexpr int side = 2 * patch + 1;
+#pragma GCC unroll 25
+    for (int i = 0; i < side * side; ++i)
+        reference[i] = sample(current, e, x + float(i % side - patch), y + float(i / side - patch));
+}
+// Mean absolute difference between the patch and the previous frame displaced by (dx, dy).
+template<int patch>
+DLSSLOP_TEMPORAL_INLINE float patch_cost(const Patch<patch>& reference, const float* previous,
+                                      Extent e, float x, float y, float dx, float dy)
 {
     if (x + dx < 0 || y + dy < 0 || x + dx > float(e.width - 1) || y + dy > float(e.height - 1))
         return 10;
+    constexpr int side = 2 * patch + 1;
     float cost = 0;
-    for (int py = -int(patch); py <= int(patch); ++py)
-        for (int px = -int(patch); px <= int(patch); ++px)
-            cost += absolute(sample(current, e, x + float(px), y + float(py)) -
-                             sample(previous, e, x + float(px) + dx, y + float(py) + dy));
-    const unsigned side = patch * 2 + 1;
+#pragma GCC unroll 25
+    for (int i = 0; i < side * side; ++i)
+        cost += absolute(reference[i] - sample(previous, e, x + float(i % side - patch) + dx,
+                                               y + float(i / side - patch) + dy));
     return cost / float(side * side);
 }
 DLSSLOP_TEMPORAL_INLINE Flow sample_flow(const Flow* image, Extent e, float x, float y)
@@ -60,8 +75,9 @@ DLSSLOP_TEMPORAL_INLINE Flow sample_flow(const Flow* image, Extent e, float x, f
             (a.y + (b.y - a.y) * fx) * (1 - fy) + (c.y + (d.y - c.y) * fx) * fy,
             (a.error + (b.error - a.error) * fx) * (1 - fy) + (c.error + (d.error - c.error) * fx) * fy};
 }
-DLSSLOP_TEMPORAL_INLINE Flow estimate(const float* current, const float* previous,
-                                   const Flow* coarse, Search s, unsigned index)
+template<int patch>
+DLSSLOP_TEMPORAL_INLINE Flow estimate_patch(const float* current, const float* previous,
+                                         const Flow* coarse, Search s, unsigned index)
 {
     const float x = clamp((float(index % s.grid.width) + .5f) * float(s.step) - .5f,
                           0, float(s.image.width - 1));
@@ -73,36 +89,60 @@ DLSSLOP_TEMPORAL_INLINE Flow estimate(const float* current, const float* previou
                             (y + .5f) / float(s.step * 2) - .5f);
         start.x = float(round_int(start.x * 2)); start.y = float(round_int(start.y * 2));
     }
-    // Always retain zero displacement as a candidate, including at object edges.
-    Flow best{0, 0, patch_cost(current, previous, s.image, x, y, 0, 0, s.patch)};
-    float best_score = best.error;
-    for (int dy = -int(s.radius); dy <= int(s.radius); ++dy) {
-        for (int dx = -int(s.radius); dx <= int(s.radius); ++dx) {
-            const float vx = start.x + float(dx), vy = start.y + float(dy);
-            const float cost = patch_cost(current, previous, s.image, x, y, vx, vy, s.patch);
+    // The current patch does not depend on the candidate: sample it once.
+    Patch<patch> reference;
+    sample_patch<patch>(reference, current, s.image, x, y);
+    // Every candidate goes through one cost site, so the unrolled patch is
+    // emitted once. k = 0 is zero displacement, always retained, including at
+    // object edges; then the search window row by row; then, on the finest
+    // level, the left, right, top and bottom neighbours of the best match and
+    // the parabolic refinement between them.
+    constexpr float step_x[4] = {-1, 1, 0, 0}, step_y[4] = {0, 0, -1, 1};
+    const int radius = int(s.radius), searched = (2 * radius + 1) * (2 * radius + 1);
+    Flow best{};
+    float best_score = 0, around[4]{}, vx = 0, vy = 0;
+    for (int k = 0, dx = -radius, dy = -radius;; ++k) {
+        const float cost = patch_cost<patch>(reference, previous, s.image, x, y, vx, vy);
+        if (k == 0) {
+            best = {0, 0, cost};
+            best_score = cost;
+        } else if (k <= searched) {
             // Stable tie-breaking in textureless areas; do not manufacture motion.
             const float score = cost + .00001f * (absolute(vx) + absolute(vy));
             if (score < best_score) { best = {vx, vy, cost}; best_score = score; }
+        } else if (k <= searched + 4) {
+            around[k - searched - 1] = cost;
+        } else {
+            if (cost < best.error) best = {vx, vy, cost};
+            break;
         }
-    }
-    // Parabolic refinement is restricted to the finest level and accepted only
-    // if its measured cost improves. This avoids subpixel drift on static input.
-    if (s.final_level && s.radius > 1 && best.error > .000001f) {
-        const float left = patch_cost(current, previous, s.image, x, y, best.x - 1, best.y, s.patch);
-        const float right = patch_cost(current, previous, s.image, x, y, best.x + 1, best.y, s.patch);
-        const float top = patch_cost(current, previous, s.image, x, y, best.x, best.y - 1, s.patch);
-        const float bottom = patch_cost(current, previous, s.image, x, y, best.x, best.y + 1, s.patch);
-        const float hx = left - 2 * best.error + right, hy = top - 2 * best.error + bottom;
-        const float dx = hx > .000001f ? clamp(.5f * (left - right) / hx, -.5f, .5f) : 0;
-        const float dy = hy > .000001f ? clamp(.5f * (top - bottom) / hy, -.5f, .5f) : 0;
-        const float cost = patch_cost(current, previous, s.image, x, y, best.x + dx, best.y + dy, s.patch);
-        if (cost < best.error) best = {best.x + dx, best.y + dy, cost};
+        if (k < searched) {
+            vx = start.x + float(dx); vy = start.y + float(dy);
+            if (++dx > radius) { dx = -radius; ++dy; }
+        } else if (k == searched && !(s.final_level && s.radius > 1 && best.error > .000001f)) {
+            // Parabolic refinement is restricted to the finest level and accepted only
+            // if its measured cost improves. This avoids subpixel drift on static input.
+            break;
+        } else if (k < searched + 4) {
+            vx = best.x + step_x[k - searched]; vy = best.y + step_y[k - searched];
+        } else {
+            const float hx = around[0] - 2 * best.error + around[1], hy = around[2] - 2 * best.error + around[3];
+            vx = best.x + (hx > .000001f ? clamp(.5f * (around[0] - around[1]) / hx, -.5f, .5f) : 0);
+            vy = best.y + (hy > .000001f ? clamp(.5f * (around[2] - around[3]) / hy, -.5f, .5f) : 0);
+        }
     }
     if (s.final_level && s.units != 1) {
         const float numerator = s.units == 0 ? 2.0f : 1.0f;
         best.x *= numerator / float(s.image.width); best.y *= numerator / float(s.image.height);
     }
     return best;
+}
+// The patch radius is 1 or 2 (quality 2); each is a static instance.
+DLSSLOP_TEMPORAL_INLINE Flow estimate(const float* current, const float* previous,
+                                   const Flow* coarse, Search s, unsigned index)
+{
+    return s.patch == 2 ? estimate_patch<2>(current, previous, coarse, s, index) :
+                          estimate_patch<1>(current, previous, coarse, s, index);
 }
 // current_luma is the finest pyramid level, the luma of the frame's original input, which feedback
 // in later passes does not change; fallback is the current pass's input. A scene cut rejects every

@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <random>
 #include <stdexcept>
 #include <vector>
 
@@ -55,6 +57,101 @@ float random(unsigned x, unsigned y)
     unsigned v = x * 0x45d9f3b + y * 0x119de1f3;
     v ^= v >> 16; v *= 0x45d9f3b; v ^= v >> 16;
     return float(v & 65535) / 65535;
+}
+// The flow search as it was before it sampled the current patch once per grid point:
+// every candidate resamples both frames. The shipped search must match it bit for bit.
+float reference_cost(const float* current, const float* previous, dlsslop_temporal::Extent e,
+                     float x, float y, float dx, float dy, unsigned patch)
+{
+    if (x + dx < 0 || y + dy < 0 || x + dx > float(e.width - 1) || y + dy > float(e.height - 1))
+        return 10;
+    float cost = 0;
+    for (int py = -int(patch); py <= int(patch); ++py)
+        for (int px = -int(patch); px <= int(patch); ++px)
+            cost += dlsslop_temporal::absolute(dlsslop_temporal::sample(current, e, x + float(px), y + float(py)) -
+                                               dlsslop_temporal::sample(previous, e, x + float(px) + dx, y + float(py) + dy));
+    const unsigned side = patch * 2 + 1;
+    return cost / float(side * side);
+}
+dlsslop_temporal::Flow reference_estimate(const float* current, const float* previous,
+                                          const dlsslop_temporal::Flow* coarse, dlsslop_temporal::Search s, unsigned index)
+{
+    using dlsslop_temporal::absolute;
+    using dlsslop_temporal::clamp;
+    const float x = clamp((float(index % s.grid.width) + .5f) * float(s.step) - .5f, 0, float(s.image.width - 1));
+    const float y = clamp((float(index / s.grid.width) + .5f) * float(s.step) - .5f, 0, float(s.image.height - 1));
+    dlsslop_temporal::Flow start{};
+    if (s.has_coarse) {
+        start = dlsslop_temporal::sample_flow(coarse, s.coarse_grid, (x + .5f) / float(s.step * 2) - .5f,
+                                              (y + .5f) / float(s.step * 2) - .5f);
+        start.x = float(dlsslop_temporal::round_int(start.x * 2));
+        start.y = float(dlsslop_temporal::round_int(start.y * 2));
+    }
+    dlsslop_temporal::Flow best{0, 0, reference_cost(current, previous, s.image, x, y, 0, 0, s.patch)};
+    float best_score = best.error;
+    for (int dy = -int(s.radius); dy <= int(s.radius); ++dy) {
+        for (int dx = -int(s.radius); dx <= int(s.radius); ++dx) {
+            const float vx = start.x + float(dx), vy = start.y + float(dy);
+            const float cost = reference_cost(current, previous, s.image, x, y, vx, vy, s.patch);
+            const float score = cost + .00001f * (absolute(vx) + absolute(vy));
+            if (score < best_score) { best = {vx, vy, cost}; best_score = score; }
+        }
+    }
+    if (s.final_level && s.radius > 1 && best.error > .000001f) {
+        const float left = reference_cost(current, previous, s.image, x, y, best.x - 1, best.y, s.patch);
+        const float right = reference_cost(current, previous, s.image, x, y, best.x + 1, best.y, s.patch);
+        const float top = reference_cost(current, previous, s.image, x, y, best.x, best.y - 1, s.patch);
+        const float bottom = reference_cost(current, previous, s.image, x, y, best.x, best.y + 1, s.patch);
+        const float hx = left - 2 * best.error + right, hy = top - 2 * best.error + bottom;
+        const float dx = hx > .000001f ? clamp(.5f * (left - right) / hx, -.5f, .5f) : 0;
+        const float dy = hy > .000001f ? clamp(.5f * (top - bottom) / hy, -.5f, .5f) : 0;
+        const float cost = reference_cost(current, previous, s.image, x, y, best.x + dx, best.y + dy, s.patch);
+        if (cost < best.error) best = {best.x + dx, best.y + dy, cost};
+    }
+    if (s.final_level && s.units != 1) {
+        const float numerator = s.units == 0 ? 2.0f : 1.0f;
+        best.x *= numerator / float(s.image.width); best.y *= numerator / float(s.image.height);
+    }
+    return best;
+}
+// Random pictures, some translated, some static, at every quality, grid, unit, coarse start and
+// level: the search must return exactly what resampling every candidate returns.
+void search_equivalence()
+{
+    std::mt19937 rng(7);
+    unsigned long long vectors = 0;
+    for (int trial = 0; trial < 20; ++trial) {
+        const unsigned w = 4 + rng() % 36, h = 4 + rng() % 24;
+        std::vector<float> current(w * h), previous(w * h);
+        const int sx = int(rng() % 7) - 3, sy = int(rng() % 7) - 3;
+        for (float& v : previous) v = float(rng() % 1000) / 999;
+        for (unsigned y = 0; y < h; ++y)
+            for (unsigned x = 0; x < w; ++x)
+                current[y * w + x] = rng() % 5 ? previous[std::min(h - 1, unsigned(std::max(0, int(y) + sy))) * w +
+                                                          std::min(w - 1, unsigned(std::max(0, int(x) + sx)))]
+                                               : float(rng() % 1000) / 999;
+        if (trial % 10 == 0) current = previous;
+        for (unsigned quality = 0; quality < 3; ++quality)
+            for (unsigned grid = 0; grid < 4; ++grid)
+                for (unsigned units = 0; units < 3; ++units)
+                    for (unsigned has_coarse = 0; has_coarse < 2; ++has_coarse)
+                        for (unsigned final_level = 0; final_level < 2; ++final_level) {
+                            const unsigned step = 1u << grid;
+                            const dlsslop_temporal::Extent e{w, h}, g{(w + step - 1) / step, (h + step - 1) / step};
+                            const dlsslop_temporal::Extent cg{(g.width + 1) / 2, (g.height + 1) / 2};
+                            std::vector<dlsslop_temporal::Flow> coarse(cg.width * cg.height);
+                            for (auto& f : coarse)
+                                f = {float(int(rng() % 9) - 4) * .5f, float(int(rng() % 9) - 4) * .5f, 0};
+                            const dlsslop_temporal::Search s{e, g, cg, step, quality + 1, quality == 2 ? 2u : 1u,
+                                                             units, has_coarse, final_level};
+                            for (unsigned i = 0; i < g.width * g.height; ++i, ++vectors) {
+                                const auto a = reference_estimate(current.data(), previous.data(), coarse.data(), s, i);
+                                const auto b = dlsslop_temporal::estimate(current.data(), previous.data(), coarse.data(), s, i);
+                                require(!std::memcmp(&a, &b, sizeof a), "flow search differs from resampling every candidate");
+                            }
+                        }
+    }
+    std::printf("flow search: %llu vectors bit-identical to resampling every candidate\n", vectors);
 }
 // A pillarboxed and letterboxed picture on a 16x8 raster. The bars' history is a sentinel that no
 // fitted pixel may blend in, even when sub-pixel motion points into a bar. The bars' previous luma
@@ -172,6 +269,7 @@ void run()
         require(output[p * 4 + 3] == 1, "scene cut fallback is not opaque");
     }
     letterbox();
+    search_equivalence();
     std::puts("temporal tests passed");
 }
 }

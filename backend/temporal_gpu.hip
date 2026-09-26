@@ -51,7 +51,9 @@ DEV bool cut_sample(const float* current, const float* previous,
         f.x *= float(w.image.width) / denominator;
         f.y *= float(w.image.height) / denominator;
     }
-    return !(dlsslop_temporal::patch_cost(current, previous, w.image, x, y, f.x, f.y, 1) < .1f);
+    dlsslop_temporal::Patch<1> reference;
+    dlsslop_temporal::sample_patch<1>(reference, current, w.image, x, y);
+    return !(dlsslop_temporal::patch_cost<1>(reference, previous, w.image, x, y, f.x, f.y) < .1f);
 }
 // A scene cut, where at least 48 of the 64 samples fail, makes the warp reject
 // every pixel; the decision stays on the stream. Local disocclusions are still
