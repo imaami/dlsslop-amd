@@ -150,6 +150,8 @@ int main() {
         const auto third = read(root / "manifest.txt");
         require(field(third, "encoding") == "raw", "FP16 capture was not raw");
         require(field(third, "bytes_per_pixel") == "8", "FP16 capture byte count incorrect");
+        // Eight bytes take the hash's word step; the BGRA pixel above takes its byte tail.
+        require(field(third, "before_hash") == "736955abadf41fdf", "wrong FP16 input hash");
         const auto raw = read(root / field(third, "batch_dir") / "before_00.raw");
         require(raw == std::string(reinterpret_cast<const char*>(fp16), sizeof fp16), "FP16 bytes changed");
 

@@ -672,7 +672,7 @@ diff --git a/upstream-layer/dlssnr-helper b/upstream-layer/dlssnr-helper
 old mode 100644
 new mode 100755
 diff --git a/upstream-layer/layer_linux/src/capture.cpp b/upstream-layer/layer_linux/src/capture.cpp
-index 75b2a3f..9a27287 100644
+index 75b2a3f..d0d0abc 100644
 --- a/upstream-layer/layer_linux/src/capture.cpp
 +++ b/upstream-layer/layer_linux/src/capture.cpp
 @@ -12,9 +12,9 @@
@@ -708,7 +708,7 @@ index 75b2a3f..9a27287 100644
  // True when the format is four 8-bit channels, which is the only shape PNG can hold here.
  bool IsEightBitRgba(uint32_t f) {
      switch (f) {
-@@ -62,24 +47,63 @@ size_t BytesPerPixel(uint32_t f) {
+@@ -62,24 +47,69 @@ size_t BytesPerPixel(uint32_t f) {
      return f == VK_FORMAT_R16G16B16A16_SFLOAT ? 8u : 4u;
  }
  
@@ -738,15 +738,21 @@ index 75b2a3f..9a27287 100644
 +        const bool wrote = fwrite(pixels, 1, bytes, f) == bytes;
 +        const bool closed = fclose(f) == 0;
 +        if (wrote && closed) return true;
-     }
++    }
 +    Log("[capture] could not write %s", path.c_str());
 +    return false;
 +}
 +
++// FNV-1a over 8-byte words, then the tail bytes: only equality matters.
 +uint64_t HashBytes(const void* pixels, size_t bytes) {
 +    const auto* p = static_cast<const uint8_t*>(pixels);
 +    uint64_t hash = UINT64_C(14695981039346656037);
-+    for (size_t i = 0; i < bytes; ++i) hash = (hash ^ p[i]) * UINT64_C(1099511628211);
++    size_t i = 0;
++    for (uint64_t word; i + 8 <= bytes; i += 8) {
++        std::memcpy(&word, p + i, 8);
++        hash = (hash ^ word) * UINT64_C(1099511628211);
+     }
++    for (; i < bytes; ++i) hash = (hash ^ p[i]) * UINT64_C(1099511628211);
 +    return hash;
 +}
 +
@@ -779,7 +785,7 @@ index 75b2a3f..9a27287 100644
  }
  
  }  // namespace
-@@ -92,65 +116,102 @@ std::string CaptureWriter::Directory() {
+@@ -92,65 +122,102 @@ std::string CaptureWriter::Directory() {
      return "/tmp/dlssnr-captures";
  }
  
