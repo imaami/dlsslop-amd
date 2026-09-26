@@ -35,8 +35,9 @@ integration patches and local source, not complete upstream copies.
 `prepare-sources.py` verifies selected originals against their recorded hashes,
 projects them into `upstream-layer/`, `kernels/` and `backend/vendor/`, and
 applies `patches/linux-integration.patch`. The patch adapts Linux loading and
-transport, extends controls and composition, and adds explicit shared-memory
-fences in affected HIP kernels. It leaves the upstream working trees unchanged.
+transport and extends controls and composition. It leaves the upstream working
+trees and HIP kernels unchanged; `scripts/build-kernels.py` wraps the bare
+workgroup barriers of three kernel sources in LDS-only release/acquire fences.
 In `backend/vendor/`, the patch makes `hip_api.h` load the Linux HIP runtime
 (`libamdhip64.so.7`, `.so.6` or the unversioned soname, also from
 `/opt/rocm/lib` or an explicit `DLSSLOP_HIP_LIBRARY` path) with

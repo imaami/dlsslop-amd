@@ -40,6 +40,22 @@ MODULES = [
 ]
 
 
+# Upstream separates LDS phases in these sources with bare execution barriers,
+# which gfx12 signals with DS operations still outstanding. Add the LDS-only
+# release/acquire of __syncthreads() so global loads need not drain; the
+# lds-barriers test checks the result.
+# https://llvm.org/docs/AMDGPUUsage.html#execution-barriers
+LDS_BARRIER = ('#define __builtin_amdgcn_s_barrier() (__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local"), '
+               '__builtin_amdgcn_s_barrier(), __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local"))\n')
+PRELUDES = {
+    # Upstream's byte-output attention template calls byte_F before its later
+    # definition; standard C++ lookup needs a declaration.
+    "deep_fast.hip": LDS_BARRIER + "__attribute__((device)) __attribute__((always_inline)) unsigned char byte_F(float);\n",
+    "multihead_fast_padded.hip": LDS_BARRIER,
+    "prefix_fast.hip": LDS_BARRIER,
+}
+
+
 # Auto-detection order. Before Clang 22, every gfx12 workgroup barrier also
 # drains global loads and stores.
 MIN_CLANG = 22
@@ -98,10 +114,7 @@ def build(args):
         # The Windows COMGR frontend supplies size_t implicitly. Linux's
         # headerless HIP frontend needs its builtin type spelling explicitly.
         source = "typedef __SIZE_TYPE__ size_t;\n" + "".join(f"#define {d}\n" for d in defines)
-        if "deep_fast.hip" in sources:
-            # Upstream's byte-output attention template calls this helper
-            # before its later definition; standard C++ lookup needs a decl.
-            source += "__attribute__((device)) __attribute__((always_inline)) unsigned char byte_F(float);\n"
+        source += "".join(PRELUDES.get(filename, "") for filename in sources)
         source_hashes = {}
         for filename in sources:
             path = (args.codec_source if name == "linux_codec" else
@@ -110,11 +123,6 @@ def build(args):
             content = path.read_bytes()
             source_hashes[filename] = hashlib.sha256(content).hexdigest()
             source += content.decode("utf-8") + "\n"
-            if b'#include "lds_barrier.h"' in content:
-                # These shared-memory kernels depend on an explicit LDS fence
-                # helper. Record its source as part of the module provenance.
-                header = args.source / "lds_barrier.h"
-                source_hashes[header.name] = hashlib.sha256(header.read_bytes()).hexdigest()
             # Colour's header includes tuning's: scan each recorded header too.
             for header_name in ("color_preserve_math.h", "temporal_math.h", "tuning_math.h"):
                 if ('#include "' + header_name + '"').encode() in content:
@@ -132,7 +140,6 @@ def build(args):
                    f"--offload-arch={args.arch}", f"-mcode-object-version={args.code_object_version}",
                    "-nogpuinc", "-nogpulib", "-fuse-cuid=none", "-O3", "-std=c++17",
                    "-Xclang", "-target-feature", "-Xclang", "-real-true16",
-                   "-I", str(args.source.resolve()),
                    "-I", str(args.codec_source.parent.resolve()),
                    "-c", str(generated), "-o", str(output)]
         if args.linker:

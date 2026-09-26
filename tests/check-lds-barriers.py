@@ -67,8 +67,7 @@ def probe(objdump, compiler, base):
                         "--offload-arch=gfx1201", "-mcode-object-version=5", "-nogpuinc", "-nogpulib",
                         "-fuse-cuid=none", "-O3", "-std=c++17",
                         "-Xclang", "-target-feature", "-Xclang", "-real-true16",
-                        "-I", str(base / "kernels"), "-c",
-                        str(base / "tests/lds_barrier_probe.hip"), "-o", str(output)], check=True)
+                        "-c", str(base / "tests/lds_barrier_probe.hip"), "-o", str(output)], check=True)
         bodies = disassemble(objdump, output)
     errors = []
     for symbol, unsafe in (("unsafe_lds", True), ("fenced_lds", False)):
