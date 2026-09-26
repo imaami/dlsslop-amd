@@ -68,6 +68,7 @@ is the AGPL-3.0 text. Preserve the applicable notices when redistributing source
 or build outputs.
 
 The model coefficients are a separate dependency and are never included in
-source or CI artifacts. `assets/weights-manifest.json` contains expected names
-and sizes only. `scripts/fetch-assets.py` imports user-provided coefficients and
-records their hashes; the source-code licenses do not license those weights.
+source or CI artifacts. `scripts/fetch-assets.py` (installed as `dlsslop-setup`)
+imports user-provided coefficients and records their hashes; its
+`--print-manifest` option prints the expected names and element counts. The
+source-code licenses do not license those weights.
