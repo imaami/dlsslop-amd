@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "channel.h"
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
@@ -35,6 +36,23 @@ int main()
         header = static_cast<ShmHeader*>(memory);
         rejects([&] { dlsslop_gui::Channel channel(path, true); });
         ShmInitNativeDefaults(header);
+        // Fixed settings admit only their reset default, only the native tuning
+        // values are marked as such, and each label list names its range once.
+        for (const auto& s : dlsslop_control::kSettings) {
+            const std::string name = s.name;
+            const double initial = dlsslop_control::value(s, (header->*s.field).load());
+            require(dlsslop_control::inRange(s, initial), "a default is outside its range");
+            require(dlsslop_control::fixed(s) == (name == "preset" || name == "style" || name == "auto-mask" ||
+                                                   name == "skin-structure"), "wrong fixed settings");
+            require(!dlsslop_control::fixed(s) || (s.minimum == initial && s.maximum == initial),
+                    "a fixed setting admits another value");
+            require(dlsslop_control::fixed(s) == (s.minimum == s.maximum), "a one-value range is not fixed");
+            require(s.tuning == (name == "intensity" || name == "local-tone" || name == "local-structure" ||
+                                 name == "sharpness"), "wrong native tuning settings");
+            if (!s.choices) continue;
+            const auto labels = 1 + std::count(s.choices, s.choices + std::strlen(s.choices), '|');
+            require(!s.isFloat && labels == s.maximum - s.minimum + 1, "choice labels do not match the range");
+        }
         std::size_t intensity = 0, color = 0, preset = 0, colorPreserve = 0;
         for (std::size_t i = 0; i < std::size(dlsslop_control::kSettings); ++i) {
             const std::string name = dlsslop_control::kSettings[i].name;
@@ -72,7 +90,6 @@ int main()
                 const double above = std::nextafter(static_cast<double>(static_cast<float>(s.maximum)), HUGE_VAL);
                 require(!dlsslop_control::inRange(s, below) && !dlsslop_control::inRange(s, above) &&
                         !dlsslop_control::inRange(s, std::nan("")), "range admits an outside value");
-                if (dlsslop_control::fixed(s)) continue;
                 for (const double bound : {s.minimum, s.maximum}) {
                     channel.write({{i, bound}});
                     require(dlsslop_control::inRange(s, dlsslop_control::value(s, (header->*s.field).load())),

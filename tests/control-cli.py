@@ -134,10 +134,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     def printed(output):
         return dict(re.findall(r'^([a-z0-9-]+)=([^ ]+) default=', output, re.MULTILINE))
 
-    fixed = ('preset', 'style', 'auto-mask', 'skin-structure')
     for name in values:
-        if name in fixed:
-            continue
         bounds = re.search(r'--' + re.escape(name) + r'\s+VALUE[^\n]*\n\s*Range: (\S+?)\.\.([^;]+);', helptext)
         assert bounds, name
         for bound in bounds.groups():
@@ -226,11 +223,9 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     assert status.endswith(f'\ncapture_control_seq={sequence + 1}\n'), status
     assert 'capture_control_seq=' not in run('-S') + run('--capture=64', '-l') + run('-c', '0')
 
-    # Every other setting takes its short option too: set the bound that is not
-    # the default and read it back by name.
+    # Every setting takes its short option too: set a bound that is not the
+    # default (a fixed setting has only its default) and read it back by name.
     for name, (_, default) in values.items():
-        if name in fixed:
-            continue
         option = re.search(r'-(\w), --' + re.escape(name) + r'\s+VALUE[^\n]*\n\s*Range: (\S+?)\.\.([^;]+);', helptext)
         assert option, name
         bound = option[3] if float(option[3]) != default else option[2]

@@ -54,16 +54,12 @@ public:
     // are written, preserving unrelated edits made by the CLI or another GUI.
     void write(const std::map<std::size_t, double>& changes)
     {
-        ShmHeader defaults{};
-        ShmInitNativeDefaults(&defaults);
         for (const auto& [index, number] : changes) {
             if (index >= std::size(dlsslop_control::kSettings))
                 throw std::invalid_argument("Unknown setting");
             const auto& s = dlsslop_control::kSettings[index];
             if (!dlsslop_control::inRange(s, number) || (!s.isFloat && std::trunc(number) != number))
                 throw std::invalid_argument("Setting outside supported range");
-            if (dlsslop_control::fixed(s) && number != dlsslop_control::value(s, (defaults.*s.field).load()))
-                throw std::invalid_argument("This captured model fixes that setting");
         }
         bool tuningChanged = false;
         for (const auto& [index, number] : changes) {
@@ -71,7 +67,7 @@ public:
             // + 0.0f stores -0 as 0.
             (header_->*s.field).store(s.isFloat ? FloatToBits(static_cast<float>(number) + 0.0f) :
                                                static_cast<uint32_t>(number));
-            tuningChanged |= dlsslop_control::tuning(s);
+            tuningChanged |= s.tuning;
         }
         if (changes.empty()) return;
         if (tuningChanged) header_->tuningSeq.fetch_add(1);

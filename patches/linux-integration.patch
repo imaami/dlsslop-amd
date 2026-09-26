@@ -2149,10 +2149,10 @@ index f4579c1..d4fba4b 100644
      X(vkGetPhysicalDeviceMemoryProperties2)                                                        \
      X(vkGetPhysicalDeviceProperties2)
 diff --git a/upstream-layer/tools/shmctl.cpp b/upstream-layer/tools/shmctl.cpp
-index 4e16702..da09740 100644
+index 4e16702..a2ff9e3 100644
 --- a/upstream-layer/tools/shmctl.cpp
 +++ b/upstream-layer/tools/shmctl.cpp
-@@ -1,168 +1,337 @@
+@@ -1,168 +1,321 @@
 -// dlssnr-shmctl — read and write the shared-memory header from shell.
 -//
 -// This exists because the helper CLI used to poke the header with
@@ -2199,7 +2199,7 @@ index 4e16702..da09740 100644
 +using dlsslop_control::kSettings;
 +
 +// --capture parses like an integer setting.
-+constexpr Setting kCapture{"capture", 'c', &ShmHeader::captureRequest, false, 0, 64, nullptr};
++constexpr Setting kCapture{"capture", &ShmHeader::captureRequest, 0, 64};
 +
 +constexpr std::size_t kCount = std::size(kSettings);
 +static_assert(kCount <= 64, "Options keeps one mask bit per setting");
@@ -2390,26 +2390,15 @@ index 4e16702..da09740 100644
      }
 +    return true;
 +}
-+
-+const Setting* FindSetting(const char* name) {
-+    for (const auto& setting : kSettings)
-+        if (!std::strcmp(name, setting.name)) return &setting;
-+    return nullptr;
-+}
  
 -    if ((size_t) st.st_size < ShmTotalBytes()) {
 -        if (!create) {  // nothing has ever attached; there is nothing to talk to
 -            close(fd);
 -            return nullptr;
-+bool SupportedConfiguration(const Setting& setting, uint32_t value) {
-+    if (!dlsslop_control::fixed(setting)) return true;
-+    ShmHeader defaults{};
-+    ShmInitNativeDefaults(&defaults);
-+    const uint32_t raw = (defaults.*setting.field).load();
-+    if (value == raw) return true;
-+    std::fprintf(stderr, "--%s: this captured network supports only %g; alternate preset/style/skin-mask parameter mappings are unavailable\n",
-+                 setting.name, dlsslop_control::value(setting, raw));
-+    return false;
++const Setting* FindSetting(const char* name) {
++    for (const auto& setting : kSettings)
++        if (!std::strcmp(name, setting.name)) return &setting;
++    return nullptr;
 +}
 +
 +bool ParseOptions(int argc, char** argv, Options& options) {
@@ -2456,10 +2445,6 @@ index 4e16702..da09740 100644
 +                std::fprintf(stderr, "--toggle requires a boolean setting name, got '%s'\n", optarg);
 +                return false;
 +            }
-+            if (dlsslop_control::fixed(*setting)) {
-+                std::fprintf(stderr, "--toggle %s: the captured network fixes this configuration; it cannot be toggled\n", setting->name);
-+                return false;
-+            }
 +            options.toggled |= Bit(setting);
 +            break;
 +        }
@@ -2483,7 +2468,6 @@ index 4e16702..da09740 100644
 +                             setting->minimum, setting->maximum, optarg);
 +                return false;
 +            }
-+            if (!SupportedConfiguration(*setting, value)) return false;
 +            options.assigned |= Bit(setting);
 +            break;
          }
@@ -2622,7 +2606,7 @@ index 4e16702..da09740 100644
  }
  
  void PrintStatus(const ShmHeader* h) {
-@@ -171,11 +340,20 @@ void PrintStatus(const ShmHeader* h) {
+@@ -171,11 +324,20 @@ void PrintStatus(const ShmHeader* h) {
      if (!Initialised(h)) return;
      std::printf("seq_req=%u\nseq_resp=%u\n", h->seq_req.load(), h->seq_resp.load());
      std::printf("width=%u\nheight=%u\n", h->width.load(), h->height.load());
@@ -2645,7 +2629,7 @@ index 4e16702..da09740 100644
      std::printf("layer_pid=%u\nlayer_composition_up=%u\nlayer_frames=%llu\nlayer_ms=%.2f\n",
                  h->layerPid.load(),
                  h->layerCompositionUp.load(),
-@@ -189,99 +367,70 @@ void PrintStatus(const ShmHeader* h) {
+@@ -189,99 +351,70 @@ void PrintStatus(const ShmHeader* h) {
      if (!reason.empty()) std::printf("helper_reason=%s\n", reason.c_str());
  }
  
@@ -2698,25 +2682,7 @@ index 4e16702..da09740 100644
 -        if (Initialised(h)) {
 -            h->quit.store(1);
 -            h->controlSeq.fetch_add(1);
-+    int result = Attach(h, create, options.path.c_str()) ? 0 : 1;
-+    if (!result) {
-+        // Store each setting once: readers never wait on controlSeq, so a second
-+        // store would show them a value nobody asked for. Reset copies controls
-+        // only and never memsets a live transport header.
-+        ShmHeader defaults{};
-+        if (options.reset) ShmInitNativeDefaults(&defaults, dlsslop_control::workerBypass(h));
-+        bool tuningChanged = options.reset;
-+        for (std::size_t i = 0; i < kCount; ++i) {
-+            const uint64_t bit = uint64_t(1) << i;
-+            const uint32_t flip = (options.toggled & bit) != 0;
-+            const Setting& s = kSettings[i];
-+            auto& field = h->*s.field;
-+            if (options.assigned & bit) {  // never also toggled
-+                field.store(options.values[i]);
-+                tuningChanged |= dlsslop_control::tuning(s);
-+            } else if (options.reset) field.store((defaults.*s.field).load() ^ flip);
-+            else if (flip) for (uint32_t value = field.load(); !field.compare_exchange_weak(value, !value);) {}
-         }
+-        }
 -    } else if (std::strcmp(cmd, "resume") == 0) {
 -        if (!Initialised(h)) ShmInitDefaults(h);
 -        h->quit.store(0);
@@ -2772,7 +2738,25 @@ index 4e16702..da09740 100644
 -                std::fprintf(stderr, "unknown setting: %s\n", argv[3]);
 -                rc = 2;
 -            }
--        }
++    int result = Attach(h, create, options.path.c_str()) ? 0 : 1;
++    if (!result) {
++        // Store each setting once: readers never wait on controlSeq, so a second
++        // store would show them a value nobody asked for. Reset copies controls
++        // only and never memsets a live transport header.
++        ShmHeader defaults{};
++        if (options.reset) ShmInitNativeDefaults(&defaults, dlsslop_control::workerBypass(h));
++        bool tuningChanged = options.reset;
++        for (std::size_t i = 0; i < kCount; ++i) {
++            const uint64_t bit = uint64_t(1) << i;
++            const uint32_t flip = (options.toggled & bit) != 0;
++            const Setting& s = kSettings[i];
++            auto& field = h->*s.field;
++            if (options.assigned & bit) {  // never also toggled
++                field.store(options.values[i]);
++                tuningChanged |= s.tuning;
++            } else if (options.reset) field.store((defaults.*s.field).load() ^ flip);
++            else if (flip) for (uint32_t value = field.load(); !field.compare_exchange_weak(value, !value);) {}
+         }
 -    } else {
 -        Usage();
 -        rc = 2;

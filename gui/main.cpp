@@ -39,33 +39,6 @@ using dlsslop_gui::Channel;
 constexpr double kArrowSteps[] = {0.001, 0.01, 0.1};
 constexpr int kDefaultArrowStep = 1;
 
-QStringList choices(const QString& name)
-{
-    if (name == "hdr-mode") return {"Automatic", "8-bit proxy", "16-bit proxy"};
-    if (name == "mvec-quality") return {"Fast", "Balanced", "Quality"};
-    if (name == "mvec-pixels") return {"1 px", "2 px", "4 px", "8 px"};
-    if (name == "white-point-source") return {"Manual", "Measured"};
-    if (name == "color-mode") return {"Automatic", "Display-referred", "Linear HDR"};
-    if (name == "reversible") return {"Knee", "Neutwo", "Neutwo replace", "Hybrid", "Hybrid replace"};
-    if (name == "transfer") return {"Classic ratio", "Matched residual", "Native frame + edit"};
-    if (name == "debug-view") return {"Off", "Input proxy", "Model output", "Edit", "Color bound 1", "Color bound 2"};
-    if (name == "downscaler") return {"Bicubic", "Catmull", "Lanczos 2", "Lanczos 3", "Kaiser 2", "Kaiser 3", "Magic"};
-    if (name == "compare") return {"Off", "Side by side", "Wipe"};
-    return {};
-}
-
-int category(const QString& name)
-{
-    if (QStringList{"enabled", "passes", "color-preserve", "intensity", "local-tone", "local-structure",
-                    "sharpness", "apply-model", "hold"}.contains(name)) return 0;
-    if (QStringList{"detail", "color", "guard", "transfer", "bypass", "ratio-smooth", "color-trust"}.contains(name)) return 1;
-    if (QStringList{"hdr-mode", "sdr16-multipass", "white-point", "white-point-scale", "white-point-source",
-                    "white-point-trim", "color-mode", "reversible", "working-scale", "downscaler"}.contains(name)) return 2;
-    if (name.startsWith("mvec")) return 3;
-    if (QStringList{"preset", "style", "auto-mask", "skin-structure"}.contains(name)) return 5;
-    return 4;
-}
-
 QString title(QString name)
 {
     name.replace('-', ' ');
@@ -227,8 +200,8 @@ class Window final : public QWidget {
         label->setObjectName("settingTitle");
         row->addWidget(label);
         row->addStretch();
-        const auto modes = choices(s.name);
-        if (!modes.isEmpty()) {
+        if (s.choices) {
+            const auto modes = QString(s.choices).split('|');
             e.combo = new QComboBox;
             e.combo->setMinimumWidth(190);
             for (int i = 0; i < modes.size(); ++i) e.combo->addItem(modes[i], static_cast<int>(s.minimum) + i);
@@ -238,7 +211,7 @@ class Window final : public QWidget {
             connect(e.combo, &QComboBox::currentIndexChanged, this, [this, index](int) {
                 queue(index, editors_[index].combo->currentData().toInt());
             });
-        } else if (!s.isFloat && s.minimum == 0 && s.maximum == 1) {
+        } else if (!s.isFloat && s.maximum == 1) {
             e.checkbox = new QCheckBox("On");
             e.checkbox->setAccessibleName(title(s.name));
             row->addWidget(e.checkbox);
@@ -369,7 +342,7 @@ public:
             stack->addWidget(scroll);
             pages.push_back(layout);
         }
-        for (std::size_t i = 0; i < editors_.size(); ++i) pages[category(kSettings[i].name)]->addWidget(makeEditor(i));
+        for (std::size_t i = 0; i < editors_.size(); ++i) pages[kSettings[i].section]->addWidget(makeEditor(i));
         auto* precisionRow = new QHBoxLayout;
         precisionRow->addWidget(new QLabel("Numeric arrow step"));
         auto* step = new QComboBox;
