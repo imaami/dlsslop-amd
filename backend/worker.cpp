@@ -346,7 +346,6 @@ public:
         h->answerExportSeq.store(0);
         h->layerProxySeq.store(0);
         h->layerAnswerSeq.store(0);
-        h->helperPassCeiling.store(kMaxPasses);
         h->modelUp.store(0);
         h->seq_ok.store(0);
         // Answer a request left by a previous worker as failed, so the layer
@@ -796,7 +795,6 @@ void run_worker(const Options& o)
         std::signal(SIGINT, stop_handler);
         std::signal(SIGTERM, stop_handler);
         h->modelUp.store(o.test_identity ? 0 : 1);
-        h->helperFeatures.store(o.test_identity ? 0 : 1);
         h->helperState.store(kHelperRunning, std::memory_order_release);
         const char* const ready = o.test_identity ? "IDENTITY TEST: no neural rendering"
                                                   : "native HIP ready; display-encoded RGBA8/FP16 proxy";

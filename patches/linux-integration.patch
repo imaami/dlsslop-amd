@@ -433,7 +433,7 @@ index 3d7bbfb..0b087a2 100644
   for(uint tile=0;tile<2;tile++){half8 a{};for(uint e=0;e<8;e++){uint k=tile*16+group*8+e;a[e]=(_Float16)(k<16?values[rc*16+k]:0.f);}
    for(uint col=0;col<2;col++){half8 b{};for(uint e=0;e<8;e++){uint k=tile*16+group*8+e;b[e]=(_Float16)(k<16?weights[(col*16+rc)*16+k]:0.f);}sum[col]=__builtin_amdgcn_wmma_f32_16x16x16_f16_w32_gfx12(a,b,sum[col]);}
 diff --git a/upstream-layer/common/shm_protocol.h b/upstream-layer/common/shm_protocol.h
-index fd7c1cd..328d05e 100644
+index fd7c1cd..0b01f8e 100644
 --- a/upstream-layer/common/shm_protocol.h
 +++ b/upstream-layer/common/shm_protocol.h
 @@ -14,11 +14,11 @@
@@ -593,7 +593,7 @@ index fd7c1cd..328d05e 100644
  
      h->transferStrengthBits.store(FloatToBits(1.0f));
      h->colourStrengthBits.store(FloatToBits(1.0f));
-@@ -733,6 +766,20 @@ inline void ShmInitDefaults(ShmHeader* h) {
+@@ -733,6 +766,19 @@ inline void ShmInitDefaults(ShmHeader* h) {
      }
  }
  
@@ -606,7 +606,6 @@ index fd7c1cd..328d05e 100644
 +    h->mvecEnabled.store(0);
 +    h->sdr16Multipass.store(1);
 +    h->passes.store(kNativeDefaultPasses);
-+    h->helperPassCeiling.store(kMaxPasses);
 +    h->transfer.store(2);
 +    h->compositionBypass.store(bypass ? 1 : 0);
 +}
@@ -2639,7 +2638,7 @@ diff --git a/upstream-layer/tools/meson-build.sh b/upstream-layer/tools/meson-bu
 old mode 100644
 new mode 100755
 diff --git a/upstream-layer/tools/shmctl.cpp b/upstream-layer/tools/shmctl.cpp
-index 4e16702..b6578fd 100644
+index 4e16702..397e5c4 100644
 --- a/upstream-layer/tools/shmctl.cpp
 +++ b/upstream-layer/tools/shmctl.cpp
 @@ -1,168 +1,351 @@
@@ -3134,7 +3133,7 @@ index 4e16702..b6578fd 100644
 -                h->controlSeq.load());
 +    std::printf("neural_max_width=%u\nneural_max_height=%u\n",
 +                h->nativeModelMaxWidth.load(), h->nativeModelMaxHeight.load());
-+    std::printf("passes=%u\npass_ceiling=%u\n", h->passes.load(), h->helperPassCeiling.load());
++    std::printf("passes=%u\npass_ceiling=%u\n", h->passes.load(), ShmPassCeiling(h));
 +    std::printf("display_width=%u\ndisplay_height=%u\n",
 +                h->layerWidth.load(), h->layerHeight.load());
 +    std::printf("quit=%u\nheartbeat=%u\ncontrol_seq=%u\ntuning_seq=%u\n", h->quit.load(), h->heartbeat.load(),
