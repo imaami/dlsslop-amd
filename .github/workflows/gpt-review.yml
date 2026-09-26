@@ -1,0 +1,69 @@
+name: GPT PR review
+
+on:
+  issue_comment:
+    types: [created]
+
+# Everything the job writes -- the review comment, the eyes reaction
+# -- is on a pull request, and GITHUB_TOKEN needs pull-requests:
+# write for that even through the issues endpoints; issues: write
+# alone is refused with 403 once the paid call has been made.
+permissions:
+  contents: read
+  pull-requests: write
+  # For the sweep: deleting this workflow's own skipped runs.
+  actions: write
+
+jobs:
+  review:
+    # The command may stand on any line of the comment -- one comment
+    # prods every bot -- so the gate matches it at the start of the
+    # body or of some line (fromJSON is how an expression spells a
+    # newline).  The command is the literal "/gpt review", one
+    # space: expressions cannot regex, so the script accepts exactly
+    # what this gate can see -- a validator wider than its gate is a
+    # command that never runs.
+    if: >-
+      github.event.issue.pull_request &&
+      (startsWith(github.event.comment.body, '/gpt review') ||
+       contains(github.event.comment.body, fromJSON('"\n/gpt review"'))) &&
+      github.event.comment.user.login == github.repository_owner &&
+      github.triggering_actor == github.repository_owner
+    runs-on: ubuntu-latest
+    # Exploration (600 s) plus the finale (600 s) plus checkout and
+    # the comment post; the script's own budgets stay inside this.
+    timeout-minutes: 25
+    # No concurrency group on purpose.  A group holds one running
+    # and ONE pending job, and a third request replaces the pending
+    # one whatever cancel-in-progress says -- a valid command would
+    # vanish without a review or a failure.  Parallel reviews are
+    # independent and each was asked for; the sweep already
+    # tolerates rivals.
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_MODEL: ${{ vars.OPENAI_REVIEW_MODEL || 'gpt-5.6-sol' }}
+      OPENAI_REASONING_EFFORT: ${{ vars.OPENAI_REVIEW_REASONING || 'xhigh' }}
+
+    steps:
+      # issue_comment runs at the default branch. Keep it that way: the
+      # workflow has a secret and must never execute code from the PR.
+      # Full history on purpose: the reviewer's read-only git tool
+      # walks log and blame, and a shallow clone would show it a
+      # repository with amnesia.
+      - name: Check out trusted reviewer
+        # Pinned by hash: a mutable tag is action code that can
+        # change under a job holding secrets.
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Review PR
+        run: bash .github/gpt-review/review.sh
+
+      # Whatever became of the review: the skipped runs other
+      # comments left behind are noise by construction.
+      - name: Sweep skipped runs
+        if: always()
+        run: bash .github/gpt-review/sweep.sh
