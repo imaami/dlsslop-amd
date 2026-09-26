@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "codec.h"
 #include "color_preserve_math.h"
 #include <cmath>
 #include <cstring>
@@ -18,9 +17,7 @@ inline void preserve_color(const float* original_rgba, const float* model_rgb,
 {
     if (!std::isfinite(strength) || strength < 0 || strength > 1)
         throw std::invalid_argument("color preservation must be finite and within 0..1");
-    if (!original_rgba || !model_rgb || !g.width || !g.height || !g.fit_width || !g.fit_height ||
-        g.width > 16384 || g.height > 16384 || g.x >= g.width || g.y >= g.height ||
-        g.fit_width > g.width - g.x || g.fit_height > g.height - g.y)
+    if (!original_rgba || !model_rgb || !fits(g) || g.width > 16384 || g.height > 16384)
         throw std::invalid_argument("invalid color preservation buffers or geometry");
     if (!result.empty() && (result.data() == model_rgb || result.data() == original_rgba))
         throw std::invalid_argument("color preservation requires distinct output");

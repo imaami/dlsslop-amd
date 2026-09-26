@@ -153,9 +153,7 @@ struct TraceStats {
 inline TraceStats trace_write_pfm(const std::filesystem::path& file, const float* data,
                                   const Geometry& g, unsigned channels)
 {
-    if (!data || (channels != 3 && channels != 4) || !g.fit_width || !g.fit_height ||
-        g.x >= g.width || g.y >= g.height || g.fit_width > g.width - g.x ||
-        g.fit_height > g.height - g.y)
+    if (!data || (channels != 3 && channels != 4) || !fits(g))
         throw std::invalid_argument("invalid diagnostic image geometry");
     const std::uint16_t endian = 1;
     const bool little = *reinterpret_cast<const unsigned char*>(&endian) == 1;

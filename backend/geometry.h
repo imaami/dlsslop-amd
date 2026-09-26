@@ -18,4 +18,11 @@ struct Geometry {
     unsigned x{}, y{}, fit_width{}, fit_height{};
 };
 
+// Whether the fitted picture is nonempty and inside the padded extent.
+inline bool fits(const Geometry& g)
+{
+    return g.fit_width && g.fit_height && g.x < g.width && g.y < g.height &&
+           g.fit_width <= g.width - g.x && g.fit_height <= g.height - g.y;
+}
+
 } // namespace dlsslop

@@ -27,9 +27,7 @@ inline void tune_neural_rgb(const float* input_rgba, const float* raw_rgb,
                             const NativeTuning& tuning)
 {
     validate_native_tuning(tuning);
-    if (!g.width || !g.height || !g.fit_width || !g.fit_height ||
-        g.x >= g.width || g.y >= g.height || g.fit_width > g.width - g.x ||
-        g.fit_height > g.height - g.y || g.width > 16384 || g.height > 16384)
+    if (!fits(g) || g.width > 16384 || g.height > 16384)
         throw std::invalid_argument("invalid native tuning geometry");
     const std::size_t pixels = std::size_t(g.width) * g.height;
     if (!input_rgba || !raw_rgb || (!output.empty() &&
