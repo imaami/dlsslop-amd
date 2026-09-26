@@ -10,13 +10,8 @@
 #include <cstring>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
 
 namespace dlsslop {
-
-// Geometry is passed by value to the SDKless HIP kernels. Pin its exact ABI.
-static_assert(sizeof(Geometry) == 40 && offsetof(Geometry, fit_height) == 36 &&
-              std::is_trivially_copyable<Geometry>::value, "GPU codec geometry ABI");
 
 class GpuCodec {
     using HostRegister = int (*)(void*, std::size_t, unsigned);

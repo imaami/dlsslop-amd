@@ -4,11 +4,7 @@
 // Shared native postprocessing math: the tuning controls, and the 3x3 filter
 // that colour preservation also uses. These controls operate on a pass's RGB
 // residual; they are not NVIDIA NGX model conditioning or semantic masks.
-#if defined(__HIP_DEVICE_COMPILE__)
-#define DLSSLOP_INLINE __attribute__((device)) __attribute__((always_inline)) inline
-#else
-#define DLSSLOP_INLINE inline
-#endif
+#include "geometry.h"
 
 namespace dlsslop {
 

@@ -3,11 +3,7 @@
 
 // The same scalar math is compiled into the HIP module and the CPU contract test.
 // There are no shared-memory reductions or cross-wave synchronization assumptions.
-#if defined(__HIP_DEVICE_COMPILE__)
-#define DLSSLOP_TEMPORAL_INLINE __attribute__((device)) __attribute__((always_inline)) inline
-#else
-#define DLSSLOP_TEMPORAL_INLINE inline
-#endif
+#include "geometry.h"
 
 namespace dlsslop_temporal {
 struct Flow { float x, y, error; };
@@ -20,11 +16,11 @@ struct Warp {
     Extent image, grid;
     unsigned padded_height, step, units, x, y, fit_width, fit_height;
 };
-DLSSLOP_TEMPORAL_INLINE float absolute(float v) { return v < 0 ? -v : v; }
-DLSSLOP_TEMPORAL_INLINE float clamp(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
-DLSSLOP_TEMPORAL_INLINE unsigned min_u(unsigned a, unsigned b) { return a < b ? a : b; }
-DLSSLOP_TEMPORAL_INLINE int round_int(float v) { return int(v + (v >= 0 ? .5f : -.5f)); }
-DLSSLOP_TEMPORAL_INLINE float sample(const float* image, Extent e, float x, float y)
+DLSSLOP_INLINE float absolute(float v) { return v < 0 ? -v : v; }
+DLSSLOP_INLINE float clamp(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
+DLSSLOP_INLINE unsigned min_u(unsigned a, unsigned b) { return a < b ? a : b; }
+DLSSLOP_INLINE int round_int(float v) { return int(v + (v >= 0 ? .5f : -.5f)); }
+DLSSLOP_INLINE float sample(const float* image, Extent e, float x, float y)
 {
     x = clamp(x, 0, float(e.width - 1));
     y = clamp(y, 0, float(e.height - 1));
@@ -41,7 +37,7 @@ DLSSLOP_TEMPORAL_INLINE float sample(const float* image, Extent e, float x, floa
 // issue together.
 template<int patch> using Patch = float[(2 * patch + 1) * (2 * patch + 1)];
 template<int patch>
-DLSSLOP_TEMPORAL_INLINE void sample_patch(Patch<patch>& reference, const float* current, Extent e, float x, float y)
+DLSSLOP_INLINE void sample_patch(Patch<patch>& reference, const float* current, Extent e, float x, float y)
 {
     constexpr int side = 2 * patch + 1;
 #pragma GCC unroll 25
@@ -50,7 +46,7 @@ DLSSLOP_TEMPORAL_INLINE void sample_patch(Patch<patch>& reference, const float* 
 }
 // Mean absolute difference between the patch and the previous frame displaced by (dx, dy).
 template<int patch>
-DLSSLOP_TEMPORAL_INLINE float patch_cost(const Patch<patch>& reference, const float* previous,
+DLSSLOP_INLINE float patch_cost(const Patch<patch>& reference, const float* previous,
                                       Extent e, float x, float y, float dx, float dy)
 {
     if (x + dx < 0 || y + dy < 0 || x + dx > float(e.width - 1) || y + dy > float(e.height - 1))
@@ -63,7 +59,7 @@ DLSSLOP_TEMPORAL_INLINE float patch_cost(const Patch<patch>& reference, const fl
                                                y + float(i / side - patch) + dy));
     return cost / float(side * side);
 }
-DLSSLOP_TEMPORAL_INLINE Flow sample_flow(const Flow* image, Extent e, float x, float y)
+DLSSLOP_INLINE Flow sample_flow(const Flow* image, Extent e, float x, float y)
 {
     x = clamp(x, 0, float(e.width - 1)); y = clamp(y, 0, float(e.height - 1));
     const unsigned ix = unsigned(x), iy = unsigned(y);
@@ -76,7 +72,7 @@ DLSSLOP_TEMPORAL_INLINE Flow sample_flow(const Flow* image, Extent e, float x, f
             (a.error + (b.error - a.error) * fx) * (1 - fy) + (c.error + (d.error - c.error) * fx) * fy};
 }
 template<int patch>
-DLSSLOP_TEMPORAL_INLINE Flow estimate_patch(const float* current, const float* previous,
+DLSSLOP_INLINE Flow estimate_patch(const float* current, const float* previous,
                                          const Flow* coarse, Search s, unsigned index)
 {
     const float x = clamp((float(index % s.grid.width) + .5f) * float(s.step) - .5f,
@@ -138,7 +134,7 @@ DLSSLOP_TEMPORAL_INLINE Flow estimate_patch(const float* current, const float* p
     return best;
 }
 // The patch radius is 1 or 2 (quality 2); each is a static instance.
-DLSSLOP_TEMPORAL_INLINE Flow estimate(const float* current, const float* previous,
+DLSSLOP_INLINE Flow estimate(const float* current, const float* previous,
                                    const Flow* coarse, Search s, unsigned index)
 {
     return s.patch == 2 ? estimate_patch<2>(current, previous, coarse, s, index) :
@@ -147,7 +143,7 @@ DLSSLOP_TEMPORAL_INLINE Flow estimate(const float* current, const float* previou
 // current_luma is the finest pyramid level, the luma of the frame's original input, which feedback
 // in later passes does not change; fallback is the current pass's input. A scene cut rejects every
 // pixel, which gives the network exactly the input of its no-history path.
-DLSSLOP_TEMPORAL_INLINE void warp(const float* __restrict__ current_luma, const float* __restrict__ previous_gray,
+DLSSLOP_INLINE void warp(const float* __restrict__ current_luma, const float* __restrict__ previous_gray,
                                const float* __restrict__ history, const float* __restrict__ fallback,
                                const Flow* __restrict__ flow, float* __restrict__ output, Warp w, unsigned index,
                                bool cut = false)
@@ -188,4 +184,3 @@ DLSSLOP_TEMPORAL_INLINE void warp(const float* __restrict__ current_luma, const 
     for (unsigned channel = 0; channel < 4; ++channel) output[index * 4 + channel] = o[channel];
 }
 } // namespace dlsslop_temporal
-#undef DLSSLOP_TEMPORAL_INLINE

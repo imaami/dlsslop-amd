@@ -3,12 +3,8 @@
 #include "codec.h"
 #include "vendor/hip_api.h"
 #include <cmath>
-#include <type_traits>
 
 namespace dlsslop {
-static_assert(sizeof(Geometry) == 40 && offsetof(Geometry, x) == 24 &&
-    offsetof(Geometry, fit_height) == 36 && std::is_standard_layout<Geometry>::value,
-    "color kernel geometry ABI");
 
 class GpuColor {
     hip_probe::Api& api_;

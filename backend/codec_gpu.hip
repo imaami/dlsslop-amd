@@ -2,25 +2,13 @@
 // SDR GPU boundary port of lmxxf's native_codec_encode/decode shaders.
 // See codec.cpp for the retained upstream copyright and MIT permission notice.
 // The complete CPU reference remains in codec.cpp.
-#pragma clang fp contract(off)
-#pragma clang fp reassociate(off)
+#include "kernel.h"
 
 typedef unsigned uint;
 typedef unsigned char byte;
 typedef unsigned short halfword;
-#define DEV __attribute__((device)) __attribute__((always_inline))
-#define KERNEL extern "C" __attribute__((global))
-
-struct CodecGeometry {
-    uint source_width, source_height, width, height, valid_width, valid_height;
-    uint x, y, fit_width, fit_height;
-};
+typedef dlsslop::Geometry Geometry;
 struct Rgb { float r, g, b; };
-
-DEV uint thread_index()
-{
-    return __builtin_amdgcn_workgroup_id_x() * 256u + __builtin_amdgcn_workitem_id_x();
-}
 
 DEV uint bits(float x)
 {
@@ -89,7 +77,7 @@ DEV Rgb read_source(const byte* source, uint pixel, uint* invalid)
 }
 
 template<bool fp16>
-DEV Rgb sample_source(const byte* source, CodecGeometry g, float x, float y, uint* invalid)
+DEV Rgb sample_source(const byte* source, Geometry g, float x, float y, uint* invalid)
 {
     x = clamp(x, 0.0f, float(g.source_width - 1));
     y = clamp(y, 0.0f, float(g.source_height - 1));
@@ -103,7 +91,7 @@ DEV Rgb sample_source(const byte* source, CodecGeometry g, float x, float y, uin
 }
 
 template<bool fp16>
-DEV void encode_proxy(const byte* source, float* rgba, uint* invalid, CodecGeometry g)
+DEV void encode_proxy(const byte* source, float* rgba, uint* invalid, Geometry g)
 {
     const uint index = thread_index();
     if (index >= g.width * g.height)
@@ -125,13 +113,13 @@ DEV void encode_proxy(const byte* source, float* rgba, uint* invalid, CodecGeome
 }
 
 KERNEL void dlsslop_encode_rgba8(const byte* source, float* rgba, uint* invalid,
-                              CodecGeometry g)
+                              Geometry g)
 {
     encode_proxy<false>(source, rgba, invalid, g);
 }
 
 KERNEL void dlsslop_encode_rgba16f(const byte* source, float* rgba, uint* invalid,
-                                CodecGeometry g)
+                                Geometry g)
 {
     encode_proxy<true>(source, rgba, invalid, g);
 }
@@ -157,7 +145,7 @@ DEV Rgb read_neural(const float* neural, uint pixel, uint* invalid)
 }
 
 KERNEL void dlsslop_feedback_rgb(const float* neural_rgb, float* rgba,
-                               uint* invalid, CodecGeometry g, uint precision16)
+                               uint* invalid, Geometry g, uint precision16)
 {
     const uint index = thread_index();
     if (index >= g.width * g.height)
@@ -188,7 +176,7 @@ KERNEL void dlsslop_feedback_rgb(const float* neural_rgb, float* rgba,
     rgba[index * 4 + 3] = 1.0f;
 }
 
-DEV Rgb sample_neural(const float* source, CodecGeometry g, float x, float y, uint* invalid)
+DEV Rgb sample_neural(const float* source, Geometry g, float x, float y, uint* invalid)
 {
     x = clamp(x, float(g.x), float(g.x + g.fit_width - 1));
     y = clamp(y, float(g.y), float(g.y + g.fit_height - 1));
@@ -204,7 +192,7 @@ DEV Rgb sample_neural(const float* source, CodecGeometry g, float x, float y, ui
 // Decode replaces RGB in the uploaded proxy and keeps its alpha. Each pixel is
 // one whole-word read-modify-write: a partial-word store makes the readback slower.
 KERNEL void dlsslop_decode_rgba8(uint* proxy, const float* neural_rgb, uint* invalid,
-                              CodecGeometry g)
+                              Geometry g)
 {
     const uint pixel = thread_index();
     if (pixel >= g.source_width * g.source_height)
@@ -218,7 +206,7 @@ KERNEL void dlsslop_decode_rgba8(uint* proxy, const float* neural_rgb, uint* inv
 }
 
 KERNEL void dlsslop_decode_rgba16f(unsigned long long* proxy, const float* neural_rgb,
-                                uint* invalid, CodecGeometry g)
+                                uint* invalid, Geometry g)
 {
     const uint pixel = thread_index();
     if (pixel >= g.source_width * g.source_height)

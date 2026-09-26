@@ -17,12 +17,11 @@ int main()
         }
         original[p*4+3]=1;
     }
-    const ColorGeometry kg{g.source_width,g.source_height,g.width,g.height,g.valid_width,g.valid_height,g.x,g.y,g.fit_width,g.fit_height};
     for(float strength : {0.f,.25f,.5f,1.f}) {
         dlsslop::preserve_color(original.data(),raw.data(),g,strength,expected);
         for(group_id=0;group_id<(pixels+255)/256;++group_id)
             for(item_id=0;item_id<256;++item_id)
-                dlsslop_preserve_color(original.data(),raw.data(),actual.data(),kg,strength);
+                dlsslop_preserve_color(original.data(),raw.data(),actual.data(),g,strength);
         if(std::memcmp(expected.data(),actual.data(),expected.size()*sizeof(float))) {
             std::fprintf(stderr,"kernel entry disagrees with reference\n");return 1;
         }

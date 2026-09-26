@@ -2,17 +2,12 @@
 // SDR boundary codec adapted from lmxxf/dlss5-on-amd-9070xt-porting.
 #pragma once
 
+#include "geometry.h"
+
 #include <cstdint>
 #include <vector>
 
 namespace dlsslop {
-
-struct Geometry {
-    unsigned source_width{}, source_height{};
-    unsigned width{}, height{};             // Padded neural processing extent.
-    unsigned valid_width{}, valid_height{}; // Unpadded, fixed 16:9 viewport.
-    unsigned x{}, y{}, fit_width{}, fit_height{};
-};
 
 // tier_height: 0 selects the smallest fitting tier; otherwise 720, 900 or 1080.
 // Larger source pictures are fitted into the largest tier. Throws on invalid

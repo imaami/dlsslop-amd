@@ -95,7 +95,8 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
     color = next(row for row in json.loads((root / 'mixed-out/modules.json').read_text())
                  if row['module'] == 'linux_color')
     assert color['sources'] == {name: hashlib.sha256((backend / name).read_bytes()).hexdigest()
-                                for name in ('color_gpu.hip', 'color_preserve_math.h', 'tuning_math.h')}, color
+                                for name in ('color_gpu.hip', 'kernel.h', 'geometry.h', 'color_preserve_math.h',
+                                             'tuning_math.h')}, color
     # The compile finds an upstream source's quoted includes through -I backend, and a header's own
     # includes beside it: decoys beside the source must not be recorded.
     kernels = root / 'kernels'
@@ -108,7 +109,7 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
                   if row['module'] == 'prefix_fast')
     assert prefix['sources'] == {
         'prefix_fast.hip': hashlib.sha256((kernels / 'prefix_fast.hip').read_bytes()).hexdigest(),
-        **{name: color['sources'][name] for name in ('color_preserve_math.h', 'tuning_math.h')}}, prefix
+        **{name: color['sources'][name] for name in ('color_preserve_math.h', 'tuning_math.h', 'geometry.h')}}, prefix
 
     newer = compilers('newer', {'amdclang++': 'AMD clang version 22.0.0git',
                                 'clang++-22': 'Debian clang version 22.1.8'})
