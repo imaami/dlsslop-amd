@@ -199,6 +199,16 @@ class SubmodulesTest(unittest.TestCase):
             self.assertIn('symlink in prepared source', linked.stderr)
             self.assertEqual((clone / 'patches/linux-integration.patch').read_text(), patch)
             (clone / 'kernels/link.hip').unlink()
+            # So would a linked prepared directory's contents, wherever it points.
+            moved = clone.parent / 'kernels-moved'
+            (clone / 'kernels').rename(moved)
+            (clone / 'kernels').symlink_to(moved)
+            linked = command(sys.executable, 'scripts/update-source-patch.py', cwd=clone, check=False)
+            self.assertNotEqual(linked.returncode, 0)
+            self.assertIn('symlink in prepared source', linked.stderr)
+            self.assertEqual((clone / 'patches/linux-integration.patch').read_text(), patch)
+            (clone / 'kernels').unlink()
+            moved.rename(clone / 'kernels')
             command(sys.executable, 'scripts/prepare-sources.py', cwd=clone)
             self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched\n')
             for name, data in committed.items():

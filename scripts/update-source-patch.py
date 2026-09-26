@@ -21,7 +21,7 @@ def main():
         git('add','-f','.')
         git('-c','user.name=Source snapshot','-c','user.email=snapshot@localhost','commit','-qm','Pinned originals')
         for folder in PREPARED:
-            for path in (ROOT/folder).rglob('*'):
+            for path in (ROOT/folder, *(ROOT/folder).rglob('*')):
                 if path.is_symlink():
                     raise RuntimeError('symlink in prepared source: '+str(path))
             shutil.rmtree(stage/folder)
