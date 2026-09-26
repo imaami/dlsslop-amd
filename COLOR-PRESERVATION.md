@@ -29,10 +29,11 @@ factor so that no channel leaves [0,1] or goes further outside it than the pass
 put it. Out-of-range luma takes the full correction and keeps its headroom for
 the existing codec. The filter can also remove intended relighting color.
 
-## GPU and CPU paths
+## HIP module
 
-The full build includes `linux_color.hsaco`. To rebuild and test that module
-separately after source preparation and the host build:
+The full build includes `linux_color.hsaco`, and the worker requires it like
+its other native modules. To rebuild and test that module separately after
+source preparation and the host build:
 
 ```bash
 python3 scripts/build-kernels.py --only linux_color \
@@ -46,19 +47,14 @@ isolation and prints kernel timing. Exit 77 means the module or a compatible
 runtime or device is unavailable. See [VALIDATION.md](VALIDATION.md) for
 integration tests.
 
-When correction is enabled, the worker logs `color preservation backend: GPU
-(HIP)` if the module is available. The GPU path retains the reference using an
-asynchronous device copy and adds one kernel per pass on the inference stream.
-It adds no correction-related per-pass host transfers or waits. Extra storage
-is 28 bytes per padded pixel, approximately 59.1 MiB at 1920×1152.
+The worker loads the module when correction is first enabled. It retains the
+reference using an asynchronous device copy and adds one kernel per pass on
+the inference stream, with no correction-related host transfers or waits.
+Extra storage is 28 bytes per padded pixel, approximately 59.1 MiB at
+1920×1152. A module that is missing or fails to load or launch stops the
+worker with an error. Strength zero skips correction work.
 
-If the module is absent, the worker logs `CPU fallback`. That path reads the
-original input once per frame, then reads, corrects and uploads each enabled
-pass on the CPU. A present module that fails to load or launch raises an error.
-Backend selection is cached until restart; reinstall and restart the worker
-after building a missing module. Strength zero skips correction work.
-
-Opt-in tracing records `color_preserve`, `color_backend` and
-`pass-NN-color.pfm`. The automated color diagnostic disables preservation for
-its baseline comparisons and restores the original setting afterwards; its
-initial current-view capture retains the user's setting.
+Opt-in tracing records `color_preserve` and `pass-NN-color.pfm`. The
+automated color diagnostic disables preservation for its baseline comparisons
+and restores the original setting afterwards; its initial current-view capture
+retains the user's setting.

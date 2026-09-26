@@ -92,6 +92,5 @@ dlsslopctl --hold 0
 `-L`, `--color-preserve 0..1` (default **0**) anchors broad chroma changes to
 the original encoded input after each pass, before history/feedback. It is the
 41st setting and appears in the Qt controller's Neural passes section.
-The HIP implementation avoids correction-related host transfers when its
-module is installed; an explicitly logged CPU fallback remains available.
+It runs on the GPU without correction-related host transfers.
 Unlike `--color`, it operates before feedback. See COLOR-PRESERVATION.md.

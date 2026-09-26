@@ -58,8 +58,7 @@ visible and disabled. Writable settings have individual reset buttons.
   queued edits are not replayed into a replacement channel.
 
 **Color preserve**, under Neural passes, anchors broad chroma changes to the
-original proxy before per-pass history/feedback. Default 0 disables it. The
-worker selects the HIP module or logs the slower CPU fallback; see
+original proxy before per-pass history/feedback. Default 0 disables it; see
 [COLOR-PRESERVATION.md](../COLOR-PRESERVATION.md).
 
 The CI workflow builds the GUI and runs its option-parsing, channel and

@@ -4,7 +4,6 @@
 #include "vendor/LmxxfProductionOptions.h"
 #include "codec_gpu.h"
 #include "tuning.h"
-#include "color_preserve.h"
 #include "color_gpu.h"
 #include "temporal_gpu.h"
 #include "control_selftest.h"
@@ -378,7 +377,6 @@ class Engine {
     std::unique_ptr<dlsslop::GpuCodec> gpu_codec_;
     std::unique_ptr<dlsslop::GpuTuning> gpu_tuning_;
     std::unique_ptr<dlsslop::GpuColor> gpu_color_;
-    bool color_backend_checked_ = false;
     std::unique_ptr<dlsslop::GpuTemporal> temporal_;
     void* device_input_ = nullptr;
     void* device_output_ = nullptr;
@@ -386,7 +384,6 @@ class Engine {
     void* answer_ = nullptr; // The latest frame's final network answer.
     unsigned width_ = 0, height_ = 0;
     std::vector<float> encoded_, neural_, feedback_;
-    std::vector<float> color_original_, color_raw_, color_result_;
     ProcessingSettings previous_settings_;
     unsigned previous_passes_ = 0;
     // Stream events: frame start, uploaded, evaluated, answered. Timing never
@@ -399,7 +396,6 @@ class Engine {
         api.Check(api.hipEventRecord(marks_[i], network_->Stream()), "record timing event");
     }
 public:
-    const char* color_backend() const { return gpu_color_ ? "gpu" : color_backend_checked_ ? "cpu" : "off"; }
     float upload_ms = 0, inference_ms = 0, readback_ms = 0;
     explicit Engine(Options o) : options_(std::move(o)) {}
     ~Engine() { reset(); }
@@ -412,7 +408,6 @@ public:
         temporal_.reset();
         gpu_tuning_.reset();
         gpu_color_.reset();
-        color_backend_checked_ = false;
         gpu_codec_.reset();
         if (device_input_) api.hipFree(device_input_);
         if (device_output_) api.hipFree(device_output_);
@@ -515,25 +510,10 @@ public:
             api.Check(api.hipMemcpy(device_input_, encoded_.data(), encoded_.size() * sizeof(float), 1), "upload encoded frame");
         }
         if (settings.color_preserve > 0) {
-            if (!color_backend_checked_) {
-                const auto path = options_.modules + "/linux_color.hsaco";
-                if (std::filesystem::exists(path)) {
-                    gpu_color_ = std::make_unique<dlsslop::GpuColor>(api, network_->Stream(), path, width_, height_);
-                    std::fprintf(stderr, "color preservation backend: GPU (HIP)\n");
-                } else {
-                    std::fprintf(stderr, "color preservation backend: CPU fallback; linux_color.hsaco missing; significant per-pass cost\n");
-                }
-                color_backend_checked_ = true;
-            }
-            if (gpu_color_) {
-                gpu_color_->begin(device_input_, g);
-            } else {
-                network_->Synchronize();
-                color_original_.resize(size_t(width_) * height_ * 4);
-                api.Check(api.hipMemcpy(color_original_.data(), device_input_, color_original_.size() * sizeof(float), 2),
-                          "read original color reference");
-                color_raw_.resize(size_t(width_) * height_ * 3);
-            }
+            if (!gpu_color_)
+                gpu_color_ = std::make_unique<dlsslop::GpuColor>(api, network_->Stream(),
+                                                                 options_.modules + "/linux_color.hsaco", width_, height_);
+            gpu_color_->begin(device_input_, g);
         }
         mark(1);
         if (settings.motion) {
@@ -586,17 +566,7 @@ public:
                 if (trace) trace_image(std::string(stage) + "-tuned", answer, 3);
             }
             if (settings.color_preserve > 0) {
-                if (gpu_color_) {
-                    answer = gpu_color_->apply(answer, g, settings.color_preserve);
-                } else {
-                    network_->Synchronize();
-                    api.Check(api.hipMemcpy(color_raw_.data(), answer, color_raw_.size() * sizeof(float), 2),
-                              "read per-pass color input");
-                    dlsslop::preserve_color(color_original_.data(), color_raw_.data(), g,
-                                          settings.color_preserve, color_result_);
-                    api.Check(api.hipMemcpy(answer, color_result_.data(), color_result_.size() * sizeof(float), 1),
-                              "upload color-preserved answer");
-                }
+                answer = gpu_color_->apply(answer, g, settings.color_preserve);
                 if (trace) trace_image(std::string(stage) + "-color", answer, 3);
             }
             if (settings.motion) temporal_->finish_pass(pass, answer);
@@ -910,7 +880,6 @@ void run_worker(const Options& o)
                     metadata.local_structure = settings.tuning.structure;
                     metadata.sharpness = settings.tuning.sharpness;
                     metadata.color_preserve = settings.color_preserve;
-                    metadata.color_backend = settings.color_preserve > 0 ? engine.color_backend() : "off";
                     trace_metadata = metadata.json();
                 }
                 if (!failure.empty()) { // Serving recovered: the failure is no longer current.

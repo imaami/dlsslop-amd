@@ -38,7 +38,6 @@ struct TraceFrameMetadata {
     Geometry geometry{};
     bool fp16_proxy{}, fp16_feedback{}, motion{};
     float intensity{}, local_tone{}, local_structure{}, sharpness{}, color_preserve{};
-    const char* color_backend = "off";
 
     std::string json() const {
         std::ostringstream out;
@@ -57,7 +56,6 @@ struct TraceFrameMetadata {
             << ",\"fp16_proxy\":" << fp16_proxy << ",\"fp16_feedback\":" << fp16_feedback
             << ",\"motion\":" << motion
             << ",\"intensity\":" << intensity << ",\"local_tone\":" << local_tone
-            << ",\"color_backend\":\"" << color_backend << "\""
             << ",\"color_preserve\":" << color_preserve
             << ",\"local_structure\":" << local_structure << ",\"sharpness\":" << sharpness << '}';
         return out.str();

@@ -17,7 +17,7 @@ struct Setting {
 // All controls from the original interface. The captured network configuration
 // is fixed for four fields; parsing rejects unsupported changes before mapping.
 inline constexpr Setting kSettings[] = {
-    {"color-preserve", 'L', &ShmHeader::colorPreserveBits, true, 0, 1, "Per-pass original-frame chroma anchoring (HIP when installed, otherwise CPU; 0 disables)"},
+    {"color-preserve", 'L', &ShmHeader::colorPreserveBits, true, 0, 1, "Per-pass original-frame chroma anchoring (0 disables)"},
     {"enabled", 'e', &ShmHeader::enabled, false, 0, 1, "Enable neural rendering (0/1)"},
     {"hdr-mode", 'E', &ShmHeader::hdrMode, false, 0, 2, "Proxy precision: 0 auto (16-bit for HDR), 1 force 8-bit, 2 force 16-bit"},
     {"sdr16-multipass", 'B', &ShmHeader::sdr16Multipass, false, 0, 1, "SDR between-pass precision: 0 quantized 8-bit, 1 binary16; HDR stays binary16"},
