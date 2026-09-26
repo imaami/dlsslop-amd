@@ -4,8 +4,8 @@
 paths and the native worker's private channel use `dlsslop-amd`. Public commands
 are `dlsslopd`, `dlsslopctl`, `dlsslop-gui`, `dlsslop-test`, `dlsslop-setup`
 and `dlsslop-run`. Locally introduced integration identifiers use `DLSSLOP_`, including
-`DLSSLOP_AMD_ENABLE`, `DLSSLOP_BACKEND`, `DLSSLOP_MODULES` and
-`DLSSLOP_HIP_LIBRARY`; the local codec namespace is `dlsslop`.
+`DLSSLOP_AMD_ENABLE`, `DLSSLOP_MODULES` and `DLSSLOP_HIP_LIBRARY`; the local
+codec namespace is `dlsslop`.
 
 Inherited interfaces retain their upstream names, including `DLSSNR_SHM`,
 `DLSSNR_LOG`, the other `DLSSNR_*` layer controls, the `dlssnr` C++ namespace

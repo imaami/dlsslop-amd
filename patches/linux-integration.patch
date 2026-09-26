@@ -961,7 +961,7 @@ index db0dc5d..0c88a64 100644
  
  }  // namespace dlssnr
 diff --git a/upstream-layer/layer_linux/src/composition.cpp b/upstream-layer/layer_linux/src/composition.cpp
-index dc344c4..a7a2a69 100644
+index dc344c4..ffa3771 100644
 --- a/upstream-layer/layer_linux/src/composition.cpp
 +++ b/upstream-layer/layer_linux/src/composition.cpp
 @@ -69,6 +69,9 @@ bool ColourIsLinearHdr(VkFormat swapchainFormat, uint32_t colourMode) {
@@ -1051,15 +1051,6 @@ index dc344c4..a7a2a69 100644
      const auto scaled = [&](uint32_t v) {
          if (s.workingScale == 1.0f) return v;
          return std::max<uint32_t>(64, uint32_t(std::lround(double(v) * double(s.workingScale))));
-@@ -695,7 +719,7 @@ void Composition::ModelExtent(uint32_t width, uint32_t height, const FrameSettin
- }
- 
- bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFormat, const FrameSettings& s,
--                          bool linearHdr, bool hdrProxy, uint32_t hdrTransfer) {
-+                          bool linearHdr, bool hdrProxy, uint32_t hdrTransfer, bool nativeEncodedProxy) {
-     if (!_usable) return false;
- 
-     VkFormat work = CompositionFormat(swapchainFormat);
 @@ -733,25 +757,9 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
          }
      }
@@ -1089,29 +1080,20 @@ index dc344c4..a7a2a69 100644
      uint32_t modelW = 0, modelH = 0;
      ModelExtent(width, height, s, modelW, modelH);
      const bool superSample = modelW > width || modelH > height;
-@@ -767,13 +775,13 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -767,7 +775,6 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
          if ((fp16.optimalTilingFeatures & need) != need) {
              if (!_hdrProxy) Log("[comp] float16 proxy requested but not supported here; staying 8-bit");
              hdrProxy = false;
 -            hdrTransfer = 0;
-+            if (!nativeEncodedProxy) hdrTransfer = 0;
          }
      }
  
-     if (_width == width && _height == height && _swapchainFormat == swapchainFormat &&
-         _modelW == modelW && _modelH == modelH && _linearHdr == linearHdr && _hdrProxy == hdrProxy &&
--        _hdrTransfer == hdrTransfer && _scalerFilter == s.downscaler && _frame.image)
-+        _hdrTransfer == hdrTransfer && _nativeEncodedProxy == nativeEncodedProxy && _scalerFilter == s.downscaler && _frame.image)
-         return true;
- 
-     Log("[comp] building %ux%u, model %ux%u, %s%s%s", width, height, modelW, modelH,
-@@ -820,12 +828,14 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -820,12 +827,13 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
      _blitSwapchain = blit;
      _linearHdr = linearHdr;
      _hdrProxy = hdrProxy;
 -    _hdrTransfer = hdrProxy ? hdrTransfer : 0;
-+    _nativeEncodedProxy = nativeEncodedProxy;
-+    _hdrTransfer = (hdrProxy || nativeEncodedProxy) ? hdrTransfer : 0;
++    _hdrTransfer = hdrTransfer;
      const VkFormat proxyFormat = _hdrProxy ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
  
 -    // The untouched copy is float only when the frame it holds is: on a display-referred frame the
@@ -1124,7 +1106,7 @@ index dc344c4..a7a2a69 100644
  
      const VkImageUsageFlags sampled = VK_IMAGE_USAGE_SAMPLED_BIT;
      const VkImageUsageFlags storage = VK_IMAGE_USAGE_STORAGE_BIT;
-@@ -833,9 +843,8 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -833,9 +841,8 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
      const VkImageUsageFlags dst = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
  
      const bool ok =
@@ -1136,7 +1118,7 @@ index dc344c4..a7a2a69 100644
          MakeImage(_model, modelW, modelH, proxyFormat, sampled | src | dst) &&
          MakeImage(_composed, width, height, work, storage | src);
  
-@@ -858,7 +867,7 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -858,7 +865,7 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
                     VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT) &&
           MakeMeterState());
  
@@ -1145,7 +1127,7 @@ index dc344c4..a7a2a69 100644
      const bool okWork = !needWork || MakeImage(_work, modelW, modelH, proxyFormat,
                                                 sampled | storage | src);
  
-@@ -1088,20 +1097,18 @@ void Composition::TransitionSwapchain(VkCommandBuffer cb, VkImage image, VkImage
+@@ -1088,20 +1095,18 @@ void Composition::TransitionSwapchain(VkCommandBuffer cb, VkImage image, VkImage
      b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
      b.image = image;
      b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
@@ -1178,7 +1160,7 @@ index dc344c4..a7a2a69 100644
                                nullptr, 0, nullptr, 1, &b);
  }
  
-@@ -1146,7 +1153,7 @@ float Composition::ResolvedWhitePoint(const FrameSettings& s) const {
+@@ -1146,7 +1151,7 @@ float Composition::ResolvedWhitePoint(const FrameSettings& s) const {
  DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
      DlssNrConstants c{};
  
@@ -1187,7 +1169,7 @@ index dc344c4..a7a2a69 100644
      c.TransferStrength = s.transferStrength;
      c.ColourStrength = s.colourStrength;
      c.MaxRatio = s.maxRatio;
-@@ -1178,7 +1185,7 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
+@@ -1178,7 +1183,7 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
              c.ReversibleMode = s.reversibleMode >= 3 ? 4u : 2u;
          } else {
              c.DebugView = 2;
@@ -1196,19 +1178,19 @@ index dc344c4..a7a2a69 100644
          }
      }
  
-@@ -1194,8 +1201,9 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
+@@ -1194,8 +1199,9 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
      c.GuideHeight = _height;
      c.UseGameExposure = 0;
      c.ExposurePreMul = 1.0f;
 -    c.HdrProxy = _hdrProxy ? 1u : 0u;
 -    c.HdrTransfer = _hdrProxy ? _hdrTransfer : 0u;
 +    // Surface precision and model color domain are independent for native HIP.
-+    c.HdrProxy = _hdrProxy ? (_nativeEncodedProxy ? 2u : 1u) : 0u;
++    c.HdrProxy = _hdrProxy ? 2u : 0u;
 +    c.HdrTransfer = _hdrTransfer;
      c.ColourTrust = s.colourTrust;
      c.RatioSmooth = s.ratioSmooth;
      return c;
-@@ -1237,7 +1245,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1237,7 +1243,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
      // While held the frame is not re-read, but everything downstream of it still runs: the encode
      // re-encodes, the model re-evaluates and the resolve re-composes, so a setting changed now is
      // answered on the same picture. Freezing the proxy instead would be wrong -- settings must still
@@ -1217,7 +1199,7 @@ index dc344c4..a7a2a69 100644
      const bool freeze = _holding && _frameCaptured;
  
      if (!freeze) {
-@@ -1255,18 +1263,21 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1255,18 +1261,21 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
      }
  
      Transition(cb, _frame, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -1250,7 +1232,7 @@ index dc344c4..a7a2a69 100644
      // distinction is the whole reason it is safe: an earlier white point meter upstream read its own
      // output and chased it, walking one session from 0.010 to 97.910. There is no path from what this
      // pass writes back into what this reads.
-@@ -1276,24 +1287,28 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1276,24 +1285,28 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
      // a four-byte copy into its own constant block (RecordCompose). The 128-byte mirror the transfer
      // copies at the end is for the CPU's frame-hold snapshot and status field only.
      if (_meter.image && _meterGpu) {
@@ -1282,7 +1264,7 @@ index dc344c4..a7a2a69 100644
              pc.source = s.whitePointSource;
              pc.hold = _holding && _frameCaptured ? 1u : 0u;
              _vk->vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, _meterPipeline);
-@@ -1319,18 +1334,16 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1319,18 +1332,16 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
              const VkBufferCopy mirror{ 0, 0, kMeterStateBytes };
              _vk->vkCmdCopyBuffer(cb, _meterState, _meterMirror.buffer, 1, &mirror);
          }
@@ -1303,7 +1285,7 @@ index dc344c4..a7a2a69 100644
                  return false;
          } else {
              // Reduce, with the module's own area filter -- the model then works on fewer pixels and
-@@ -1339,7 +1352,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1339,7 +1350,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
              down.Mode = DlssNrMode_Downsample;
              down.Width = _modelW;
              down.Height = _modelH;
@@ -1312,7 +1294,7 @@ index dc344c4..a7a2a69 100644
                                   VK_NULL_HANDLE, _work.view, VK_NULL_HANDLE))
                  return false;
          }
-@@ -1485,11 +1498,11 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1485,11 +1496,11 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
              return false;
          Transition(cb, _modelNative, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
          answer = &_modelNative;
@@ -1326,7 +1308,7 @@ index dc344c4..a7a2a69 100644
      Transition(cb, _composed, VK_IMAGE_LAYOUT_GENERAL);
  
      DlssNrConstants res = BaseConstants(s);
-@@ -1520,7 +1533,7 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1520,7 +1531,7 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
                                    0, 0, nullptr, 1, &b, 0, nullptr);
      }
  
@@ -1335,7 +1317,7 @@ index dc344c4..a7a2a69 100644
                           _composed.view, VK_NULL_HANDLE))
          return false;
  
-@@ -1552,6 +1565,23 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1552,6 +1563,23 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
      // presented it and the frame the model edited, for the same frame.
      _captureRecorded = false;
      if (_capture.Active()) {
@@ -1359,7 +1341,7 @@ index dc344c4..a7a2a69 100644
          const size_t bytes = size_t(_width) * _height * (_workFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 4);
          if (_captureBuf.buffer || MakeHostBuffer(_captureBuf, bytes * 2, VK_BUFFER_USAGE_TRANSFER_DST_BIT)) {
              Transition(cb, _frame, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-@@ -1567,9 +1597,6 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1567,9 +1595,6 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
              _captureRecorded = true;
          }
      }
@@ -1369,7 +1351,7 @@ index dc344c4..a7a2a69 100644
      return true;
  }
  
-@@ -1578,7 +1605,7 @@ void Composition::WriteCapturedFrame() {
+@@ -1578,7 +1603,7 @@ void Composition::WriteCapturedFrame() {
      _captureRecorded = false;
      const size_t bytes = size_t(_width) * _height * (_workFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 4);
      const uint8_t* base = (const uint8_t*) _captureBuf.mapped;
@@ -1379,7 +1361,7 @@ index dc344c4..a7a2a69 100644
  
  
 diff --git a/upstream-layer/layer_linux/src/composition.h b/upstream-layer/layer_linux/src/composition.h
-index 757303b..7147b1b 100644
+index 757303b..155f188 100644
 --- a/upstream-layer/layer_linux/src/composition.h
 +++ b/upstream-layer/layer_linux/src/composition.h
 @@ -5,8 +5,9 @@
@@ -1411,21 +1393,17 @@ index 757303b..7147b1b 100644
      uint32_t transfer = 1;
      uint32_t debugView = 0;
      uint32_t compareMode = 0;
-@@ -111,8 +115,12 @@ class Composition {
+@@ -111,6 +115,9 @@ class Composition {
      // the encode writes normalised linear light instead of an sRGB picture. hdrTransfer = 1 says the
      // swapchain itself carries PQ. Both are honoured only while the device can hold a float16 proxy;
      // Prepare reports the decision it actually made through HdrProxyActive().
 +    // Native HIP is the exception: its network cannot consume the NGX linear-light
-+    // float proxy, so nativeEncodedProxy keeps an sRGB-encoded proxy at either
-+    // precision and honours hdrTransfer with an RGBA8 proxy too.
++    // float proxy, so the proxy stays sRGB-encoded at either precision and
++    // hdrTransfer is honoured with an RGBA8 proxy too.
      bool Prepare(uint32_t width, uint32_t height, VkFormat swapchainFormat, const FrameSettings& s,
--                 bool linearHdr, bool hdrProxy = false, uint32_t hdrTransfer = 0);
-+                 bool linearHdr, bool hdrProxy = false, uint32_t hdrTransfer = 0,
-+                 bool nativeEncodedProxy = false);
+                  bool linearHdr, bool hdrProxy = false, uint32_t hdrTransfer = 0);
  
-     // The raster the model will work at, for a caller that has to size a transport before Prepare
-     // runs. Same arithmetic Prepare uses, in one place so the two cannot disagree.
-@@ -125,7 +133,7 @@ class Composition {
+@@ -125,7 +132,7 @@ class Composition {
      // in the layer derives from this one number so the two sides cannot disagree.
      size_t ModelBytes() const { return size_t(_modelW) * _modelH * (_hdrProxy ? 8 : 4); }
      bool HdrProxyActive() const { return _hdrProxy; }
@@ -1434,7 +1412,7 @@ index 757303b..7147b1b 100644
  
      // Point the transport buffers at the shared-memory pixel regions so the GPU reads and writes
      // them directly, with no host copy in between. Null pointers fall back to private host-visible
-@@ -198,8 +206,15 @@ class Composition {
+@@ -198,8 +205,15 @@ class Composition {
      void MarkModelFrame() { _haveModel = true; }
  
      // Write this many matched before/after pairs, starting with the next composed frame.
@@ -1451,14 +1429,13 @@ index 757303b..7147b1b 100644
  
      // Called after leg 2's fence, when the readback the compose recorded has landed.
      void WriteCapturedFrame();
-@@ -270,13 +285,13 @@ class Composition {
+@@ -270,13 +284,12 @@ class Composition {
      VkFormat _swapchainFormat = VK_FORMAT_UNDEFINED;
      VkFormat _workFormat = VK_FORMAT_UNDEFINED;  // usually the swapchain's UNORM twin; see Prepare
      bool _blitSwapchain = false;                 // set when _workFormat is not the swapchain's twin
 -    VkFormat _keepFormat = VK_FORMAT_UNDEFINED;
      bool _linearHdr = false;
      bool _hdrProxy = false;
-+    bool _nativeEncodedProxy = false;
      uint32_t _hdrTransfer = 0;
      bool _haveModel = false;
  
@@ -1467,7 +1444,7 @@ index 757303b..7147b1b 100644
  
      // Supersampling: the model works above the frame, so the proxy is enlarged on the way in and the
      // answer averaged back on the way out. _modelNative holds that average; without it the resolve
-@@ -287,7 +302,7 @@ class Composition {
+@@ -287,7 +300,7 @@ class Composition {
      bool _superSample = false;
      uint32_t _scalerFilter = kScalerLanczos3;
  
@@ -1476,7 +1453,7 @@ index 757303b..7147b1b 100644
      // percentile taken across it -- on the GPU. The reduce pass keeps the percentile, the history
      // and the resolved value in a device-local state buffer; the resolve reads the resolved value
      // through a four-byte copy into its own constant block, so no tensor crosses to the host. The
-@@ -322,10 +337,11 @@ class Composition {
+@@ -322,10 +335,11 @@ class Composition {
      bool _answerViaFd = false;
  
      CaptureWriter _capture;
@@ -1888,7 +1865,7 @@ index ec78533..e4f1a0e 100644
      return true;
  }
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..dc0d64e 100644
+index 4b37520..dfbc930 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -1934,24 +1911,18 @@ index 4b37520..dc0d64e 100644
      }();
      char buf[2048];
      va_list args;
-@@ -95,6 +101,16 @@ static bool VerboseEnabled() {
+@@ -95,6 +101,10 @@ static bool VerboseEnabled() {
      return v;
  }
  
-+// The native HIP helper is deliberately opt-in. Its transport is host-staged RGBA8 or RGBA16F;
-+// it does not import NGX's exported images or require NVIDIA driver extensions.
-+static bool NativeHipBackend() {
-+    static const bool enabled = [] {
-+        const char* backend = getenv("DLSSLOP_BACKEND");
-+        return backend && !std::strcmp(backend, "hip");
-+    }();
-+    return enabled;
-+}
++// This layer only drives the native HIP worker. Its transport is host-staged RGBA8 or RGBA16F;
++// upstream's NGX image import and dma-buf exchange fold away at compile time.
++static constexpr bool NativeHipBackend() { return true; }
 +
  static inline double NowMs() {
      return std::chrono::duration<double, std::milli>(
          std::chrono::steady_clock::now().time_since_epoch()).count();
-@@ -137,6 +153,48 @@ struct ShmMap {
+@@ -137,6 +147,47 @@ struct ShmMap {
      bool dead = false;
      // The file path, kept so the dma-buf socket can be named beside it.
      std::string path;
@@ -1975,7 +1946,6 @@ index 4b37520..dc0d64e 100644
 +    bool ready_ = false;
 +public:
 +    explicit NativeFrameGuard(ShmMap& s) {
-+        if (!NativeHipBackend()) { ready_ = true; return; }
 +        if (!s.hdr || s.path.empty()) return;
 +        if (s.producerFd < 0) {
 +            const std::string name = s.path + ".producer.lock";
@@ -2000,7 +1970,7 @@ index 4b37520..dc0d64e 100644
  };
  
  // The directory now lives under /tmp, which is world-writable, so it is worth checking that what we
-@@ -226,7 +284,7 @@ static bool ShmOpen(ShmMap& s) {
+@@ -226,7 +277,7 @@ static bool ShmOpen(ShmMap& s) {
      const char* path = getenv("DLSSNR_SHM");
      std::string p = (path && *path) ? path : ShmDefaultPath();
      if (!EnsureParentDir(p)) return false;
@@ -2009,7 +1979,7 @@ index 4b37520..dc0d64e 100644
      if (fd < 0) { Log("[shm] open %s failed", p.c_str()); return false; }
      // The file still spans the whole protocol -- the offsets are fixed and both sides agree on them --
      // but it is sparse, so the size on disk is what has actually been written.
-@@ -325,6 +383,7 @@ static int AdoptPeerFd(uint32_t pid, uint32_t fd) {
+@@ -325,6 +376,7 @@ static int AdoptPeerFd(uint32_t pid, uint32_t fd) {
  // The exchange is on unless the environment says off; the helper and driver get the final say by
  // what they publish.
  static bool DmaBufEnabled() {
@@ -2017,10 +1987,13 @@ index 4b37520..dc0d64e 100644
      static const bool on = [] {
          const char* v = getenv("DLSSNR_DMABUF");
          return !(v && !strcmp(v, "0"));
-@@ -332,6 +391,19 @@ static bool DmaBufEnabled() {
+@@ -332,6 +384,17 @@ static bool DmaBufEnabled() {
      return on;
  }
  
++// Whether an idle-repaint thread may run; DLSSNR_IDLE_REPAINT=0 says no. The application's own
++// acquires, submits and queue waits are hooked, and take the device lock, only when one may;
++// otherwise they go straight down the chain instead of queueing behind the round trip.
 +static bool IdleRepaintWanted() {
 +    static const bool wanted = [] {
 +        const char* v = getenv("DLSSNR_IDLE_REPAINT");
@@ -2029,32 +2002,25 @@ index 4b37520..dc0d64e 100644
 +    return wanted;
 +}
 +
-+// The application's own acquires, submits and queue waits take the device lock only while a
-+// repaint thread may use its queue or a dma-buf import may wait for the whole device inside a
-+// present. Otherwise they go straight down the chain instead of queueing behind the round trip.
-+static bool QueueHooksNeeded() { return IdleRepaintWanted() || DmaBufEnabled(); }
-+
  static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, const void* proxy,
                            void* modelOut, bool proxyInRegion, bool answerFromFd, bool hdrEncode) {
      if (s.dead) return false;
-@@ -361,6 +433,8 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -361,6 +424,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
      // by leg 1's vkWaitForFences; this fence covers the host-visible ordering across processes.)
      std::atomic_thread_fence(std::memory_order_release);
      s.hdr->seq_req.store(req);
-+    if (NativeHipBackend())
-+        syscall(SYS_futex, &s.hdr->seq_req, FUTEX_WAKE, 1, nullptr, nullptr, 0);
++    syscall(SYS_futex, &s.hdr->seq_req, FUTEX_WAKE, 1, nullptr, nullptr, 0);
  
      // How long this frame may wait, which is a question about whether anyone is listening.
      //
-@@ -378,12 +452,19 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -378,12 +442,18 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
      // once it is warm. Timing that out and giving up is how a working helper gets abandoned before it
      // has answered once.
      const bool warmingUp = !s.everAnswered;
 -    const double budgetMs = !helperPresent ? 20.0 : (warmingUp ? 10000.0 : 1000.0);
 +    // HIP passes share one model and run sequentially. Allow a longer chain
 +    // under game GPU contention without changing the single-pass deadline.
-+    const double frameBudgetMs = NativeHipBackend()
-+        ? std::min(10000.0, 1000.0 * double(ShmPasses(s.hdr))) : 1000.0;
++    const double frameBudgetMs = std::min(10000.0, 1000.0 * double(ShmPasses(s.hdr)));
 +    const double budgetMs = !helperPresent ? 20.0 : (warmingUp ? 10000.0 : frameBudgetMs);
  
      // Wait for the helper (fail-open: present the original frame on timeout).
@@ -2064,57 +2030,48 @@ index 4b37520..dc0d64e 100644
      for (;;) {
 -        if (s.hdr->seq_resp.load() >= req) {
 +        const uint32_t response = s.hdr->seq_resp.load(std::memory_order_acquire);
-+        if (NativeHipBackend() ? response == req : response >= req) {
++        if (response == req) {
              s.timeouts = 0;
              s.everAnswered = true;
              // The helper's GPU wrote the answer into this region (or the memcpy below reads the
-@@ -396,7 +477,9 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -396,7 +466,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
              // the meantime, and seq_resp only counts. Composing that answer here would copy a
              // different number of bytes into these surfaces -- the row-shifted colour garbage this
              // check exists to refuse.
 -            const bool ok = s.hdr->seq_ok.load() >= req && s.hdr->answeredW.load() == w &&
-+            const uint32_t successful = s.hdr->seq_ok.load();
-+            const bool ok = (NativeHipBackend() ? successful == req : successful >= req) &&
-+                            s.hdr->answeredW.load() == w &&
++            const bool ok = s.hdr->seq_ok.load() == req && s.hdr->answeredW.load() == w &&
                              s.hdr->answeredH.load() == h;
              if (!ok) Log("[shm] helper could not use frame %u (ok=%u)", req, s.hdr->seq_ok.load());
              if (ok && !answerFromFd && modelOut != (void*) s.outPixels) std::memcpy(modelOut, s.outPixels, bytes);
-@@ -413,9 +496,32 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -413,9 +483,25 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
          if (s.hdr->quit.load()) { s.dead = true; return false; }
          const double elapsed = NowMs() - tSignal;
          if (elapsed >= budgetMs) break;
 -        if (elapsed < 2.0) CpuYield();
 -        else std::this_thread::sleep_for(std::chrono::microseconds(200));
-+        if (NativeHipBackend()) {
-+            // The worker ticks its heartbeat every 100 ms, also mid-frame. One that
-+            // exits or dies (even by SIGKILL) will not answer; stop waiting for it.
-+            if (s.hdr->helperState.load() != kHelperRunning) break;
-+            if (const uint32_t b = s.hdr->heartbeat.load(); b != beat) {
-+                beat = b;
-+                beatAt = elapsed;
-+            } else if (elapsed - beatAt > 500.0) {
-+                break;
-+            }
-+            // Shared futexes work across the two MAP_SHARED mappings. Comparing the
-+            // observed response value in the kernel closes the check-to-sleep race;
-+            // the deadline also lets a dead worker fail open and quit remain responsive.
-+            const uint64_t ns = uint64_t(std::min(50.0, budgetMs - elapsed) * 1000000.0);
-+            const timespec timeout{time_t(ns / 1000000000u), long(ns % 1000000000u)};
-+            syscall(SYS_futex, &s.hdr->seq_resp, FUTEX_WAIT, response, &timeout, nullptr, 0);
-+        } else if (elapsed < 2.0) {
-+            CpuYield();
-+        } else {
-+            std::this_thread::sleep_for(std::chrono::microseconds(200));
++        // The worker ticks its heartbeat every 100 ms, also mid-frame. One that
++        // exits or dies (even by SIGKILL) will not answer; stop waiting for it.
++        if (s.hdr->helperState.load() != kHelperRunning) break;
++        if (const uint32_t b = s.hdr->heartbeat.load(); b != beat) {
++            beat = b;
++            beatAt = elapsed;
++        } else if (elapsed - beatAt > 500.0) {
++            break;
 +        }
++        // Shared futexes work across the two MAP_SHARED mappings. Comparing the
++        // observed response value in the kernel closes the check-to-sleep race;
++        // the deadline (under 50 ms) also lets a dead worker fail open and quit
++        // remain responsive.
++        const timespec timeout{0, long(std::min(50.0, budgetMs - elapsed) * 1000000.0)};
++        syscall(SYS_futex, &s.hdr->seq_resp, FUTEX_WAIT, response, &timeout, nullptr, 0);
      }
-+    if (NativeHipBackend())
-+        Log("[shm] worker did not answer frame %u in %.0f ms (state=%u heartbeat=%u); "
-+            "presenting original frames until it answers", req, NowMs() - tSignal,
-+            s.hdr->helperState.load(), s.hdr->heartbeat.load());
++    Log("[shm] worker did not answer frame %u in %.0f ms (state=%u heartbeat=%u); "
++        "presenting original frames until it answers", req, NowMs() - tSignal,
++        s.hdr->helperState.load(), s.hdr->heartbeat.load());
      // Four rather than eight, and with a pause before the next attempt, so giving up costs a
      // fraction of a second and retrying costs that again only every few seconds.
      if (++s.timeouts >= 4) {
-@@ -477,13 +583,17 @@ struct SwapchainState {
+@@ -477,13 +563,17 @@ struct SwapchainState {
      uint32_t width = 0, height = 0;
      // Two fences, not one. Leg 1's must be waited on before the proxy is handed to the helper --
      // the sequence number is the helper's only ordering signal, and it may not be bumped ahead of
@@ -2136,7 +2093,7 @@ index 4b37520..dc0d64e 100644
      VkCommandPool pool = VK_NULL_HANDLE;
      VkCommandBuffer cb = VK_NULL_HANDLE;
      // Reused by the present path; resizing only occurs when an unusual caller supplies more waits.
-@@ -751,7 +861,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_EnumeratePhysicalDevices(
+@@ -751,7 +841,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_EnumeratePhysicalDevices(
  // ---------------------------------------------------------------------------
  // Both declared here for the idle repaint, which draws a frame the application did not ask for.
  static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
@@ -2145,7 +2102,7 @@ index 4b37520..dc0d64e 100644
                             bool repaint, bool* waitsConsumed);
  
  // Put the captured frame back, for when the effect is switched off while the picture is still.
-@@ -759,12 +869,19 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -759,12 +849,19 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
  // No model and no round trip: the composed result is replaced by the frame it was made from, which
  // is what the application drew and what it would draw again if it were running. Without this,
  // switching the effect off while paused leaves the edit on screen until something else redraws.
@@ -2167,7 +2124,7 @@ index 4b37520..dc0d64e 100644
          dc->vkEndCommandBuffer(sc.cb);
          return false;
      }
-@@ -772,12 +889,12 @@ static bool RestorePresent(DeviceChain* dc, SwapchainState& sc, VkImage swapchai
+@@ -772,12 +869,12 @@ static bool RestorePresent(DeviceChain* dc, SwapchainState& sc, VkImage swapchai
      VkSubmitInfo si{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
      si.commandBufferCount = 1;
      si.pCommandBuffers = &sc.cb;
@@ -2185,17 +2142,17 @@ index 4b37520..dc0d64e 100644
      {
          static std::once_flag said;
          std::call_once(said, [] { Log("[layer] idle repaint: put the captured frame back"); });
-@@ -851,6 +968,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -851,6 +948,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              for (size_t k = 0; k < kWantCount; ++k)
                      if (!std::strcmp(pCreateInfo->ppEnabledExtensionNames[i], kWantExts[k])) enabled[k] = true;
          for (size_t k = 0; k < kWantCount; ++k) {
 +            // Native HIP uses private coherent staging on the Vulkan side. In particular,
 +            // never let GPU reads of the answer alias memory the worker can overwrite.
-+            if (NativeHipBackend() && k < 3) continue;
++            if (k < 3) continue;
              if (!ic->surfaceMaintenance1 &&
                  !std::strcmp(kWantExts[k], VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME))
                  continue;
-@@ -886,6 +1006,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -886,6 +986,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
  
      link->u.pLayerInfo = link->u.pLayerInfo->pNext;
      auto* const nextLayerInfo = link->u.pLayerInfo;
@@ -2218,7 +2175,7 @@ index 4b37520..dc0d64e 100644
      VkResult res = create(physicalDevice, effective, pAllocator, pDevice);
      if (res != VK_SUCCESS && effective != pCreateInfo) {
          // Nothing added here is worth failing a device creation over.
-@@ -893,6 +1029,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -893,6 +1009,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              (int) res);
          link->u.pLayerInfo = nextLayerInfo;
          addedSwapMaint = false;
@@ -2226,7 +2183,7 @@ index 4b37520..dc0d64e 100644
          res = create(physicalDevice, pCreateInfo, pAllocator, pDevice);
      }
      if (res != VK_SUCCESS) return res;
-@@ -910,19 +1047,32 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -910,9 +1027,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
      dc->table.Load(*pDevice);
      dc->releaseImages = addedSwapMaint && dc->vkReleaseSwapchainImagesEXT != nullptr;
      if (!dc->vkQueuePresentKHR || !dc->vkCreateSwapchainKHR || !ic) dc->inert = true;
@@ -2237,35 +2194,30 @@ index 4b37520..dc0d64e 100644
  
 -    // Neural Rendering is an NGX feature and the helper only ever creates its own device on an
 -    // NVIDIA GPU, so on anything else there is nothing for this layer to do but cost a round trip.
--    // Hybrid machines are the case that matters: an implicit layer is loaded for every device the
--    // loader builds, including the integrated one a game may well be running on.
-+    // The NGX helper targets NVIDIA; the native HIP helper targets AMD. Do not activate
-+    // a helper on an unrelated device merely because the implicit layer was discovered.
++    // The native HIP worker runs on an AMD GPU, so on anything else there is nothing for this
++    // layer to do but cost a round trip.
+     // Hybrid machines are the case that matters: an implicit layer is loaded for every device the
+     // loader builds, including the integrated one a game may well be running on.
      char deviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE] = "?";
-     if (ic && ic->vkGetPhysicalDeviceProperties) {
+@@ -920,9 +1041,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
          VkPhysicalDeviceProperties props{};
          ic->vkGetPhysicalDeviceProperties(physicalDevice, &props);
          std::snprintf(deviceName, sizeof(deviceName), "%s", props.deviceName);
 -        if (props.vendorID != 0x10DE) {
-+        const uint32_t supportedVendor = NativeHipBackend() ? 0x1002u : 0x10DEu;
-+        bool vendorSupported = props.vendorID == supportedVendor;
++        bool vendorSupported = props.vendorID == 0x1002u;
 +#ifdef DLSSLOP_TEST_LAVAPIPE
 +        // Test builds only: exercise the real Vulkan capture/composition/IPC route
 +        // with Mesa's CPU driver. Production binaries have no vendor override.
-+        vendorSupported = vendorSupported ||
-+            (NativeHipBackend() && props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU);
++        vendorSupported = vendorSupported || props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
 +#endif
 +        if (!vendorSupported) {
              dc->inert = true;
 -            Log("[layer] inert on non-NVIDIA device (vendor %#x): %s", props.vendorID, deviceName);
-+            Log("[layer] backend %s inert on device (vendor %#x): %s",
-+                NativeHipBackend() ? "hip" : "ngx", props.vendorID, deviceName);
-+        } else if (NativeHipBackend()) {
-+            Log("[layer] native HIP backend: host-staging transport on %s", deviceName);
++            Log("[layer] inert on non-AMD device (vendor %#x): %s", props.vendorID, deviceName);
          }
      }
  
-@@ -950,11 +1100,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -950,11 +1077,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
      // was enabled and no helper was running.
      //
      // DLSSNR_IDLE_REPAINT=0 turns it off.
@@ -2278,7 +2230,7 @@ index 4b37520..dc0d64e 100644
          dc->repaintThread = std::thread([dc] {
              while (dc->repaintRun.load(std::memory_order_relaxed)) {
                  std::this_thread::sleep_for(std::chrono::milliseconds(60));
-@@ -1089,11 +1235,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -1089,11 +1212,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
                  }
  
                  const bool drew =
@@ -2294,7 +2246,7 @@ index 4b37520..dc0d64e 100644
                      pi.swapchainCount = 1;
                      pi.pSwapchains = &swapchain;
                      pi.pImageIndices = &index;
-@@ -1159,6 +1306,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
+@@ -1159,6 +1283,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
              sc.comp.reset();
              if (sc.fenceLeg1) dc->vkDestroyFence(device, sc.fenceLeg1, nullptr);
              if (sc.fenceLeg2) dc->vkDestroyFence(device, sc.fenceLeg2, nullptr);
@@ -2302,21 +2254,20 @@ index 4b37520..dc0d64e 100644
              if (sc.repaintFence) dc->vkDestroyFence(device, sc.repaintFence, nullptr);
              if (sc.pool) dc->vkDestroyCommandPool(device, sc.pool, nullptr);
          }
-@@ -1250,8 +1398,27 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
+@@ -1250,8 +1375,26 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
      }
      if (!dc || !dc->vkCreateSwapchainKHR) return VK_ERROR_INITIALIZATION_FAILED;
  
 +    // Native HIP supports display-referred SDR, linear scRGB/BT.709 FP16,
 +    // and PQ/BT.2020 HDR10. Other transfer/primary combinations need their
 +    // own color conversion and remain pass-through.
-+    const bool nativeColorSpace =
++    const bool unsupportedHdr = !(
 +        pCreateInfo->imageColorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR ||
 +        (pCreateInfo->imageFormat == VK_FORMAT_R16G16B16A16_SFLOAT &&
 +         pCreateInfo->imageColorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT) ||
-+        DetectHdrKind(pCreateInfo->imageFormat, pCreateInfo->imageColorSpace) == kHdrPq10;
-+    const bool unsupportedHdr = NativeHipBackend() && !nativeColorSpace;
++        DetectHdrKind(pCreateInfo->imageFormat, pCreateInfo->imageColorSpace) == kHdrPq10);
 +    bool unsupportedTransfer = false;
-+    if (NativeHipBackend() && !dc->inert && LayerEnabled()) {
++    if (!dc->inert && LayerEnabled()) {
 +        const VkImageUsageFlags required = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 +        VkSurfaceCapabilitiesKHR capabilities{};
 +        auto query = dc->instance ? dc->instance->table.vkGetPhysicalDeviceSurfaceCapabilitiesKHR : nullptr;
@@ -2331,7 +2282,7 @@ index 4b37520..dc0d64e 100644
          m.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
  
      VkResult res = dc->vkCreateSwapchainKHR(device, &m, pAllocator, pSwapchain);
-@@ -1269,14 +1436,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
+@@ -1269,14 +1412,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
      sc.width = pCreateInfo->imageExtent.width;
      sc.height = pCreateInfo->imageExtent.height;
      const bool tooSmall = sc.width < kMinW || sc.height < kMinH;
@@ -2351,7 +2302,7 @@ index 4b37520..dc0d64e 100644
                            : tooSmall ? " (too small)" : " (too large)") : "");
      dc->swapchains[*pSwapchain] = std::move(sc);
      return VK_SUCCESS;
-@@ -1303,6 +1473,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
+@@ -1303,6 +1449,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
          sc.comp.reset();
          if (sc.fenceLeg1) dc->vkDestroyFence(device, sc.fenceLeg1, nullptr);
          if (sc.fenceLeg2) dc->vkDestroyFence(device, sc.fenceLeg2, nullptr);
@@ -2359,31 +2310,28 @@ index 4b37520..dc0d64e 100644
          if (sc.repaintFence) dc->vkDestroyFence(device, sc.repaintFence, nullptr);
          if (sc.pool) dc->vkDestroyCommandPool(device, sc.pool, nullptr);
          dc->swapchains.erase(it);
-@@ -1335,6 +1506,23 @@ static bool SetLoaderData(DeviceChain* dc, void* object) {
+@@ -1335,6 +1482,20 @@ static bool SetLoaderData(DeviceChain* dc, void* object) {
  static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family) {
      VkDevice d = dc->self;
  
-+    if (NativeHipBackend()) {
-+        // Present-only queues cannot execute the composition's compute dispatches.
-+        // Proton normally presents on its graphics queue; unusual applications can
-+        // still present untouched instead of issuing invalid commands.
-+        if (!dc->instance || !dc->instance->table.vkGetPhysicalDeviceQueueFamilyProperties)
-+            return false;
-+        uint32_t count = 0;
-+        dc->instance->table.vkGetPhysicalDeviceQueueFamilyProperties(dc->physical, &count, nullptr);
-+        std::vector<VkQueueFamilyProperties> properties(count);
-+        dc->instance->table.vkGetPhysicalDeviceQueueFamilyProperties(dc->physical, &count,
-+                                                                   properties.data());
-+        if (family >= count || !(properties[family].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
-+            Log("[layer] present queue family %u cannot execute the HIP compositor", family);
-+            return false;
-+        }
++    // Present-only queues cannot execute the composition's compute dispatches.
++    // Proton normally presents on its graphics queue; unusual applications can
++    // still present untouched instead of issuing invalid commands.
++    if (!dc->instance || !dc->instance->table.vkGetPhysicalDeviceQueueFamilyProperties)
++        return false;
++    uint32_t count = 0;
++    dc->instance->table.vkGetPhysicalDeviceQueueFamilyProperties(dc->physical, &count, nullptr);
++    std::vector<VkQueueFamilyProperties> properties(count);
++    dc->instance->table.vkGetPhysicalDeviceQueueFamilyProperties(dc->physical, &count, properties.data());
++    if (family >= count || !(properties[family].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
++        Log("[layer] present queue family %u cannot execute the HIP compositor", family);
++        return false;
 +    }
 +
      VkCommandPoolCreateInfo cpci{};
      cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
      cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-@@ -1352,6 +1540,11 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
+@@ -1352,6 +1513,11 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
      fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
      if (dc->vkCreateFence(d, &fci, nullptr, &sc.fenceLeg1) != VK_SUCCESS) return false;
      if (dc->vkCreateFence(d, &fci, nullptr, &sc.fenceLeg2) != VK_SUCCESS) return false;
@@ -2395,7 +2343,7 @@ index 4b37520..dc0d64e 100644
  
      if (!dc->instance) return false;
      sc.comp = std::make_unique<dlssnr::Composition>(&dc->table, &dc->instance->table, d, dc->physical);
-@@ -1383,30 +1576,44 @@ static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
+@@ -1383,30 +1549,43 @@ static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
      return false;
  }
  
@@ -2434,10 +2382,9 @@ index 4b37520..dc0d64e 100644
 +    // present the game's original image without blocking or overwriting the slot.
 +    // Do the same while no worker serves (starting, failed or stopped): a request
 +    // then would only stall this present and outlive the worker.
-+    if (NativeHipBackend() &&
-+        (dc->shm.hdr->helperState.load(std::memory_order_acquire) != kHelperRunning ||
-+         dc->shm.hdr->seq_req.load(std::memory_order_acquire) !=
-+         dc->shm.hdr->seq_resp.load(std::memory_order_acquire)))
++    if (dc->shm.hdr->helperState.load(std::memory_order_acquire) != kHelperRunning ||
++        dc->shm.hdr->seq_req.load(std::memory_order_acquire) !=
++        dc->shm.hdr->seq_resp.load(std::memory_order_acquire))
 +        return false;
      VkDevice d = dc->self;
      VkCommandBuffer cb = sc.cb;
@@ -2447,30 +2394,24 @@ index 4b37520..dc0d64e 100644
  
      // The previous frame's compose, if it is still running, must finish before anything here
      // touches the surfaces it reads or the command buffer it was recorded into. Waiting here rather
-@@ -1437,19 +1644,26 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1437,19 +1616,21 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // frame on the 8-bit path it has always used. hdrActive doubles as the echo the helper reads, so
      // it builds the float images only for a layer that has said it will feed them.
      const uint32_t hdrMode = dc->shm.hdr ? dc->shm.hdr->hdrMode.load() : kHdrAuto;
--    const bool hdrActive = hdrMode != kHdrOff && (hdrMode == kHdrForce || sc.hdrKind != kHdrNone);
++    const uint32_t colorMode = dc->shm.hdr ? dc->shm.hdr->colourMode.load() : kColourAuto;
+     const bool hdrActive = hdrMode != kHdrOff && (hdrMode == kHdrForce || sc.hdrKind != kHdrNone);
 -    const bool hdrProxy = hdrActive && dc->shm.hdr &&
 -                          dc->shm.hdr->proxyFormat.load() == kProxyRgba16F;
 -    const uint32_t hdrTransfer = sc.hdrKind == kHdrPq10 ? 1u : 0u;
 -
 -    const bool linearHdr =
 -        hdrProxy || dlssnr::ColourIsLinearHdr(sc.format, dc->shm.hdr ? dc->shm.hdr->colourMode.load() : kColourAuto);
-+    const uint32_t colorMode = dc->shm.hdr ? dc->shm.hdr->colourMode.load() : kColourAuto;
-+    const bool native = NativeHipBackend();
-+    const bool hdrActive = hdrMode != kHdrOff &&
-+                          (hdrMode == kHdrForce || sc.hdrKind != kHdrNone);
-+    // HIP consumes an encoded picture in either precision; unlike NGX, format
-+    // support does not require rebuilding its model. The per-request hdrEncode
-+    // field publishes the selected transport before seq_req.
-+    const bool hdrProxy = hdrActive && (native || (dc->shm.hdr &&
-+                          dc->shm.hdr->proxyFormat.load() == kProxyRgba16F));
-+    const bool linearHdr = native
-+        ? (colorMode == kColourLinearHdr ||
-+           (colorMode == kColourAuto && sc.hdrKind != kHdrNone))
-+        : (hdrProxy || dlssnr::ColourIsLinearHdr(sc.format, colorMode));
++    // HIP consumes an encoded picture in either precision; unlike NGX, format support does not
++    // require rebuilding its model, so the float proxy follows the intent alone. The per-request
++    // hdrEncode field publishes the selected transport before seq_req.
++    const bool hdrProxy = hdrActive;
++    const bool linearHdr = colorMode == kColourLinearHdr ||
++                           (colorMode == kColourAuto && sc.hdrKind != kHdrNone);
 +    const uint32_t hdrTransfer = linearHdr && sc.hdrKind == kHdrPq10 ? 1u : 0u;
  
      // Point the transport at the shared-memory regions before Prepare sizes anything, so the first
@@ -2482,16 +2423,7 @@ index 4b37520..dc0d64e 100644
          uint32_t mw = 0, mh = 0;
          dlssnr::Composition::ModelExtent(sc.width, sc.height, fs, mw, mh);
          if (ShmMapFrames(dc->shm, size_t(mw) * mh * (hdrProxy ? 8 : 4)))
-@@ -1470,7 +1684,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
-     // through, and the helper honours them on exactly the frame they were set for.
-     sc.comp->SetDmaBuf(DmaBufEnabled());
- 
--    if (!sc.comp->Prepare(sc.width, sc.height, sc.format, fs, linearHdr, hdrProxy, hdrTransfer)) {
-+    if (!sc.comp->Prepare(sc.width, sc.height, sc.format, fs, linearHdr, hdrProxy, hdrTransfer, native)) {
-         Log("[layer] composition cannot run here: %s", sc.comp->Reason());
-         return false;
-     }
-@@ -1534,8 +1748,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1534,8 +1715,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // A capture is asked for by writing a frame count into the header; taking it clears the request,
      // so one press produces one run rather than one per frame for as long as nobody clears it.
      if (dc->shm.hdr) {
@@ -2507,7 +2439,7 @@ index 4b37520..dc0d64e 100644
      }
  
      VkCommandBufferBeginInfo bi{};
-@@ -1559,7 +1778,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1559,7 +1745,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          si.pWaitDstStageMask = nullptr;
      };
  
@@ -2521,7 +2453,7 @@ index 4b37520..dc0d64e 100644
          if (!NoteVk(dc, dc->vkEndCommandBuffer(cb), "vkEndCommandBuffer")) return false;
          if (!NoteVk(dc, dc->vkQueueSubmit(queue, 1, &si, fence), "vkQueueSubmit")) return false;
          if (waitsConsumed && si.waitSemaphoreCount != 0) *waitsConsumed = true;
-@@ -1574,7 +1799,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1574,7 +1766,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
  
      // ---- leg 1: the frame the model is shown ----
      if (!NoteVk(dc, dc->vkBeginCommandBuffer(cb, &bi), "vkBeginCommandBuffer")) return false;
@@ -2530,7 +2462,7 @@ index 4b37520..dc0d64e 100644
          dc->vkEndCommandBuffer(cb);
          return false;
      }
-@@ -1595,20 +1820,33 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1595,20 +1787,33 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          return false;
      }
      sc.comp->MarkModelFrame();
@@ -2569,7 +2501,7 @@ index 4b37520..dc0d64e 100644
  
      if (dc->shm.hdr) {
          ShmStore64(dc->shm.hdr->layerFramesLo, dc->shm.hdr->layerFramesHi, ++dc->framesComposed);
-@@ -1650,11 +1888,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1650,11 +1855,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
      dc->lastPresentMs.store(NowMs(), std::memory_order_relaxed);
  
      // Whether this call's wait semaphores have already been consumed by a submit of ours. They are
@@ -2584,7 +2516,7 @@ index 4b37520..dc0d64e 100644
  
      // Held from here to the present at the end, alongside Hook_QueueSubmit{,2}. Vulkan requires
      // external synchronization for every operation on a queue; the repaint uses the application's
-@@ -1679,6 +1919,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1679,6 +1886,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
                  if (k < 3) Log("[layer] present: swapchain %p is not primary", (void*)pPresentInfo->pSwapchains[i]);
                  continue;
              }
@@ -2594,7 +2526,7 @@ index 4b37520..dc0d64e 100644
              sc.queue = queue;
              if (!sc.ready && !dc->shm.dead) {
                  if (!CreateResources(dc, sc, family)) {
-@@ -1700,11 +1943,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1700,11 +1910,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
              }
              const uint32_t waitCount = waitsConsumed ? 0u : pPresentInfo->waitSemaphoreCount;
              bool submittedWaits = false;
@@ -2609,7 +2541,7 @@ index 4b37520..dc0d64e 100644
              if (VerboseEnabled()) {
                  Log("[present] swapchain=%p image=%u seq=%u composed=%d",
                      (void*)pPresentInfo->pSwapchains[i], pPresentInfo->pImageIndices[i],
-@@ -1723,13 +1967,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1723,13 +1934,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
          }
      }
  
@@ -2626,12 +2558,12 @@ index 4b37520..dc0d64e 100644
      return dc->vkQueuePresentKHR(queue, &pi);
  }
  
-@@ -1793,11 +2037,12 @@ static PFN_vkVoidFunction LookupHook(const char* n) {
+@@ -1793,11 +2004,12 @@ static PFN_vkVoidFunction LookupHook(const char* n) {
      if (!std::strcmp(n, "vkGetDeviceQueue2")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue2;
      if (!std::strcmp(n, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)Hook_CreateSwapchainKHR;
      if (!std::strcmp(n, "vkDestroySwapchainKHR")) return (PFN_vkVoidFunction)Hook_DestroySwapchainKHR;
 +    if (!std::strcmp(n, "vkQueuePresentKHR")) return (PFN_vkVoidFunction)Hook_QueuePresentKHR;
-+    if (!QueueHooksNeeded()) return nullptr;
++    if (!IdleRepaintWanted()) return nullptr;
      if (!std::strcmp(n, "vkAcquireNextImageKHR")) return (PFN_vkVoidFunction)Hook_AcquireNextImageKHR;
      if (!std::strcmp(n, "vkQueueSubmit")) return (PFN_vkVoidFunction)Hook_QueueSubmit;
      if (!std::strcmp(n, "vkQueueSubmit2")) return (PFN_vkVoidFunction)Hook_QueueSubmit2;
@@ -2640,12 +2572,12 @@ index 4b37520..dc0d64e 100644
      return nullptr;
  }
  
-@@ -1807,11 +2052,12 @@ static PFN_vkVoidFunction LookupDeviceHook(const char* n) {
+@@ -1807,11 +2019,12 @@ static PFN_vkVoidFunction LookupDeviceHook(const char* n) {
      if (!std::strcmp(n, "vkGetDeviceQueue2")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue2;
      if (!std::strcmp(n, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)Hook_CreateSwapchainKHR;
      if (!std::strcmp(n, "vkDestroySwapchainKHR")) return (PFN_vkVoidFunction)Hook_DestroySwapchainKHR;
 +    if (!std::strcmp(n, "vkQueuePresentKHR")) return (PFN_vkVoidFunction)Hook_QueuePresentKHR;
-+    if (!QueueHooksNeeded()) return nullptr;
++    if (!IdleRepaintWanted()) return nullptr;
      if (!std::strcmp(n, "vkAcquireNextImageKHR")) return (PFN_vkVoidFunction)Hook_AcquireNextImageKHR;
      if (!std::strcmp(n, "vkQueueSubmit")) return (PFN_vkVoidFunction)Hook_QueueSubmit;
      if (!std::strcmp(n, "vkQueueSubmit2")) return (PFN_vkVoidFunction)Hook_QueueSubmit2;
@@ -2654,7 +2586,7 @@ index 4b37520..dc0d64e 100644
      return nullptr;
  }
  
-@@ -1851,7 +2097,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
+@@ -1851,7 +2064,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
      if (*pCount < 1) { *pCount = 1; return VK_INCOMPLETE; }
      std::memset(pProperties, 0, sizeof(*pProperties));
      std::strncpy(pProperties->layerName, VK_LAYER_NAME, VK_MAX_EXTENSION_NAME_SIZE - 1);

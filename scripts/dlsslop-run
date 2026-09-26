@@ -21,8 +21,7 @@ Environment defaults:
 Relative paths are resolved against the launcher's working directory.
 
 The launcher sets these values for COMMAND, overriding inherited values:
-  DLSSLOP_AMD_ENABLE=1  DLSSNR_ENABLE=1  DLSSLOP_BACKEND=hip
-  DLSSNR_DMABUF=0      DLSSNR_IDLE_REPAINT=0
+  DLSSLOP_AMD_ENABLE=1  DLSSNR_ENABLE=1  DLSSNR_IDLE_REPAINT=0
 It unsets DLSSNR_DISABLE and VKLayer_DLSS5. Other environment is inherited.
 COMMAND and its arguments are passed unchanged; its exit status is preserved.
 Start dlsslopd separately before launching the game.
@@ -108,8 +107,7 @@ else
         exit 1
     fi
 fi
-export DLSSLOP_AMD_ENABLE=1 DLSSNR_ENABLE=1 DLSSLOP_BACKEND=hip
-export DLSSNR_DMABUF=0 DLSSNR_IDLE_REPAINT=0
+export DLSSLOP_AMD_ENABLE=1 DLSSNR_ENABLE=1 DLSSNR_IDLE_REPAINT=0
 export DLSSNR_LOG=${log_override:-${DLSSNR_SHM%/*}/layer.log}
 unset DLSSNR_DISABLE VKLayer_DLSS5
 shopt -s execfail

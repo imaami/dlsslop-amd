@@ -95,10 +95,10 @@ def main():
             assert got["argv"] == arguments
             assert got["env"]["DLSSNR_SHM"] == str(channel)
             assert got["env"]["DLSSNR_LOG"] == str(channel.parent / "layer.log")
-            assert got["env"]["DLSSLOP_BACKEND"] == "hip"
+            assert got["env"]["DLSSLOP_BACKEND"] == "inherited"
             assert got["env"]["DLSSLOP_AMD_ENABLE"] == "1"
             assert got["env"]["DLSSNR_ENABLE"] == "1"
-            assert got["env"]["DLSSNR_DMABUF"] == "0"
+            assert got["env"]["DLSSNR_DMABUF"] == "1"
             assert got["env"]["DLSSNR_IDLE_REPAINT"] == "0"
             assert "DLSSNR_DISABLE" not in got["env"] and "VKLayer_DLSS5" not in got["env"]
             assert "DLSSLOP_SHM" not in got["env"] and "DLSSLOP_LOG" not in got["env"]
