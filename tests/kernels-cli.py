@@ -96,8 +96,8 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
         'geometry.h is included directly'
     native = json.loads((root / 'mixed-out/modules.json').read_text())[0]
     assert native['sources'] == {name: hashlib.sha256((backend / name).read_bytes()).hexdigest()
-                                 for name in (*native_sources, 'kernel.h', 'geometry.h', 'tuning_math.h',
-                                              'color_preserve_math.h', 'temporal_math.h')}, native
+                                 for name in (*native_sources, 'kernel.h', 'geometry.h', 'codec_math.h',
+                                              'tuning_math.h', 'color_preserve_math.h', 'temporal_math.h')}, native
     # The compile finds an upstream source's quoted includes through -I backend, and a header's own
     # includes beside it: decoys beside the source must not be recorded.
     kernels = root / 'kernels'

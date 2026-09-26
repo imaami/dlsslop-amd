@@ -22,6 +22,7 @@
 // SOFTWARE.
 
 #include "codec.h"
+#include "codec_math.h"
 
 #include <algorithm>
 #include <array>
@@ -33,15 +34,9 @@
 namespace dlsslop {
 namespace {
 
-struct Vec3 {
-    float r, g, b;
-    Vec3 operator*(float x) const { return {r * x, g * x, b * x}; }
-};
-
-Vec3 lerp(Vec3 a, Vec3 b, float f)
+Rgb operator*(Rgb c, float x)
 {
-    return {a.r + (b.r - a.r) * f, a.g + (b.g - a.g) * f,
-            a.b + (b.b - a.b) * f};
+    return {c.r * x, c.g * x, c.b * x};
 }
 
 // Matches conversion into the upstream intermediate RGBA16_FLOAT textures.
@@ -118,7 +113,7 @@ float srgb_decode(float x)
     return x <= 0.04045f ? x / 12.92f : std::pow((x + 0.055f) / 1.055f, 2.4f);
 }
 
-Vec3 decode(Vec3 x)
+Rgb decode(Rgb x)
 {
     return {srgb_decode(x.r), srgb_decode(x.g), srgb_decode(x.b)};
 }
@@ -129,22 +124,12 @@ float srgb_encode(float x)
     return x <= 0.0031308f ? x * 12.92f : 1.055f * std::pow(x, 1.0f / 2.4f) - 0.055f;
 }
 
-std::uint8_t unorm8(float x)
-{
-    // HLSL round() is nearest-even; do not inherit the process's fenv mode.
-    const float scaled = saturate(x) * 255.0f;
-    const unsigned low = static_cast<unsigned>(scaled);
-    const float fraction = scaled - float(low);
-    return static_cast<std::uint8_t>(low + unsigned(
-        fraction > 0.5f || (fraction == 0.5f && (low & 1))));
-}
-
-float luminance(Vec3 x)
+float luminance(Rgb x)
 {
     return x.r * 0.212639f + x.g * 0.715169f + x.b * 0.072192f;
 }
 
-Vec3 to_lab(Vec3 c)
+Rgb to_lab(Rgb c)
 {
     const float l = std::cbrt(0.4122214708f * c.r + 0.5363325363f * c.g + 0.0514459929f * c.b);
     const float m = std::cbrt(0.2119034982f * c.r + 0.6806995451f * c.g + 0.1073969566f * c.b);
@@ -154,7 +139,7 @@ Vec3 to_lab(Vec3 c)
             0.0259040371f * l + 0.7827717662f * m - 0.8086757660f * s};
 }
 
-Vec3 from_lab(Vec3 c)
+Rgb from_lab(Rgb c)
 {
     float l = c.r + 0.3963377774f * c.g + 0.2158037573f * c.b;
     float m = c.r - 0.1055613458f * c.g - 0.0638541728f * c.b;
@@ -167,7 +152,7 @@ Vec3 from_lab(Vec3 c)
             -0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s};
 }
 
-Vec3 clamp_ap1(Vec3 c)
+Rgb clamp_ap1(Rgb c)
 {
     const float r = std::max(0.0f, 0.613097f * c.r + 0.339523f * c.g + 0.047379f * c.b);
     const float g = std::max(0.0f, 0.070194f * c.r + 0.916354f * c.g + 0.013452f * c.b);
@@ -177,10 +162,10 @@ Vec3 clamp_ap1(Vec3 c)
             -0.024003f * r - 0.128969f * g + 1.152972f * b};
 }
 
-Vec3 hue(Vec3 incorrect, Vec3 correct)
+Rgb hue(Rgb incorrect, Rgb correct)
 {
-    Vec3 a = to_lab(incorrect);
-    const Vec3 b = to_lab(correct);
+    Rgb a = to_lab(incorrect);
+    const Rgb b = to_lab(correct);
     const float ca = std::hypot(a.g, a.b), cb = std::hypot(b.g, b.b);
     const float scale = cb == 0.0f ? 1.0f : ca / cb;
     a.g = b.g * scale;
@@ -188,7 +173,7 @@ Vec3 hue(Vec3 incorrect, Vec3 correct)
     return clamp_ap1(from_lab(a));
 }
 
-Vec3 upgrade(Vec3 original, Vec3 proxy, Vec3 neural, float strength)
+Rgb upgrade(Rgb original, Rgb proxy, Rgb neural, float strength)
 {
     const float oy = luminance(original), py = luminance(proxy), ny = luminance(neural);
     if (ny <= 1e-5f)
@@ -208,59 +193,29 @@ void validate(const Geometry& g)
         throw std::invalid_argument("inconsistent codec geometry");
 }
 
-Vec3 read_rgba8(const std::uint8_t* p, std::size_t pixel)
+Rgb rgba8(const std::uint8_t* p)
 {
-    return {float(p[pixel * 4]) / 255.0f, float(p[pixel * 4 + 1]) / 255.0f,
-            float(p[pixel * 4 + 2]) / 255.0f};
+    return {float(p[0]) / 255.0f, float(p[1]) / 255.0f, float(p[2]) / 255.0f};
 }
 
-Vec3 read_proxy(const std::uint8_t* source, std::size_t pixel, bool fp16)
+// The answer at source pixel (x, y) through the upstream FP16 surface. Like
+// the GPU codec, reject it when a texel it reads is not a finite binary16.
+Rgb answer(const float* neural_rgb, const Geometry& g, unsigned x, unsigned y)
 {
-    if (!fp16)
-        return read_rgba8(source, pixel);
-    const std::uint8_t* p = source + pixel * 8;
-    const Vec3 c{unpack_half(p), unpack_half(p + 2), unpack_half(p + 4)};
-    if (!std::isfinite(c.r) || !std::isfinite(c.g) || !std::isfinite(c.b))
-        throw std::range_error("FP16 proxy contains nonfinite RGB samples");
-    return c;
-}
-
-Vec3 sample_source(const std::uint8_t* source, const Geometry& g, float x, float y,
-                   bool fp16)
-{
-    x = std::clamp(x, 0.0f, float(g.source_width - 1));
-    y = std::clamp(y, 0.0f, float(g.source_height - 1));
-    const unsigned x0 = unsigned(x), y0 = unsigned(y);
-    const unsigned x1 = std::min(x0 + 1, g.source_width - 1);
-    const unsigned y1 = std::min(y0 + 1, g.source_height - 1);
-    const float fx = x - float(x0), fy = y - float(y0);
-    return lerp(lerp(read_proxy(source, std::size_t(y0) * g.source_width + x0, fp16),
-                     read_proxy(source, std::size_t(y0) * g.source_width + x1, fp16), fx),
-                lerp(read_proxy(source, std::size_t(y1) * g.source_width + x0, fp16),
-                     read_proxy(source, std::size_t(y1) * g.source_width + x1, fp16), fx), fy);
-}
-
-Vec3 sample_network(const float* source, const Geometry& g, unsigned channels,
-                    float x, float y, bool round_half)
-{
-    x = std::clamp(x, float(g.x), float(g.x + g.fit_width - 1));
-    y = std::clamp(y, float(g.y), float(g.y + g.fit_height - 1));
-    const unsigned x0 = unsigned(x), y0 = unsigned(y);
-    const unsigned x1 = std::min(x0 + 1, g.x + g.fit_width - 1);
-    const unsigned y1 = std::min(y0 + 1, g.y + g.fit_height - 1);
-    const float fx = x - float(x0), fy = y - float(y0);
-    const auto read = [&](unsigned px, unsigned py) {
-        const float* p = source + (std::size_t(py) * g.width + px) * channels;
-        return round_half ? Vec3{half_round(p[0]), half_round(p[1]), half_round(p[2])} :
-                            Vec3{p[0], p[1], p[2]};
-    };
-    const Vec3 c = lerp(lerp(read(x0, y0), read(x1, y0), fx),
-                        lerp(read(x0, y1), read(x1, y1), fx), fy);
-    // Like the GPU codec, reject a nonfinite or FP16-overflow texel. Even at zero
-    // weight it makes the result nonfinite (inf * 0 is NaN).
-    if (!std::isfinite(c.r) || !std::isfinite(c.g) || !std::isfinite(c.b))
+    const Rgb c = sample_answer([&](unsigned px, unsigned py) {
+        const float* p = neural_rgb + (std::size_t(py) * g.width + px) * 3;
+        return Rgb{half_round(p[0]), half_round(p[1]), half_round(p[2])};
+    }, g, x, y);
+    if (!finite(c))
         throw std::range_error("neural output contains nonfinite or FP16-overflow samples");
     return c;
+}
+
+void reflect_padding(const Geometry& g, std::vector<float>& rgba)
+{
+    const std::size_t row = std::size_t(g.width) * 4;
+    for (unsigned y = g.valid_height; y < g.height; ++y)
+        std::memcpy(rgba.data() + y * row, rgba.data() + codec_row(g, y) * row, row * sizeof(float));
 }
 
 } // namespace
@@ -306,15 +261,21 @@ void encode_proxy(const std::uint8_t* source, const Geometry& g, bool fp16,
     validate(g);
     if (!source)
         throw std::invalid_argument("null source image");
+    const auto read8 = [&](unsigned x, unsigned y) {
+        return rgba8(source + (std::size_t(y) * g.source_width + x) * 4);
+    };
+    const auto read16 = [&](unsigned x, unsigned y) {
+        const std::uint8_t* p = source + (std::size_t(y) * g.source_width + x) * 8;
+        return Rgb{unpack_half(p), unpack_half(p + 2), unpack_half(p + 4)};
+    };
     rgba.resize(std::size_t(g.width) * g.height * 4);
     for (unsigned y = 0; y < g.valid_height; ++y) {
         for (unsigned x = 0; x < g.width; ++x) {
-            Vec3 c{};
-            if (x >= g.x && x < g.x + g.fit_width && y >= g.y && y < g.y + g.fit_height) {
-                const float sx = (float(x) + 0.5f - float(g.x)) * float(g.source_width) / float(g.fit_width) - 0.5f;
-                const float sy = (float(y) + 0.5f - float(g.y)) * float(g.source_height) / float(g.fit_height) - 0.5f;
-                c = sample_source(source, g, sx, sy, fp16);
-            }
+            Rgb c{};
+            if (fitted(g, x, y))
+                c = fp16 ? sample_proxy(read16, g, x, y) : sample_proxy(read8, g, x, y);
+            if (!finite(c)) // Only FP16 samples can be.
+                throw std::range_error("FP16 proxy contains nonfinite RGB samples");
             float* p = rgba.data() + (std::size_t(y) * g.width + x) * 4;
             p[0] = half_round(c.r);
             p[1] = half_round(c.g);
@@ -322,14 +283,7 @@ void encode_proxy(const std::uint8_t* source, const Geometry& g, bool fp16,
             p[3] = 1.0f;
         }
     }
-    // reflect101: 0,1,...,h-2,h-1,h-2,... . All supported tiers need less
-    // than one reflected period, matching native_game_rgb_input.hlsl.
-    for (unsigned y = g.valid_height; y < g.height; ++y) {
-        const unsigned reflected = 2 * g.valid_height - 2 - y;
-        std::memcpy(rgba.data() + std::size_t(y) * g.width * 4,
-                    rgba.data() + std::size_t(reflected) * g.width * 4,
-                    std::size_t(g.width) * 4 * sizeof(float));
-    }
+    reflect_padding(g, rgba);
 }
 
 void feedback_neural_rgb(const float* neural_rgb, const Geometry& g,
@@ -341,16 +295,17 @@ void feedback_neural_rgb(const float* neural_rgb, const Geometry& g,
     rgba.resize(std::size_t(g.width) * g.height * 4);
     for (unsigned y = 0; y < g.valid_height; ++y) {
         for (unsigned x = 0; x < g.width; ++x) {
-            Vec3 c{};
-            if (x >= g.x && x < g.x + g.fit_width && y >= g.y && y < g.y + g.fit_height) {
+            Rgb c{};
+            if (fitted(g, x, y)) {
                 const float* p = neural_rgb + (std::size_t(y) * g.width + x) * 3;
-                if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2]))
-                    throw std::runtime_error("neural feedback contains nonfinite samples");
-                c = precision16 ? Vec3{half_round(p[0]), half_round(p[1]), half_round(p[2])} :
-                    Vec3{half_round(float(unorm8(p[0])) / 255.0f),
-                         half_round(float(unorm8(p[1])) / 255.0f),
-                         half_round(float(unorm8(p[2])) / 255.0f)};
-                if (!std::isfinite(c.r) || !std::isfinite(c.g) || !std::isfinite(c.b))
+                const Rgb raw{p[0], p[1], p[2]};
+                c = precision16 ? Rgb{half_round(p[0]), half_round(p[1]), half_round(p[2])} :
+                    Rgb{half_round(float(unorm8(p[0])) / 255.0f),
+                        half_round(float(unorm8(p[1])) / 255.0f),
+                        half_round(float(unorm8(p[2])) / 255.0f)};
+                // Binary16 feedback also rejects what rounds past binary16;
+                // UNORM8 feedback, which clamps, only nonfinite input.
+                if (!finite(raw) || !finite(c))
                     throw std::runtime_error("neural feedback contains nonfinite or FP16-overflow samples");
             }
             float* p = rgba.data() + (std::size_t(y) * g.width + x) * 4;
@@ -360,12 +315,7 @@ void feedback_neural_rgb(const float* neural_rgb, const Geometry& g,
             p[3] = 1.0f;
         }
     }
-    for (unsigned y = g.valid_height; y < g.height; ++y) {
-        const unsigned reflected = 2 * g.valid_height - 2 - y;
-        std::memcpy(rgba.data() + std::size_t(y) * g.width * 4,
-                    rgba.data() + std::size_t(reflected) * g.width * 4,
-                    std::size_t(g.width) * 4 * sizeof(float));
-    }
+    reflect_padding(g, rgba);
 }
 
 void decode_neural_rgba8(const std::uint8_t* original, const Geometry& g,
@@ -383,10 +333,8 @@ void decode_neural_proxy(const std::uint8_t* original, const Geometry& g, bool f
     const unsigned pixel_bytes = fp16 ? 8 : 4;
     output.resize(std::size_t(g.source_width) * g.source_height * pixel_bytes);
     for (unsigned y = 0; y < g.source_height; ++y) {
-        const float ny = float(g.y) + (float(y) + 0.5f) * float(g.fit_height) / float(g.source_height) - 0.5f;
         for (unsigned x = 0; x < g.source_width; ++x) {
-            const float nx = float(g.x) + (float(x) + 0.5f) * float(g.fit_width) / float(g.source_width) - 0.5f;
-            const Vec3 neural = sample_network(neural_rgb, g, 3, nx, ny, true);
+            const Rgb neural = answer(neural_rgb, g, x, y);
             const std::size_t p = (std::size_t(y) * g.source_width + x) * pixel_bytes;
             if (fp16) {
                 pack_half(neural.r, output.data() + p);
@@ -420,18 +368,20 @@ void decode_rgba8(const std::uint8_t* original, const Geometry& g,
         std::memcpy(output.data(), original, output.size());
         return;
     }
+    const auto encoded = [&](unsigned x, unsigned y) {
+        const float* p = encoded_rgba + (std::size_t(y) * g.width + x) * 4;
+        return Rgb{p[0], p[1], p[2]};
+    };
     for (unsigned y = 0; y < g.source_height; ++y) {
-        const float ny = float(g.y) + (float(y) + 0.5f) * float(g.fit_height) / float(g.source_height) - 0.5f;
         for (unsigned x = 0; x < g.source_width; ++x) {
-            const float nx = float(g.x) + (float(x) + 0.5f) * float(g.fit_width) / float(g.source_width) - 0.5f;
             const std::size_t pixel = std::size_t(y) * g.source_width + x;
-            const Vec3 source = decode(read_rgba8(original, pixel));
-            const Vec3 proxy = decode(sample_network(encoded_rgba, g, 4, nx, ny, false));
-            const Vec3 neural = decode(sample_network(neural_rgb, g, 3, nx, ny, true));
-            const Vec3 upgraded = upgrade(source, proxy, neural, transfer_strength);
+            const Rgb source = decode(rgba8(original + pixel * 4));
+            const Rgb proxy = decode(sample_answer(encoded, g, x, y));
+            const Rgb neural = decode(answer(neural_rgb, g, x, y));
+            const Rgb upgraded = upgrade(source, proxy, neural, transfer_strength);
             const float oy = luminance(source), uy = luminance(upgraded);
             const float ratio = oy == 0.0f ? 1.0f : std::clamp(uy / oy, 0.0f, 4.0f);
-            const Vec3 result = lerp(source * ratio, upgraded, color_strength);
+            const Rgb result = lerp(source * ratio, upgraded, color_strength);
             output[pixel * 4] = unorm8(srgb_encode(result.r));
             output[pixel * 4 + 1] = unorm8(srgb_encode(result.g));
             output[pixel * 4 + 2] = unorm8(srgb_encode(result.b));
