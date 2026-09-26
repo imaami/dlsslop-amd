@@ -27,7 +27,10 @@ class GpuCodec {
     std::uint8_t* pinned_[2]{};
     std::size_t pinned_bytes_ = 0;
     Geometry uploaded_{};
-    bool uploaded_fp16_ = false;
+    // Per proxy precision, RGBA8 then RGBA16F: its kernels and bytes per pixel.
+    struct Format { Kernel encode, decode; unsigned bytes; };
+    static constexpr Format kFormats[2] = {{kEncodeRgba8, kDecodeRgba8, 4}, {kEncodeRgba16f, kDecodeRgba16f, 8}};
+    const Format* format_ = kFormats; // The latest encode's.
 
     void unpin() noexcept
     {
@@ -97,14 +100,14 @@ public:
         validate(g);
         if (!device_rgba)
             throw std::invalid_argument("null GPU encode output");
-        const std::size_t bytes = std::size_t(g.source_width) * g.source_height * (fp16 ? 8 : 4);
+        format_ = &kFormats[fp16];
+        const std::size_t bytes = std::size_t(g.source_width) * g.source_height * format_->bytes;
         reserve(bytes);
         api_.Check(api_.hipMemcpyAsync(proxy_, input, bytes, 4, stream_), "upload codec proxy");
         *invalid_ = 0;
         uploaded_ = g;
-        uploaded_fp16_ = fp16;
         void* args[] = {&proxy_, &device_rgba, &invalid_, &uploaded_};
-        kernels_.launch(fp16 ? kEncodeRgba16f : kEncodeRgba8, g.width * g.height, args);
+        kernels_.launch(format_->encode, g.width * g.height, args);
     }
 
     // A subsequent pass consumes the preceding raw RGB output at the latest
@@ -128,8 +131,8 @@ public:
             throw std::invalid_argument("GPU decode without an encode");
         const unsigned pixels = uploaded_.source_width * uploaded_.source_height;
         void* args[] = {&proxy_, &neural_rgb, &invalid_, &uploaded_};
-        kernels_.launch(uploaded_fp16_ ? kDecodeRgba16f : kDecodeRgba8, pixels, args);
-        api_.Check(api_.hipMemcpyAsync(output, proxy_, std::size_t(pixels) * (uploaded_fp16_ ? 8 : 4), 4, stream_),
+        kernels_.launch(format_->decode, pixels, args);
+        api_.Check(api_.hipMemcpyAsync(output, proxy_, std::size_t(pixels) * format_->bytes, 4, stream_),
                    "read codec proxy");
     }
 
