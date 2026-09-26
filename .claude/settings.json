@@ -1,0 +1,30 @@
+{
+  "attribution": {
+    "sessionUrl": false
+  },
+  "permissions": {
+    "allow": [
+      "Bash(bash .claude/skills/review-bots/rabbit.sh *)",
+      "Bash(bash .claude/skills/review-bots/pilot.sh *)",
+      "Bash(bash .claude/skills/review-bots/codex.sh *)",
+      "Bash(bash .claude/skills/review-bots/gpt.sh fetch)",
+      "Bash(bash .claude/skills/review-bots/gpt.sh reply *)",
+      "Bash(bash .claude/skills/review-bots/gpt.sh resolve *)",
+      "Bash(bash .claude/skills/review-bots/gpt.sh unresolve *)",
+      "Bash(bash .claude/skills/review-bots/gpt.sh comment *)",
+      "Bash(cmake --build *)",
+      "Bash(ctest *)",
+      "Bash(git status*)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git add *)",
+      "Bash(git commit -m *)",
+      "Bash(git push)"
+    ],
+    "deny": [
+      "Bash(git push -f*)",
+      "Bash(git push --force*)"
+    ]
+  }
+}
