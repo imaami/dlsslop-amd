@@ -289,8 +289,7 @@ int select_device(int requested)
 }
 
 class Mapping {
-    int fd_ = -1;
-    void* mapping_ = MAP_FAILED;
+    struct Descriptor { int fd = -1; ~Descriptor() { if (fd >= 0) close(fd); } } file_;
 public:
     ShmHeader* h = nullptr;
     uint8_t* input = nullptr;
@@ -301,45 +300,22 @@ public:
         const auto parent = std::filesystem::path(name).parent_path();
         if (parent.empty()) throw std::runtime_error("--shm requires a path inside a private directory");
         dlsslop::private_directory(parent, "shared-memory");
-        fd_ = open(name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
-        if (fd_ < 0) system_error("open shared-memory file");
-        if (flock(fd_, LOCK_EX | LOCK_NB)) {
-            close(fd_); fd_ = -1;
+        file_.fd = open(name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+        if (file_.fd < 0) system_error("open shared-memory file");
+        if (flock(file_.fd, LOCK_EX | LOCK_NB))
             throw std::runtime_error("another worker owns this shared-memory file");
-        }
         struct stat st{};
-        if (fstat(fd_, &st) || !S_ISREG(st.st_mode) || st.st_uid != getuid()) {
-            close(fd_); fd_ = -1;
+        if (fstat(file_.fd, &st) || !S_ISREG(st.st_mode) || st.st_uid != getuid())
             throw std::runtime_error("shared-memory file must be regular and owned by the current user");
-        }
-        if (fchmod(fd_, 0600)) {
-            const int error = errno;
-            close(fd_); fd_ = -1;
-            errno = error;
-            system_error("make shared-memory file private");
-        }
-        if (ftruncate(fd_, static_cast<off_t>(ShmTotalBytes()))) {
-            const int error = errno;
-            close(fd_); fd_ = -1;
-            errno = error;
-            system_error("size shared-memory file");
-        }
-        mapping_ = mmap(nullptr, ShmTotalBytes(), PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
-        if (mapping_ == MAP_FAILED) {
-            const int error = errno;
-            close(fd_); fd_ = -1;
-            errno = error;
-            system_error("map shared-memory file");
-        }
-        h = static_cast<ShmHeader*>(mapping_);
+        if (fchmod(file_.fd, 0600)) system_error("make shared-memory file private");
+        if (ftruncate(file_.fd, static_cast<off_t>(ShmTotalBytes()))) system_error("size shared-memory file");
+        void* const mapping = mmap(nullptr, ShmTotalBytes(), PROT_READ | PROT_WRITE, MAP_SHARED, file_.fd, 0);
+        if (mapping == MAP_FAILED) system_error("map shared-memory file");
+        h = static_cast<ShmHeader*>(mapping);
         if (h->magic.load() != kShmMagic || h->version.load() != kShmVersion) ShmInitNativeDefaults(h);
-        input = static_cast<uint8_t*>(mapping_) + kHeaderBytes;
+        input = static_cast<uint8_t*>(mapping) + kHeaderBytes;
         output = input + kMaxFrame;
         h->quit.store(0);
-        h->proxyExportSeq.store(0);
-        h->answerExportSeq.store(0);
-        h->layerProxySeq.store(0);
-        h->layerAnswerSeq.store(0);
         h->modelUp.store(0);
         h->seq_ok.store(0);
         // Answer a request left by a previous worker as failed, so the layer
@@ -351,12 +327,9 @@ public:
     Mapping(const Mapping&) = delete;
     ~Mapping()
     {
-        if (h) {
-            h->modelUp.store(0);
-            if (h->helperState.load() != kHelperModelFailed) h->helperState.store(kHelperStopped);
-            munmap(mapping_, ShmTotalBytes());
-        }
-        if (fd_ >= 0) close(fd_);
+        h->modelUp.store(0);
+        if (h->helperState.load() != kHelperModelFailed) h->helperState.store(kHelperStopped);
+        munmap(h, ShmTotalBytes());
     }
     void reason(const std::string& text)
     {
@@ -390,20 +363,15 @@ class Engine {
 public:
     float upload_ms = 0, inference_ms = 0, readback_ms = 0;
     explicit Engine(Options o) : options_(std::move(o)) {}
-    ~Engine() { reset(); }
-    void reset()
+    // The members go next, in reverse order: the helpers before the network whose runtime they use.
+    ~Engine()
     {
         if (!network_) return;
         auto& api = network_->Runtime();
         api.hipStreamSynchronize(network_->Stream());
         for (auto event : marks_) api.hipEventDestroy(event);
-        temporal_.reset();
-        gpu_codec_.reset();
-        kernels_.reset();
         for (void* buffer : {device_input_, device_feedback_, device_output_, device_scratch_})
             if (buffer) api.hipFree(buffer);
-        device_input_ = device_feedback_ = device_output_ = device_scratch_ = answer_ = nullptr;
-        network_.reset();
     }
     void prepare()
     {
@@ -772,6 +740,11 @@ void run_worker(const Options& o)
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     });
+    struct Stop {
+        std::atomic<bool>& flag;
+        std::thread& thread;
+        ~Stop() { flag.store(true); thread.join(); }
+    } stop_heartbeat{heartbeat_stop, heartbeat};
     try {
         mapping.reason(o.test_identity ? "IDENTITY TEST: inference disabled" : "initializing native HIP model");
         Engine engine(o);
@@ -883,9 +856,7 @@ void run_worker(const Options& o)
                 h->helperEvalMsBits.store(FloatToBits(engine.inference_ms));
                 h->helperUploadMsBits.store(FloatToBits(engine.upload_ms));
                 h->helperReadbackMsBits.store(FloatToBits(engine.readback_ms));
-                ++frames;
-                h->helperFramesLo.store(static_cast<uint32_t>(frames));
-                h->helperFramesHi.store(static_cast<uint32_t>(frames >> 32));
+                ShmStore64(h->helperFramesLo, h->helperFramesHi, ++frames);
                 h->seq_ok.store(request);
                 h->seq_resp.store(request, std::memory_order_release);
                 syscall(SYS_futex, reinterpret_cast<uint32_t*>(&h->seq_resp), FUTEX_WAKE,
@@ -918,18 +889,9 @@ void run_worker(const Options& o)
         }
     } catch (const std::exception& e) {
         mapping.reason(e.what());
-        heartbeat_stop.store(true);
-        heartbeat.join();
-        h->helperState.store(kHelperModelFailed);
-        throw;
-    } catch (...) {
-        heartbeat_stop.store(true);
-        heartbeat.join();
         h->helperState.store(kHelperModelFailed);
         throw;
     }
-    heartbeat_stop.store(true);
-    heartbeat.join();
 }
 } // namespace
 
