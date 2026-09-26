@@ -1,4 +1,3 @@
-#include "storage_shader.h"
 #include "device_features.h"
 #include "dlssnr/DlssNr_Shader_Vk.h"
 #include "scaling/bcus_Shader_Vk.h"
@@ -10,10 +9,11 @@
 #include "scaling/bcds_kaiser3_Shader_Vk.h"
 #include "scaling/bcds_magc_Shader_Vk.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <fstream>
-#include <string>
+#include <cstring>
+#include <vector>
 
 static void Check(bool value, const char* message) {
     if (!value) {
@@ -22,51 +22,41 @@ static void Check(bool value, const char* message) {
     }
 }
 
-static std::vector<char> Bytes(const std::vector<uint32_t>& words) {
-    std::vector<char> bytes(words.size() * sizeof(uint32_t));
-    std::memcpy(bytes.data(), words.data(), bytes.size());
-    return bytes;
-}
-
-template<size_t N> static void Shader(const unsigned char (&blob)[N], const char* name,
-                                     const char* outputDirectory) {
-    std::vector<char> source(blob, blob + N);
-    std::vector<uint32_t> fixed;
-    std::string reason;
-    Check(dlssnr::FormatlessStorageShader(source, fixed, reason), reason.c_str());
-    unsigned capabilities = 0, storage = 0;
-    for (size_t i = 5; i < fixed.size(); i += fixed[i] >> 16) {
-        const uint32_t op = fixed[i] & 0xffffu;
-        if (op == 17 && fixed[i + 1] == 56) ++capabilities;
-        if (op == 25 && fixed[i + 7] == 2) {
-            Check(fixed[i + 8] == 0, "typed storage image remains");
+// The layer loads these modules as they are built and enables only
+// shaderStorageImageWriteWithoutFormat. Every storage image must be a
+// formatless 2D image that is only written: a storage read or atomic would
+// need shaderStorageImageReadWithoutFormat or a typed format too.
+template<size_t N> static void Shader(const unsigned char (&blob)[N], const char* name) {
+    constexpr uint32_t kOpCapability = 17, kOpTypeImage = 25, kOpImageTexelPointer = 60;
+    constexpr uint32_t kOpImageRead = 98, kOpImageWrite = 99, kOpImageSparseRead = 320;
+    constexpr uint32_t kReadWithoutFormat = 55, kWriteWithoutFormat = 56;
+    Check(N >= 5 * sizeof(uint32_t) && N % sizeof(uint32_t) == 0, "invalid SPIR-V byte count");
+    std::vector<uint32_t> words(N / sizeof(uint32_t));
+    std::memcpy(words.data(), blob, N);
+    Check(words[0] == 0x07230203 && words[4] == 0, "invalid SPIR-V header");
+    unsigned writeCapabilities = 0, storage = 0, writes = 0;
+    for (size_t i = 5; i < words.size(); i += words[i] >> 16) {
+        const uint32_t count = words[i] >> 16, op = words[i] & 0xffffu;
+        Check(count && count <= words.size() - i, "truncated SPIR-V instruction");
+        if (op == kOpCapability) {
+            Check(words[i + 1] != kReadWithoutFormat, "storage reads without format are not enabled");
+            writeCapabilities += words[i + 1] == kWriteWithoutFormat;
+        } else if (op == kOpTypeImage) {
+            Check(count >= 9, "invalid OpTypeImage");
+            if (words[i + 7] != 2) continue;
+            // Dim2D, depth absent or unspecified, not arrayed or multisampled.
+            Check(words[i + 3] == 1 && words[i + 4] != 1 && words[i + 4] <= 2 && !words[i + 5] &&
+                  !words[i + 6], "unexpected storage image type");
+            Check(words[i + 8] == 0, "typed storage image");
             ++storage;
+        } else {
+            Check(op != kOpImageRead && op != kOpImageSparseRead && op != kOpImageTexelPointer,
+                  "storage read or atomic");
+            writes += op == kOpImageWrite;
         }
     }
-    Check(capabilities == 1 && storage != 0, "missing formatless storage capability/type");
-    std::vector<uint32_t> again;
-    Check(dlssnr::FormatlessStorageShader(Bytes(fixed), again, reason), "idempotent transform rejected");
-    Check(again == fixed, "formatless transform is not idempotent");
-    for (uint32_t forbidden : {98u, 60u, 320u}) {
-        auto unsupported = fixed;
-        unsupported.push_back((1u << 16) | forbidden);
-        Check(!dlssnr::FormatlessStorageShader(Bytes(unsupported), again, reason),
-              "storage read/atomic was accepted");
-        Check(again.empty(), "rejected module was left usable");
-    }
-    auto malformed = fixed;
-    malformed.push_back(0);
-    Check(!dlssnr::FormatlessStorageShader(Bytes(malformed), again, reason), "zero word count accepted");
-    malformed.back() = 3u << 16;
-    Check(!dlssnr::FormatlessStorageShader(Bytes(malformed), again, reason), "truncated instruction accepted");
-    source.pop_back();
-    Check(!dlssnr::FormatlessStorageShader(source, again, reason), "unaligned module accepted");
-    if (outputDirectory) {
-        const std::string path = std::string(outputDirectory) + '/' + name + ".spv";
-        std::ofstream output(path, std::ios::binary);
-        output.write(reinterpret_cast<const char*>(fixed.data()), fixed.size() * sizeof(uint32_t));
-        Check(bool(output), "cannot write transformed shader for external validation");
-    }
+    Check(writeCapabilities == 1, "missing StorageImageWriteWithoutFormat capability");
+    Check(storage && writes, "expected a write-only storage image shader");
     std::printf("%s: write-only formatless storage verified\n", name);
 }
 
@@ -122,10 +112,9 @@ static void Features() {
     std::puts("device features: private legacy/Features2 copies and unknown-prefix fallback verified");
 }
 
-int main(int argc, char** argv) {
-    const char* output = argc > 1 ? argv[1] : nullptr;
+int main() {
     Features();
-#define SHADER(name) Shader(name##_spv, #name, output)
+#define SHADER(name) Shader(name##_spv, #name)
     SHADER(dlssnr);
     SHADER(bcus);
     SHADER(bcds_bicubic);

@@ -961,7 +961,7 @@ index db0dc5d..0c88a64 100644
  
  }  // namespace dlssnr
 diff --git a/upstream-layer/layer_linux/src/composition.cpp b/upstream-layer/layer_linux/src/composition.cpp
-index dc344c4..ffa3771 100644
+index dc344c4..1a84da8 100644
 --- a/upstream-layer/layer_linux/src/composition.cpp
 +++ b/upstream-layer/layer_linux/src/composition.cpp
 @@ -69,6 +69,9 @@ bool ColourIsLinearHdr(VkFormat swapchainFormat, uint32_t colourMode) {
@@ -1074,8 +1074,8 @@ index dc344c4..ffa3771 100644
 -    // one binding serves surfaces of three different formats; or recompile it with an Unknown format
 -    // and enable shaderStorageImageWriteWithoutFormat on the device, which is the arrangement this
 -    // pass actually needs and which vkBasalt reaches by a similar route.
-+    // Shader_Vk converts write-only storage declarations to Unknown after
-+    // device feature negotiation, so the declarations match the bound view's
++    // The build declares write-only storage images formatless and the device enables
++    // shaderStorageImageWriteWithoutFormat, so each declaration matches the bound view's
 +    // actual format (RGBA8, BGRA8 or float) without changing shader arithmetic.
      uint32_t modelW = 0, modelH = 0;
      ModelExtent(width, height, s, modelW, modelH);
@@ -1818,7 +1818,7 @@ index 6ea685d..d412f9d 100644
  
      const auto readInfo = [&](VkImageView v, VkImageLayout layout) {
 diff --git a/upstream-layer/layer_linux/src/dlssnr_pass.h b/upstream-layer/layer_linux/src/dlssnr_pass.h
-index 0941c93..4fc25d2 100644
+index 0941c93..b544124 100644
 --- a/upstream-layer/layer_linux/src/dlssnr_pass.h
 +++ b/upstream-layer/layer_linux/src/dlssnr_pass.h
 @@ -2,8 +2,8 @@
@@ -1827,8 +1827,8 @@ index 0941c93..4fc25d2 100644
  // This is OptiScaler's DlssNr_Vk with the loader-exported Vulkan calls replaced by the layer's next-
 -// chain table; the SPIR-V is byte-for-byte the same module, so the picture this produces and the
 -// picture OptiScaler produces are the same picture by construction rather than by agreement.
-+// chain table. Shader_Vk converts the vendored SPIR-V's Rgba32f storage declarations to Unknown
-+// for the actual RGBA8/BGRA8/FP16 targets; all shader arithmetic remains unchanged.
++// chain table. The build declares its storage images with an Unknown format for the actual
++// RGBA8/BGRA8/FP16 targets; all shader arithmetic remains unchanged.
  //
  // Three things are worth knowing before reading the implementation.
  //
@@ -2646,120 +2646,6 @@ index 542f559..9fdcbda 100644
  
    public:
      ScalerVk(const DeviceTable* InVk, const InstanceTable* InInstance, VkDevice InDevice,
-diff --git a/upstream-layer/layer_linux/src/shader_vk.cpp b/upstream-layer/layer_linux/src/shader_vk.cpp
-index 935db58..71e2bda 100644
---- a/upstream-layer/layer_linux/src/shader_vk.cpp
-+++ b/upstream-layer/layer_linux/src/shader_vk.cpp
-@@ -1,5 +1,6 @@
- #include "shader_vk.h"
- #include "log.h"
-+#include "storage_shader.h"
- 
- namespace dlssnr {
- 
-@@ -45,11 +46,17 @@ uint32_t Shader_Vk::FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags pr
- 
- bool Shader_Vk::CreateComputePipeline(VkPipelineLayout pipelineLayout, VkPipeline* pipeline,
-                                       const std::vector<char>& shaderCode, const char* entryPoint) {
-+    std::vector<uint32_t> storageCode;
-+    std::string reason;
-+    if (!FormatlessStorageShader(shaderCode, storageCode, reason)) {
-+        Log("[%s] cannot prepare storage shader: %s", _name.c_str(), reason.c_str());
-+        return false;
-+    }
-     VkShaderModule shaderModule = VK_NULL_HANDLE;
-     VkShaderModuleCreateInfo createInfo {};
-     createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
--    createInfo.codeSize = shaderCode.size();
--    createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode.data());
-+    createInfo.codeSize = storageCode.size() * sizeof(uint32_t);
-+    createInfo.pCode = storageCode.data();
- 
-     if (_vk->vkCreateShaderModule(_device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-         Log("[%s] vkCreateShaderModule failed", _name.c_str());
-diff --git a/upstream-layer/layer_linux/src/storage_shader.h b/upstream-layer/layer_linux/src/storage_shader.h
-new file mode 100644
-index 0000000..47128c7
---- /dev/null
-+++ b/upstream-layer/layer_linux/src/storage_shader.h
-@@ -0,0 +1,77 @@
-+#pragma once
-+
-+#include <cstdint>
-+#include <cstring>
-+#include <string>
-+#include <vector>
-+
-+namespace dlssnr {
-+
-+// The vendored DXC modules declare RWTexture2D<float4> as Rgba32f even though
-+// their output views are RGBA8, BGRA8 or FP16. Make their write-only storage
-+// images formatless before loading them. The device must enable
-+// shaderStorageImageWriteWithoutFormat. This deliberately accepts only the
-+// narrow shader shape we ship; a future storage read fails closed instead of
-+// silently requiring shaderStorageImageReadWithoutFormat too.
-+inline bool FormatlessStorageShader(const std::vector<char>& bytes,
-+                                    std::vector<uint32_t>& words, std::string& reason) {
-+    constexpr uint32_t kMagic = 0x07230203;
-+    constexpr uint32_t kOpCapability = 17;
-+    constexpr uint32_t kOpTypeImage = 25;
-+    constexpr uint32_t kOpImageRead = 98;
-+    constexpr uint32_t kOpImageWrite = 99;
-+    constexpr uint32_t kOpImageTexelPointer = 60;
-+    constexpr uint32_t kOpImageSparseRead = 320;
-+    constexpr uint32_t kWriteWithoutFormat = 56;
-+    const auto reject = [&](const char* text) {
-+        reason = text;
-+        words.clear();
-+        return false;
-+    };
-+    if (bytes.size() < 5 * sizeof(uint32_t) || bytes.size() % sizeof(uint32_t))
-+        return reject("invalid SPIR-V byte count");
-+    words.resize(bytes.size() / sizeof(uint32_t));
-+    std::memcpy(words.data(), bytes.data(), bytes.size());
-+    if (words[0] != kMagic || words[4] != 0)
-+        return reject("invalid SPIR-V header");
-+
-+    bool capability = false;
-+    bool storage = false;
-+    bool writes = false;
-+    size_t capabilityEnd = 5;
-+    for (size_t i = 5; i < words.size();) {
-+        const uint32_t count = words[i] >> 16;
-+        const uint32_t op = words[i] & 0xffffu;
-+        if (!count || count > words.size() - i)
-+            return reject("truncated SPIR-V instruction");
-+        if (op == kOpCapability) {
-+            if (count != 2) return reject("invalid OpCapability");
-+            capability |= words[i + 1] == kWriteWithoutFormat;
-+            if (i == capabilityEnd) capabilityEnd += count;
-+        } else if (op == kOpTypeImage) {
-+            if (count < 9) return reject("invalid OpTypeImage");
-+            if (words[i + 7] == 2) {
-+                // Dim2D, depth absent/unspecified, no array/MS, Unknown or the inherited Rgba32f.
-+                if (words[i + 3] != 1 || words[i + 4] == 1 || words[i + 4] > 2 || words[i + 5] ||
-+                    words[i + 6] || words[i + 8] > 1)
-+                    return reject("unexpected storage image type");
-+                words[i + 8] = 0;  // ImageFormatUnknown
-+                storage = true;
-+            }
-+        } else if (op == kOpImageRead || op == kOpImageSparseRead || op == kOpImageTexelPointer) {
-+            return reject("storage reads/atomics require a separate feature audit");
-+        } else if (op == kOpImageWrite) {
-+            writes = true;
-+        }
-+        i += count;
-+    }
-+    if (!storage || !writes) return reject("expected a write-only storage image shader");
-+    if (!capability) {
-+        words.insert(words.begin() + capabilityEnd,
-+                     { (2u << 16) | kOpCapability, kWriteWithoutFormat });
-+    }
-+    reason.clear();
-+    return true;
-+}
-+
-+}  // namespace dlssnr
 diff --git a/upstream-layer/layer_linux/src/vk_table.h b/upstream-layer/layer_linux/src/vk_table.h
 index f4579c1..d4fba4b 100644
 --- a/upstream-layer/layer_linux/src/vk_table.h

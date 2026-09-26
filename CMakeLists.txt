@@ -24,7 +24,9 @@ find_path(X11_HEADERS X11/Xlib.h REQUIRED)
 find_path(XINPUT_HEADERS X11/extensions/XInput2.h REQUIRED)
 # Every layer shader is compiled from its prepared source into the build tree,
 # where the layer's quoted includes find it. Pass -DDXC=<path> for a DXC that
-# is not on PATH.
+# is not on PATH. Storage images are declared formatless: one binding serves
+# RGBA8, BGRA8 and FP16 views, and the layer enables
+# shaderStorageImageWriteWithoutFormat.
 find_program(DXC dxc REQUIRED)
 find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 find_program(SPIRV_VAL spirv-val REQUIRED)
@@ -38,7 +40,7 @@ file(MAKE_DIRECTORY ${SHADER_DIR}/dlssnr ${SHADER_DIR}/scaling)
 macro(add_hlsl source output)
     get_filename_component(symbol ${source} NAME_WE)
     add_custom_command(OUTPUT ${SHADER_DIR}/${output}.h ${SHADER_DIR}/${output}.spv
-        COMMAND ${DXC} -spirv -D VK_MODE -T cs_6_0 -E CSMain -Vn ${symbol}_spv
+        COMMAND ${DXC} -spirv -fspv-use-unknown-image-format -D VK_MODE -T cs_6_0 -E CSMain -Vn ${symbol}_spv
             -Fo ${SHADER_DIR}/${output}.spv -Fh ${SHADER_DIR}/${output}.h ${SHADER_SOURCE}/${source}
         COMMAND ${SPIRV_VAL} --target-env vulkan1.0 ${SHADER_DIR}/${output}.spv
         DEPENDS ${SHADER_SOURCE}/${source} VERBATIM)
@@ -127,7 +129,7 @@ if(BUILD_TESTING)
     add_executable(vulkan-storage-test tests/vulkan_storage_test.cpp)
     add_dependencies(vulkan-storage-test layer-shaders)
     target_include_directories(vulkan-storage-test PRIVATE ${SHADER_DIR} layer
-        ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party)
+        ${LAYER_ROOT}/standalone_runner/third_party)
     add_test(NAME vulkan-storage COMMAND vulkan-storage-test)
     add_executable(codec-test backend/codec_test.cpp)
     target_link_libraries(codec-test PRIVATE dlsslop-codec)
