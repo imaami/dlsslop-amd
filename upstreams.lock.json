@@ -18,21 +18,6 @@
     }
   },
   "files": {
-    "upstream-layer/.github/workflows/build.yml": {
-      "repository": "layer",
-      "source": ".github/workflows/build.yml",
-      "sha256": "8c23e60c3fd87aae902be6511e77c5adec14bd01e00f983563556028aa280425"
-    },
-    "upstream-layer/.github/workflows/release-draft.yml": {
-      "repository": "layer",
-      "source": ".github/workflows/release-draft.yml",
-      "sha256": "8d2f42802a0d43333d9ab56f4cebf36f53bdeb149f8226df9914d23965cb45f8"
-    },
-    "upstream-layer/.gitignore": {
-      "repository": "layer",
-      "source": ".gitignore",
-      "sha256": "4f6d3aa8ed43891e5429bab96c8e5b3bfd037668ce9e5b122d2eb703610a922b"
-    },
     "upstream-layer/ATTRIBUTION.md": {
       "repository": "layer",
       "source": "ATTRIBUTION.md",
@@ -43,150 +28,20 @@
       "source": "LICENSE",
       "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
     },
-    "upstream-layer/README.md": {
-      "repository": "layer",
-      "source": "README.md",
-      "sha256": "6d91b571a2972aa618d459041b12913208c446a95cb656ec3db83e26c70b4665"
-    },
-    "upstream-layer/common/runner_discovery.cpp": {
-      "repository": "layer",
-      "source": "common/runner_discovery.cpp",
-      "sha256": "83071509f48264f0e46a6f2e5fee057800fa2e755e40cf39f2046b6b857ab4ee"
-    },
-    "upstream-layer/common/runner_discovery.h": {
-      "repository": "layer",
-      "source": "common/runner_discovery.h",
-      "sha256": "4de4ab43c90d5d2c0d5bd02c21a30eb1c5fd0885baee7991c9a6de86a4fcda88"
-    },
     "upstream-layer/common/shm_protocol.h": {
       "repository": "layer",
       "source": "common/shm_protocol.h",
       "sha256": "2198cca22404234fb2df1af88ed934a1756bc08ac95d705d9f4cc1009be680a3"
-    },
-    "upstream-layer/core/guard.cpp": {
-      "repository": "layer",
-      "source": "core/guard.cpp",
-      "sha256": "80b675ecc3f8edca3174ee778e28b426b663577bce1d19c4535e68278459f44f"
-    },
-    "upstream-layer/core/guard.h": {
-      "repository": "layer",
-      "source": "core/guard.h",
-      "sha256": "3c101b8e0ad2f6daa4e59dfc12f5c80b356030b8b359216f55d2b74b098a5963"
-    },
-    "upstream-layer/core/logging.h": {
-      "repository": "layer",
-      "source": "core/logging.h",
-      "sha256": "81c11a0b130d75eeb79e172d942b40fd759baf4c9992c4e476d40d11dc53485e"
-    },
-    "upstream-layer/core/ngx_abi.h": {
-      "repository": "layer",
-      "source": "core/ngx_abi.h",
-      "sha256": "bb0b960b4e20f4af02b38231a0ee213c81767faf47e42ed3994673940542c3ac"
-    },
-    "upstream-layer/core/ngx_param.h": {
-      "repository": "layer",
-      "source": "core/ngx_param.h",
-      "sha256": "aeac83c7af6433f37455ef2f14418faba9810bf7d622a9ce28b7c9a567bd4e1d"
-    },
-    "upstream-layer/core/ngx_snippet.cpp": {
-      "repository": "layer",
-      "source": "core/ngx_snippet.cpp",
-      "sha256": "bddc74109fd4495f94cf1bd893d89878412c015422b3c465520e8aa25c08ebd2"
-    },
-    "upstream-layer/core/ngx_snippet.h": {
-      "repository": "layer",
-      "source": "core/ngx_snippet.h",
-      "sha256": "81469e621a8d07c234cc5279a919d5b7e69b1b3bf40f64978517d0e1ad2a88d9"
     },
     "upstream-layer/core/stb_image_write.h": {
       "repository": "layer",
       "source": "core/stb_image_write.h",
       "sha256": "fe31f93135df4ce3fa3107b744c73f13939c104aa378932018f69124c5114b50"
     },
-    "upstream-layer/dlssnr-helper": {
-      "repository": "layer",
-      "source": "dlssnr-helper",
-      "sha256": "f59fb5b9361a511a27998823c114a7c994f98239c80c9d846e18d3b68ac34cbf"
-    },
-    "upstream-layer/extracted_pipeline_notes.md": {
-      "repository": "layer",
-      "source": "extracted_pipeline_notes.md",
-      "sha256": "01f5640f7fe986ccae6187ce79e584a7f511c8cba5044579666342385627cbdf"
-    },
-    "upstream-layer/gui/dlssnr_gui.pro": {
-      "repository": "layer",
-      "source": "gui/dlssnr_gui.pro",
-      "sha256": "1ecf174652b4ed4bd1cc44d7fab9bb432b87dc2e4f1bef427bd4396a2cac2439"
-    },
-    "upstream-layer/gui/main.cpp": {
-      "repository": "layer",
-      "source": "gui/main.cpp",
-      "sha256": "cbb7f19560ce8e1607fa8b4775b21879ebcf0c548b76f0bd77c293ccb46b640e"
-    },
-    "upstream-layer/gui/mainwindow.cpp": {
-      "repository": "layer",
-      "source": "gui/mainwindow.cpp",
-      "sha256": "d39d61630b97d993d7f6ab8d5ea04c5207b969449c2b9b2d1cab3d8dcf72cfbf"
-    },
-    "upstream-layer/gui/mainwindow.h": {
-      "repository": "layer",
-      "source": "gui/mainwindow.h",
-      "sha256": "9ec7abc818957e771ab7121ad7fafc0765514b11a2b36c4289cd29e77d06de54"
-    },
-    "upstream-layer/gui/meson.build": {
-      "repository": "layer",
-      "source": "gui/meson.build",
-      "sha256": "220de324fa26056fa0a384686094a4dad50b514702d68dbfe95ecd80197be36d"
-    },
-    "upstream-layer/gui/passdialog.cpp": {
-      "repository": "layer",
-      "source": "gui/passdialog.cpp",
-      "sha256": "0e6e72a7e4ea7cc7f86f795bd2faa552041003edaae35530aa5ea3b94ae5c72c"
-    },
-    "upstream-layer/gui/passdialog.h": {
-      "repository": "layer",
-      "source": "gui/passdialog.h",
-      "sha256": "daa63c1832139efffb1d8823909ecf750e3ef05cca20ff52bdf467cd4253efd7"
-    },
-    "upstream-layer/gui/shm_binder.cpp": {
-      "repository": "layer",
-      "source": "gui/shm_binder.cpp",
-      "sha256": "312eb7f9d5fd4543735af268f342a9c05834981773517751ba054f4bbf85569e"
-    },
-    "upstream-layer/gui/shm_binder.h": {
-      "repository": "layer",
-      "source": "gui/shm_binder.h",
-      "sha256": "295330e360cfdae73d14c31056bf0f9e9f9a71051c901bbc4bcd99e8595633d5"
-    },
-    "upstream-layer/helper/main.cpp": {
-      "repository": "layer",
-      "source": "helper/main.cpp",
-      "sha256": "52afa097db149982145abbef43662a02501d71a8048af15317dfb4f87016df90"
-    },
-    "upstream-layer/helper/mvec_deadzone_spv.h": {
-      "repository": "layer",
-      "source": "helper/mvec_deadzone_spv.h",
-      "sha256": "770ee9de81501ab26eac1050ce170c77ecdbea9d6ad6f4a4754cc97e7c3bc1ce"
-    },
-    "upstream-layer/helper/shaders/mvec_deadzone.comp": {
-      "repository": "layer",
-      "source": "helper/shaders/mvec_deadzone.comp",
-      "sha256": "8c1df4f2f88ca386d6ca59b330bfc510c893854b1290fdd9c83ff40d6674f466"
-    },
     "upstream-layer/layer_linux/dlssnr.map": {
       "repository": "layer",
       "source": "layer_linux/dlssnr.map",
       "sha256": "4dc4e55f59d62456441d5a69c0c0bdff51fb7c85d6e4205df8919f71082a4ab4"
-    },
-    "upstream-layer/layer_linux/manifest/VK_LAYER_NV_dlssnr.json": {
-      "repository": "layer",
-      "source": "layer_linux/manifest/VK_LAYER_NV_dlssnr.json",
-      "sha256": "6110c5dd2f06ab69af219970d07cbc74b453f1b10f6d69b44313a5a3153baf0d"
-    },
-    "upstream-layer/layer_linux/meson.build": {
-      "repository": "layer",
-      "source": "layer_linux/meson.build",
-      "sha256": "062a7329fac42c3901491440dde02a232d6b3a3d7ce35df223c338af88e8f4e2"
     },
     "upstream-layer/layer_linux/src/capture.cpp": {
       "repository": "layer",
@@ -208,11 +63,6 @@
       "source": "layer_linux/src/composition.h",
       "sha256": "2a27790e2534b4783bc80ebedd1908bde1aad76d5ffbded1672ada8080107e6d"
     },
-    "upstream-layer/layer_linux/src/dlssnr/DEVELOPMENT.md": {
-      "repository": "layer",
-      "source": "layer_linux/src/dlssnr/DEVELOPMENT.md",
-      "sha256": "94123e30d793e67dc188737d8aef9a3be4fd59077bc5d543a74bd5bd6404015e"
-    },
     "upstream-layer/layer_linux/src/dlssnr/DlssNr_Common.h": {
       "repository": "layer",
       "source": "layer_linux/src/dlssnr/DlssNr_Common.h",
@@ -227,11 +77,6 @@
       "repository": "layer",
       "source": "layer_linux/src/dlssnr/dlssnr.hlsl",
       "sha256": "30154d7e697d396ec9ce209523c6b3a471eecce1be580e709136b0de4b797c68"
-    },
-    "upstream-layer/layer_linux/src/dlssnr/frame-hold.md": {
-      "repository": "layer",
-      "source": "layer_linux/src/dlssnr/frame-hold.md",
-      "sha256": "7a2266a95a11811360954b001175c60db1d06931b5d077703a916306b950b7f4"
     },
     "upstream-layer/layer_linux/src/dlssnr_pass.cpp": {
       "repository": "layer",
@@ -293,90 +138,10 @@
       "source": "layer_linux/src/vk_table.h",
       "sha256": "1518365a26deb0b873d4481dcf275f5966c7a54012edd5848cd2b1580455cc06"
     },
-    "upstream-layer/local_install.sh": {
-      "repository": "layer",
-      "source": "local_install.sh",
-      "sha256": "7287c1c4146d5ecff9b5f2f472b2dda5517f8bbe8149430104fc98c7e551935b"
-    },
-    "upstream-layer/meson/cross-clang-linux32.ini": {
-      "repository": "layer",
-      "source": "meson/cross-clang-linux32.ini",
-      "sha256": "885cd7bc87a3c66c8f389944ef1b4ca076d1655a5b77f12d9524801602170f60"
-    },
-    "upstream-layer/meson/cross-clang-mingw64.ini": {
-      "repository": "layer",
-      "source": "meson/cross-clang-mingw64.ini",
-      "sha256": "f620fb13b2055828d52a5cc44cf89d15d1c56863d80deb1d47014c986d7c6056"
-    },
-    "upstream-layer/meson/native-clang.ini": {
-      "repository": "layer",
-      "source": "meson/native-clang.ini",
-      "sha256": "229ab28b54b5ce3995142f94d73a1f18dbcd4847d78cde167601ecb127a8f748"
-    },
-    "upstream-layer/meson.build": {
-      "repository": "layer",
-      "source": "meson.build",
-      "sha256": "17b56b282885578c82f2a44dbfefd3df2a7abf306da5d012dc4d60aa9012890a"
-    },
-    "upstream-layer/meson_options.txt": {
-      "repository": "layer",
-      "source": "meson_options.txt",
-      "sha256": "80c86c18290f7638b6b9bf94e20700be51b1e93ae7ab68dfd6e0ba872466e6b6"
-    },
-    "upstream-layer/packaging/PKGBUILD": {
-      "repository": "layer",
-      "source": "packaging/PKGBUILD",
-      "sha256": "8bc50a393eeb949d031d87e3606589255b226ebfd78ae417aec2f0ab8f4ca58b"
-    },
-    "upstream-layer/packaging/dlssnr-personal.spec": {
-      "repository": "layer",
-      "source": "packaging/dlssnr-personal.spec",
-      "sha256": "a8aae90d5b0ff6f5617427be1c944a644ca59fc5a1bc5a54a211967e59427260"
-    },
-    "upstream-layer/packaging/dlssnr.desktop": {
-      "repository": "layer",
-      "source": "packaging/dlssnr.desktop",
-      "sha256": "8e5d9838b9e116bc63af8059dc7ba469b943fcb8ca8d37f9f0a7496df4be3179"
-    },
-    "upstream-layer/packaging/dlssnr.spec": {
-      "repository": "layer",
-      "source": "packaging/dlssnr.spec",
-      "sha256": "7d4c507605a387617a1a015518d9b619d1e2517b2e1cc3ac9092af5a1aaa2256"
-    },
-    "upstream-layer/packaging/install.sh": {
-      "repository": "layer",
-      "source": "packaging/install.sh",
-      "sha256": "2164181307570f7d7cc451695201f354d9a30c0b9efb88927123f366c27fdc88"
-    },
-    "upstream-layer/packaging/make-deb.sh": {
-      "repository": "layer",
-      "source": "packaging/make-deb.sh",
-      "sha256": "314af445683fa655fef578f44dd1d28d060c9f178b02f1ffeec2e3becf198daa"
-    },
-    "upstream-layer/packaging/make-dist.sh": {
-      "repository": "layer",
-      "source": "packaging/make-dist.sh",
-      "sha256": "1933a19bbd6134d0b7ab3a41c61d7d9998b4c9392a06258e01102d177cbca5ae"
-    },
-    "upstream-layer/packaging/uninstall.sh": {
-      "repository": "layer",
-      "source": "packaging/uninstall.sh",
-      "sha256": "1cfd524a1f16f525ca675cbcf73b63dfd4a3b0fe56d4deabddb1da7a682d1202"
-    },
-    "upstream-layer/run_helper.sh": {
-      "repository": "layer",
-      "source": "run_helper.sh",
-      "sha256": "e058411d48647337d6d1f42f609f77594e2e3c779994fe7dd13cab7f0b0d632c"
-    },
     "upstream-layer/standalone_runner/third_party/stb_image.h": {
       "repository": "layer",
       "source": "standalone_runner/third_party/stb_image.h",
       "sha256": "594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3"
-    },
-    "upstream-layer/standalone_runner/third_party/stb_image_write.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/stb_image_write.h",
-      "sha256": "cbd5f0ad7a9cf4468affb36354a1d2338034f2c12473cf1a8e32053cb6914a05"
     },
     "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_av1std.h": {
       "repository": "layer",
@@ -422,11 +187,6 @@
       "repository": "layer",
       "source": "standalone_runner/third_party/vk_video/vulkan_video_codecs_common.h",
       "sha256": "78cf3c99d3d57afa7ab1782ec6018b4bcdbe273f2843d76e3375282db875b71e"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vk_icd.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vk_icd.h",
-      "sha256": "6c80200a7fcc4c7da3170ef9dc674eab142c92767bfc9733c98649bce78aecb9"
     },
     "upstream-layer/standalone_runner/third_party/vulkan/vk_layer.h": {
       "repository": "layer",
@@ -523,31 +283,6 @@
       "source": "standalone_runner/third_party/vulkan/vulkan_xlib_xrandr.h",
       "sha256": "b33d51ee2feb28890cb5b2db3cd4c8b0553553d81c71d6057ed91bb5029d844e"
     },
-    "upstream-layer/test_gui/binder_test.cpp": {
-      "repository": "layer",
-      "source": "test_gui/binder_test.cpp",
-      "sha256": "6ff2561d624d0274471e0857d63142179dd6c6503e309254658629f6360cd0b3"
-    },
-    "upstream-layer/test_gui/meson.build": {
-      "repository": "layer",
-      "source": "test_gui/meson.build",
-      "sha256": "d11f8321fa864b9ad68fc06183d7bffc4524d6c700a1660e1c07fb210487631c"
-    },
-    "upstream-layer/test_layer/smoke.cpp": {
-      "repository": "layer",
-      "source": "test_layer/smoke.cpp",
-      "sha256": "0e9509ff73c4b8a90c1da8571d79ef6f3ddea845cf78d8822a7be21f555368ba"
-    },
-    "upstream-layer/third_party/dxvk/2.7.1/LICENSE.txt": {
-      "repository": "layer",
-      "source": "third_party/dxvk/2.7.1/LICENSE.txt",
-      "sha256": "ef22f45815d8e58ae7bd919131071aac8b50d52cc9e92becfbf6d05f8225fc3a"
-    },
-    "upstream-layer/third_party/dxvk/2.7.1/VERSION": {
-      "repository": "layer",
-      "source": "third_party/dxvk/2.7.1/VERSION",
-      "sha256": "bd7f9252181a4f69c7bc99cf9ef5beded7fce04dcf5899f4314e1ca6664156e7"
-    },
     "upstream-layer/third_party/optiscaler/LICENSE": {
       "repository": "layer",
       "source": "third_party/optiscaler/LICENSE",
@@ -558,70 +293,15 @@
       "source": "third_party/optiscaler/RenoDX_ATTRIBUTION.txt",
       "sha256": "40db841188178fa6871e4b435f1cf25cf46a7b52070f973cbbbc999ec020d7f2"
     },
-    "upstream-layer/tools/gen_dlssnr_spv.sh": {
-      "repository": "layer",
-      "source": "tools/gen_dlssnr_spv.sh",
-      "sha256": "1d742d6e89f26ae757edb3a8ea59a48de06b09531227a8d733e9f0bb43d864a7"
-    },
-    "upstream-layer/tools/gen_meter_spv.sh": {
-      "repository": "layer",
-      "source": "tools/gen_meter_spv.sh",
-      "sha256": "c77f4d1fe9529c35ee2e7571da5146e02c384b931fe8cd4e53efc8353fe43d1b"
-    },
-    "upstream-layer/tools/gen_mvec_spv.sh": {
-      "repository": "layer",
-      "source": "tools/gen_mvec_spv.sh",
-      "sha256": "47b0d2a42d443fe1365217d14cd34f519135c33789f3b0be035a2374f317b246"
-    },
-    "upstream-layer/tools/glsl2spv.cpp": {
-      "repository": "layer",
-      "source": "tools/glsl2spv.cpp",
-      "sha256": "fa48282a0b3ac9bde160cc39c01d4460125aa1dd07f05be6b09a1cf3cabc2218"
-    },
-    "upstream-layer/tools/meson-build.sh": {
-      "repository": "layer",
-      "source": "tools/meson-build.sh",
-      "sha256": "0329d6457a3d201f6d712faabc087a5e16ae8433ccc3454d74331c695b40b78c"
-    },
-    "upstream-layer/tools/meson.build": {
-      "repository": "layer",
-      "source": "tools/meson.build",
-      "sha256": "dd820563103ec62366133d9d4d4bb65c72d18683b2720a1ad92a6e8941724850"
-    },
-    "upstream-layer/tools/runner_probe.cpp": {
-      "repository": "layer",
-      "source": "tools/runner_probe.cpp",
-      "sha256": "8a163a995c81c244310b7466e64f4a049681dae0a24e50aeba05d77d44acda40"
-    },
-    "upstream-layer/tools/shm_frames.cpp": {
-      "repository": "layer",
-      "source": "tools/shm_frames.cpp",
-      "sha256": "22859d41e9ea685a740e6eb84d0b3e041d234b9693e73bfc5381acdf07669e9c"
-    },
     "upstream-layer/tools/shmctl.cpp": {
       "repository": "layer",
       "source": "tools/shmctl.cpp",
       "sha256": "27ad9df5a04a4da20ab2e49e0fbbb1786a2b6bebb30bce568c3512dfa34de57b"
     },
-    "upstream-layer/tools/soak_passes.cpp": {
-      "repository": "layer",
-      "source": "tools/soak_passes.cpp",
-      "sha256": "2401c7fc8b71934855ebe34d25df28cffcfff10f119703cc145f42da2ec65d77"
-    },
-    "upstream-layer/windows/meson.build": {
-      "repository": "layer",
-      "source": "windows/meson.build",
-      "sha256": "38f78786e275fa52be0d045e9fa0fb2741a2e1c65732b4e5e3b15b2a3ea3c7a1"
-    },
     "kernels/LICENSE": {
       "repository": "amd",
       "source": "LICENSE",
       "sha256": "e289f704a22be5bb836eca345831b81e383ff9ffab443ecd1e436347515bf111"
-    },
-    "kernels/UPSTREAM-README.md": {
-      "repository": "amd",
-      "source": "hip/README.md",
-      "sha256": "4844e293a93d38e3e503e3e75c5f36e3528c0870fc5da69837ecd0bb159f6740"
     },
     "kernels/boundary_fast.hip": {
       "repository": "amd",

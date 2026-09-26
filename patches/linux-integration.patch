@@ -260,9 +260,6 @@ index fd7c1cd..0b01f8e 100644
  inline uint32_t ShmPassCeiling(const ShmHeader* h) {
      (void)h;
      return kMaxPasses;
-diff --git a/upstream-layer/dlssnr-helper b/upstream-layer/dlssnr-helper
-old mode 100644
-new mode 100755
 diff --git a/upstream-layer/layer_linux/src/capture.cpp b/upstream-layer/layer_linux/src/capture.cpp
 index 75b2a3f..d0d0abc 100644
 --- a/upstream-layer/layer_linux/src/capture.cpp
@@ -2254,36 +2251,6 @@ index f4579c1..d4fba4b 100644
      X(vkEnumerateDeviceExtensionProperties)                                                        \
      X(vkGetPhysicalDeviceMemoryProperties2)                                                        \
      X(vkGetPhysicalDeviceProperties2)
-diff --git a/upstream-layer/local_install.sh b/upstream-layer/local_install.sh
-old mode 100644
-new mode 100755
-diff --git a/upstream-layer/packaging/install.sh b/upstream-layer/packaging/install.sh
-old mode 100644
-new mode 100755
-diff --git a/upstream-layer/packaging/make-deb.sh b/upstream-layer/packaging/make-deb.sh
-old mode 100644
-new mode 100755
-diff --git a/upstream-layer/packaging/make-dist.sh b/upstream-layer/packaging/make-dist.sh
-old mode 100644
-new mode 100755
-diff --git a/upstream-layer/packaging/uninstall.sh b/upstream-layer/packaging/uninstall.sh
-old mode 100644
-new mode 100755
-diff --git a/upstream-layer/run_helper.sh b/upstream-layer/run_helper.sh
-old mode 100644
-new mode 100755
-diff --git a/upstream-layer/tools/gen_dlssnr_spv.sh b/upstream-layer/tools/gen_dlssnr_spv.sh
-old mode 100644
-new mode 100755
-diff --git a/upstream-layer/tools/gen_meter_spv.sh b/upstream-layer/tools/gen_meter_spv.sh
-old mode 100644
-new mode 100755
-diff --git a/upstream-layer/tools/gen_mvec_spv.sh b/upstream-layer/tools/gen_mvec_spv.sh
-old mode 100644
-new mode 100755
-diff --git a/upstream-layer/tools/meson-build.sh b/upstream-layer/tools/meson-build.sh
-old mode 100644
-new mode 100755
 diff --git a/upstream-layer/tools/shmctl.cpp b/upstream-layer/tools/shmctl.cpp
 index 4e16702..397e5c4 100644
 --- a/upstream-layer/tools/shmctl.cpp

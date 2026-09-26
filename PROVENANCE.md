@@ -54,13 +54,11 @@ output and C256 FFN fragments. It also clears the WMMA, tiled, wave and
 fused-C32 flags: production launches nothing from their modules, so the build
 ships only the 12 of upstream's 24 modules that the network loads.
 
-Preserve `upstream-layer/ATTRIBUTION.md` and all inherited notices. The layer's
-shader/dispatch lineage includes OptiScaler and Dagherbou/OptiScaler_DLSSNR,
-with RenoDX color-composition attribution. Khronos Vulkan/video headers and
-stb retain their own licenses. The BCUS shader also identifies Microsoft
-MiniEngine/Minigraph and James Stanard. The DXVK directory holds a
-license/version notice, not a runtime DLL. Windows helpers and GUI sources are
-upstream context, not native Linux build targets.
+Preserve `upstream-layer/ATTRIBUTION.md` and all inherited notices of projected
+code. The layer's shader/dispatch lineage includes OptiScaler and
+Dagherbou/OptiScaler_DLSSNR, with RenoDX color-composition attribution. Khronos
+Vulkan/video headers and stb retain their own licenses. The BCUS shader also
+identifies Microsoft MiniEngine/Minigraph and James Stanard.
 
 The native worker integration, codec, tuning/temporal and color-preservation
 modules, Qt Widgets controller, build tools and tests are local additions or
