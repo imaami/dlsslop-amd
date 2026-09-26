@@ -428,6 +428,9 @@ public:
         auto opt = LmxxfProductionOptions(w, h, options_.modules, options_.assets);
         opt.device = static_cast<unsigned>(options_.device);
         if (!options_.performance) opt.skip_blocks.clear();
+        // Upstream's shipped HIP configurations (scripts/hip-*-flags.txt) add
+        // these bit-exact byte residual and fragment paths to the snapshot.
+        opt.mh_feature_byte = opt.mh_proj_diag_fb = opt.mh_byte_stream = opt.decoder_byte = opt.mh_ffn_frag256 = true;
         network_ = std::make_unique<hip_reference::Network>(opt);
         network_->SetNoise({}); // Fast prefix uses procedural noise, not noise.f32.
         auto& api = network_->Runtime();
