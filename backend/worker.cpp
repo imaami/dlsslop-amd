@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: MIT
 #include "codec.h"
 #include "vendor/LmxxfProductionOptions.h"
+#include "native_kernels.h"
 #include "codec_gpu.h"
 #include "tuning.h"
-#include "color_gpu.h"
 #include "temporal_gpu.h"
 #include "control_selftest.h"
 #include "trace.h"
@@ -21,6 +21,7 @@
 #include <fstream>
 #include <getopt.h>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -373,10 +374,9 @@ public:
 class Engine {
     Options options_;
     std::unique_ptr<hip_reference::Network> network_;
-    std::unique_ptr<dlsslop::GpuCodec> gpu_codec_;
-    std::unique_ptr<dlsslop::GpuTuning> gpu_tuning_;
-    std::unique_ptr<dlsslop::GpuColor> gpu_color_;
-    std::unique_ptr<dlsslop::GpuTemporal> temporal_;
+    std::optional<dlsslop::NativeKernels> kernels_;
+    std::optional<dlsslop::GpuCodec> gpu_codec_;
+    std::optional<dlsslop::GpuTemporal> temporal_;
     void* device_input_ = nullptr; // The encoded frame, unchanged until the next one.
     void* device_feedback_ = nullptr; // Later passes' input, allocated for multi-pass.
     void* device_output_ = nullptr;
@@ -406,9 +406,8 @@ public:
         api.hipStreamSynchronize(network_->Stream());
         for (auto event : marks_) api.hipEventDestroy(event);
         temporal_.reset();
-        gpu_tuning_.reset();
-        gpu_color_.reset();
         gpu_codec_.reset();
+        kernels_.reset();
         for (void* buffer : {device_input_, device_feedback_, device_output_, device_scratch_})
             if (buffer) api.hipFree(buffer);
         device_input_ = device_feedback_ = device_output_ = device_scratch_ = answer_ = nullptr;
@@ -432,8 +431,10 @@ public:
         network_->SetNoise({}); // Fast prefix uses procedural noise, not noise.f32.
         auto& api = network_->Runtime();
         for (auto& event : marks_) api.Check(api.hipEventCreate(&event), "create timing event");
-        if (!options_.cpu_codec)
-            gpu_codec_ = std::make_unique<dlsslop::GpuCodec>(api, network_->Stream(), options_.modules + "/linux_codec.hsaco");
+        // Tuning, colour and motion use the module's kernels with the CPU codec too.
+        kernels_.emplace(api, network_->Stream(), options_.modules + "/linux_native.hsaco");
+        if (!options_.cpu_codec) gpu_codec_.emplace(*kernels_);
+        temporal_.emplace(*kernels_);
         const size_t pixels = size_t(w) * h;
         api.Check(api.hipMalloc(&device_input_, pixels * 16), "allocate network input");
         api.Check(api.hipMalloc(&device_output_, pixels * 12), "allocate network output");
@@ -446,8 +447,11 @@ public:
         network_->Enqueue(device_input_, nullptr, device_output_, 0);
         network_->Synchronize();
         network_->PrintMemory();
-        if (options_.self_test)
-            dlsslop::check_gpu_controls(api, network_->Stream(), options_.modules);
+        if (options_.self_test) { // The kernels on synthetic inputs, independent of model weights.
+            selftest::check_tuning(*kernels_);
+            selftest::check_temporal(*kernels_);
+            selftest::check_codec(*kernels_);
+        }
     }
     // Serving only: DMA the channel's frame slots directly (see GpuCodec::pin).
     void pin(uint8_t* input, uint8_t* output, size_t bytes)
@@ -490,13 +494,9 @@ public:
             throw std::range_error("FP16 proxy transport requires Vulkan composition; disable --cpu-compose");
         if (!std::isfinite(settings.color_preserve) || settings.color_preserve < 0 || settings.color_preserve > 1)
             throw std::range_error("invalid color preservation strength");
+        dlsslop::validate_native_tuning(settings.tuning);
         const bool tuned = !dlsslop::native_tuning_is_default(settings.tuning);
         const bool colored = settings.color_preserve > 0;
-        if (tuned && !gpu_tuning_)
-            gpu_tuning_ = std::make_unique<dlsslop::GpuTuning>(api, network_->Stream(), options_.modules + "/linux_tuning.hsaco");
-        if (colored && !gpu_color_)
-            gpu_color_ = std::make_unique<dlsslop::GpuColor>(api, network_->Stream(),
-                                                             options_.modules + "/linux_color.hsaco", width_, height_);
         if ((tuned || colored) && !device_scratch_)
             api.Check(api.hipMalloc(&device_scratch_, size_t(width_) * height_ * 12), "allocate post-processing output");
         if (passes > 1 && !device_feedback_)
@@ -518,8 +518,6 @@ public:
         }
         mark(1);
         if (settings.motion) {
-            if (!temporal_)
-                temporal_ = std::make_unique<dlsslop::GpuTemporal>(api, network_->Stream(), options_.modules + "/linux_temporal.hsaco");
             const bool reset = options_.self_test || previous_passes_ != passes ||
                 !previous_settings_.motion || previous_settings_.fp16 != settings.fp16 ||
                 previous_settings_.precision16 != settings.precision16 ||
@@ -530,7 +528,7 @@ public:
             // history still pending, and the next begin() would fail.
             temporal_->begin(device_input_, g, settings.motion_quality, settings.motion_grid,
                              settings.motion_units, passes, reset);
-        } else if (temporal_) {
+        } else {
             temporal_->reset();
         }
         void* answer = device_output_;
@@ -570,11 +568,12 @@ public:
             network_->Enqueue(pass_input, history, stages[0], 0);
             if (trace) trace_image(std::string(stage) + "-raw", stages[0], 3);
             if (tuned) {
-                gpu_tuning_->apply(g, pass_input, stages[0], stages[1], settings.tuning);
+                dlsslop::gpu_tune(*kernels_, g, pass_input, stages[0], stages[1], settings.tuning);
                 if (trace) trace_image(std::string(stage) + "-tuned", stages[1], 3);
             }
             if (colored) {
-                gpu_color_->apply(device_input_, stages[tuned], stages[1 + tuned], g, settings.color_preserve);
+                dlsslop::gpu_preserve_color(*kernels_, g, device_input_, stages[tuned], stages[1 + tuned],
+                                            settings.color_preserve);
                 if (trace) trace_image(std::string(stage) + "-color", stages[1 + tuned], 3);
             }
             answer = stages[tuned + colored];

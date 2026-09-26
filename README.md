@@ -81,7 +81,8 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 ```
 
 This compiles and validates ten Vulkan shaders, compiles the `gfx1201` HIP modules
-(including `linux_color`), and builds the worker, layer, CLI, Qt GUI and tests.
+(the network's and `linux_native`, the worker's codec, tuning, color and motion
+kernels), and builds the worker, layer, CLI, Qt GUI and tests.
 CMake builds the shaders from their prepared sources; `-DDXC` defaults to `dxc`
 on `PATH`.
 Compilation does not require a GPU, ROCm runtime or model weights. Qt uses the

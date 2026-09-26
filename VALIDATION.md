@@ -55,7 +55,7 @@ With a compatible HIP runtime and `gfx1201` GPU, CTest's `color-gpu` test
 checks color correction without model weights. To run it alone:
 
 ```bash
-./build/color-gpu-test --module assets/HIP/gfx1201/linux_color.hsaco
+./build/color-gpu-test --module assets/HIP/gfx1201/linux_native.hsaco
 ```
 
 Exit 77 means the module, runtime or device is unavailable, not a passing

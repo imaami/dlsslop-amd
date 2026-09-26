@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Independent HIP test: no model weights, game or worker required.
-#include "../backend/color_gpu.h"
+#include "../backend/native_kernels.h"
 #include "../backend/color_preserve.h"
 #include <getopt.h>
 #include <unistd.h>
@@ -9,7 +9,7 @@
 
 int main(int argc,char** argv)
 {
-    std::string module="assets/HIP/gfx1201/linux_color.hsaco";
+    std::string module="assets/HIP/gfx1201/linux_native.hsaco";
     int device=-1;
     const option options[]={{"module",required_argument,nullptr,'m'}, {"device",required_argument,nullptr,'d'},
         {"help",no_argument,nullptr,'h'}, {nullptr,0,nullptr,0}};
@@ -17,7 +17,7 @@ int main(int argc,char** argv)
     while((code=getopt_long(argc,argv,"+m:d:h",options,nullptr))!=-1) {
         if(code=='h') {
             std::puts("Usage: color-gpu-test [OPTION]...\n"
-                " -m, --module PATH  Kernel module (default: assets/HIP/gfx1201/linux_color.hsaco)\n"
+                " -m, --module PATH  Kernel module (default: assets/HIP/gfx1201/linux_native.hsaco)\n"
                 " -d, --device N     HIP device (default: auto, first gfx1201)\n"
                 " -h, --help         Show help (default: off)\n"
                 "Tests correction against CPU reference for two references, then times a 1080-tier kernel.\n"
@@ -69,10 +69,10 @@ int main(int argc,char** argv)
         api.Check(api.hipMemcpy(original,input.data(),input.size()*sizeof(float),1),"upload test reference");
         api.Check(api.hipMemcpy(raw,model.data(),model.size()*sizeof(float),1),"upload test model");
         {
-            dlsslop::GpuColor color(api,stream,module,g.width,g.height);
+            const dlsslop::NativeKernels kernels(api,stream,module);
             // The kernel reads a neighbourhood of the model output, so it cannot run in place.
             bool rejected=false;
-            try {color.apply(original,raw,raw,g,1);}
+            try {dlsslop::gpu_preserve_color(kernels,g,original,raw,raw,1);}
             catch(const std::invalid_argument&) {rejected=true;}
             if(!rejected) throw std::runtime_error("GPU correction accepted an in-place output");
             for(unsigned reference=0;reference<2;++reference) {
@@ -84,7 +84,7 @@ int main(int argc,char** argv)
                 }
                 for(float strength : {0.f,.25f,.5f,1.f}) {
                     dlsslop::preserve_color(input.data(),model.data(),g,strength,expected);
-                    color.apply(original,raw,output,g,strength);
+                    dlsslop::gpu_preserve_color(kernels,g,original,raw,output,strength);
                     api.Check(api.hipStreamSynchronize(stream),"finish correction");
                     api.Check(api.hipMemcpy(actual.data(),output,actual.size()*sizeof(float),2),"read correction");
                     float worst=0;
@@ -99,7 +99,7 @@ int main(int argc,char** argv)
             api.Check(api.hipEventCreate(&start),"create start event");
             api.Check(api.hipEventCreate(&end),"create end event");
             api.Check(api.hipEventRecord(start,stream),"record start");
-            for(unsigned i=0;i<20;++i) color.apply(original,raw,output,g,1);
+            for(unsigned i=0;i<20;++i) dlsslop::gpu_preserve_color(kernels,g,original,raw,output,1);
             api.Check(api.hipEventRecord(end,stream),"record end");
             api.Check(api.hipEventSynchronize(end),"wait for timing");
             float ms=0;api.Check(api.hipEventElapsedTime(&ms,start,end),"measure correction");

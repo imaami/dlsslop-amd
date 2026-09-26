@@ -138,7 +138,7 @@ if(BUILD_TESTING)
     target_link_libraries(color-gpu-test PRIVATE ${CMAKE_DL_LIBS})
     # Uses the GPU when the HIP runtime, a gfx1201 device and the module exist.
     set(HIP_MODULES ${CMAKE_CURRENT_SOURCE_DIR}/assets/HIP/gfx1201)
-    add_test(NAME color-gpu COMMAND color-gpu-test --module ${HIP_MODULES}/linux_color.hsaco)
+    add_test(NAME color-gpu COMMAND color-gpu-test --module ${HIP_MODULES}/linux_native.hsaco)
     add_executable(color-kernel-host-test tests/color_kernel_host_test.cpp)
     target_compile_options(color-kernel-host-test PRIVATE -Wno-attributes -Wno-unknown-pragmas)
     add_test(NAME color-kernel-host COMMAND color-kernel-host-test)
@@ -170,7 +170,7 @@ if(BUILD_TESTING)
         --compiler=$<$<BOOL:${HIP_CLANG}>:${HIP_CLANG}>)
     add_test(NAME codec-isa COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/check-codec-isa.py --objdump ${LLVM_OBJDUMP}
-        ${HIP_MODULES}/linux_codec.hsaco)
+        ${HIP_MODULES}/linux_native.hsaco)
     add_neural_layer(VkLayer_DLSSLOP_test)
     target_compile_definitions(VkLayer_DLSSLOP_test PRIVATE DLSSLOP_TEST_LAVAPIPE=1)
     find_library(VULKAN_LOADER NAMES vulkan libvulkan.so.1 REQUIRED)

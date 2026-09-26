@@ -31,14 +31,14 @@ the existing codec. The filter can also remove intended relighting color.
 
 ## HIP module
 
-The full build includes `linux_color.hsaco`, and the worker requires it like
-its other native modules. To rebuild and test that module separately after
-source preparation and the host build:
+The kernel is part of `linux_native.hsaco`, the module of the worker's own
+kernels, which the worker loads at startup. To rebuild that module and test the
+kernel separately after source preparation and the host build:
 
 ```bash
-python3 scripts/build-kernels.py --only linux_color \
+python3 scripts/build-kernels.py --only linux_native \
     --compiler clang++-22 --linker /usr/bin/ld.lld-22
-./build/color-gpu-test --module assets/HIP/gfx1201/linux_color.hsaco
+./build/color-gpu-test --module assets/HIP/gfx1201/linux_native.hsaco
 ```
 
 The test needs a compatible HIP runtime and Radeon, but no weights or game.
@@ -47,13 +47,13 @@ prints kernel timing. Exit 77 means the module or a compatible runtime or
 device is unavailable. See [VALIDATION.md](VALIDATION.md) for integration
 tests.
 
-The worker loads the module when correction is first enabled. Feedback never
-overwrites the encoded input, so the kernel reads it as the reference; it adds
-one kernel per pass on the inference stream, with no correction-related copies,
-host transfers or waits. Its output buffer, 12 bytes per padded pixel
-(approximately 25.3 MiB at 1920×1152), is shared with native tuning. A module
-that is missing or fails to load or launch stops the worker with an error.
-Strength zero skips correction work.
+Feedback never overwrites the encoded input, so the kernel reads it as the
+reference; it adds one kernel per pass on the inference stream, with no
+correction-related copies, host transfers or waits. Its output buffer, 12 bytes
+per padded pixel (approximately 25.3 MiB at 1920×1152), is shared with native
+tuning and allocated when either is first enabled. A module that is missing or
+fails to load stops the worker at startup; a failed launch stops it with an
+error. Strength zero skips correction work.
 
 Opt-in tracing records `color_preserve` and `pass-NN-color.pfm`. The
 automated color diagnostic disables preservation for its baseline comparisons

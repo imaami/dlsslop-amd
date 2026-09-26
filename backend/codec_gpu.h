@@ -2,23 +2,22 @@
 #pragma once
 
 #include "codec.h"
-#include "vendor/hip_api.h"
+#include "native_kernels.h"
 
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <stdexcept>
-#include <string>
 
 namespace dlsslop {
 
 class GpuCodec {
     using HostRegister = int (*)(void*, std::size_t, unsigned);
     using HostRelease = int (*)(void*);
+    const NativeKernels& kernels_;
     hip_probe::Api& api_;
-    hip_probe::Handle stream_{};
-    hip_probe::Handle module_{}, encode_{}, encode16_{}, feedback_{}, decode_{}, decode16_{};
+    const hip_probe::Handle stream_;
     void* proxy_ = nullptr;
     std::uint32_t* invalid_ = nullptr; // Pinned host status word; kernels only ever store 1.
     std::size_t capacity_ = 0;
@@ -50,38 +49,21 @@ class GpuCodec {
         capacity_ = bytes;
     }
 
-    void release() noexcept
+public:
+    explicit GpuCodec(const NativeKernels& kernels) : kernels_(kernels), api_(kernels.api), stream_(kernels.stream)
+    {
+        if (!host_free_) throw std::runtime_error("missing HIP export hipHostFree");
+        api_.Check(api_.hipHostMalloc(reinterpret_cast<void**>(&invalid_), sizeof *invalid_, 0), "allocate codec status");
+    }
+    GpuCodec(const GpuCodec&) = delete;
+    GpuCodec& operator=(const GpuCodec&) = delete;
+    ~GpuCodec()
     {
         api_.hipStreamSynchronize(stream_);
         unpin();
         if (proxy_) api_.hipFree(proxy_);
-        if (invalid_) host_free_(invalid_);
-        if (module_) api_.hipModuleUnload(module_);
-        proxy_ = invalid_ = nullptr;
-        module_ = nullptr;
+        host_free_(invalid_);
     }
-
-public:
-    GpuCodec(hip_probe::Api& api, hip_probe::Handle stream, const std::string& module_path)
-        : api_(api), stream_(stream)
-    {
-        try {
-            api_.Check(api_.LoadModule(&module_, module_path.c_str()), "load Linux codec module");
-            api_.Check(api_.hipModuleGetFunction(&encode_, module_, "dlsslop_encode_rgba8"), "find encode kernel");
-            api_.Check(api_.hipModuleGetFunction(&encode16_, module_, "dlsslop_encode_rgba16f"), "find FP16 encode kernel");
-            api_.Check(api_.hipModuleGetFunction(&feedback_, module_, "dlsslop_feedback_rgb"), "find feedback kernel");
-            api_.Check(api_.hipModuleGetFunction(&decode_, module_, "dlsslop_decode_rgba8"), "find decode kernel");
-            api_.Check(api_.hipModuleGetFunction(&decode16_, module_, "dlsslop_decode_rgba16f"), "find FP16 decode kernel");
-            if (!host_free_) throw std::runtime_error("missing HIP export hipHostFree");
-            api_.Check(api_.hipHostMalloc(reinterpret_cast<void**>(&invalid_), sizeof *invalid_, 0), "allocate codec status");
-        } catch (...) {
-            release();
-            throw;
-        }
-    }
-    GpuCodec(const GpuCodec&) = delete;
-    GpuCodec& operator=(const GpuCodec&) = delete;
-    ~GpuCodec() { release(); }
 
     // Serving: page-lock growing prefixes of the channel's frame slots so the
     // encode and decode copies DMA straight from and to shared memory. The
@@ -120,8 +102,7 @@ public:
         *invalid_ = 0;
         Geometry parameters = g;
         void* args[] = {&proxy_, &device_rgba, &invalid_, &parameters};
-        api_.Check(api_.hipModuleLaunchKernel(fp16 ? encode16_ : encode_, (g.width * g.height + 255u) / 256u,
-            1, 1, 256, 1, 1, 0, stream_, args, nullptr), "encode proxy to neural input");
+        kernels_.launch(fp16 ? kEncodeRgba16f : kEncodeRgba8, g.width * g.height, args);
         uploaded_ = g;
         uploaded_fp16_ = fp16;
     }
@@ -137,8 +118,7 @@ public:
         Geometry parameters = g;
         std::uint32_t precision = precision16 ? 1 : 0;
         void* args[] = {&neural_rgb, &device_rgba, &invalid_, &parameters, &precision};
-        api_.Check(api_.hipModuleLaunchKernel(feedback_, (g.width * g.height + 255u) / 256u,
-            1, 1, 256, 1, 1, 0, stream_, args, nullptr), "prepare neural input for next pass");
+        kernels_.launch(kFeedbackRgb, g.width * g.height, args);
     }
 
     // decode belongs to the latest encode. Both execute on the network stream;
@@ -151,8 +131,7 @@ public:
         const std::size_t bytes = std::size_t(g.source_width) * g.source_height * (uploaded_fp16_ ? 8 : 4);
         Geometry parameters = g;
         void* args[] = {&proxy_, &neural_rgb, &invalid_, &parameters};
-        api_.Check(api_.hipModuleLaunchKernel(uploaded_fp16_ ? decode16_ : decode_, (g.source_width * g.source_height + 255u) / 256u,
-            1, 1, 256, 1, 1, 0, stream_, args, nullptr), "decode neural output to proxy");
+        kernels_.launch(uploaded_fp16_ ? kDecodeRgba16f : kDecodeRgba8, g.source_width * g.source_height, args);
         api_.Check(api_.hipMemcpyAsync(output, proxy_, bytes, 2, stream_), "read codec proxy");
     }
 

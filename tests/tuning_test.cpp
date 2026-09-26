@@ -82,8 +82,15 @@ int main()
         bool rejected = false;
         t.intensity = std::numeric_limits<float>::quiet_NaN();
         try { dlsslop::tune_neural_rgb(input.data(), model.data(), g, output, t); }
-        catch (const std::invalid_argument&) { rejected = true; }
+        catch (const std::range_error&) { rejected = true; }
         require(rejected, "nonfinite tuning must fail");
+        for (const dlsslop::NativeTuning& invalid : {dlsslop::NativeTuning{4.5f, 1, 1, 0}, dlsslop::NativeTuning{1, -1, 1, 0},
+                                                     dlsslop::NativeTuning{1, 1, 1, 1.5f}}) {
+            rejected = false;
+            try { dlsslop::validate_native_tuning(invalid); }
+            catch (const std::range_error&) { rejected = true; }
+            require(rejected, "out-of-range tuning must reject the request");
+        }
         rejected = false;
         try { dlsslop::tune_neural_rgb(input.data(), model.data(), g, model, {}); }
         catch (const std::invalid_argument&) { rejected = true; }

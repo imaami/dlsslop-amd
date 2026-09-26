@@ -68,7 +68,7 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
         output = root / (folder.name + '-out')
         environment = {key: value for key, value in os.environ.items() if key != 'HIP_CLANG'}
         environment.update(PATH=str(folder), **env)
-        result = subprocess.run([sys.executable, str(script), '-o', str(output), '-n', 'linux_codec', *options],
+        result = subprocess.run([sys.executable, str(script), '-o', str(output), '-n', 'linux_native', *options],
                                 env=environment, text=True, capture_output=True, timeout=60)
         assert result.returncode == expected, (folder.name, options, result.stdout, result.stderr)
         if expected:
@@ -88,15 +88,16 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
         ['-Xclang', '-target-feature', '-Xclang'], 'true16 is not disabled'
     assert not any(arg.startswith('--ld-path') for arg in arguments), 'no linker was requested'
 
-    # Provenance hashes every local header, including one only another header includes.
+    # Provenance hashes every source of a module and every local header,
+    # including one only another header includes.
     backend = script.parents[1] / 'backend'
-    assert b'tuning_math.h' not in (backend / 'color_gpu.hip').read_bytes(), 'tuning_math.h is included directly'
-    build(mixed, '--only', 'linux_color')
-    color = next(row for row in json.loads((root / 'mixed-out/modules.json').read_text())
-                 if row['module'] == 'linux_color')
-    assert color['sources'] == {name: hashlib.sha256((backend / name).read_bytes()).hexdigest()
-                                for name in ('color_gpu.hip', 'kernel.h', 'geometry.h', 'color_preserve_math.h',
-                                             'tuning_math.h')}, color
+    native_sources = ('codec_gpu.hip', 'tuning_gpu.hip', 'color_gpu.hip', 'temporal_gpu.hip')
+    assert not any(b'geometry.h' in (backend / name).read_bytes() for name in native_sources), \
+        'geometry.h is included directly'
+    native = json.loads((root / 'mixed-out/modules.json').read_text())[0]
+    assert native['sources'] == {name: hashlib.sha256((backend / name).read_bytes()).hexdigest()
+                                 for name in (*native_sources, 'kernel.h', 'geometry.h', 'tuning_math.h',
+                                              'color_preserve_math.h', 'temporal_math.h')}, native
     # The compile finds an upstream source's quoted includes through -I backend, and a header's own
     # includes beside it: decoys beside the source must not be recorded.
     kernels = root / 'kernels'
@@ -109,7 +110,7 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
                   if row['module'] == 'prefix_fast')
     assert prefix['sources'] == {
         'prefix_fast.hip': hashlib.sha256((kernels / 'prefix_fast.hip').read_bytes()).hexdigest(),
-        **{name: color['sources'][name] for name in ('color_preserve_math.h', 'tuning_math.h', 'geometry.h')}}, prefix
+        **{name: native['sources'][name] for name in ('color_preserve_math.h', 'tuning_math.h', 'geometry.h')}}, prefix
 
     newer = compilers('newer', {'amdclang++': 'AMD clang version 22.0.0git',
                                 'clang++-22': 'Debian clang version 22.1.8'})
@@ -123,12 +124,13 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
     (root / 'stale-out').mkdir()
     (root / 'stale-out/modules.json').write_text(json.dumps(
         [{'module': 'c32_wmma', 'compiler': 'old', 'sha256': '1' * 64},
-         {'module': 'linux_color', 'compiler': 'old', 'sha256': '0' * 64}]))
+         {'module': 'linux_color', 'compiler': 'old', 'sha256': '2' * 64},
+         {'module': 'prefix_fast', 'compiler': 'old', 'sha256': '0' * 64}]))
     build(stale)
     rows = json.loads((root / 'stale-out/modules.json').read_text())
-    assert [row['module'] for row in rows] == ['linux_codec', 'linux_color'], rows
+    assert [row['module'] for row in rows] == ['linux_native', 'prefix_fast'], rows
     sums = (root / 'stale-out/SHA256SUMS').read_text()
-    assert 'c32_wmma' not in sums and f'{"0" * 64}  linux_color.hsaco\n' in sums, sums
+    assert 'c32_wmma' not in sums and 'linux_color' not in sums and f'{"0" * 64}  prefix_fast.hsaco\n' in sums, sums
 
     # An explicit compiler, from the option or HIP_CLANG, is used whatever its version.
     assert build(mixed, '--compiler', 'clang++') == 'clang version 20.1.8'

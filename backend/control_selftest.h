@@ -14,8 +14,7 @@
 #include <string>
 #include <vector>
 
-namespace dlsslop {
-namespace control_selftest {
+namespace dlsslop::control_selftest {
 
 class Buffer {
     hip_probe::Api& api_;
@@ -23,8 +22,8 @@ class Buffer {
     std::size_t bytes_;
 public:
     void* pointer = nullptr;
-    Buffer(hip_probe::Api& api, hip_probe::Handle stream, std::size_t bytes)
-        : api_(api), stream_(stream), bytes_(bytes)
+    Buffer(const NativeKernels& kernels, std::size_t bytes)
+        : api_(kernels.api), stream_(kernels.stream), bytes_(bytes)
     {
         api_.Check(api_.hipMalloc(&pointer, bytes_), "allocate control self-test buffer");
     }
@@ -79,7 +78,7 @@ inline void compare(const std::vector<float>& actual, const std::vector<float>& 
     throw std::runtime_error(std::string(name) + " disagrees with CPU reference");
 }
 
-inline void check_tuning(hip_probe::Api& api, hip_probe::Handle stream, const std::string& modules)
+inline void check_tuning(const NativeKernels& kernels)
 {
     const Geometry g{7, 5, 7, 5, 5, 0, 0, 7, 5};
     const std::size_t pixels = g.width * g.height;
@@ -91,16 +90,15 @@ inline void check_tuning(hip_probe::Api& api, hip_probe::Handle stream, const st
         }
         input[p * 4 + 3] = 1;
     }
-    Buffer device_input(api, stream, input.size() * sizeof(float));
-    Buffer device_model(api, stream, model.size() * sizeof(float));
-    Buffer device_result(api, stream, model.size() * sizeof(float));
+    Buffer device_input(kernels, input.size() * sizeof(float));
+    Buffer device_model(kernels, model.size() * sizeof(float));
+    Buffer device_result(kernels, model.size() * sizeof(float));
     device_input.upload(input); device_model.upload(model);
-    GpuTuning tuning(api, stream, modules + "/linux_tuning.hsaco");
     const NativeTuning states[] = {{}, {0, 1, 1, 0}, {1.75f, .25f, 2.5f, .375f},
                                   {1, 0, 1, 0}, {1, 1, 0, 1}};
     for (const auto& state : states) {
         tune_neural_rgb(input.data(), model.data(), g, reference, state);
-        tuning.apply(g, device_input.pointer, device_model.pointer, device_result.pointer, state);
+        gpu_tune(kernels, g, device_input.pointer, device_model.pointer, device_result.pointer, state);
         compare(device_result.read(), reference, "GPU native tuning");
     }
     std::printf("GPU control self-test: native tuning 5 states exact\n");
@@ -114,8 +112,10 @@ inline float texture(unsigned x, unsigned y)
     return float(v & 65535u) / 65535.0f;
 }
 
-inline void check_temporal(hip_probe::Api& api, hip_probe::Handle stream, const std::string& modules)
+inline void check_temporal(const NativeKernels& kernels)
 {
+    auto& api = kernels.api;
+    const auto stream = kernels.stream;
     constexpr unsigned width = 128, height = 96, padded_height = 104;
     const Geometry g{width, height, width, padded_height, height, 0, 0, width, height};
     const std::size_t pixels = width * padded_height;
@@ -145,14 +145,14 @@ inline void check_temporal(hip_probe::Api& api, hip_probe::Handle stream, const 
             }
         }
     }
-    Buffer device_input(api, stream, original.size() * sizeof(float));
-    Buffer device_fallback(api, stream, fallback.size() * sizeof(float));
-    Buffer device_first(api, stream, histories[0].size() * sizeof(float));
-    Buffer device_second(api, stream, histories[1].size() * sizeof(float));
+    Buffer device_input(kernels, original.size() * sizeof(float));
+    Buffer device_fallback(kernels, fallback.size() * sizeof(float));
+    Buffer device_first(kernels, histories[0].size() * sizeof(float));
+    Buffer device_second(kernels, histories[1].size() * sizeof(float));
     device_input.upload(original); device_fallback.upload(fallback);
     device_first.upload(histories[0]); device_second.upload(histories[1]);
     void* results[] = {device_first.pointer, device_second.pointer};
-    GpuTemporal temporal(api, stream, modules + "/linux_temporal.hsaco");
+    GpuTemporal temporal(kernels);
 
     temporal.begin(device_input.pointer, g, 2, 2, 1, 2);
     for (unsigned pass = 0; pass < 2; ++pass) {
@@ -278,7 +278,7 @@ inline bool codec_rejects(GpuCodec& codec, const std::vector<std::uint8_t>& prox
     return false;
 }
 
-inline void check_codec(hip_probe::Api& api, hip_probe::Handle stream, const std::string& modules)
+inline void check_codec(const NativeKernels& kernels)
 {
     const Geometry g = geometry(7, 5, 720);
     const std::size_t pixels = std::size_t(g.width) * g.height;
@@ -291,9 +291,9 @@ inline void check_codec(hip_probe::Api& api, hip_probe::Handle stream, const std
             std::memcpy(proxy.data() + p * 8 + c * 2, &value, sizeof(value));
         }
     }
-    Buffer device_input(api, stream, pixels * 4 * sizeof(float));
-    Buffer device_rgb(api, stream, pixels * 3 * sizeof(float));
-    GpuCodec codec(api, stream, modules + "/linux_codec.hsaco");
+    Buffer device_input(kernels, pixels * 4 * sizeof(float));
+    Buffer device_rgb(kernels, pixels * 3 * sizeof(float));
+    GpuCodec codec(kernels);
     std::vector<float> reference, model(pixels * 3);
     encode_proxy(proxy.data(), g, true, reference);
     codec.encode(proxy.data(), g, device_input.pointer, true);
@@ -350,16 +350,4 @@ inline void check_codec(hip_probe::Api& api, hip_probe::Handle stream, const std
     std::fflush(stdout);
 }
 
-} // namespace control_selftest
-
-// Exercises the native controls on synthetic inputs, independently of model
-// weights. Run on the selected GPU and the network stream before self-test.
-inline void check_gpu_controls(hip_probe::Api& api, hip_probe::Handle stream,
-                               const std::string& modules)
-{
-    control_selftest::check_tuning(api, stream, modules);
-    control_selftest::check_temporal(api, stream, modules);
-    control_selftest::check_codec(api, stream, modules);
-}
-
-} // namespace dlsslop
+} // namespace dlsslop::control_selftest

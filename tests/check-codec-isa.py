@@ -9,7 +9,7 @@ inter-pass feedback and RGBA16F boundary conversions. Exit status 77 means
 the disassembler or the module is missing.
 
 Usage: python3 tests/check-codec-isa.py --objdump /path/to/llvm-objdump \
-           assets/HIP/gfx1201/linux_codec.hsaco
+           assets/HIP/gfx1201/linux_native.hsaco
 """
 
 import argparse

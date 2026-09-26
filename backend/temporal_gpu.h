@@ -2,8 +2,7 @@
 #pragma once
 #include "codec.h"
 #include "temporal_math.h"
-#include "vendor/hip_api.h"
-#include <string>
+#include "native_kernels.h"
 #include <vector>
 
 namespace dlsslop {
@@ -15,8 +14,9 @@ class GpuTemporal {
         dlsslop_temporal::Extent image{}, grid{};
         void *current = nullptr, *previous = nullptr, *flow = nullptr;
     };
+    const NativeKernels& kernels_;
     hip_probe::Api& api_;
-    hip_probe::Handle stream_{}, module_{}, luma_{}, reduce_{}, flow_{}, warp_{}, cut_{};
+    const hip_probe::Handle stream_;
     std::vector<Level> levels_;
     std::vector<void*> history_;
     void *warped_ = nullptr, *scene_cut_ = nullptr;
@@ -87,27 +87,11 @@ class GpuTemporal {
                 geometry_.height, 1u << grid_, units_, geometry_.x, geometry_.y,
                 geometry_.fit_width, geometry_.fit_height};
     }
-    void launch(hip_probe::Handle kernel, unsigned count, void** args, const char* what)
-    {
-        api_.Check(api_.hipModuleLaunchKernel(kernel, (count + 255) / 256, 1, 1,
-                   256, 1, 1, 0, stream_, args, nullptr), what);
-    }
 public:
-    GpuTemporal(hip_probe::Api& api, hip_probe::Handle stream, const std::string& path)
-        : api_(api), stream_(stream)
-    {
-        try {
-            api_.Check(api_.LoadModule(&module_, path.c_str()), "load temporal module");
-            api_.Check(api_.hipModuleGetFunction(&luma_, module_, "dlsslop_temporal_luma"), "find temporal luma kernel");
-            api_.Check(api_.hipModuleGetFunction(&reduce_, module_, "dlsslop_temporal_reduce"), "find temporal reduce kernel");
-            api_.Check(api_.hipModuleGetFunction(&flow_, module_, "dlsslop_temporal_flow"), "find temporal flow kernel");
-            api_.Check(api_.hipModuleGetFunction(&warp_, module_, "dlsslop_temporal_warp"), "find temporal warp kernel");
-            api_.Check(api_.hipModuleGetFunction(&cut_, module_, "dlsslop_temporal_cut"), "find temporal cut kernel");
-        } catch (...) { if (module_) api_.hipModuleUnload(module_); throw; }
-    }
+    explicit GpuTemporal(const NativeKernels& kernels) : kernels_(kernels), api_(kernels.api), stream_(kernels.stream) {}
     GpuTemporal(const GpuTemporal&) = delete;
     GpuTemporal& operator=(const GpuTemporal&) = delete;
-    ~GpuTemporal() { release_buffers(); if (module_) api_.hipModuleUnload(module_); }
+    ~GpuTemporal() { release_buffers(); }
     void reset() noexcept { valid_ = false; pending_ = false; completed_ = 0; }
     // Self-test only, as it waits for the stream: whether the latest begin()
     // found a scene cut.
@@ -132,11 +116,11 @@ public:
         pending_ = true; completed_ = 0;
         unsigned count = g.width * g.valid_height;
         void* args[] = {&rgba, &levels_[0].current, &count};
-        launch(luma_, count, args, "build temporal luma");
+        kernels_.launch(kTemporalLuma, count, args);
         for (std::size_t i = 1; i < levels_.size(); ++i) {
             auto& source = levels_[i - 1]; auto& target = levels_[i];
             void* down_args[] = {&source.current, &target.current, &source.image, &target.image};
-            launch(reduce_, target.image.width * target.image.height, down_args, "reduce temporal pyramid");
+            kernels_.launch(kTemporalReduce, target.image.width * target.image.height, down_args);
         }
         if (!valid_) return;
         for (std::size_t i = levels_.size(); i-- > 0;) {
@@ -147,11 +131,11 @@ public:
                 coarse ? levels_[i + 1].grid : level.grid, 1u << grid_, quality_ + 1,
                 quality_ == 2 ? 2u : 1u, units_, unsigned(coarse), unsigned(i == 0)};
             void* flow_args[] = {&level.current, &level.previous, &coarse_flow, &level.flow, &search};
-            launch(flow_, level.grid.width * level.grid.height, flow_args, "estimate pyramidal optical flow");
+            kernels_.launch(kTemporalFlow, level.grid.width * level.grid.height, flow_args);
         }
         auto w = warp_geometry();
         void* cut_args[] = {&levels_[0].current, &levels_[0].previous, &levels_[0].flow, &scene_cut_, &w};
-        launch(cut_, 32, cut_args, "detect temporal scene cut");
+        kernels_.launch(kTemporalCut, 32, cut_args);
     }
     // Call immediately before Enqueue for this pass. The returned image lives
     // until history() is called again; both it and inference share one stream.
@@ -163,7 +147,7 @@ public:
         auto w = warp_geometry();
         void* args[] = {&levels_[0].current, &levels_[0].previous, &history_[pass], &current_pass_rgba,
                         &levels_[0].flow, &warped_, &scene_cut_, &w};
-        launch(warp_, geometry_.width * geometry_.height, args, "warp same-pass neural history");
+        kernels_.launch(kTemporalWarp, geometry_.width * geometry_.height, args);
         return warped_;
     }
     // Call after history() for this pass: the pass's final RGB answer goes

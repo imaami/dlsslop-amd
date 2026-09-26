@@ -33,10 +33,7 @@ MODULES = [
     ("multihead_fused_attention", ["HIP_MH_RTZ_ISA 1"], ["multihead_fused_attention.hip"]),
     ("deep_fast-packed", ["HIP_BRANCHLESS_F 1"], ["deep_fast.hip"]),
     ("multihead-fast-padded-wave-packed", ["HIP_FFN_HOIST_RES 2"], ["multihead_fast_padded.hip"]),
-    ("linux_codec", [], ["codec_gpu.hip"]),
-    ("linux_tuning", [], ["tuning_gpu.hip"]),
-    ("linux_color", [], ["color_gpu.hip"]),
-    ("linux_temporal", [], ["temporal_gpu.hip"]),
+    ("linux_native", [], ["codec_gpu.hip", "tuning_gpu.hip", "color_gpu.hip", "temporal_gpu.hip"]),
 ]
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT / "backend"  # The linux_ modules' sources and headers.

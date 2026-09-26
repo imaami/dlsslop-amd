@@ -142,7 +142,8 @@ def main():
 
         # Files outside the allowlist never leak into the release.
         for name in ("secret-weights.f16", "assets/model.onnx", "build/color-gpu-test", "tests/private.cpp",
-                     "assets/HIP/gfx1201/unlisted.hsaco", "assets/HIP/gfx1201/linux_color.generated.hip"):
+                     "assets/HIP/gfx1201/unlisted.hsaco", "assets/HIP/gfx1201/linux_color.hsaco",
+                     "assets/HIP/gfx1201/linux_native.generated.hip"):
             path = source / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("must not ship\n")
@@ -173,7 +174,7 @@ def main():
 
         # Package validation also finishes before replacing an existing archive.
         output.write_bytes(b"existing archive")
-        (modules / "linux_color.hsaco").write_bytes(b"invalid GPU code")
+        (modules / "linux_native.hsaco").write_bytes(b"invalid GPU code")
         try:
             PACKAGER.package(source, build, output, source_url)
         except ValueError:
