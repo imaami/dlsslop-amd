@@ -445,7 +445,7 @@ index 75b2a3f..efd2ab3 100644
  
  }  // namespace dlssnr
 diff --git a/upstream-layer/layer_linux/src/capture.h b/upstream-layer/layer_linux/src/capture.h
-index db0dc5d..5c9a2ec 100644
+index db0dc5d..b8983f0 100644
 --- a/upstream-layer/layer_linux/src/capture.h
 +++ b/upstream-layer/layer_linux/src/capture.h
 @@ -14,30 +14,45 @@
@@ -475,7 +475,7 @@ index db0dc5d..5c9a2ec 100644
      static std::string Directory();
  
 -    void Begin(uint32_t frames);
-+    void Begin(uint32_t frames, uint32_t controlSeq = 0);
++    void Begin(uint32_t frames, uint32_t controlSeq);
      bool Active() const { return _remaining > 0; }
      uint32_t Remaining() const { return _remaining; }
  
@@ -483,7 +483,7 @@ index db0dc5d..5c9a2ec 100644
      // between PNG and raw from it, and reports what it chose in the manifest.
      void WriteFrame(const void* before, const void* after, uint32_t width, uint32_t height,
 -                    uint32_t vkFormat);
-+                    uint32_t vkFormat, const CaptureMetadata& metadata = {});
++                    uint32_t vkFormat, const CaptureMetadata& metadata);
  
    private:
 -    void WriteManifest(uint32_t width, uint32_t height, uint32_t vkFormat, bool png) const;
@@ -900,7 +900,7 @@ index dc344c4..1a84da8 100644
  
  
 diff --git a/upstream-layer/layer_linux/src/composition.h b/upstream-layer/layer_linux/src/composition.h
-index 757303b..904806a 100644
+index 757303b..584a6b8 100644
 --- a/upstream-layer/layer_linux/src/composition.h
 +++ b/upstream-layer/layer_linux/src/composition.h
 @@ -5,8 +5,9 @@
@@ -942,21 +942,12 @@ index 757303b..904806a 100644
      bool Prepare(uint32_t width, uint32_t height, VkFormat swapchainFormat, const FrameSettings& s,
                   bool linearHdr, bool hdrProxy = false, uint32_t hdrTransfer = 0);
  
-@@ -125,7 +132,7 @@ class Composition {
-     // in the layer derives from this one number so the two sides cannot disagree.
-     size_t ModelBytes() const { return size_t(_modelW) * _modelH * (_hdrProxy ? 8 : 4); }
-     bool HdrProxyActive() const { return _hdrProxy; }
--    uint32_t HdrTransfer() const { return _hdrProxy ? _hdrTransfer : 0; }
-+    uint32_t HdrTransfer() const { return _hdrTransfer; }
- 
-     // Point the transport buffers at the shared-memory pixel regions so the GPU reads and writes
-     // them directly, with no host copy in between. Null pointers fall back to private host-visible
 @@ -198,8 +205,11 @@ class Composition {
      void MarkModelFrame() { _haveModel = true; }
  
      // Write this many matched before/after pairs, starting with the next composed frame.
 -    void RequestCapture(uint32_t frames) { _capture.Begin(frames); }
-+    void RequestCapture(uint32_t frames, uint32_t controlSeq = 0) { _capture.Begin(frames, controlSeq); }
++    void RequestCapture(uint32_t frames, uint32_t controlSeq) { _capture.Begin(frames, controlSeq); }
 +    void SetCaptureInference(uint32_t seq) { _captureMetadata.inferenceSeq = seq; }
      bool CaptureActive() const { return _capture.Active(); }
 +    // This frame's compose recorded a pair; an active capture without its host buffer records none.
@@ -1017,7 +1008,7 @@ index 2690bb9..90440b6 100644
  
      // How much of the chroma-agreement gate to apply, 0..1. See colourTrustPercent.
 diff --git a/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl b/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
-index 67c5f9d..15bd6bf 100644
+index 67c5f9d..1752d23 100644
 --- a/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
 +++ b/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
 @@ -29,9 +29,9 @@ cbuffer Params : register(b0)
@@ -1032,7 +1023,7 @@ index 67c5f9d..15bd6bf 100644
                             //    PQ-decoded on the way in and PQ-encoded on the way out.
      float gColourTrust;    // maximum chroma displacement from the frame, in normalized units
      float gRatioSmooth;    // how much of the relighting ratio to take from the neighbourhood
-@@ -303,26 +303,46 @@ static const float kPqC3 = 18.6875;           // 2392 / 4096 * 32
+@@ -303,26 +303,44 @@ static const float kPqC3 = 18.6875;           // 2392 / 4096 * 32
  // this is the divisor that puts a UI white at 1.0. The user's white point scales it from there.
  static const float kPqPaperWhite = 0.0203;
  
@@ -1080,12 +1071,10 @@ index 67c5f9d..15bd6bf 100644
 -        return max(gWhitePoint, 1e-4) * (gHdrTransfer != 0 ? kPqPaperWhite : 1.0);
 +    if (gHdrTransfer != 0)
 +        return max(gWhitePoint, 1e-4) * kPqPaperWhite;
-+    if (gHdrProxy == 1)
-+        return max(gWhitePoint, 1e-4);
      return gPassthrough != 0 ? 1.0 : max(gWhitePoint, 1e-4);
  }
  
-@@ -501,7 +521,7 @@ float3 CubeScaleResidual(float3 P, float3 T)
+@@ -501,7 +519,7 @@ float3 CubeScaleResidual(float3 P, float3 T)
  {
      // The unit cube is the SDR proxy's bound. A float16 proxy is unbounded by design -- the edit may
      // take a pixel past 1.0 into real HDR and that is the picture, not an overflow.
@@ -1094,7 +1083,7 @@ index 67c5f9d..15bd6bf 100644
          return T;
  
      float3 d = T - P;
-@@ -580,8 +600,8 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -580,8 +598,8 @@ void CSMain(uint3 id : SV_DispatchThreadID)
              for (uint tx = tx0; tx < max(tx1, tx0 + 1u); tx += stepX)
              {
                  float3 c = max(gSource.Load(int3(min(tx, fullW - 1u), min(ty, fullH - 1u), 0)).rgb, 0.0);
@@ -1105,7 +1094,7 @@ index 67c5f9d..15bd6bf 100644
                  peak = max(peak, dot(c, kLuma));
              }
          }
-@@ -627,8 +647,8 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -627,8 +645,8 @@ void CSMain(uint3 id : SV_DispatchThreadID)
              for (uint tx = tx0; tx < max(tx1, tx0 + 1u); tx += stepX)
              {
                  float3 c = max(gSource.Load(int3(min(tx, fullW - 1u), min(ty, fullH - 1u), 0)).rgb, 0.0);
@@ -1116,7 +1105,7 @@ index 67c5f9d..15bd6bf 100644
                  sum += dot(c, kLuma);
                  taken++;
              }
-@@ -703,14 +723,11 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -703,14 +721,11 @@ void CSMain(uint3 id : SV_DispatchThreadID)
          float4 source = gSource.Load(int3(id.xy, 0));
          float3 frame = max(source.rgb, float3(0.0, 0.0, 0.0));
  
@@ -1132,7 +1121,7 @@ index 67c5f9d..15bd6bf 100644
          {
              float3 lin = gHdrTransfer != 0 ? PqToLinear(frame) : frame;
              gTarget[id.xy] = float4(lin / NormScale(), source.a);
-@@ -741,7 +758,10 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -741,7 +756,10 @@ void CSMain(uint3 id : SV_DispatchThreadID)
          // that shows the model highlight gradation the knee throws away. Reached only when the frame
          // is not passthrough (handled and returned above), so NeutwoEncode never sees a tone-mapped
          // frame. Both are undone by the resolve: the knee approximately, Neutwo exactly.
@@ -1144,7 +1133,7 @@ index 67c5f9d..15bd6bf 100644
          float3 display;
          if (gReversibleMode == 0)
              display = SoftKnee(normalized);        // soft knee
-@@ -803,7 +823,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -803,7 +821,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      // Nothing was encoded on the way in, so nothing is decoded here either. The float16 proxy is
      // linear light already -- the sRGB decode would fold the highlights flat.
      float3 proxy, model;
@@ -1153,7 +1142,7 @@ index 67c5f9d..15bd6bf 100644
      {
          proxy = proxySample.rgb;
          model = modelSample.rgb;
-@@ -843,7 +863,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -843,7 +861,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
              const float2 uvn = saturate(cmpUv + off);
              float3 pn = gSource.SampleLevel(gLinear, uvn, 0).rgb;
              float3 mn = gModel.SampleLevel(gLinear, uvn, 0).rgb;
@@ -1162,7 +1151,7 @@ index 67c5f9d..15bd6bf 100644
              {
                  pn = SrgbToLinear(pn);
                  mn = SrgbToLinear(mn);
-@@ -866,7 +886,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -866,7 +884,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      // own hue, which is what makes the failure so confusing to look at.
      const float normScale = NormScale();
      float3 originalRaw = originalSample.rgb;
@@ -1171,7 +1160,7 @@ index 67c5f9d..15bd6bf 100644
          originalRaw = PqToLinear(max(originalRaw, 0.0));  // the frame's own light, in nits
      float3 original = originalRaw / normScale;
  
-@@ -878,22 +898,22 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -878,22 +896,22 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      // with and without Neural Rendering. In passthrough the frame is already display-referred.
      if (gApplyModel == 0)
      {
@@ -1184,7 +1173,7 @@ index 67c5f9d..15bd6bf 100644
      {
 -        float3 dbg = proxy * gDebugScale * (gHdrProxy != 0 ? normScale : 1.0);
 -        if (gHdrProxy != 0 && gHdrTransfer != 0) dbg = LinearToPq(dbg);
-+        float3 dbg = proxy * gDebugScale * (gPassthrough == 0 || gHdrProxy == 1 ? normScale : 1.0);
++        float3 dbg = proxy * gDebugScale * normScale;
 +        if (gHdrTransfer != 0) dbg = LinearToPq(dbg);
          gTarget[id.xy] = float4(dbg, originalSample.a);
          return;
@@ -1194,23 +1183,23 @@ index 67c5f9d..15bd6bf 100644
      {
 -        float3 dbg = model * gDebugScale * (gHdrProxy != 0 ? normScale : 1.0);
 -        if (gHdrProxy != 0 && gHdrTransfer != 0) dbg = LinearToPq(dbg);
-+        float3 dbg = model * gDebugScale * (gPassthrough == 0 || gHdrProxy == 1 ? normScale : 1.0);
++        float3 dbg = model * gDebugScale * normScale;
 +        if (gHdrTransfer != 0) dbg = LinearToPq(dbg);
          gTarget[id.xy] = float4(dbg, originalSample.a);
          return;
      }
-@@ -907,8 +927,8 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -907,8 +925,8 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      {
          // Amplified and centred on grey, so both directions of the edit are visible at once.
          float3 shown = saturate(0.5 + edit * 20.0);
 -        float3 dbg = SrgbToLinear(shown) * gDebugScale * (gHdrProxy != 0 ? normScale : 1.0);
 -        if (gHdrProxy != 0 && gHdrTransfer != 0) dbg = LinearToPq(dbg);
-+        float3 dbg = SrgbToLinear(shown) * gDebugScale * (gPassthrough == 0 || gHdrProxy == 1 ? normScale : 1.0);
++        float3 dbg = SrgbToLinear(shown) * gDebugScale * normScale;
 +        if (gHdrTransfer != 0) dbg = LinearToPq(dbg);
          gTarget[id.xy] = float4(dbg, originalSample.a);
          return;
      }
-@@ -973,7 +993,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -973,7 +991,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
          // same passthrough check the encode has. Without this, a reversible + matched-residual +
          // already-tone-mapped frame would Neutwo-compress a frame the encode left raw. Neutwo already
          // lands in [0,1), so it needs no saturate.
@@ -1219,7 +1208,7 @@ index 67c5f9d..15bd6bf 100644
                                 ? original  // the float encode is a divide; the rebuild is the same divide
                                 : gPassthrough != 0
                                 ? saturate(original)
-@@ -1026,7 +1046,11 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -1026,7 +1044,11 @@ void CSMain(uint3 id : SV_DispatchThreadID)
          // Saturated like the blend in the branch below. Detail strength above 1 is carried further
          // down as a power on the luminance ratio, so scaling the edit by it here as well spends it
          // twice.
@@ -1232,7 +1221,7 @@ index 67c5f9d..15bd6bf 100644
  
          // What bounds the sum. An addition says nothing about where the result lands, so the model's
          // verdict is read as a ratio on the pair it came from and the sum is held near it.
-@@ -1342,15 +1366,17 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -1342,15 +1364,17 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      if (gDebugView == 4)
      {
          const float a = saturate(colourAllow);
@@ -1248,20 +1237,20 @@ index 67c5f9d..15bd6bf 100644
      {
 -        float3 dbg = upgraded * gDebugScale * (gHdrProxy != 0 ? normScale : 1.0);
 -        if (gHdrProxy != 0 && gHdrTransfer != 0) dbg = LinearToPq(dbg);
-+        float3 dbg = upgraded * gDebugScale * (gPassthrough == 0 || gHdrProxy == 1 ? normScale : 1.0);
++        float3 dbg = upgraded * gDebugScale * normScale;
 +        if (gHdrTransfer != 0) dbg = LinearToPq(dbg);
          gTarget[id.xy] = float4(max(dbg, 0.0), originalSample.a);
          return;
      }
-@@ -1362,21 +1388,36 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -1362,21 +1386,32 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      if (gColourStrength > 1.0)
          result = ClampAp1(FromOkLab(float3(1.0, gColourStrength, gColourStrength) * ToOkLab(max(result, 0.0))));
  
-+    // The HIP model sees an SDR/BT.709 proxy. A wide-gamut HDR10 source can
-+    // have negative BT.709 coordinates, which its proxy necessarily cannot
-+    // preserve. Keep the native hue for those pixels and transfer luminance
-+    // only; otherwise even an identity model desaturates BT.2020 primaries.
-+    const bool nativeWideGamut = gPassthrough == 0 && gHdrProxy != 1 && any(original < 0.0);
++    // The HIP model sees an SDR/BT.709 proxy, which cannot hold a wide-gamut source's negative
++    // BT.709 coordinates: keep their native hue and transfer luminance only, or even an identity
++    // model desaturates BT.2020 primaries. The replace modes take the model's answer instead.
++    const bool nativeWideGamut = gPassthrough == 0 && gHdrProxy != 1 && gReversibleMode != 2 &&
++                                 gReversibleMode != 4 && any(original < 0.0);
 +    if (nativeWideGamut)
 +        result = lumaOnly;
 +
@@ -1282,19 +1271,15 @@ index 67c5f9d..15bd6bf 100644
      result *= normScale;
 -    if (gHdrProxy != 0 && gHdrTransfer != 0)
 -        result = LinearToPq(max(result, 0.0));
++    // A luminance-only edit applies in the source gamut directly: inverse FP32 matrices leave a
++    // saturated primary tiny nonzero channels, which PQ amplifies visibly near black.
 +    if (gHdrTransfer != 0)
-+    {
-+        // Apply a luminance-only edit in the source gamut directly. Converting
-+        // a saturated primary through inverse FP32 matrices leaves tiny nonzero
-+        // channels; PQ amplifies that cancellation error visibly near black.
-+        result = nativeWideGamut && gReversibleMode != 2 && gReversibleMode != 4
-+            ? Linear2020ToPq(PqToLinear2020(originalSample.rgb) * boundedRatio)
-+            : LinearToPq(result);
-+    }
++        result = nativeWideGamut ? Linear2020ToPq(PqToLinear2020(originalSample.rgb) * boundedRatio)
++                                 : LinearToPq(result);
  
      // The side being shown untouched takes the frame as it arrived, past every step above -- code
      // for code, transfer included.
-@@ -1392,11 +1433,15 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -1392,11 +1427,15 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      if (onDivider)
      {
          float3 white = float3(WhitePoint(), WhitePoint(), WhitePoint());
