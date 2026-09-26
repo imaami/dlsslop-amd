@@ -52,7 +52,8 @@ preparation script verifies the hashes of the pinned inputs and applies
 Run it again after a pull: it updates files it prepared, deletes those the patch
 no longer produces and refuses to overwrite local edits. It knows what it
 prepared from `.prepared-sources.json`; a tree prepared before that record
-existed reads as local edits, so remove those three directories once first.
+existed reads as local edits: keep any edits you made there, then remove
+those three directories once.
 Pins, file mappings and hashes are in `upstreams.lock.json`; attribution is in
 [PROVENANCE.md](PROVENANCE.md).
 
