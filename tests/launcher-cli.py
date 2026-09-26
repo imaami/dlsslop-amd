@@ -50,10 +50,19 @@ def main():
         assert "(default: /layer.log)" in root_help
         for option in ("--help", "-h"):
             run([BASH, str(LAUNCHER), option], env=env)
-        run([BASH, str(LAUNCHER)], expected=2, env=env)
-        run([BASH, str(LAUNCHER), "--shm"], expected=2, env=env)
-        run([BASH, str(LAUNCHER), "--shm="], expected=2, env=env)
-        run([BASH, str(LAUNCHER), "--unknown"], expected=2, env=env)
+        # Help shows the defaults, not values of options given before it.
+        preceded_help = run([BASH, str(LAUNCHER), "--shm", "/other/shm.bin", "-l", "other.log", "--help"],
+                            env=env).stdout
+        assert f"(default: {channel})" in preceded_help
+        assert f"(default: {channel.parent}/layer.log)" in preceded_help
+        result = run([BASH, str(LAUNCHER)], expected=2, env=env)
+        assert result.stderr == "Usage: dlsslop-run [OPTIONS] [--] COMMAND [ARGUMENTS...]\n"
+        for missing in (["--shm"], ["--shm="], ["-s", ""], ["-l"], ["--log="], ["--log", "", "/usr/bin/true"]):
+            result = run([BASH, str(LAUNCHER), *missing], expected=2, env=env)
+            assert result.stderr == f"dlsslop-run: {missing[0].rstrip('=')} requires a nonempty path\n", result.stderr
+        for unknown in ("--unknown", "-x", "--shmx"):
+            result = run([BASH, str(LAUNCHER), unknown, "/usr/bin/true"], expected=2, env=env)
+            assert result.stderr == f"dlsslop-run: unknown option: {unknown} (see --help)\n", result.stderr
         result = run([BASH, str(LAUNCHER), "/usr/bin/true"], expected=1, env=env)
         assert "Start dlsslopd on the host first" in result.stderr
         assert not channel.exists()

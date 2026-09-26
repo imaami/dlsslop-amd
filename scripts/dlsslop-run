@@ -1,12 +1,21 @@
 #!/usr/bin/bash
 # Steam launch options: /home/USER/.local/bin/dlsslop-run -- %command%
 
+usage_line='Usage: dlsslop-run [OPTIONS] [--] COMMAND [ARGUMENTS...]'
+declare -A option_variable=([-s]=channel [--shm]=channel [-l]=log [--log]=log)
 channel_default=${DLSSNR_SHM:-/tmp/dlsslop-amd-${UID}/shm.bin}
 [[ $channel_default == /* ]] || channel_default=$PWD/$channel_default
+channel=$channel_default
+log=${DLSSNR_LOG:-}
+
+fail() {
+    printf '%s\n' "$2" >&2
+    exit "$1"
+}
 
 usage() {
     cat <<HELP
-Usage: dlsslop-run [OPTIONS] [--] COMMAND [ARGUMENTS...]
+${usage_line}
 Run a game with the native AMD presentation layer and an existing worker.
 
 Options:
@@ -28,90 +37,35 @@ Start dlsslopd separately before launching the game.
 HELP
 }
 
-channel=$channel_default
-log_override=${DLSSNR_LOG:-}
 while (( $# )); do
     case $1 in
-        -h|--help)
-            usage
-            exit 0
-            ;;
+        -h|--help) usage; exit 0 ;;
+        --shm=*|--log=*) set -- "${1%%=*}" "${1#*=}" "${@:2}" ;;
+        -s?*|-l?*) set -- "${1:0:2}" "${1:2}" "${@:2}" ;;
         -s|--shm|-l|--log)
-            if (( $# < 2 )) || [[ -z $2 ]]; then
-                printf 'dlsslop-run: %s requires a nonempty path\n' "$1" >&2
-                exit 2
-            fi
-            if [[ $1 == -s || $1 == --shm ]]; then
-                channel=$2
-            else
-                log_override=$2
-            fi
-            shift 2
-            ;;
-        --shm=*|--log=*)
-            value=${1#*=}
-            if [[ -z $value ]]; then
-                printf 'dlsslop-run: %s requires a nonempty path\n' "${1%%=*}" >&2
-                exit 2
-            fi
-            if [[ $1 == --shm=* ]]; then
-                channel=$value
-            else
-                log_override=$value
-            fi
-            shift
-            ;;
-        -s?*|-l?*)
-            if [[ $1 == -s* ]]; then
-                channel=${1:2}
-            else
-                log_override=${1:2}
-            fi
-            shift
-            ;;
-        --)
-            shift
-            break
-            ;;
-        -*)
-            printf 'dlsslop-run: unknown option: %s (see --help)\n' "$1" >&2
-            exit 2
-            ;;
-        *)
-            break
-            ;;
+            [[ $2 ]] || fail 2 "dlsslop-run: $1 requires a nonempty path"
+            printf -v "${option_variable[$1]}" '%s' "$2"
+            shift 2 ;;
+        --) shift; break ;;
+        -*) fail 2 "dlsslop-run: unknown option: $1 (see --help)" ;;
+        *) break ;;
     esac
 done
-if (( ! $# )); then
-    printf '%s\n' 'Usage: dlsslop-run [OPTIONS] [--] COMMAND [ARGUMENTS...]' >&2
-    exit 2
-fi
+(( $# )) || fail 2 "$usage_line"
 [[ $channel == /* ]] || channel=$PWD/$channel
-[[ -z $log_override || $log_override == /* ]] || log_override=$PWD/$log_override
-export DLSSNR_SHM=$channel
-if [[ ! -f $DLSSNR_SHM ]]; then
-    printf 'Start dlsslopd on the host first (missing %s).\n' "$DLSSNR_SHM" >&2
-    exit 1
-fi
-if ! command -v flock >/dev/null 2>&1; then
-    printf '%s\n' 'dlsslop-run requires flock (Debian package util-linux).' >&2
-    exit 1
-fi
-if flock --nonblock --conflict-exit-code 73 "$DLSSNR_SHM" true; then
-    printf '%s\n' 'No live native worker owns this channel; start dlsslopd first.' >&2
-    exit 1
-else
-    lock_status=$?
-    if (( lock_status != 73 )); then
-        printf '%s\n' 'Could not inspect the native worker channel.' >&2
-        exit 1
-    fi
-fi
-export DLSSLOP_AMD_ENABLE=1 DLSSNR_ENABLE=1 DLSSNR_IDLE_REPAINT=0
-export DLSSNR_LOG=${log_override:-${DLSSNR_SHM%/*}/layer.log}
+log=${log:-${channel%/*}/layer.log}
+[[ $log == /* ]] || log=$PWD/$log
+[[ -f $channel ]] || fail 1 "Start dlsslopd on the host first (missing $channel)."
+command -v flock >/dev/null 2>&1 || fail 1 'dlsslop-run requires flock (Debian package util-linux).'
+flock --nonblock --conflict-exit-code 73 "$channel" true
+case $? in
+    73) ;;
+    0) fail 1 'No live native worker owns this channel; start dlsslopd first.' ;;
+    *) fail 1 'Could not inspect the native worker channel.' ;;
+esac
+export DLSSNR_SHM=$channel DLSSNR_LOG=$log DLSSLOP_AMD_ENABLE=1 DLSSNR_ENABLE=1 DLSSNR_IDLE_REPAINT=0
 unset DLSSNR_DISABLE VKLayer_DLSS5
 shopt -s execfail
 exec -- "$@"
 status=$?
-printf 'dlsslop-run: could not execute %s (status %d)\n' "$1" "$status" >&2
-exit "$status"
+fail "$status" "dlsslop-run: could not execute $1 (status $status)"
