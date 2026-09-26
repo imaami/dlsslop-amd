@@ -89,7 +89,9 @@ public:
     // The caller keeps the HIP device current and the network's stream alive
     // and idle here: a frame ends before encode or after finish(). Upload and
     // encode are queued on the inference stream; input must stay unchanged
-    // until the stream reaches them (pageable input is staged).
+    // until the stream reaches them (pageable input is staged). Input and
+    // decode's output may be host memory or imported device frames: the
+    // copies infer their direction.
     void encode(const std::uint8_t* input, const Geometry& g, void* device_rgba, bool fp16 = false)
     {
         validate(g);
@@ -97,7 +99,7 @@ public:
             throw std::invalid_argument("null GPU encode output");
         const std::size_t bytes = std::size_t(g.source_width) * g.source_height * (fp16 ? 8 : 4);
         reserve(bytes);
-        api_.Check(api_.hipMemcpyAsync(proxy_, input, bytes, 1, stream_), "upload codec proxy");
+        api_.Check(api_.hipMemcpyAsync(proxy_, input, bytes, 4, stream_), "upload codec proxy");
         *invalid_ = 0;
         uploaded_ = g;
         uploaded_fp16_ = fp16;
@@ -127,7 +129,7 @@ public:
         const unsigned pixels = uploaded_.source_width * uploaded_.source_height;
         void* args[] = {&proxy_, &neural_rgb, &invalid_, &uploaded_};
         kernels_.launch(uploaded_fp16_ ? kDecodeRgba16f : kDecodeRgba8, pixels, args);
-        api_.Check(api_.hipMemcpyAsync(output, proxy_, std::size_t(pixels) * (uploaded_fp16_ ? 8 : 4), 2, stream_),
+        api_.Check(api_.hipMemcpyAsync(output, proxy_, std::size_t(pixels) * (uploaded_fp16_ ? 8 : 4), 4, stream_),
                    "read codec proxy");
     }
 

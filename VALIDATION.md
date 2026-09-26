@@ -83,6 +83,12 @@ Repeat with `--passes 2` to exercise feedback. Successful execution and
 deterministic output are basic sanity checks; the self-test does not measure
 visual quality or game performance.
 
+When the game renders on the worker's RX 9070 XT, its layer log (beside the
+channel file) must report `device-local transport ready`: proxy and answer then
+stay in video memory. A game on another GPU, or a worker whose channel path is
+too long for a Unix socket, logs `device-local transport declined` and stages
+frames through host memory instead.
+
 ## Game and desktop testing
 
 Run the worker and launch the game using the instructions in

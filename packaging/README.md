@@ -98,9 +98,11 @@ Start a fresh worker after `--quit`. Every command has `--help`; `dlsslopctl
 resolution; the edit is composed against the native frame. Each extra pass
 consumes the previous output and adds GPU work and latency without guaranteeing
 better quality. Motion estimation is optional and off by default. HUDs are part
-of the image and may change. Capture, host staging and inference are
+of the image and may change. Capture, transport and inference are
 synchronous, so the worker adds latency and competes with the game for GPU
-time. It transforms images; it does not generate frames.
+time. When the game renders on the worker's GPU, frames cross between the
+layer and the worker in video memory; otherwise they are staged through host
+memory. It transforms images; it does not generate frames.
 
 The worker, launcher and controllers use `/tmp/dlsslop-amd-UID/shm.bin`, where
 `UID` is your numeric user ID. The launcher writes the layer log beside that file.

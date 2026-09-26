@@ -11,6 +11,8 @@
 #include "shm_protocol.h"
 
 #include <algorithm>
+#include <array>
+#include <climits>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -29,10 +31,13 @@
 #include <fcntl.h>
 #include <linux/futex.h>
 #include <pwd.h>
+#include <poll.h>
 #include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 #include <sys/syscall.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 namespace {
@@ -317,6 +322,7 @@ public:
         h->quit.store(0);
         h->modelUp.store(0);
         h->seq_ok.store(0);
+        h->transportAck.store(0); // A new worker holds no device-local imports.
         // Answer a request left by a previous worker as failed, so the layer
         // presents its own frame; requests made from here on are served.
         h->seq_resp.store(h->seq_req.load(std::memory_order_acquire), std::memory_order_release);
@@ -352,6 +358,26 @@ class Engine {
     // Stream events: frame start, uploaded, evaluated, answered. Timing never
     // stalls the stream; the intervals are read once the answer is complete.
     hip_probe::Handle marks_[4]{};
+    // Device-local frames the layer exported (ShmTransportOffer), one per
+    // producer generation, the oldest replaced first.
+    struct Imported {
+        uint32_t generation = 0;
+        size_t bytes = 0;
+        hip_probe::Handle memory[2]{};
+        void* frame[2]{}; // proxy, answer
+    };
+    std::array<Imported, 4> imported_{};
+    unsigned next_import_ = 0;
+
+    void release(Imported& slot)
+    {
+        auto& api = network_->Runtime();
+        for (unsigned i = 0; i < 2; ++i) {
+            if (slot.frame[i]) api.hipFree(slot.frame[i]);
+            if (slot.memory[i]) api.hipDestroyExternalMemory(slot.memory[i]);
+        }
+        slot = {};
+    }
 
     void mark(unsigned i)
     {
@@ -367,6 +393,7 @@ public:
         if (!network_) return;
         auto& api = network_->Runtime();
         api.hipStreamSynchronize(network_->Stream());
+        for (auto& slot : imported_) release(slot);
         for (auto event : marks_) api.hipEventDestroy(event);
         for (void* buffer : {device_input_, device_feedback_, device_output_, device_scratch_})
             if (buffer) api.hipFree(buffer);
@@ -413,6 +440,53 @@ public:
     void pin(uint8_t* input, uint8_t* output, size_t bytes)
     {
         if (gpu_codec_) gpu_codec_->pin(input, output, bytes);
+    }
+    // Serving, between frames: imports an offered proxy/answer pair for the GPU
+    // codec. HIP owns each descriptor it imported; fds keeps the rest to close.
+    bool import(const ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2])
+    {
+        if (!gpu_codec_ || !offer.generation) return false;
+        auto& api = network_->Runtime();
+        Imported next{offer.generation, size_t(std::min(offer.allocation[0], offer.allocation[1]))};
+        for (unsigned i = 0; i < 2; ++i) {
+            hip_probe::MemoryDesc memory{};
+            memory.type = 1; // hipExternalMemoryHandleTypeOpaqueFd
+            memory.handle.fd = fds[i].fd;
+            memory.size = offer.allocation[i];
+            hip_probe::BufferDesc buffer{};
+            buffer.size = offer.allocation[i];
+            if (api.hipImportExternalMemory(&next.memory[i], &memory)) {
+                release(next);
+                return false;
+            }
+            fds[i].fd = -1;
+            if (api.hipExternalMemoryGetMappedBuffer(&next.frame[i], next.memory[i], &buffer)) {
+                release(next);
+                return false;
+            }
+        }
+        Imported* slot = nullptr;
+        for (auto& imported : imported_)
+            if (imported.generation == offer.generation) slot = &imported;
+        if (!slot) slot = &imported_[next_import_++ % imported_.size()];
+        release(*slot);
+        *slot = next;
+        return true;
+    }
+    struct Frames { const uint8_t* proxy; uint8_t* answer; };
+    // The imported frames of a generation that hold bytes, or nulls.
+    Frames frames(uint32_t generation, size_t bytes) const
+    {
+        for (const auto& imported : imported_)
+            if (imported.generation == generation && imported.bytes >= bytes)
+                return {static_cast<const uint8_t*>(imported.frame[0]), static_cast<uint8_t*>(imported.frame[1])};
+        return {};
+    }
+    // Diagnostics: copies host or device memory, such as an imported frame, to the host.
+    void read_back(void* host, const void* source, size_t bytes)
+    {
+        auto& api = network_->Runtime();
+        api.Check(api.hipMemcpy(host, source, bytes, 4), "read diagnostic frame");
     }
     // Input and output are w * h RGBA8, or RGBA16F with settings.fp16. verify
     // checks the GPU codec against the CPU reference inside the timed frame.
@@ -696,6 +770,66 @@ void run_offline(const Options& o, Engine& engine)
                  o.passes, engine.upload_ms, engine.inference_ms, engine.readback_ms);
 }
 
+// The socket beside the channel file on which the layer offers its exported
+// frames; closed (no device-local transport) when the codec runs on the CPU.
+struct TransportListener {
+    dlsslop::Descriptor socket;
+    std::string path;
+    TransportListener(const std::string& channel, bool wanted) : path(ShmTransportPath(channel))
+    {
+        sockaddr_un address{};
+        address.sun_family = AF_UNIX;
+        if (!wanted) return;
+        errno = ENAMETOOLONG;
+        if (path.size() < sizeof address.sun_path) {
+            std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
+            unlink(path.c_str());
+            socket.fd = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+            if (socket.fd >= 0 && !bind(socket.fd, reinterpret_cast<const sockaddr*>(&address), sizeof address) &&
+                !listen(socket.fd, 4))
+                return;
+        }
+        std::fprintf(stderr, "device-local transport unavailable (%s): %s\n", path.c_str(), std::strerror(errno));
+    }
+    ~TransportListener() { if (socket.fd >= 0) unlink(path.c_str()); }
+};
+
+// One offer: the layer sends it right after connecting.
+bool receive_offer(int peer, ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2])
+{
+    pollfd ready{peer, POLLIN, 0};
+    if (poll(&ready, 1, 100) != 1) return false;
+    alignas(cmsghdr) char control[CMSG_SPACE(2 * sizeof(int))]{};
+    iovec data{&offer, sizeof offer};
+    msghdr message{};
+    message.msg_iov = &data;
+    message.msg_iovlen = 1;
+    message.msg_control = control;
+    message.msg_controllen = sizeof control;
+    const ssize_t got = recvmsg(peer, &message, MSG_CMSG_CLOEXEC);
+    const cmsghdr* rights = got > 0 ? CMSG_FIRSTHDR(&message) : nullptr;
+    if (!rights || rights->cmsg_level != SOL_SOCKET || rights->cmsg_type != SCM_RIGHTS) return false;
+    const size_t count = std::min<size_t>(2, (rights->cmsg_len - CMSG_LEN(0)) / sizeof(int));
+    for (size_t i = 0; i < count; ++i) std::memcpy(&fds[i].fd, CMSG_DATA(rights) + i * sizeof(int), sizeof(int));
+    return size_t(got) == sizeof offer && count == 2 && offer.magic == kShmMagic &&
+           !(message.msg_flags & (MSG_TRUNC | MSG_CTRUNC));
+}
+
+// Imports every pending offer and acknowledges each imported generation.
+void accept_offers(const TransportListener& listener, Engine& engine, ShmHeader* h)
+{
+    for (int peer; (peer = accept4(listener.socket.fd, nullptr, nullptr, SOCK_CLOEXEC)) >= 0; close(peer)) {
+        ShmTransportOffer offer{};
+        dlsslop::Descriptor fds[2];
+        if (!receive_offer(peer, offer, fds) || !engine.import(offer, fds)) {
+            std::fprintf(stderr, "device-local transport offer rejected\n");
+            continue;
+        }
+        h->transportAck.store(offer.generation, std::memory_order_release);
+        syscall(SYS_futex, reinterpret_cast<uint32_t*>(&h->transportAck), FUTEX_WAKE, INT_MAX, nullptr, nullptr, 0);
+    }
+}
+
 void run_worker(const Options& o)
 {
     Mapping mapping(o.shm);
@@ -737,6 +871,7 @@ void run_worker(const Options& o)
         mapping.reason(o.test_identity ? "IDENTITY TEST: inference disabled" : "initializing native HIP model");
         Engine engine(o);
         engine.prepare();
+        const TransportListener transport(o.shm, !o.test_identity && !o.cpu_codec);
         // Only serving stops gracefully, from the ready announcement on.
         // Before it, and in every other mode, SIGINT and SIGTERM terminate.
         std::signal(SIGINT, stop_handler);
@@ -756,6 +891,7 @@ void run_worker(const Options& o)
         uint32_t last = h->seq_resp.load(std::memory_order_acquire);
         std::string failure;
         while (!stopping && !h->quit.load(std::memory_order_relaxed)) {
+            accept_offers(transport, engine, h);
             if (traces && !pending_trace) {
                 try {
                     pending_trace = traces->take();
@@ -805,8 +941,18 @@ void run_worker(const Options& o)
                     std::fprintf(stderr, "neural passes=%u; one final composition per frame\n", passes);
                     previous_passes = passes;
                 }
-                engine.pin(mapping.input, mapping.output, bytes);
-                engine.infer(mapping.input, w, height, mapping.output, passes, settings, pending_trace.get());
+                // The request's frames: an imported device-local pair, or the channel's slots.
+                Engine::Frames io{mapping.input, mapping.output};
+                if (const uint32_t generation = h->transportGen.load()) {
+                    io = engine.frames(generation, bytes);
+                    if (!io.proxy) {
+                        h->transportMiss.store(generation);
+                        throw std::range_error("request names device-local frames this worker has not imported");
+                    }
+                } else {
+                    engine.pin(mapping.input, mapping.output, bytes);
+                }
+                engine.infer(io.proxy, w, height, io.answer, passes, settings, pending_trace.get());
                 if (h->seq_req.load(std::memory_order_acquire) != request)
                     throw std::range_error("request changed during inference; old answer discarded");
                 std::string trace_metadata;
@@ -819,9 +965,11 @@ void run_worker(const Options& o)
                     metadata.tuning_seq_end = h->tuningSeq.load();
                     metadata.held_input = held_input;
                     metadata.held_input_end = h->holdFrame.load();
+                    std::vector<uint8_t> proxy(bytes);
+                    engine.read_back(proxy.data(), io.proxy, bytes);
                     metadata.source_proxy_hash = 14695981039346656037ull;
-                    for (size_t i = 0; i < bytes; ++i)
-                        metadata.source_proxy_hash = (metadata.source_proxy_hash ^ mapping.input[i]) * 1099511628211ull;
+                    for (uint8_t byte : proxy)
+                        metadata.source_proxy_hash = (metadata.source_proxy_hash ^ byte) * 1099511628211ull;
                     metadata.passes = passes;
                     metadata.geometry = dlsslop::geometry(w, height, o.tier);
                     metadata.fp16_proxy = settings.fp16;
