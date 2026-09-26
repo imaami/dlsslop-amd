@@ -201,8 +201,10 @@ DEV Rgb sample_neural(const float* source, CodecGeometry g, float x, float y, ui
                      read_neural(source, y1 * g.width + x1, invalid), x - float(x0)), y - float(y0));
 }
 
-KERNEL void dlsslop_decode_rgba8(const byte* original, const float* neural_rgb,
-                              byte* output, uint* invalid, CodecGeometry g)
+// Decode replaces RGB in the uploaded proxy and keeps its alpha. Each pixel is
+// one whole-word read-modify-write: a partial-word store makes the readback slower.
+KERNEL void dlsslop_decode_rgba8(uint* proxy, const float* neural_rgb, uint* invalid,
+                              CodecGeometry g)
 {
     const uint pixel = thread_index();
     if (pixel >= g.source_width * g.source_height)
@@ -211,14 +213,12 @@ KERNEL void dlsslop_decode_rgba8(const byte* original, const float* neural_rgb,
     const float nx = float(g.x) + (float(x) + 0.5f) * float(g.fit_width) / float(g.source_width) - 0.5f;
     const float ny = float(g.y) + (float(y) + 0.5f) * float(g.fit_height) / float(g.source_height) - 0.5f;
     const Rgb c = sample_neural(neural_rgb, g, nx, ny, invalid);
-    output[pixel * 4] = unorm8(c.r);
-    output[pixel * 4 + 1] = unorm8(c.g);
-    output[pixel * 4 + 2] = unorm8(c.b);
-    output[pixel * 4 + 3] = original[pixel * 4 + 3];
+    proxy[pixel] = (proxy[pixel] & 0xff000000u) | unorm8(c.r) | uint(unorm8(c.g)) << 8 |
+                   uint(unorm8(c.b)) << 16;
 }
 
-KERNEL void dlsslop_decode_rgba16f(const halfword* original, const float* neural_rgb,
-                                halfword* output, uint* invalid, CodecGeometry g)
+KERNEL void dlsslop_decode_rgba16f(unsigned long long* proxy, const float* neural_rgb,
+                                uint* invalid, CodecGeometry g)
 {
     const uint pixel = thread_index();
     if (pixel >= g.source_width * g.source_height)
@@ -227,8 +227,7 @@ KERNEL void dlsslop_decode_rgba16f(const halfword* original, const float* neural
     const float nx = float(g.x) + (float(x) + 0.5f) * float(g.fit_width) / float(g.source_width) - 0.5f;
     const float ny = float(g.y) + (float(y) + 0.5f) * float(g.fit_height) / float(g.source_height) - 0.5f;
     const Rgb c = sample_neural(neural_rgb, g, nx, ny, invalid);
-    output[pixel * 4] = dlsslop_pack_binary16(c.r, invalid);
-    output[pixel * 4 + 1] = dlsslop_pack_binary16(c.g, invalid);
-    output[pixel * 4 + 2] = dlsslop_pack_binary16(c.b, invalid);
-    output[pixel * 4 + 3] = original[pixel * 4 + 3];
+    proxy[pixel] = (proxy[pixel] & 0xffff000000000000ull) | dlsslop_pack_binary16(c.r, invalid) |
+                   uint(dlsslop_pack_binary16(c.g, invalid)) << 16 |
+                   (unsigned long long)dlsslop_pack_binary16(c.b, invalid) << 32;
 }

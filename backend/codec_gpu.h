@@ -24,8 +24,7 @@ class GpuCodec {
     hip_probe::Api& api_;
     hip_probe::Handle stream_{};
     hip_probe::Handle module_{}, encode_{}, encode16_{}, feedback_{}, decode_{}, decode16_{};
-    void* source_ = nullptr;
-    void* output_ = nullptr;
+    void* proxy_ = nullptr;
     std::uint32_t* invalid_ = nullptr; // Pinned host status word; kernels only ever store 1.
     std::size_t capacity_ = 0;
     // Resolved here so the vendored loader stays as upstream adapted it.
@@ -49,19 +48,10 @@ class GpuCodec {
         if (bytes <= capacity_)
             return;
         api_.Check(api_.hipStreamSynchronize(stream_), "codec resize synchronize");
-        void* source = nullptr;
-        void* output = nullptr;
-        api_.Check(api_.hipMalloc(&source, bytes), "allocate codec source proxy");
-        try {
-            api_.Check(api_.hipMalloc(&output, bytes), "allocate codec output proxy");
-        } catch (...) {
-            api_.hipFree(source);
-            throw;
-        }
-        if (source_) api_.hipFree(source_);
-        if (output_) api_.hipFree(output_);
-        source_ = source;
-        output_ = output;
+        void* proxy = nullptr;
+        api_.Check(api_.hipMalloc(&proxy, bytes), "allocate codec proxy");
+        if (proxy_) api_.hipFree(proxy_);
+        proxy_ = proxy;
         capacity_ = bytes;
     }
 
@@ -69,11 +59,10 @@ class GpuCodec {
     {
         api_.hipStreamSynchronize(stream_);
         unpin();
-        if (source_) api_.hipFree(source_);
-        if (output_) api_.hipFree(output_);
+        if (proxy_) api_.hipFree(proxy_);
         if (invalid_) host_free_(invalid_);
         if (module_) api_.hipModuleUnload(module_);
-        source_ = output_ = invalid_ = nullptr;
+        proxy_ = invalid_ = nullptr;
         module_ = nullptr;
     }
 
@@ -132,10 +121,10 @@ public:
             throw std::invalid_argument("invalid GPU encode geometry or output");
         const std::size_t bytes = std::size_t(g.source_width) * g.source_height * (fp16 ? 8 : 4);
         reserve(bytes);
-        api_.Check(api_.hipMemcpyAsync(source_, input, bytes, 1, stream_), "upload codec proxy");
+        api_.Check(api_.hipMemcpyAsync(proxy_, input, bytes, 1, stream_), "upload codec proxy");
         *invalid_ = 0;
         Geometry parameters = g;
-        void* args[] = {&source_, &device_rgba, &invalid_, &parameters};
+        void* args[] = {&proxy_, &device_rgba, &invalid_, &parameters};
         api_.Check(api_.hipModuleLaunchKernel(fp16 ? encode16_ : encode_, (g.width * g.height + 255u) / 256u,
             1, 1, 256, 1, 1, 0, stream_, args, nullptr), "encode proxy to neural input");
         uploaded_ = g;
@@ -148,8 +137,7 @@ public:
     void feedback(const Geometry& g, void* neural_rgb, void* device_rgba,
                   bool precision16 = true)
     {
-        if (std::memcmp(&uploaded_, &g, sizeof g) || !source_ || !neural_rgb ||
-            !device_rgba || neural_rgb == device_rgba)
+        if (std::memcmp(&uploaded_, &g, sizeof g) || !neural_rgb || !device_rgba || neural_rgb == device_rgba)
             throw std::invalid_argument("GPU feedback without matching encode or distinct buffers");
         Geometry parameters = g;
         std::uint32_t precision = precision16 ? 1 : 0;
@@ -159,17 +147,18 @@ public:
     }
 
     // decode belongs to the latest encode. Both execute on the network stream;
-    // output holds the proxy-sized answer once finish() returns.
+    // output holds the proxy-sized answer once finish() returns. The answer's
+    // RGB overwrites the uploaded proxy in place; its alpha passes through.
     void decode(const Geometry& g, void* neural_rgb, std::uint8_t* output)
     {
-        if (std::memcmp(&uploaded_, &g, sizeof g) || !source_ || !neural_rgb)
+        if (std::memcmp(&uploaded_, &g, sizeof g) || !neural_rgb)
             throw std::invalid_argument("GPU decode without matching encode");
         const std::size_t bytes = std::size_t(g.source_width) * g.source_height * (uploaded_fp16_ ? 8 : 4);
         Geometry parameters = g;
-        void* args[] = {&source_, &neural_rgb, &output_, &invalid_, &parameters};
+        void* args[] = {&proxy_, &neural_rgb, &invalid_, &parameters};
         api_.Check(api_.hipModuleLaunchKernel(uploaded_fp16_ ? decode16_ : decode_, (g.source_width * g.source_height + 255u) / 256u,
             1, 1, 256, 1, 1, 0, stream_, args, nullptr), "decode neural output to proxy");
-        api_.Check(api_.hipMemcpyAsync(output, output_, bytes, 2, stream_), "read codec proxy");
+        api_.Check(api_.hipMemcpyAsync(output, proxy_, bytes, 2, stream_), "read codec proxy");
     }
 
     // Waits for the stream. Nonfinite or FP16-overflow samples anywhere since

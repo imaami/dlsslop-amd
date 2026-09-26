@@ -276,6 +276,11 @@ inline void check_codec(hip_probe::Api& api, hip_probe::Handle stream, const std
     std::memcpy(&first_green, decoded.data() + 2, sizeof(first_green));
     require(half_value(first_red) == -.25f && half_value(first_green) == 1.5f,
             "GPU FP16 proxy decode clipped signed/extended-range values");
+    // Decode overwrites the uploaded proxy's RGB in place; a repeat must agree.
+    std::vector<std::uint8_t> repeated(proxy.size());
+    codec.decode(g, device_rgb.pointer, repeated.data());
+    codec.finish();
+    require(repeated == expected, "GPU FP16 proxy decode changed when repeated");
 
     // The encoder (a NaN proxy sample) and the decoder (an answer beyond
     // binary16) each reject the frame, and every encode starts clean.
