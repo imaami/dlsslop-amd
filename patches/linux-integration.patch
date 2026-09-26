@@ -216,7 +216,7 @@ index fd7c1cd..4ec527a 100644
      (void)h;
      return kMaxPasses;
 diff --git a/upstream-layer/layer_linux/src/capture.cpp b/upstream-layer/layer_linux/src/capture.cpp
-index 75b2a3f..55f39c4 100644
+index 75b2a3f..efd2ab3 100644
 --- a/upstream-layer/layer_linux/src/capture.cpp
 +++ b/upstream-layer/layer_linux/src/capture.cpp
 @@ -12,9 +12,9 @@
@@ -327,7 +327,7 @@ index 75b2a3f..55f39c4 100644
  }
  
  }  // namespace
-@@ -92,65 +120,102 @@ std::string CaptureWriter::Directory() {
+@@ -92,65 +120,99 @@ std::string CaptureWriter::Directory() {
      return "/tmp/dlssnr-captures";
  }
  
@@ -339,15 +339,13 @@ index 75b2a3f..55f39c4 100644
 -    if (!_cleared) {
 -        EmptyCaptureDir(dir);
 -        _cleared = true;
-+    std::string pattern = dir + "/capture-" + std::to_string(getpid()) + "-XXXXXX";
-+    std::vector<char> name(pattern.begin(), pattern.end());
-+    name.push_back('\0');
-+    if (!mkdtemp(name.data())) {
++    _batchDir = dir + "/capture-" + std::to_string(getpid()) + "-XXXXXX";
++    if (!mkdtemp(_batchDir.data())) {
 +        Log("[capture] cannot create batch directory in %s", dir.c_str());
 +        _remaining = 0;
 +        return;
      }
-+    _batchDir = name.data();
++    _batchName = uint32_t(dir.size() + 1);
 +    _controlSeq = controlSeq;
 +    _metadata.clear();
      _remaining = frames;
@@ -415,8 +413,7 @@ index 75b2a3f..55f39c4 100644
 +    if (!f) return false;
 +    std::fprintf(f, "capture_metadata_version 2\n");
 +    std::fprintf(f, "capture_control_seq %u\n", _controlSeq);
-+    const std::string batch = _batchDir.substr(Directory().size() + 1);
-+    std::fprintf(f, "batch_dir %s\n", batch.c_str());
++    std::fprintf(f, "batch_dir %s\n", _batchDir.c_str() + _batchName);
      std::fprintf(f, "frames %u\n", _index);
      std::fprintf(f, "width %u\nheight %u\n", width, height);
      std::fprintf(f, "vk_format %u\n", vkFormat);
@@ -439,7 +436,7 @@ index 75b2a3f..55f39c4 100644
 +    // overwrites any previous batch's images.
 +    const std::string pending = _batchDir + "/published.tmp";
 +    if (link(path.c_str(), pending.c_str()) != 0) return false;
-+    if (rename(pending.c_str(), (Directory() + "/manifest.txt").c_str()) != 0) {
++    if (rename(pending.c_str(), (_batchDir.substr(0, _batchName) + "manifest.txt").c_str()) != 0) {
 +        unlink(pending.c_str());
 +        return false;
 +    }
@@ -448,10 +445,10 @@ index 75b2a3f..55f39c4 100644
  
  }  // namespace dlssnr
 diff --git a/upstream-layer/layer_linux/src/capture.h b/upstream-layer/layer_linux/src/capture.h
-index db0dc5d..97f8b61 100644
+index db0dc5d..5c9a2ec 100644
 --- a/upstream-layer/layer_linux/src/capture.h
 +++ b/upstream-layer/layer_linux/src/capture.h
-@@ -14,30 +14,44 @@
+@@ -14,30 +14,45 @@
  // with a manifest saying how to read it. The manifest is written either way.
  #include <cstdint>
  #include <string>
@@ -496,6 +493,7 @@ index db0dc5d..97f8b61 100644
      uint32_t _index = 0;
 -    bool _cleared = false;
 +    uint32_t _controlSeq = 0;
++    uint32_t _batchName = 0;  // where the batch's own name starts in _batchDir
 +    std::string _batchDir;
 +    std::vector<CaptureMetadata> _metadata;
  };

@@ -163,7 +163,15 @@ int main() {
         writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
         require(!writer.Active(), "failed batch still active");
         require(read(root / "manifest.txt") == third, "published failed batch as complete");
-        std::printf("PASS: runtime and capture paths, capture publication, provenance, preserved batches, BGRA PNG, FP16 raw, write failure\n");
+
+        // A batch publishes where it began, even if the environment moves before it completes.
+        writer.Begin(1, 127);
+        require(setenv("XDG_STATE_HOME", (temporary.path / "moved").c_str(), 1) == 0, "setenv failed");
+        writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
+        const auto fourth = read(root / "manifest.txt");
+        require(field(fourth, "capture_control_seq") == "127", "batch did not publish where it began");
+        require(read(root / field(fourth, "batch_dir") / "manifest.txt") == fourth, "wrong batch name");
+        std::printf("PASS: runtime and capture paths, capture publication, provenance, preserved batches, BGRA PNG, FP16 raw, write failure, moved environment\n");
         return 0;
     } catch (const std::exception& error) {
         std::fprintf(stderr, "capture-writer-test: %s\n", error.what());
