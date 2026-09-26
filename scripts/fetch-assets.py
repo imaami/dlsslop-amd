@@ -47,11 +47,8 @@ def weight_manifest():
 
 
 def sha256(path):
-    digest = hashlib.sha256()
     with path.open("rb") as src:
-        while data := src.read(1024 * 1024):
-            digest.update(data)
-    return digest.hexdigest()
+        return hashlib.file_digest(src, "sha256").hexdigest()
 
 
 def checksum_text(records):

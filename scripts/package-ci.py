@@ -44,15 +44,13 @@ def package(root, build, output, source_url):
             or any(character in (source_url or "") for character in "\r\n")):
         raise ValueError("provide --source-url for the exact corresponding source, or set GITHUB_REPOSITORY and GITHUB_SHA")
     installer = load_installer(root)
-    files = installer.runtime_files(root, build)
-    expected_names = installer.release_names(files)
     # Do not enumerate the checkout or build directory: only these runtime
     # destinations can enter the archive, regardless of other files present.
-    files.update({"install.py": (root / "install.py", 0o755),
-                  "README.md": (root / "packaging/README.md", 0o644)})
-    files.update({name: (root / source, 0o644) for name, source in installer.LICENSE_SOURCES.items()})
-    for source, _ in files.values():
-        installer.require_file(source)
+    files = installer.runtime_files(root, build)
+    files["install.py"] = (root / "install.py", 0o755)
+    files.update({name: (root / source, 0o644) for name, source in installer.DOCUMENT_SOURCES.items()})
+    for source in ("install.py", *installer.DOCUMENT_SOURCES.values()):
+        installer.require_file(root / source)
     source_notice = (
         "dlsslop-amd corresponding source\n"
         "==============================\n\n"
@@ -63,24 +61,16 @@ def package(root, build, output, source_url):
         "THIRD-PARTY.txt and the accompanying licenses for component attribution.\n"
         "Model weights are a separate dependency and are not included.\n"
     ).encode()
-    generated = {"licenses/SOURCES": source_notice}
-    hashes = {name: installer.sha256(source) for name, (source, _) in files.items()}
-    hashes.update({name: hashlib.sha256(content).hexdigest() for name, content in generated.items()})
-    if set(hashes) != expected_names:
-        raise ValueError("release file allowlist is inconsistent")
-    generated["PACKAGE-SHA256SUMS"] = "".join(
-        f"{hashes[name]}  {name}\n" for name in sorted(hashes)).encode()
+    entries = {name: (source.read_bytes(), mode) for name, (source, mode) in files.items()}
+    entries["licenses/SOURCES"] = (source_notice, 0o644)
+    entries["PACKAGE-SHA256SUMS"] = ("".join(f"{hashlib.sha256(content).hexdigest()}  {name}\n"
+                                             for name, (content, _) in sorted(entries.items())).encode(), 0o644)
     output.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=output.name + ".", dir=output.parent)
     os.close(descriptor)
     try:
         with tarfile.open(temporary, "w:xz") as archive:
-            for name in sorted({*files, *generated}):
-                if name in generated:
-                    content, mode = generated[name], 0o644
-                else:
-                    source, mode = files[name]
-                    content = source.read_bytes()
+            for name, (content, mode) in sorted(entries.items()):
                 info = tarfile.TarInfo("dlsslop-amd/" + name)
                 info.size, info.mode = len(content), mode
                 info.uid = info.gid = info.mtime = 0
@@ -90,7 +80,6 @@ def package(root, build, output, source_url):
         if os.path.exists(temporary):
             os.unlink(temporary)
     print(f"Packaged 4 native binaries, {len(installer.MODULE_NAMES)} GPU modules and runtime tools: {output}")
-    return output
 
 
 def main():

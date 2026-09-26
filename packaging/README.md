@@ -18,9 +18,9 @@ export DLSSLOP_HIP_LIBRARY=/path/to/libamdhip64.so
 ```
 
 The GUI uses your distribution's shared Qt 6 Core, Gui and Widgets libraries and
-its Qt platform plugin. The runtime also needs the Vulkan loader, Bash, Python 3
-and `flock`. The color diagnostic needs Python NumPy and Pillow. The worker and
-Vulkan layer run independently of the GUI.
+its Qt platform plugin. The runtime also needs the Vulkan loader, Bash, Python 3.11
+or newer and `flock`. The color diagnostic needs Python NumPy and Pillow. The worker
+and Vulkan layer run independently of the GUI.
 
 ## Install
 

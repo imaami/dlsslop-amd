@@ -36,8 +36,8 @@ def run(arguments, env, expected=0):
 
 def fixture(root):
     root.mkdir()
-    paths = {"install.py", "packaging/README.md", *INSTALLER.SCRIPT_SOURCES.values(),
-             *INSTALLER.LICENSE_SOURCES.values()}
+    paths = {"install.py", *INSTALLER.DOCUMENT_SOURCES.values(),
+             *(source for source, *_ in INSTALLER.SCRIPT_SOURCES.values())}
     for name in paths:
         target = root / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -139,6 +139,17 @@ def main():
         sums.write_text(sums.read_text().splitlines()[0] + "\n")
         refuses_install(source, build, base, env, "incomplete-modules")
         sums.write_bytes(original_sums)
+
+        # A script whose first line is not exactly its interpreter line
+        # (another interpreter, or a longer path sharing the prefix) is
+        # refused before anything is installed.
+        for name, first_line in (("scripts/dlsslop-run", b"#!/bin/sh\n"),
+                                 ("scripts/dlsslop-test", b"#!/usr/bin/python3.99\n")):
+            script = source / name
+            original_script = script.read_bytes()
+            script.write_bytes(first_line + original_script.partition(b"\n")[2])
+            refuses_install(source, build, base, env, "wrong-interpreter")
+            script.write_bytes(original_script)
 
         # Files outside the allowlist never leak into the release.
         for name in ("secret-weights.f16", "assets/model.onnx", "build/color-gpu-test", "tests/private.cpp",

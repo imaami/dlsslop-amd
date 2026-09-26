@@ -7,7 +7,6 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import shlex
-import shutil
 import sys
 import tempfile
 
@@ -26,11 +25,12 @@ NATIVE_SOURCES = {
     "bin/dlsslop-gui": "gui/dlsslop-gui",
     LAYER_LIBRARY: "libVkLayer_DLSSLOP_amd.so",
 }
+# Destination: (source, required first line, installed mode).
 SCRIPT_SOURCES = {
-    "bin/dlsslop-run": "scripts/dlsslop-run",
-    "bin/dlsslop-test": "scripts/dlsslop-test",
-    "bin/dlsslop-setup": "scripts/fetch-assets.py",
-    "libexec/dlsslop-amd/color_metrics.py": "scripts/color_metrics.py",
+    "bin/dlsslop-run": ("scripts/dlsslop-run", b"#!/usr/bin/bash\n", 0o755),
+    "bin/dlsslop-test": ("scripts/dlsslop-test", b"#!/usr/bin/python3\n", 0o755),
+    "bin/dlsslop-setup": ("scripts/fetch-assets.py", b"#!/usr/bin/python3\n", 0o755),
+    "libexec/dlsslop-amd/color_metrics.py": ("scripts/color_metrics.py", b"", 0o644),
 }
 LICENSE_SOURCES = {
     "licenses/AGPL-3.0.txt": "LICENSE",
@@ -41,6 +41,7 @@ LICENSE_SOURCES = {
     "licenses/RenoDX.txt": "upstream-layer/third_party/optiscaler/RenoDX_ATTRIBUTION.txt",
     "licenses/THIRD-PARTY.txt": "packaging/THIRD-PARTY.txt",
 }
+DOCUMENT_SOURCES = {"README.md": "packaging/README.md", **LICENSE_SOURCES}
 
 
 def require_file(path):
@@ -49,11 +50,8 @@ def require_file(path):
 
 
 def sha256(path):
-    digest = hashlib.sha256()
     with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def check_elf(path, machine=62, shared=False):
@@ -111,15 +109,12 @@ def runtime_files(root, build, release=False):
         path = root / destination if release else build / source
         check_elf(path, shared=destination == LAYER_LIBRARY)
         files[destination] = (path, 0o755)
-    for destination, source in SCRIPT_SOURCES.items():
-        path = root / destination if release else root / source
+    for destination, (source, first_line, mode) in SCRIPT_SOURCES.items():
+        path = root / (destination if release else source)
         require_file(path)
-        if destination.startswith("bin/"):
-            expected = b"#!/usr/bin/bash\n" if destination == "bin/dlsslop-run" else b"#!/usr/bin/python3\n"
-            with path.open("rb") as stream:
-                if stream.readline() != expected:
-                    raise ValueError(f"incorrect executable interpreter: {path}")
-        files[destination] = (path, 0o755 if destination.startswith("bin/") else 0o644)
+        if not path.read_bytes().startswith(first_line):
+            raise ValueError(f"incorrect executable interpreter: {path}")
+        files[destination] = (path, mode)
     module_source = root / (MODULE_DIRECTORY if release else "assets/HIP/gfx1201")
     validate_modules(module_source)
     for name in (*[name + ".hsaco" for name in MODULE_NAMES], "modules.json", "SHA256SUMS"):
@@ -128,7 +123,7 @@ def runtime_files(root, build, release=False):
 
 
 def release_names(runtime):
-    return {*runtime, "install.py", "README.md", *LICENSE_SOURCES, "licenses/SOURCES"}
+    return {*runtime, "install.py", *DOCUMENT_SOURCES, "licenses/SOURCES"}
 
 
 def validate_release(root, runtime):
@@ -142,25 +137,12 @@ def validate_release(root, runtime):
             raise ValueError(f"release checksum mismatch: {path}")
 
 
-def atomic_copy(source, target, mode=0o755):
+def atomic_write(target, data, mode=0o644):
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=target.name + ".", dir=target.parent)
     try:
-        with os.fdopen(fd, "wb") as dest, source.open("rb") as src:
-            shutil.copyfileobj(src, dest)
-        os.chmod(temporary, mode)
-        os.replace(temporary, target)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
-
-
-def atomic_text(text, target, mode=0o644):
-    target.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=target.name + ".", dir=target.parent)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as out:
-            out.write(text)
+        with os.fdopen(fd, "wb") as out:
+            out.write(data)
         os.chmod(temporary, mode)
         os.replace(temporary, target)
     finally:
@@ -185,27 +167,25 @@ def main():
     manifest_path = args.manifest_dir.expanduser().resolve() / "VK_LAYER_LOCAL_dlsslop_amd.json"
     try:
         files = runtime_files(root, args.build_dir.expanduser().resolve(), release)
-        # Finish all input validation before creating or changing installed files.
-        source_notice = None
+        # Read and validate every input before creating or changing installed files.
         if release:
             validate_release(root, files)
-            documents = {name: name for name in ("README.md", *LICENSE_SOURCES, "licenses/SOURCES")}
+            documents = {name: name for name in (*DOCUMENT_SOURCES, "licenses/SOURCES")}
+            outputs = {}
         else:
-            documents = {"README.md": "packaging/README.md", **LICENSE_SOURCES}
-            source_notice = (
+            documents = DOCUMENT_SOURCES
+            for source in documents.values():
+                require_file(root / source)
+            outputs = {"share/doc/dlsslop-amd/licenses/SOURCES": ((
                 "dlsslop-amd corresponding source\n\n"
                 f"Installed from local source checkout: {root.as_uri()}\n"
                 "Dependency source URLs and revisions are recorded in upstreams.lock.json\n"
                 "in that checkout. See THIRD-PARTY.txt for component attribution.\n"
-            )
-        for name, source_name in documents.items():
-            source = root / source_name
-            require_file(source)
-            files["share/doc/dlsslop-amd/" + name] = (source, 0o644)
-        for destination, (source, mode) in files.items():
-            atomic_copy(source, prefix / destination, mode)
-        if source_notice is not None:
-            atomic_text(source_notice, prefix / "share/doc/dlsslop-amd/licenses/SOURCES")
+            ).encode(), 0o644)}
+        files.update(("share/doc/dlsslop-amd/" + name, (root / source, 0o644)) for name, source in documents.items())
+        outputs.update((name, (source.read_bytes(), mode)) for name, (source, mode) in files.items())
+        for name, (content, mode) in outputs.items():
+            atomic_write(prefix / name, content, mode)
         manifest = {
             "file_format_version": "1.2.0",
             "layer": {
@@ -219,7 +199,7 @@ def main():
                 "disable_environment": {"DLSSNR_DISABLE": "1"},
             },
         }
-        atomic_text(json.dumps(manifest, indent=2) + "\n", manifest_path)
+        atomic_write(manifest_path, (json.dumps(manifest, indent=2) + "\n").encode())
     except (OSError, ValueError, TypeError) as exc:
         parser.error(str(exc))
     print(f"Installed dlsslop-amd in {prefix}")
