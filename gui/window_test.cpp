@@ -55,10 +55,16 @@ int notchTowardsChange(const QWidget* widget)
     return state(widget).toDouble() < widget->property("maximum").toDouble() ? 120 : -120;
 }
 
-template <class Widget> Widget* named(QWidget& window, const QString& name)
+template <class Widget> Widget* find(QWidget& window, const QString& name)
 {
     for (auto* widget : window.findChildren<Widget*>())
         if (widget->accessibleName() == name) return widget;
+    return nullptr;
+}
+
+template <class Widget> Widget* named(QWidget& window, const QString& name)
+{
+    if (auto* widget = find<Widget>(window, name)) return widget;
     throw std::runtime_error("missing test widget");
 }
 
@@ -139,6 +145,64 @@ void editsWriteAtOnceThenCoalesce(QWidget& window, const ShmHeader& header)
     require(header.controlSeq.load() == control + 2, "an idle write window wrote again");
     hold->toggle();
     require(header.controlSeq.load() == control + 3, "an edit after an idle window was not written at once");
+}
+
+// Float fields step by the selected arrow step and integer fields by 1. The
+// model settings are read-only cards without sliders; every other numeric
+// field has a slider over the setting's range, 0..10000 for floats.
+void editorsFollowTheirSettings(QWidget& window)
+{
+    auto* step = named<QComboBox>(window, "Numeric arrow step");
+    require(step->currentIndex() == kDefaultArrowStep, "the default arrow step is not selected");
+    for (int choice : {kDefaultArrowStep, 2, 0, kDefaultArrowStep}) {
+        step->setCurrentIndex(choice);
+        for (const auto& s : kSettings)
+            if (auto* number = find<QDoubleSpinBox>(window, title(s.name)))
+                require(number->singleStep() == (s.isFloat ? kArrowSteps[choice] : 1), "a numeric field has the wrong arrow step");
+    }
+    int readOnly = 0, sliders = 0;
+    for (const auto& s : kSettings) {
+        const QString name = title(s.name);
+        auto* editor = find<QWidget>(window, name);
+        auto* slider = find<QSlider>(window, name + " slider");
+        require(editor, "a setting has no editor");
+        const bool writable = !dlsslop_control::fixed(s);
+        require(editor->isEnabled() == writable && named<QPushButton>(window, "Reset " + name)->isEnabled() == writable,
+                "a setting's editor and reset button disagree with its read-only state");
+        readOnly += !writable;
+        const bool number = qobject_cast<QDoubleSpinBox*>(editor);
+        require(!slider == (!writable || !number), "a slider is missing or on a read-only or non-numeric setting");
+        if (!slider) continue;
+        ++sliders;
+        require(slider->minimum() == (s.isFloat ? 0 : static_cast<int>(s.minimum)) &&
+                slider->maximum() == (s.isFloat ? 10000 : static_cast<int>(s.maximum)), "a slider has the wrong range");
+    }
+    require(readOnly == 4 && sliders >= 19, "the editor test reached too few settings");
+}
+
+// An action sends the edits still waiting in the write window, then acts.
+void actionsSendPendingEdits(QWidget& window, const ShmHeader& header)
+{
+    auto* hold = named<QCheckBox>(window, "Hold");
+    QPushButton* capture = nullptr;
+    for (auto* button : window.findChildren<QPushButton*>())
+        if (button->text() == "Request capture") capture = button;
+    require(capture, "missing capture button");
+    named<QSpinBox>(window, "Capture frame count")->setValue(3);
+    QTest::qWait(200); // Let any earlier write windows close.
+    const uint32_t control = header.controlSeq.load();
+    hold->toggle();
+    hold->toggle();
+    require(header.controlSeq.load() == control + 1 && header.holdFrame.load() != hold->isChecked(),
+            "the second edit was not held in the write window");
+    capture->click();
+    require(header.controlSeq.load() == control + 3 && header.holdFrame.load() == hold->isChecked() &&
+            header.captureRequest.load() == 3, "the capture action did not send the pending edit, then capture");
+    bool reported = false;
+    for (const auto* label : window.findChildren<QLabel*>()) reported |= label->text().startsWith("Capture requested");
+    require(reported, "the capture action did not report success");
+    QTest::qWait(100);
+    require(header.controlSeq.load() == control + 3, "the sent edit was written again");
 }
 
 // Answers the controller's modal warnings, recording the last one's title.
@@ -222,9 +286,12 @@ int main(int argc, char** argv)
         unfocusedEditorsScrollThePage(window, *header);
         focusedEditorsTakeTheWheel(window, *header);
         editsWriteAtOnceThenCoalesce(window, *header);
+        editorsFollowTheirSettings(window);
+        actionsSendPendingEdits(window, *header);
         closingSendsTypedTextOrWarns(window, *header, path);
         std::puts("GUI window tests passed: page scrolling over unfocused controls, wheel edits of focused ones, "
-                  "edits written at once then coalesced, and typed text sent or warned about on close");
+                  "edits written at once then coalesced, arrow steps, read-only cards and slider ranges, "
+                  "pending edits sent by actions, and typed text sent or warned about on close");
     } catch (const std::exception& error) {
         std::fprintf(stderr, "%s\n", error.what());
         result = 1;

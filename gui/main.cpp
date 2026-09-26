@@ -25,7 +25,7 @@
 #include <QStyleFactory>
 #include <QTimer>
 #include <QVBoxLayout>
-#include <algorithm>
+#include <array>
 #include <cstdio>
 #include <functional>
 #include <getopt.h>
@@ -46,7 +46,6 @@ QString title(QString name)
 }
 
 struct Editor {
-    QWidget* root{};
     QDoubleSpinBox* number{};
     QSlider* slider{};
     QCheckBox* checkbox{};
@@ -61,35 +60,32 @@ class Window final : public QWidget {
     QWidget* controls_{};
     QPlainTextEdit* status_{};
     QTimer throttle_;
-    std::vector<Editor> editors_;
+    std::array<Editor, std::size(kSettings)> editors_;
     std::map<std::size_t, double> pending_;
-    bool connected_ = false;
     dev_t device_{};
     ino_t inode_{};
     std::string activePath_;
-    double step_ = kArrowSteps[kDefaultArrowStep];
 
     bool sameChannel(const Channel& channel) const
-    { return connected_ && channel.device() == device_ && channel.inode() == inode_; }
+    { return controls_->isEnabled() && channel.device() == device_ && channel.inode() == inode_; }
 
     void failed(const QString& error)
     {
         throttle_.stop();
         pending_.clear();
-        connected_ = false;
         controls_->setEnabled(false);
         state_->setText("Disconnected — " + error + ". Start the worker, then Connect / refresh.");
     }
 
-    bool flush()
+    // Writes the pending edits, then the operation, through one mapping.
+    bool send(const std::function<void(Channel&)>& operation)
     {
-        throttle_.stop();
-        if (pending_.empty()) return true;
         try {
             Channel channel(activePath_, true);
             if (!sameChannel(channel)) throw std::runtime_error("Channel replaced; refresh before editing");
             channel.write(pending_);
             pending_.clear();
+            operation(channel);
             state_->setText("Settings sent • Closing this window leaves the worker running");
             return true;
         } catch (const std::exception& error) {
@@ -98,9 +94,16 @@ class Window final : public QWidget {
         }
     }
 
-    void queue(std::size_t index, double value)
+    bool flush()
     {
-        if (!connected_) return;
+        throttle_.stop();
+        return pending_.empty() || send([](Channel&) {});
+    }
+
+    // Out of line, like edit(), so the editors' slots share one copy.
+    [[gnu::noinline]] void queue(std::size_t index, double value)
+    {
+        if (!controls_->isEnabled()) return;
         pending_[index] = value;
         // Write at once, then coalesce the next 40 ms of edits into one write.
         if (!throttle_.isActive() && flush()) throttle_.start(40);
@@ -129,6 +132,12 @@ class Window final : public QWidget {
         if (e.combo) { const QSignalBlocker blocked(e.combo); e.combo->setCurrentIndex(e.combo->findData(static_cast<int>(value))); }
     }
 
+    [[gnu::noinline]] void edit(std::size_t index, double value)
+    {
+        display(index, value);
+        queue(index, value);
+    }
+
     void refresh()
     {
         if (!flush()) return;
@@ -139,12 +148,12 @@ class Window final : public QWidget {
             ShmHeader defaults{};
             ShmInitNativeDefaults(&defaults, dlsslop_control::workerBypass(h));
             // Reject invalid live values rather than displaying a silently clamped setting.
-            std::vector<double> values;
-            for (const auto& s : kSettings) {
-                const double value = dlsslop_control::value(s, (h->*s.field).load());
-                if (!dlsslop_control::inRange(s, value))
+            std::array<double, std::size(kSettings)> values;
+            for (std::size_t i = 0; i < values.size(); ++i) {
+                const auto& s = kSettings[i];
+                values[i] = dlsslop_control::value(s, (h->*s.field).load());
+                if (!dlsslop_control::inRange(s, values[i]))
                     throw std::runtime_error(std::string("Invalid live setting: ") + s.name);
-                values.push_back(value);
             }
             for (std::size_t i = 0; i < editors_.size(); ++i) {
                 auto& e = editors_[i];
@@ -155,7 +164,6 @@ class Window final : public QWidget {
             device_ = channel.device();
             inode_ = channel.inode();
             activePath_ = path.constData();
-            connected_ = true;
             controls_->setEnabled(true);
             const auto reason = ShmLoadString(h->helperReasonSeq, h->helperReason, kReasonBytes);
             status_->setPlainText(QString("Snapshot on refresh\n\nProtocol: %1\nWorker state: %2\nModel up: %3\nStop requested: %4\n"
@@ -172,14 +180,9 @@ class Window final : public QWidget {
 
     void action(const std::function<void(Channel&)>& operation, const QString& success)
     {
-        if (!flush()) return;
-        try {
-            Channel channel(activePath_, true);
-            if (!sameChannel(channel)) throw std::runtime_error("Channel replaced; refresh before editing");
-            operation(channel);
-            refresh();
-            if (connected_) state_->setText(success);
-        } catch (const std::exception& error) { failed(QString::fromUtf8(error.what())); }
+        if (!send(operation)) return;
+        refresh();
+        if (controls_->isEnabled()) state_->setText(success);
     }
 
     QWidget* makeEditor(std::size_t index)
@@ -188,7 +191,6 @@ class Window final : public QWidget {
         auto& e = editors_[index];
         auto* card = new QFrame;
         card->setObjectName("card");
-        e.root = card;
         card->setToolTip(QString("-%1 / --%2\n%3\nRange: %4…%5")
             .arg(QChar(s.shortName)).arg(s.name).arg(s.help).arg(s.minimum).arg(s.maximum));
         auto* layout = new QVBoxLayout(card);
@@ -219,68 +221,59 @@ class Window final : public QWidget {
             e.number = new QDoubleSpinBox;
             e.number->setDecimals(s.isFloat ? 6 : 0);
             e.number->setRange(s.minimum, s.maximum);
-            e.number->setSingleStep(s.isFloat ? step_ : 1);
             e.number->setKeyboardTracking(false);
             e.number->setAccessibleName(title(s.name));
             wheelNeedsFocus(e.number);
             row->addWidget(e.number);
-            connect(e.number, &QDoubleSpinBox::valueChanged, this, [this, index](double value) {
-                auto* slider = editors_[index].slider;
-                if (slider) { const QSignalBlocker blocked(slider); slider->setValue(dlsslop_gui::sliderPosition(kSettings[index], value)); }
-                queue(index, value);
-            });
+            connect(e.number, &QDoubleSpinBox::valueChanged, this, [this, index](double value) { edit(index, value); });
         }
         e.reset = new QPushButton("Reset");
         e.reset->setAccessibleName("Reset " + title(s.name));
         row->addWidget(e.reset);
-        connect(e.reset, &QPushButton::clicked, this, [this, index] {
-            display(index, editors_[index].defaultValue);
-            queue(index, editors_[index].defaultValue);
-        });
+        connect(e.reset, &QPushButton::clicked, this, [this, index] { edit(index, editors_[index].defaultValue); });
         layout->addLayout(row);
         auto* help = new QLabel(s.help);
         help->setWordWrap(true);
         help->setObjectName("description");
         layout->addWidget(help);
-        if (e.number && !dlsslop_control::fixed(s)) {
-            e.slider = new dlsslop_gui::AbsoluteSlider(Qt::Horizontal);
-            e.slider->setRange(s.isFloat ? 0 : static_cast<int>(s.minimum), s.isFloat ? 10000 : static_cast<int>(s.maximum));
-            e.slider->setAccessibleName(title(s.name) + " slider");
-            wheelNeedsFocus(e.slider);
-            e.slider->setToolTip(dlsslop_gui::logarithmicSlider(s) ? "Logarithmic sweep; use the numeric field for an exact value" :
-                                                   "Live sweep; use the numeric field for an exact value");
-            layout->addWidget(e.slider);
-            connect(e.slider, &QSlider::valueChanged, this, [this, index](int position) {
-                auto* number = editors_[index].number;
-                const QSignalBlocker blocked(number);
-                number->setValue(dlsslop_gui::sliderValue(kSettings[index], position));
-                queue(index, number->value());
-            });
-            connect(e.slider, &QSlider::sliderReleased, this, [this] { flush(); });
-        }
         if (dlsslop_control::fixed(s)) {
-            e.reset->setEnabled(false);
-            if (e.number) e.number->setEnabled(false);
-            if (e.checkbox) e.checkbox->setEnabled(false);
+            card->setEnabled(false);
             help->setText(QString(s.help) + ". Read-only: alternate captured configurations are unavailable.");
+            return card;
         }
+        if (!e.number) return card;
+        e.slider = new dlsslop_gui::AbsoluteSlider(Qt::Horizontal);
+        if (s.isFloat) e.slider->setRange(0, 10000);
+        else e.slider->setRange(static_cast<int>(s.minimum), static_cast<int>(s.maximum));
+        e.slider->setAccessibleName(title(s.name) + " slider");
+        wheelNeedsFocus(e.slider);
+        e.slider->setToolTip(dlsslop_gui::logarithmicSlider(s) ? "Logarithmic sweep; use the numeric field for an exact value" :
+                                               "Live sweep; use the numeric field for an exact value");
+        layout->addWidget(e.slider);
+        connect(e.slider, &QSlider::valueChanged, this, [this, index](int position) {
+            auto* number = editors_[index].number;
+            const QSignalBlocker blocked(number);
+            number->setValue(dlsslop_gui::sliderValue(kSettings[index], position));
+            queue(index, number->value());
+        });
+        connect(e.slider, &QSlider::sliderReleased, this, [this] { flush(); });
         return card;
     }
 
     void closeEvent(QCloseEvent* event) override
     {
         // Committing typed text may write at once, and fail there.
-        const bool connected = connected_;
+        const bool connected = controls_->isEnabled();
         for (auto& editor : editors_)
             if (editor.number && editor.number->hasFocus()) editor.number->interpretText();
-        if (!flush() || connected_ != connected) {
+        if (!flush() || controls_->isEnabled() != connected) {
             QMessageBox::warning(this, "Last change was not sent", "The control channel became unavailable. The final pending change was not applied.");
         }
         event->accept(); // Never stop the worker or restore settings on exit.
     }
 
 public:
-    explicit Window(const QString& path) : editors_(std::size(kSettings))
+    explicit Window(const QString& path)
     {
         setWindowTitle("DLSSLOP AMD · Render controls");
         resize(1030, 800);
@@ -308,7 +301,6 @@ public:
         connect(path_, &QLineEdit::returnPressed, this, [this] { refresh(); });
         connect(path_, &QLineEdit::textEdited, this, [this] {
             flush();
-            connected_ = false;
             controls_->setEnabled(false);
             state_->setText("Channel path changed — Connect / refresh to use it");
         });
@@ -345,17 +337,19 @@ public:
         auto* precisionRow = new QHBoxLayout;
         precisionRow->addWidget(new QLabel("Numeric arrow step"));
         auto* step = new QComboBox;
+        // Connected first: filling and selecting the default set the float steps.
+        connect(step, &QComboBox::currentIndexChanged, this, [this, step](int) {
+            const double value = step->currentData().toDouble();
+            for (std::size_t i = 0; i < editors_.size(); ++i)
+                if (editors_[i].number && kSettings[i].isFloat) editors_[i].number->setSingleStep(value);
+        });
         for (double value : kArrowSteps) step->addItem(QString::number(value), value);
         step->setCurrentIndex(kDefaultArrowStep);
+        step->setAccessibleName("Numeric arrow step");
         wheelNeedsFocus(step);
         precisionRow->addWidget(step);
         precisionRow->addStretch();
         pages[0]->insertLayout(1, precisionRow);
-        connect(step, &QComboBox::currentIndexChanged, this, [this, step](int) {
-            step_ = step->currentData().toDouble();
-            for (std::size_t i = 0; i < editors_.size(); ++i)
-                if (editors_[i].number && kSettings[i].isFloat) editors_[i].number->setSingleStep(step_);
-        });
         auto* captureRow = new QHBoxLayout;
         auto* count = new QSpinBox;
         count->setRange(0, 64);
