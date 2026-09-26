@@ -1,4 +1,5 @@
-"""Shared validation for the offline import and bounded dependency fetch tools."""
+"""Shared validation for the offline import, dependency fetch and source staging tools."""
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -8,6 +9,14 @@ import subprocess
 import threading
 
 ROOT = Path(__file__).resolve().parents[1]
+PREPARED = ('upstream-layer', 'kernels', 'backend/vendor')
+# The staging repository must not inherit Git configuration, attributes or
+# GIT_* variables: diff.noprefix, color, core.autocrlf, apply.whitespace, hooks,
+# signing, eol attributes or a calling hook's GIT_DIR or GIT_INDEX_FILE would
+# silently change or break the patch.
+STAGE_ENV = dict({key: value for key, value in os.environ.items() if not key.startswith('GIT_')},
+                 GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM='1', GIT_ATTR_NOSYSTEM='1', GIT_CONFIG_COUNT='1',
+                 GIT_CONFIG_KEY_0='core.attributesFile', GIT_CONFIG_VALUE_0=os.devnull)
 
 
 def git(*args, cwd=ROOT, check=True, input=None, timeout=None, env=None):
@@ -152,3 +161,22 @@ def inspect_worktree(name, row, timeout=300):
            cwd=path, timeout=timeout).stdout:
         raise RuntimeError(f'local changes in {path}; preserve them before fetching')
     return True
+
+
+def stage_originals(stage):
+    """Make stage a Git repository holding the hash-verified pinned originals."""
+    lock = json.loads((ROOT / 'upstreams.lock.json').read_text())
+    repositories = lock['repositories']
+    for row in repositories.values():
+        path = ROOT / row['path']
+        if subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=path).decode().strip() != row['commit']:
+            raise RuntimeError(f'wrong submodule revision: {path}; run python3 scripts/fetch-submodules.py')
+    subprocess.check_call(['git', 'init', '-q'], cwd=stage, env=STAGE_ENV)
+    for name, row in lock['files'].items():
+        repo = repositories[row['repository']]
+        data = subprocess.check_output(['git', 'show', repo['commit'] + ':' + row['source']], cwd=ROOT / repo['path'])
+        if hashlib.sha256(data).hexdigest() != row['sha256']:
+            raise RuntimeError(f'upstream source hash mismatch: {name}')
+        target = stage / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)

@@ -110,6 +110,14 @@ class SubmodulesTest(unittest.TestCase):
             self.assertEqual(git('ls-tree', 'HEAD', 'external/amd', cwd=clone),
                              f'160000 commit {pin}\texternal/amd')
             self.assertFalse((clone / '.git/modules').exists())
+            # Before the fetch, both staging tools stop, name the missing step
+            # and leave the prepared tree and the patch alone.
+            for script in ('prepare-sources.py', 'update-source-patch.py'):
+                unfetched = command(sys.executable, 'scripts/' + script, cwd=clone, check=False)
+                self.assertNotEqual(unfetched.returncode, 0)
+                self.assertIn('run python3 scripts/fetch-submodules.py', unfetched.stderr)
+            self.assertFalse((clone / 'upstream-layer').exists())
+            self.assertEqual(git('status', '--porcelain', cwd=clone), '')
             offline_server.rename(server)
 
             # A host without filtering must fail before making a submodule or
@@ -159,9 +167,13 @@ class SubmodulesTest(unittest.TestCase):
                                                     '[color]\n\tui = always\n[apply]\n\twhitespace = error\n'
                                                     '[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n')
             hostile_index = base / 'hostile-index'
+            # A temporary directory inside the work tree must not let the outer
+            # repository capture the staging repository's Git commands.
+            nested_temporary = clone / 'nested-temporary'
+            nested_temporary.mkdir()
             hostile = {'GIT_CONFIG_GLOBAL': str(hostile_home / 'gitconfig'), 'XDG_CONFIG_HOME': str(hostile_home),
                        'GIT_CONFIG_PARAMETERS': "'diff.noprefix'='true' 'core.autocrlf'='true'",
-                       'GIT_INDEX_FILE': str(hostile_index)}
+                       'GIT_INDEX_FILE': str(hostile_index), 'TMPDIR': str(nested_temporary)}
             command(sys.executable, 'scripts/prepare-sources.py', cwd=clone, env=hostile)
             self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched\n')
             self.assertEqual((clone / 'kernels/example.hip').read_bytes(), b'kernel\n')
@@ -178,6 +190,7 @@ class SubmodulesTest(unittest.TestCase):
             self.assertNotIn('\x1b', patch)
             self.assertIn('\n-original\n+patched\n', patch)
             self.assertFalse(hostile_index.exists())
+            nested_temporary.rmdir()
             self.assertEqual((clone / 'upstreams.lock.json').read_bytes(), committed['upstreams.lock.json'])
             # A symlink would be recorded as its target's content.
             (clone / 'kernels/link.hip').symlink_to('example.hip')
