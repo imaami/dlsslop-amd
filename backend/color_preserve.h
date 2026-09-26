@@ -2,7 +2,6 @@
 #pragma once
 #include "codec.h"
 #include "color_preserve_math.h"
-#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <stdexcept>

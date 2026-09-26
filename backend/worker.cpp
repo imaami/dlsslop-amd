@@ -104,12 +104,6 @@ dlsslop::NativeTuning read_tuning(const ShmHeader* h)
             BitsToFloat(h->localStructureBits.load()), BitsToFloat(h->sharpnessBits.load())};
 }
 
-bool same_tuning(const dlsslop::NativeTuning& a, const dlsslop::NativeTuning& b)
-{
-    return a.intensity == b.intensity && a.tone == b.tone &&
-           a.structure == b.structure && a.sharpness == b.sharpness;
-}
-
 [[noreturn]] void system_error(const char* action)
 {
     throw std::runtime_error(std::string(action) + ": " + std::strerror(errno));
@@ -384,7 +378,6 @@ class Engine {
     unsigned width_ = 0, height_ = 0;
     std::vector<float> encoded_, neural_, feedback_;
     ProcessingSettings previous_settings_;
-    unsigned previous_passes_ = 0;
     // Stream events: frame start, uploaded, evaluated, answered. Timing never
     // stalls the stream; the intervals are read once the answer is complete.
     hip_probe::Handle marks_[4]{};
@@ -517,12 +510,11 @@ public:
         }
         mark(1);
         if (settings.motion) {
-            const bool reset = options_.self_test || previous_passes_ != passes ||
-                !previous_settings_.motion || previous_settings_.fp16 != settings.fp16 ||
-                previous_settings_.precision16 != settings.precision16 ||
-                !same_tuning(previous_settings_.tuning, settings.tuning) ||
-                previous_settings_.color_preserve != settings.color_preserve;
-            previous_passes_ = 0; // Until the frame completes: a rejected one leaves no history.
+            // GpuTemporal itself drops the history for a new pass count, quality, grid or placement.
+            const bool reset = options_.self_test || !previous_settings_.motion ||
+                previous_settings_.fp16 != settings.fp16 || previous_settings_.precision16 != settings.precision16 ||
+                !(previous_settings_.tuning == settings.tuning) || previous_settings_.color_preserve != settings.color_preserve;
+            previous_settings_.motion = false; // Until the frame completes: a rejected one leaves no history.
             // Until end(), throw no std::range_error: the worker would serve on with the
             // history still pending, and the next begin() would fail.
             temporal_->begin(device_input_, g, settings.motion_quality, settings.motion_grid, passes, reset);
@@ -611,7 +603,6 @@ public:
             mark(3);
         }
         previous_settings_ = settings;
-        previous_passes_ = passes;
         api.Check(api.hipEventSynchronize(marks_[3]), "timing event completion");
         api.Check(api.hipEventElapsedTime(&upload_ms, marks_[0], marks_[1]), "upload interval");
         api.Check(api.hipEventElapsedTime(&inference_ms, marks_[1], marks_[2]), "inference interval");

@@ -15,10 +15,15 @@ struct NativeTuning {
     float sharpness = 0.0f;
 };
 
+DLSSLOP_INLINE bool operator==(const NativeTuning& a, const NativeTuning& b)
+{
+    return a.intensity == b.intensity && a.tone == b.tone && a.structure == b.structure &&
+           a.sharpness == b.sharpness;
+}
+
 DLSSLOP_INLINE bool native_tuning_is_default(const NativeTuning& tuning)
 {
-    return tuning.intensity == 1.0f && tuning.tone == 1.0f &&
-           tuning.structure == 1.0f && tuning.sharpness == 0.0f;
+    return tuning == NativeTuning{};
 }
 
 DLSSLOP_INLINE unsigned clamp_coordinate(int position, unsigned low, unsigned high)
