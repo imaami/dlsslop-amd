@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise build-kernels.py compiler selection and flags with stand-in compilers."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -87,6 +88,28 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
         ['-Xclang', '-target-feature', '-Xclang'], 'true16 is not disabled'
     assert not any(arg.startswith('--ld-path') for arg in arguments), 'no linker was requested'
 
+    # Provenance hashes every local header, including one only another header includes.
+    backend = script.parents[1] / 'backend'
+    assert b'tuning_math.h' not in (backend / 'color_gpu.hip').read_bytes(), 'tuning_math.h is included directly'
+    build(mixed, '--only', 'linux_color')
+    color = next(row for row in json.loads((root / 'mixed-out/modules.json').read_text())
+                 if row['module'] == 'linux_color')
+    assert color['sources'] == {name: hashlib.sha256((backend / name).read_bytes()).hexdigest()
+                                for name in ('color_gpu.hip', 'color_preserve_math.h', 'tuning_math.h')}, color
+    # The compile finds an upstream source's quoted includes through -I backend, and a header's own
+    # includes beside it: decoys beside the source must not be recorded.
+    kernels = root / 'kernels'
+    kernels.mkdir()
+    (kernels / 'prefix_fast.hip').write_text('#include "color_preserve_math.h"\n')
+    for name in ('color_preserve_math.h', 'tuning_math.h'):
+        (kernels / name).write_text('decoy the compiler never sees\n')
+    build(mixed, '--only', 'prefix_fast', '--source', str(kernels))
+    prefix = next(row for row in json.loads((root / 'mixed-out/modules.json').read_text())
+                  if row['module'] == 'prefix_fast')
+    assert prefix['sources'] == {
+        'prefix_fast.hip': hashlib.sha256((kernels / 'prefix_fast.hip').read_bytes()).hexdigest(),
+        **{name: color['sources'][name] for name in ('color_preserve_math.h', 'tuning_math.h')}}, prefix
+
     newer = compilers('newer', {'amdclang++': 'AMD clang version 22.0.0git',
                                 'clang++-22': 'Debian clang version 22.1.8'})
     assert build(newer) == 'AMD clang version 22.0.0git', 'a new enough amdclang++ is no longer preferred'
@@ -132,14 +155,17 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
         assert all(text in message for text in ('found no Clang 22 or newer', '--compiler', 'HIP_CLANG')), message
 
     def helptext(**env):
-        return ' '.join(subprocess.run([sys.executable, str(script), '--help'], env={'PATH': str(mixed), **env},
+        # Wide enough that argparse does not break paths at hyphens.
+        return ' '.join(subprocess.run([sys.executable, str(script), '--help'],
+                                       env={'PATH': str(mixed), 'COLUMNS': '1000', **env},
                                        text=True, capture_output=True, check=True).stdout.split())
 
     auto = helptext()
     assert 'used whatever its Clang version (default: HIP_CLANG if set, else auto: the first Clang 22 or newer' \
         in auto and 'rocm-sdk' in auto, auto
+    assert f"output directory (default: {script.parents[1] / 'assets/HIP/gfx1201'})" in auto, auto
     named = helptext(HIP_CLANG='amdclang++')
     assert 'used whatever its Clang version (default: amdclang++ from HIP_CLANG)' in named, named
 
 print('build-kernels CLI tests passed: Clang 22 selection, rocm-sdk fallback, broken candidates, '
-      'explicit compilers, help, reproducible and true16 flags')
+      'explicit compilers, help, reproducible and true16 flags, header provenance')

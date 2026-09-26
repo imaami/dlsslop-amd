@@ -38,6 +38,9 @@ MODULES = [
     ("linux_color", [], ["color_gpu.hip"]),
     ("linux_temporal", [], ["temporal_gpu.hip"]),
 ]
+ROOT = Path(__file__).resolve().parents[1]
+BACKEND = ROOT / "backend"  # The linux_ modules' sources and headers.
+ARCH = "gfx1201"  # The worker accepts only gfx1201 devices.
 
 
 # Upstream separates LDS phases in these sources with bare execution barriers,
@@ -98,13 +101,22 @@ def find_compiler(explicit):
                        "--compiler PATH or HIP_CLANG")
 
 
+def record_includes(text, directory, hashes):
+    """Hash the headers text includes, found from directory as the compiler finds them, and theirs."""
+    for name in re.findall(rb'^#include "([^"]+)"', text, re.M):
+        header = directory / name.decode()
+        key = os.path.relpath(header, BACKEND)
+        if key not in hashes:
+            content = header.read_bytes()
+            hashes[key] = hashlib.sha256(content).hexdigest()
+            record_includes(content, header.parent, hashes)
+
+
 def build(args):
     compiler, version = find_compiler(args.compiler)
     root = args.output.resolve()
     root.mkdir(parents=True, exist_ok=True)
     modules = [row for row in MODULES if not args.only or row[0] == args.only]
-    if not modules:
-        raise RuntimeError(f"unknown module: {args.only}")
     manifest = []
     for name, extra, sources in modules:
         defines = [] if name.startswith("linux_") else ["HIP_ISA_HALF 1"]
@@ -117,18 +129,11 @@ def build(args):
         source += "".join(PRELUDES.get(filename, "") for filename in sources)
         source_hashes = {}
         for filename in sources:
-            path = (args.codec_source if name == "linux_codec" else
-                    args.codec_source.parent / filename if name.startswith("linux_") else
-                    args.source / filename)
+            path = (BACKEND if name.startswith("linux_") else args.source) / filename
             content = path.read_bytes()
             source_hashes[filename] = hashlib.sha256(content).hexdigest()
             source += content.decode("utf-8") + "\n"
-            # Colour's header includes tuning's: scan each recorded header too.
-            for header_name in ("color_preserve_math.h", "temporal_math.h", "tuning_math.h"):
-                if ('#include "' + header_name + '"').encode() in content:
-                    text = (args.codec_source.parent / header_name).read_bytes()
-                    content += text
-                    source_hashes[header_name] = hashlib.sha256(text).hexdigest()
+            record_includes(content, BACKEND, source_hashes)  # The generated copy finds them through -I.
         generated = root / f"{name}.generated.hip"
         generated.write_text(source, encoding="utf-8")
         output = root / f"{name}.hsaco"
@@ -137,19 +142,19 @@ def build(args):
         # the module does not hash the output path. Upstream's f16 inline asm
         # takes 32-bit VGPRs, which LLVM 23's gfx12 true16 mode rejects.
         command = [str(compiler), "-x", "hip", "--cuda-device-only", "--no-gpu-bundle-output",
-                   f"--offload-arch={args.arch}", f"-mcode-object-version={args.code_object_version}",
+                   f"--offload-arch={ARCH}", f"-mcode-object-version={args.code_object_version}",
                    "-nogpuinc", "-nogpulib", "-fuse-cuid=none", "-O3", "-std=c++17",
                    "-Xclang", "-target-feature", "-Xclang", "-real-true16",
-                   "-I", str(args.codec_source.parent.resolve()),
+                   "-I", str(BACKEND),
                    "-c", str(generated), "-o", str(output)]
         if args.linker:
             command.append(f"--ld-path={args.linker}")
-        print(f"[{len(manifest)+1}/{len(modules)}] {args.arch} {name}", flush=True)
+        print(f"[{len(manifest)+1}/{len(modules)}] {ARCH} {name}", flush=True)
         subprocess.run(command, check=True)
         content = output.read_bytes()
         if content[:4] != b"\x7fELF" or int.from_bytes(content[16:18], "little") != 3 or int.from_bytes(content[18:20], "little") != 224:
             raise RuntimeError(f"output is not an AMDGPU ELF shared code object: {output}")
-        manifest.append({"module": name, "target": args.arch, "defines": defines, "sources": source_hashes,
+        manifest.append({"module": name, "target": ARCH, "defines": defines, "sources": source_hashes,
                          "sha256": hashlib.sha256(content).hexdigest(), "bytes": len(content), "compiler": version,
                          "generated_sha256": hashlib.sha256(source.encode()).hexdigest(),
                          "code_object_version": args.code_object_version})
@@ -167,19 +172,14 @@ def build(args):
 
 
 def main():
-    base = Path(__file__).resolve().parents[1]
     compiler_default = os.environ.get("HIP_CLANG") or None
     compiler_help = "compiler executable, used whatever its Clang version (default: " + (
         "%(default)s from HIP_CLANG" if compiler_default else "HIP_CLANG if set, else auto: " + AUTO_COMPILERS) + ")"
     parser = argparse.ArgumentParser(description=__doc__, add_help=False, allow_abbrev=False)
-    parser.add_argument("-s", "--source", type=Path, default=base / "kernels",
+    parser.add_argument("-s", "--source", type=Path, default=ROOT / "kernels",
                         help="directory containing upstream production *.hip (default: %(default)s)")
-    parser.add_argument("-S", "--codec-source", type=Path, default=base / "backend/codec_gpu.hip",
-                        help="Linux frame conversion kernel source (default: %(default)s)")
-    parser.add_argument("-o", "--output", type=Path,
-                        help=f"output directory (default: {base / 'assets/HIP'}/ARCH, using --arch)")
-    parser.add_argument("-a", "--arch", choices=["gfx1200", "gfx1201"], default="gfx1201",
-                        help="target GPU architecture (default: %(default)s)")
+    parser.add_argument("-o", "--output", type=Path, default=ROOT / "assets/HIP" / ARCH,
+                        help="output directory (default: %(default)s)")
     parser.add_argument("-V", "--code-object-version", choices=[5, 6], type=int, default=5,
                         help="AMDHSA code object version; 5 supports older ROCm loaders (default: %(default)s)")
     parser.add_argument("-c", "--compiler", default=compiler_default, help=compiler_help)
@@ -190,10 +190,7 @@ def main():
                         help="keep generated combined HIP sources (default: off; remove them after compilation)")
     parser.add_argument("-h", "--help", action="help", help="show this help and exit (default: off)")
     try:
-        args = parser.parse_args()
-        if args.output is None:
-            args.output = base / "assets/HIP" / args.arch
-        build(args)
+        build(parser.parse_args())
     except (RuntimeError, OSError, subprocess.CalledProcessError) as exc:
         print(f"build-kernels: {exc}", file=sys.stderr)
         return 1
