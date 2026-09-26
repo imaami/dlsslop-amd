@@ -8,6 +8,7 @@ import re
 import select
 import shutil
 import signal
+import socket
 import subprocess
 import tempfile
 import time
@@ -85,6 +86,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     assert default(helptext, 'shm') == str(channel)
     assert 'DLSSNR_SHM' in helptext and 'DLSSLOP_MODULES' in helptext
     assert default(helptext, 'trace-dir').startswith('disabled')
+    assert default(helptext, 'idle-exit').startswith('0 (never)')
     assert "not 'request'" in helptext and 'ln it to DIR/request' in helptext
     assert not channel.exists(), '--help created a channel'
 
@@ -215,5 +217,38 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
         assert result.stderr.endswith(('dlsslopd: ' if status else '') + verdict + '\n'), (archs, options, result.stderr)
     assert not channel.exists(), '--diagnose created a channel'
 
+    # --idle-exit only applies to serving.
+    for options in (('--self-test', '-x', '5'), ('--idle-exit', '5', '-D')):
+        result = run(binary, *options, env=env, cwd=cwd, expected=1)
+        assert '--idle-exit requires serving shared-memory requests' in result.stderr, result.stderr
+
+    # Socket activation, as systemd's socket unit does it: a connection to the
+    # socket beside the channel starts the worker, which adopts the socket as
+    # fd 3, answers the probe with EOF only once it serves, stops after its idle
+    # time and leaves the socket (systemd's) in place.
+    private = cwd / 'activated'
+    private.mkdir(mode=0o700)
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    listener.bind(str(private / 'shm.bin.sock'))
+    listener.listen(4)
+    os.dup2(listener.fileno(), 3, inheritable=True)
+    worker_process = subprocess.Popen(
+        ['sh', '-c', 'LISTEN_PID=$$ LISTEN_FDS=1 exec "$@"', 'sh', str(binary), '--test-identity',
+         '-s', str(private / 'shm.bin'), '--idle-exit', '1'],
+        env=env, cwd=cwd, pass_fds=(3,), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    os.close(3)
+    listener.close()
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    probe.connect(str(private / 'shm.bin.sock'))
+    probe.shutdown(socket.SHUT_WR)
+    probe.settimeout(30)
+    assert probe.recv(1) == b'', 'the probe received data instead of EOF'
+    probe.close()
+    assert (private / 'shm.bin').exists(), 'the probe was answered before the worker served'
+    _, errors = worker_process.communicate(timeout=30)
+    assert worker_process.returncode == 0, (worker_process.returncode, errors)
+    assert 'no request for 1 s; stopping' in errors, errors
+    assert (private / 'shm.bin.sock').exists(), 'the worker removed the socket systemd owns'
+
 print('worker CLI: native relocation, model/module defaults, environment contracts, trace-dir parsing, '
-      'HIP loader errors, device selection, signals and identity mode passed')
+      'HIP loader errors, device selection, signals, identity mode, idle exit and socket activation passed')

@@ -78,7 +78,7 @@ struct Options {
     std::string assets, modules, shm = ShmNativeChannelPath();
     std::string input, output, trace_dir;
     unsigned tier = kNativeDefaultTier, width = 0, height = 0, self_test_runs = 10;
-    unsigned passes = kNativeDefaultPasses;
+    unsigned passes = kNativeDefaultPasses, idle_exit = 0;
     int device = -1;
     bool diagnose = false, test_identity = false, once = false, self_test = false;
     bool cpu_compose = false, cpu_codec = false, performance = false;
@@ -172,6 +172,8 @@ void usage(FILE* out)
         "  -1, --once              Answer one shared-memory request and exit,\n"
         "                          with status 1 when that request failed\n"
         "                          Default: off; run until stopped\n"
+        "  -x, --idle-exit SECONDS Stop serving after SECONDS without a request\n"
+        "                          Default: %u (never)\n"
         "  -R, --trace-dir DIR     Opt-in real-frame RGB float32 diagnostics\n"
         "                          Default: disabled; no readbacks or file checks\n"
         "                          DIR is created private (0700) or must be so\n"
@@ -189,7 +191,7 @@ void usage(FILE* out)
         defaults.modules.empty() ? "unset; required for inference" : defaults.modules.c_str(),
         defaults.shm.c_str(), ShmNativeDefaultPath().c_str(), defaults.tier,
         kMaxPasses, defaults.passes, defaults.self_test_runs,
-        defaults.width, defaults.height);
+        defaults.width, defaults.height, defaults.idle_exit);
 }
 
 Options parse(int argc, char** argv)
@@ -214,12 +216,13 @@ Options parse(int argc, char** argv)
         {"cpu-codec", no_argument, nullptr, 'C'},
         {"performance", no_argument, nullptr, 'p'},
         {"once", no_argument, nullptr, '1'},
+        {"idle-exit", required_argument, nullptr, 'x'},
         {"trace-dir", required_argument, nullptr, 'R'},
         {"test-identity", no_argument, nullptr, 'T'},
         {"help", no_argument, nullptr, 'h'},
         {nullptr, 0, nullptr, 0}
     };
-    for (int c; (c = getopt_long(argc, argv, "a:m:s:t:P:d:DSr:i:o:W:H:cCp1R:Th", opts, nullptr)) != -1;) {
+    for (int c; (c = getopt_long(argc, argv, "a:m:s:t:P:d:DSr:i:o:W:H:cCp1x:R:Th", opts, nullptr)) != -1;) {
         switch (c) {
         case 'a': o.assets = optarg; break;
         case 'm': o.modules = optarg; break;
@@ -238,6 +241,7 @@ Options parse(int argc, char** argv)
         case 'C': o.cpu_codec = true; break;
         case 'p': o.performance = true; break;
         case '1': o.once = true; break;
+        case 'x': o.idle_exit = number(optarg, "idle-exit seconds"); break;
         case 'R':
             if (!*optarg) throw std::runtime_error("--trace-dir requires a nonempty directory");
             o.trace_dir = optarg;
@@ -266,6 +270,8 @@ Options parse(int argc, char** argv)
         throw std::runtime_error("offline dimensions must be 1..7680 by 1..4320");
     if (!o.trace_dir.empty() && (o.self_test || !o.input.empty() || o.test_identity || o.diagnose))
         throw std::runtime_error("--trace-dir requires serving real shared-memory inference");
+    if (o.idle_exit && (o.self_test || !o.input.empty() || o.diagnose))
+        throw std::runtime_error("--idle-exit requires serving shared-memory requests");
     return o;
 }
 
@@ -771,12 +777,24 @@ void run_offline(const Options& o, Engine& engine)
 }
 
 // The socket beside the channel file on which the layer offers its exported
-// frames; closed (no device-local transport) when the codec runs on the CPU.
+// frames. systemd's socket unit hands it over already bound (LISTEN_FDS), and
+// connecting to it is then how a client starts the worker; otherwise the
+// worker binds it itself, only when the GPU codec can import frames.
 struct TransportListener {
     dlsslop::Descriptor socket;
     std::string path;
+    bool activated = false;
     TransportListener(const std::string& channel, bool wanted) : path(ShmTransportPath(channel))
     {
+        const char* pid = std::getenv("LISTEN_PID");
+        const char* count = std::getenv("LISTEN_FDS");
+        if (pid && count && std::strtol(pid, nullptr, 10) == getpid() && !std::strcmp(count, "1")) {
+            activated = true;
+            socket.fd = 3; // SD_LISTEN_FDS_START
+            fcntl(socket.fd, F_SETFL, fcntl(socket.fd, F_GETFL) | O_NONBLOCK);
+            fcntl(socket.fd, F_SETFD, FD_CLOEXEC);
+            return;
+        }
         sockaddr_un address{};
         address.sun_family = AF_UNIX;
         if (!wanted) return;
@@ -791,7 +809,7 @@ struct TransportListener {
         }
         std::fprintf(stderr, "device-local transport unavailable (%s): %s\n", path.c_str(), std::strerror(errno));
     }
-    ~TransportListener() { if (socket.fd >= 0) unlink(path.c_str()); }
+    ~TransportListener() { if (socket.fd >= 0 && !activated) unlink(path.c_str()); }
 };
 
 // One offer: the layer sends it right after connecting.
@@ -821,7 +839,8 @@ void accept_offers(const TransportListener& listener, Engine& engine, ShmHeader*
     for (int peer; (peer = accept4(listener.socket.fd, nullptr, nullptr, SOCK_CLOEXEC)) >= 0; close(peer)) {
         ShmTransportOffer offer{};
         dlsslop::Descriptor fds[2];
-        if (!receive_offer(peer, offer, fds) || !engine.import(offer, fds)) {
+        if (!receive_offer(peer, offer, fds)) continue; // A start or liveness probe sends nothing.
+        if (!engine.import(offer, fds)) {
             std::fprintf(stderr, "device-local transport offer rejected\n");
             continue;
         }
@@ -889,6 +908,7 @@ void run_worker(const Options& o)
         uint64_t frames = 0;
         unsigned previous_passes = 0;
         uint32_t last = h->seq_resp.load(std::memory_order_acquire);
+        auto active = std::chrono::steady_clock::now(); // The latest request, or readiness.
         std::string failure;
         while (!stopping && !h->quit.load(std::memory_order_relaxed)) {
             accept_offers(transport, engine, h);
@@ -905,6 +925,10 @@ void run_worker(const Options& o)
                 const timespec timeout{0, 100000000};
                 syscall(SYS_futex, reinterpret_cast<uint32_t*>(&h->seq_req), FUTEX_WAIT,
                         request, &timeout, nullptr, 0);
+                if (o.idle_exit && std::chrono::steady_clock::now() - active >= std::chrono::seconds(o.idle_exit)) {
+                    std::fprintf(stderr, "no request for %u s; stopping\n", o.idle_exit);
+                    break;
+                }
                 continue;
             }
             // Writers store a setting before bumping controlSeq, so sample the
@@ -916,6 +940,7 @@ void run_worker(const Options& o)
             const uint32_t held_input = pending_trace ? h->holdFrame.load() : 0;
             const unsigned w = h->width.load(), height = h->height.load();
             last = request;
+            active = std::chrono::steady_clock::now();
             try {
                 ProcessingSettings settings;
                 settings.fp16 = h->hdrEncode.load() != 0;
