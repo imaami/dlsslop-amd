@@ -434,14 +434,15 @@ public:
         }
         const auto g = dlsslop::geometry(w, h, options_.tier);
         auto& api = network_->Runtime();
-        std::vector<float> trace_buffer;
-        const auto trace_image = [&](const std::string& name, void* pointer, unsigned channels) {
+        const auto trace_image = [&](unsigned pass, const char* stage, const void* pointer, unsigned channels) {
             if (!trace) return;
             network_->Synchronize();
-            trace_buffer.resize(std::size_t(g.width) * g.height * channels);
-            api.Check(api.hipMemcpy(trace_buffer.data(), pointer,
-                trace_buffer.size() * sizeof(float), 2), "read diagnostic neural stage");
-            trace->image(name, trace_buffer.data(), g, channels);
+            std::vector<float> buffer(std::size_t(g.width) * g.height * channels);
+            api.Check(api.hipMemcpy(buffer.data(), pointer, buffer.size() * sizeof(float), 2),
+                      "read diagnostic neural stage");
+            char name[32];
+            std::snprintf(name, sizeof name, "pass-%02u-%s", pass + 1, stage);
+            trace->image(name, buffer.data(), g, channels);
         };
         if (settings.fp16 && options_.cpu_compose)
             throw std::range_error("FP16 proxy transport requires Vulkan composition; disable --cpu-compose");
@@ -502,11 +503,7 @@ public:
                               "upload inter-pass feedback");
                 }
             }
-            char stage[32]{};
-            if (trace) {
-                std::snprintf(stage, sizeof stage, "pass-%02u", pass + 1);
-                trace_image(std::string(stage) + "-input", pass_input, 4);
-            }
+            trace_image(pass, "input", pass_input, 4);
             // Stages alternate between two buffers, since tuning and colour read
             // neighbours; with motion, the last writes the pass's history slot.
             void* history = nullptr;
@@ -517,15 +514,15 @@ public:
             }
             // Graph replay (upstream o.graph, off) would need one stable rgb_output.
             network_->Enqueue(pass_input, history, stages[0], 0);
-            if (trace) trace_image(std::string(stage) + "-raw", stages[0], 3);
+            trace_image(pass, "raw", stages[0], 3);
             if (tuned) {
                 dlsslop::gpu_tune(*kernels_, g, pass_input, stages[0], stages[1], settings.tuning);
-                if (trace) trace_image(std::string(stage) + "-tuned", stages[1], 3);
+                trace_image(pass, "tuned", stages[1], 3);
             }
             if (colored) {
                 dlsslop::gpu_preserve_color(*kernels_, g, device_input_, stages[tuned], stages[1 + tuned],
                                             settings.color_preserve);
-                if (trace) trace_image(std::string(stage) + "-color", stages[1 + tuned], 3);
+                trace_image(pass, "color", stages[1 + tuned], 3);
             }
             answer = stages[tuned + colored];
             // The CPU codec, like the GPU one, rejects the nonfinite samples it reads.
