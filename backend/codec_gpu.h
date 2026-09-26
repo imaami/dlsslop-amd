@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <cstring>
 #include <stdexcept>
 
 namespace dlsslop {
@@ -93,46 +92,43 @@ public:
     // until the stream reaches them (pageable input is staged).
     void encode(const std::uint8_t* input, const Geometry& g, void* device_rgba, bool fp16 = false)
     {
-        const auto expected = geometry(g.source_width, g.source_height, g.valid_height);
-        if (std::memcmp(&expected, &g, sizeof g) || !device_rgba)
-            throw std::invalid_argument("invalid GPU encode geometry or output");
+        validate(g);
+        if (!device_rgba)
+            throw std::invalid_argument("null GPU encode output");
         const std::size_t bytes = std::size_t(g.source_width) * g.source_height * (fp16 ? 8 : 4);
         reserve(bytes);
         api_.Check(api_.hipMemcpyAsync(proxy_, input, bytes, 1, stream_), "upload codec proxy");
         *invalid_ = 0;
-        Geometry parameters = g;
-        void* args[] = {&proxy_, &device_rgba, &invalid_, &parameters};
-        kernels_.launch(fp16 ? kEncodeRgba16f : kEncodeRgba8, g.width * g.height, args);
         uploaded_ = g;
         uploaded_fp16_ = fp16;
+        void* args[] = {&proxy_, &device_rgba, &invalid_, &uploaded_};
+        kernels_.launch(fp16 ? kEncodeRgba16f : kEncodeRgba8, g.width * g.height, args);
     }
 
-    // A subsequent pass consumes the preceding raw RGB output at the existing
-    // neural extent, without a host round-trip or an RGBA8 conversion. Buffers
-    // must be distinct. Invalid samples remain recorded until final decode.
-    void feedback(const Geometry& g, void* neural_rgb, void* device_rgba,
-                  bool precision16 = true)
+    // A subsequent pass consumes the preceding raw RGB output at the latest
+    // encode's neural extent, without a host round-trip or an RGBA8 conversion.
+    // Buffers must be distinct. Invalid samples remain recorded until final decode.
+    void feedback(void* neural_rgb, void* device_rgba, bool precision16 = true)
     {
-        if (std::memcmp(&uploaded_, &g, sizeof g) || !neural_rgb || !device_rgba || neural_rgb == device_rgba)
-            throw std::invalid_argument("GPU feedback without matching encode or distinct buffers");
-        Geometry parameters = g;
+        if (!proxy_ || !neural_rgb || !device_rgba || neural_rgb == device_rgba)
+            throw std::invalid_argument("GPU feedback without an encode or distinct buffers");
         std::uint32_t precision = precision16 ? 1 : 0;
-        void* args[] = {&neural_rgb, &device_rgba, &invalid_, &parameters, &precision};
-        kernels_.launch(kFeedbackRgb, g.width * g.height, args);
+        void* args[] = {&neural_rgb, &device_rgba, &invalid_, &uploaded_, &precision};
+        kernels_.launch(kFeedbackRgb, uploaded_.width * uploaded_.height, args);
     }
 
     // decode belongs to the latest encode. Both execute on the network stream;
     // output holds the proxy-sized answer once finish() returns. The answer's
     // RGB overwrites the uploaded proxy in place; its alpha passes through.
-    void decode(const Geometry& g, void* neural_rgb, std::uint8_t* output)
+    void decode(void* neural_rgb, std::uint8_t* output)
     {
-        if (std::memcmp(&uploaded_, &g, sizeof g) || !neural_rgb)
-            throw std::invalid_argument("GPU decode without matching encode");
-        const std::size_t bytes = std::size_t(g.source_width) * g.source_height * (uploaded_fp16_ ? 8 : 4);
-        Geometry parameters = g;
-        void* args[] = {&proxy_, &neural_rgb, &invalid_, &parameters};
-        kernels_.launch(uploaded_fp16_ ? kDecodeRgba16f : kDecodeRgba8, g.source_width * g.source_height, args);
-        api_.Check(api_.hipMemcpyAsync(output, proxy_, bytes, 2, stream_), "read codec proxy");
+        if (!proxy_ || !neural_rgb)
+            throw std::invalid_argument("GPU decode without an encode");
+        const unsigned pixels = uploaded_.source_width * uploaded_.source_height;
+        void* args[] = {&proxy_, &neural_rgb, &invalid_, &uploaded_};
+        kernels_.launch(uploaded_fp16_ ? kDecodeRgba16f : kDecodeRgba8, pixels, args);
+        api_.Check(api_.hipMemcpyAsync(output, proxy_, std::size_t(pixels) * (uploaded_fp16_ ? 8 : 4), 2, stream_),
+                   "read codec proxy");
     }
 
     // Waits for the stream. Nonfinite or FP16-overflow samples anywhere since

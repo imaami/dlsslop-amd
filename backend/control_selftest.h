@@ -269,7 +269,7 @@ inline bool codec_rejects(GpuCodec& codec, const std::vector<std::uint8_t>& prox
                           void* device_input, void* device_rgb, std::vector<std::uint8_t>& decoded)
 {
     codec.encode(proxy.data(), g, device_input, true);
-    codec.decode(g, device_rgb, decoded.data());
+    codec.decode(device_rgb, decoded.data());
     try {
         codec.finish();
     } catch (const std::range_error&) {
@@ -305,10 +305,10 @@ inline void check_codec(const NativeKernels& kernels)
         model[p * 3] = -.25f; model[p * 3 + 1] = 1.5f; model[p * 3 + 2] = .5f;
     }
     device_rgb.upload(model);
-    std::vector<std::uint8_t> decoded(proxy.size()), expected;
-    codec.decode(g, device_rgb.pointer, decoded.data());
+    std::vector<std::uint8_t> decoded(proxy.size()), expected(proxy.size());
+    codec.decode(device_rgb.pointer, decoded.data());
     codec.finish();
-    decode_neural_proxy(proxy.data(), g, true, model.data(), expected);
+    decode_neural_proxy(proxy.data(), g, true, model.data(), expected.data());
     require(decoded == expected, "GPU FP16 proxy decode disagrees on exact signed/extended-range fixture");
     std::uint16_t first_red, first_green;
     std::memcpy(&first_red, decoded.data(), sizeof(first_red));
@@ -317,7 +317,7 @@ inline void check_codec(const NativeKernels& kernels)
             "GPU FP16 proxy decode clipped signed/extended-range values");
     // Decode overwrites the uploaded proxy's RGB in place; a repeat must agree.
     std::vector<std::uint8_t> repeated(proxy.size());
-    codec.decode(g, device_rgb.pointer, repeated.data());
+    codec.decode(device_rgb.pointer, repeated.data());
     codec.finish();
     require(repeated == expected, "GPU FP16 proxy decode changed when repeated");
 
@@ -343,7 +343,7 @@ inline void check_codec(const NativeKernels& kernels)
     device_rgb.upload(model);
     for (bool precision16 : {true, false}) {
         feedback_neural_rgb(model.data(), g, reference, precision16);
-        codec.feedback(g, device_rgb.pointer, device_input.pointer, precision16);
+        codec.feedback(device_rgb.pointer, device_input.pointer, precision16);
         compare(device_input.read(), reference, precision16 ? "GPU FP16 feedback" : "GPU UNORM8 feedback");
     }
     std::printf("GPU control self-test: FP16 proxy encode, decode, rejection and 16/8-bit feedback exact\n");

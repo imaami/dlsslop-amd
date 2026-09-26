@@ -25,10 +25,8 @@
 #include "codec_math.h"
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cstring>
-#include <limits>
 #include <stdexcept>
 
 namespace dlsslop {
@@ -173,24 +171,16 @@ Rgb hue(Rgb incorrect, Rgb correct)
     return clamp_ap1(from_lab(a));
 }
 
-Rgb upgrade(Rgb original, Rgb proxy, Rgb neural, float strength)
+// Upstream lerps by TransferStrength, here at full strength: a + (b - a) * 1
+// need not round to b, so the lerp stays (as for ColorStrength below).
+Rgb upgrade(Rgb original, Rgb proxy, Rgb neural)
 {
     const float oy = luminance(original), py = luminance(proxy), ny = luminance(neural);
     if (ny <= 1e-5f)
         return original;
     const float ratio = oy < py ? oy / std::max(py, 1e-6f) :
         (ny + std::max(0.0f, oy - py)) / ny;
-    return lerp(original, hue(neural * ratio, neural), strength);
-}
-
-void validate(const Geometry& g)
-{
-    const Geometry expected = geometry(g.source_width, g.source_height, g.valid_height);
-    if (g.width != expected.width || g.height != expected.height ||
-        g.valid_height != expected.valid_height || g.x != expected.x ||
-        g.y != expected.y || g.fit_width != expected.fit_width ||
-        g.fit_height != expected.fit_height)
-        throw std::invalid_argument("inconsistent codec geometry");
+    return lerp(original, hue(neural * ratio, neural), 1.0f);
 }
 
 Rgb rgba8(const std::uint8_t* p)
@@ -200,7 +190,8 @@ Rgb rgba8(const std::uint8_t* p)
 
 // The answer at source pixel (x, y) through the upstream FP16 surface. Like
 // the GPU codec, reject it when a texel it reads is not a finite binary16.
-Rgb answer(const float* neural_rgb, const Geometry& g, unsigned x, unsigned y)
+// Out of line: inlining it into both decoders adds about 9 KB of text.
+[[gnu::noinline]] Rgb answer(const float* neural_rgb, const Geometry& g, unsigned x, unsigned y)
 {
     const Rgb c = sample_answer([&](unsigned px, unsigned py) {
         const float* p = neural_rgb + (std::size_t(py) * g.width + px) * 3;
@@ -250,9 +241,11 @@ Geometry geometry(unsigned source_width, unsigned source_height, unsigned tier_h
     return g;
 }
 
-void encode_rgba8(const std::uint8_t* source, const Geometry& g, std::vector<float>& rgba)
+void validate(const Geometry& g)
 {
-    encode_proxy(source, g, false, rgba);
+    const Geometry expected = geometry(g.source_width, g.source_height, g.valid_height);
+    if (std::memcmp(&expected, &g, sizeof g))
+        throw std::invalid_argument("inconsistent codec geometry");
 }
 
 void encode_proxy(const std::uint8_t* source, const Geometry& g, bool fp16,
@@ -318,29 +311,22 @@ void feedback_neural_rgb(const float* neural_rgb, const Geometry& g,
     reflect_padding(g, rgba);
 }
 
-void decode_neural_rgba8(const std::uint8_t* original, const Geometry& g,
-                         const float* neural_rgb, std::vector<std::uint8_t>& output)
-{
-    decode_neural_proxy(original, g, false, neural_rgb, output);
-}
-
 void decode_neural_proxy(const std::uint8_t* original, const Geometry& g, bool fp16,
-                         const float* neural_rgb, std::vector<std::uint8_t>& output)
+                         const float* neural_rgb, std::uint8_t* output)
 {
     validate(g);
     if (!original || !neural_rgb)
         throw std::invalid_argument("null decode image");
     const unsigned pixel_bytes = fp16 ? 8 : 4;
-    output.resize(std::size_t(g.source_width) * g.source_height * pixel_bytes);
     for (unsigned y = 0; y < g.source_height; ++y) {
         for (unsigned x = 0; x < g.source_width; ++x) {
             const Rgb neural = answer(neural_rgb, g, x, y);
             const std::size_t p = (std::size_t(y) * g.source_width + x) * pixel_bytes;
             if (fp16) {
-                pack_half(neural.r, output.data() + p);
-                pack_half(neural.g, output.data() + p + 2);
-                pack_half(neural.b, output.data() + p + 4);
-                std::memcpy(output.data() + p + 6, original + p + 6, 2);
+                pack_half(neural.r, output + p);
+                pack_half(neural.g, output + p + 2);
+                pack_half(neural.b, output + p + 4);
+                std::memcpy(output + p + 6, original + p + 6, 2);
             } else {
                 output[p] = unorm8(neural.r);
                 output[p + 1] = unorm8(neural.g);
@@ -353,21 +339,11 @@ void decode_neural_proxy(const std::uint8_t* original, const Geometry& g, bool f
 
 void decode_rgba8(const std::uint8_t* original, const Geometry& g,
                   const float* encoded_rgba, const float* neural_rgb,
-                  std::vector<std::uint8_t>& output, float transfer_strength,
-                  float color_strength)
+                  std::uint8_t* output)
 {
     validate(g);
     if (!original || !encoded_rgba || !neural_rgb)
         throw std::invalid_argument("null decode image");
-    if (!std::isfinite(transfer_strength) || !std::isfinite(color_strength) ||
-        transfer_strength < 0.0f || transfer_strength > 1.0f ||
-        color_strength < 0.0f || color_strength > 1.0f)
-        throw std::invalid_argument("codec strengths must be finite in [0,1]");
-    output.resize(std::size_t(g.source_width) * g.source_height * 4);
-    if (transfer_strength == 0.0f) {
-        std::memcpy(output.data(), original, output.size());
-        return;
-    }
     const auto encoded = [&](unsigned x, unsigned y) {
         const float* p = encoded_rgba + (std::size_t(y) * g.width + x) * 4;
         return Rgb{p[0], p[1], p[2]};
@@ -378,10 +354,10 @@ void decode_rgba8(const std::uint8_t* original, const Geometry& g,
             const Rgb source = decode(rgba8(original + pixel * 4));
             const Rgb proxy = decode(sample_answer(encoded, g, x, y));
             const Rgb neural = decode(answer(neural_rgb, g, x, y));
-            const Rgb upgraded = upgrade(source, proxy, neural, transfer_strength);
+            const Rgb upgraded = upgrade(source, proxy, neural);
             const float oy = luminance(source), uy = luminance(upgraded);
             const float ratio = oy == 0.0f ? 1.0f : std::clamp(uy / oy, 0.0f, 4.0f);
-            const Rgb result = lerp(source * ratio, upgraded, color_strength);
+            const Rgb result = lerp(source * ratio, upgraded, 1.0f);
             output[pixel * 4] = unorm8(srgb_encode(result.r));
             output[pixel * 4 + 1] = unorm8(srgb_encode(result.g));
             output[pixel * 4 + 2] = unorm8(srgb_encode(result.b));

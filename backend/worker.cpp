@@ -536,7 +536,7 @@ public:
             void* const pass_input = pass ? device_feedback_ : device_input_;
             if (pass) {
                 if (gpu_codec_) {
-                    gpu_codec_->feedback(g, answer, pass_input, settings.precision16);
+                    gpu_codec_->feedback(answer, pass_input, settings.precision16);
                     if (verify) {
                         dlsslop::feedback_neural_rgb(neural_.data(), g, feedback_, settings.precision16);
                         selftest::compare(selftest::Buffer::read_pointer(api, network_->Stream(), pass_input,
@@ -588,15 +588,15 @@ public:
         if (settings.motion) temporal_->end();
         mark(2);
         if (gpu_codec_) {
-            gpu_codec_->decode(g, answer, output);
+            gpu_codec_->decode(answer, output);
             mark(3);
             gpu_codec_->finish();
             if (verify) {
-                std::vector<uint8_t> reference;
-                dlsslop::decode_neural_proxy(input, g, settings.fp16, neural_.data(), reference);
+                const size_t bpp = settings.fp16 ? 8 : 4;
+                std::vector<uint8_t> reference(size_t(w) * h * bpp);
+                dlsslop::decode_neural_proxy(input, g, settings.fp16, neural_.data(), reference.data());
                 const size_t first = std::mismatch(reference.begin(), reference.end(), output).first - reference.begin();
                 if (first < reference.size()) {
-                    const size_t bpp = settings.fp16 ? 8 : 4;
                     std::fprintf(stderr, "GPU decoder first mismatch: x=%zu y=%zu byte=%zu GPU=%u CPU=%u\n",
                                  (first / bpp) % w, (first / bpp) / w, first % bpp,
                                  unsigned(output[first]), unsigned(reference[first]));
@@ -606,12 +606,10 @@ public:
                 std::fflush(stdout);
             }
         } else {
-            std::vector<uint8_t> result;
             if (options_.cpu_compose)
-                dlsslop::decode_rgba8(input, g, encoded_.data(), neural_.data(), result);
+                dlsslop::decode_rgba8(input, g, encoded_.data(), neural_.data(), output);
             else
-                dlsslop::decode_neural_proxy(input, g, settings.fp16, neural_.data(), result);
-            std::memcpy(output, result.data(), result.size());
+                dlsslop::decode_neural_proxy(input, g, settings.fp16, neural_.data(), output);
             mark(3);
         }
         previous_settings_ = settings;
