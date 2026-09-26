@@ -926,7 +926,7 @@ index db0dc5d..0c88a64 100644
  
  }  // namespace dlssnr
 diff --git a/upstream-layer/layer_linux/src/composition.cpp b/upstream-layer/layer_linux/src/composition.cpp
-index dc344c4..f7d1120 100644
+index dc344c4..a7a2a69 100644
 --- a/upstream-layer/layer_linux/src/composition.cpp
 +++ b/upstream-layer/layer_linux/src/composition.cpp
 @@ -69,6 +69,9 @@ bool ColourIsLinearHdr(VkFormat swapchainFormat, uint32_t colourMode) {
@@ -953,15 +953,17 @@ index dc344c4..f7d1120 100644
      s.transfer = h->transfer.load();
      s.debugView = h->debugView.load();
      s.compareMode = h->compareMode.load();
-@@ -204,6 +214,7 @@ Composition::~Composition() {
+@@ -204,8 +214,8 @@ Composition::~Composition() {
  }
  
  void Composition::DropAll() {
 +    DropHostBuffer(_captureBuf);
      DropImage(_frame);
-     DropImage(_keep);
+-    DropImage(_keep);
      DropImage(_proxy);
-@@ -498,6 +509,7 @@ void Composition::SetTransport(void* inRegion, void* outRegion, size_t bytes) {
+     DropImage(_work);
+     DropImage(_model);
+@@ -498,6 +508,7 @@ void Composition::SetTransport(void* inRegion, void* outRegion, size_t bytes) {
  // and the descriptor's image binding follow the meter image.
  bool Composition::BuildMeterPipeline() {
      if (_meterPipeline) return true;
@@ -969,7 +971,7 @@ index dc344c4..f7d1120 100644
      if (!_vk->vkCreateShaderModule || !_vk->vkCmdPushConstants || !_vk->vkCmdFillBuffer) return false;
  
      VkShaderModuleCreateInfo smci{};
-@@ -553,12 +565,13 @@ bool Composition::BuildMeterPipeline() {
+@@ -553,12 +564,13 @@ bool Composition::BuildMeterPipeline() {
          return false;
      }
  
@@ -986,7 +988,7 @@ index dc344c4..f7d1120 100644
      if (_vk->vkCreateDescriptorPool(_device, &dpci, nullptr, &_meterDescriptorPool) != VK_SUCCESS) {
          _vk->vkDestroyShaderModule(_device, module, nullptr);
          return false;
-@@ -623,7 +636,8 @@ bool Composition::MakeMeterState() {
+@@ -623,7 +635,8 @@ bool Composition::MakeMeterState() {
      VkBufferCreateInfo bci{};
      bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
      bci.size = kMeterStateBytes;
@@ -996,7 +998,7 @@ index dc344c4..f7d1120 100644
      bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
      if (_vk->vkCreateBuffer(_device, &bci, nullptr, &_meterState) != VK_SUCCESS) return false;
      VkMemoryRequirements req{};
-@@ -686,6 +700,17 @@ void Composition::DropMeterState() {
+@@ -686,6 +699,17 @@ void Composition::DropMeterState() {
  // pathologically small window from producing a degenerate raster.
  void Composition::ModelExtent(uint32_t width, uint32_t height, const FrameSettings& s,
                                uint32_t& modelW, uint32_t& modelH) {
@@ -1014,7 +1016,7 @@ index dc344c4..f7d1120 100644
      const auto scaled = [&](uint32_t v) {
          if (s.workingScale == 1.0f) return v;
          return std::max<uint32_t>(64, uint32_t(std::lround(double(v) * double(s.workingScale))));
-@@ -695,7 +720,7 @@ void Composition::ModelExtent(uint32_t width, uint32_t height, const FrameSettin
+@@ -695,7 +719,7 @@ void Composition::ModelExtent(uint32_t width, uint32_t height, const FrameSettin
  }
  
  bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFormat, const FrameSettings& s,
@@ -1023,7 +1025,7 @@ index dc344c4..f7d1120 100644
      if (!_usable) return false;
  
      VkFormat work = CompositionFormat(swapchainFormat);
-@@ -733,25 +758,9 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -733,25 +757,9 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
          }
      }
  
@@ -1052,7 +1054,7 @@ index dc344c4..f7d1120 100644
      uint32_t modelW = 0, modelH = 0;
      ModelExtent(width, height, s, modelW, modelH);
      const bool superSample = modelW > width || modelH > height;
-@@ -767,13 +776,13 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -767,13 +775,13 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
          if ((fp16.optimalTilingFeatures & need) != need) {
              if (!_hdrProxy) Log("[comp] float16 proxy requested but not supported here; staying 8-bit");
              hdrProxy = false;
@@ -1068,7 +1070,7 @@ index dc344c4..f7d1120 100644
          return true;
  
      Log("[comp] building %ux%u, model %ux%u, %s%s%s", width, height, modelW, modelH,
-@@ -820,7 +829,8 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -820,12 +828,14 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
      _blitSwapchain = blit;
      _linearHdr = linearHdr;
      _hdrProxy = hdrProxy;
@@ -1077,17 +1079,38 @@ index dc344c4..f7d1120 100644
 +    _hdrTransfer = (hdrProxy || nativeEncodedProxy) ? hdrTransfer : 0;
      const VkFormat proxyFormat = _hdrProxy ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
  
-     // The untouched copy is float only when the frame it holds is: on a display-referred frame the
-@@ -833,7 +843,7 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+-    // The untouched copy is float only when the frame it holds is: on a display-referred frame the
+-    // swapchain's own format loses nothing and costs half the memory.
+-    _keepFormat = linearHdr ? VK_FORMAT_R16G16B16A16_SFLOAT : work;
++    // A display-referred UNORM frame is its own proxy: the encode would only copy it, so there is no
++    // proxy and the downsample reads the frame, converting it into the model's format even at equal
++    // size. A float frame still goes through the encode, which clamps its negative channels.
++    const bool direct = !linearHdr && work != VK_FORMAT_R16G16B16A16_SFLOAT;
+ 
+     const VkImageUsageFlags sampled = VK_IMAGE_USAGE_SAMPLED_BIT;
+     const VkImageUsageFlags storage = VK_IMAGE_USAGE_STORAGE_BIT;
+@@ -833,9 +843,8 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
      const VkImageUsageFlags dst = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
  
      const bool ok =
 -        (keepFrame || MakeImage(_frame, width, height, work, sampled | dst)) &&
+-        MakeImage(_keep, width, height, _keepFormat, sampled | storage) &&
+-        MakeImage(_proxy, width, height, proxyFormat, sampled | storage | src) &&
 +        (keepFrame || MakeImage(_frame, width, height, work, sampled | src | dst)) &&
-         MakeImage(_keep, width, height, _keepFormat, sampled | storage) &&
-         MakeImage(_proxy, width, height, proxyFormat, sampled | storage | src) &&
++        (direct || MakeImage(_proxy, width, height, proxyFormat, sampled | storage | src)) &&
          MakeImage(_model, modelW, modelH, proxyFormat, sampled | src | dst) &&
-@@ -1088,20 +1098,18 @@ void Composition::TransitionSwapchain(VkCommandBuffer cb, VkImage image, VkImage
+         MakeImage(_composed, width, height, work, storage | src);
+ 
+@@ -858,7 +867,7 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+                    VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT) &&
+          MakeMeterState());
+ 
+-    const bool needWork = (modelW != width || modelH != height);
++    const bool needWork = direct || modelW != width || modelH != height;
+     const bool okWork = !needWork || MakeImage(_work, modelW, modelH, proxyFormat,
+                                                sampled | storage | src);
+ 
+@@ -1088,20 +1097,18 @@ void Composition::TransitionSwapchain(VkCommandBuffer cb, VkImage image, VkImage
      b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
      b.image = image;
      b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
@@ -1120,7 +1143,7 @@ index dc344c4..f7d1120 100644
                                nullptr, 0, nullptr, 1, &b);
  }
  
-@@ -1146,7 +1154,7 @@ float Composition::ResolvedWhitePoint(const FrameSettings& s) const {
+@@ -1146,7 +1153,7 @@ float Composition::ResolvedWhitePoint(const FrameSettings& s) const {
  DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
      DlssNrConstants c{};
  
@@ -1129,7 +1152,7 @@ index dc344c4..f7d1120 100644
      c.TransferStrength = s.transferStrength;
      c.ColourStrength = s.colourStrength;
      c.MaxRatio = s.maxRatio;
-@@ -1178,7 +1186,7 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
+@@ -1178,7 +1185,7 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
              c.ReversibleMode = s.reversibleMode >= 3 ? 4u : 2u;
          } else {
              c.DebugView = 2;
@@ -1138,7 +1161,7 @@ index dc344c4..f7d1120 100644
          }
      }
  
-@@ -1194,8 +1202,9 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
+@@ -1194,8 +1201,9 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
      c.GuideHeight = _height;
      c.UseGameExposure = 0;
      c.ExposurePreMul = 1.0f;
@@ -1150,7 +1173,61 @@ index dc344c4..f7d1120 100644
      c.ColourTrust = s.colourTrust;
      c.RatioSmooth = s.ratioSmooth;
      return c;
-@@ -1287,13 +1296,18 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1237,7 +1245,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+     // While held the frame is not re-read, but everything downstream of it still runs: the encode
+     // re-encodes, the model re-evaluates and the resolve re-composes, so a setting changed now is
+     // answered on the same picture. Freezing the proxy instead would be wrong -- settings must still
+-    // re-encode -- and freezing it would also desynchronise it from the untouched keep.
++    // re-encode -- and freezing it would also desynchronise it from the frame the resolve reads.
+     const bool freeze = _holding && _frameCaptured;
+ 
+     if (!freeze) {
+@@ -1255,18 +1263,21 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+     }
+ 
+     Transition(cb, _frame, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+-    Transition(cb, _proxy, VK_IMAGE_LAYOUT_GENERAL);
+-    Transition(cb, _keep, VK_IMAGE_LAYOUT_GENERAL);
+-
+-    DlssNrConstants enc = BaseConstants(s);
+-    enc.Mode = DlssNrMode_Encode;
+-    enc.Width = _width;
+-    enc.Height = _height;
+-    if (!_pass->Dispatch(cb, enc, _width, _height, _frame.view, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+-                         _proxy.view, _keep.view))
+-        return false;
+ 
+-    // The meter, measured off the untouched copy and never off anything this pass writes. That
++    Image* source = &_frame;
++    if (_proxy.image) {
++        Transition(cb, _proxy, VK_IMAGE_LAYOUT_GENERAL);
++        DlssNrConstants enc = BaseConstants(s);
++        enc.Mode = DlssNrMode_Encode;
++        enc.Width = _width;
++        enc.Height = _height;
++        if (!_pass->Dispatch(cb, enc, _width, _height, _frame.view, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
++                             _proxy.view, VK_NULL_HANDLE))
++            return false;
++        source = &_proxy;
++    }
++
++    // The meter, measured off the captured frame and never off anything this pass writes. That
+     // distinction is the whole reason it is safe: an earlier white point meter upstream read its own
+     // output and chased it, walking one session from 0.010 to 97.910. There is no path from what this
+     // pass writes back into what this reads.
+@@ -1276,24 +1287,28 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+     // a four-byte copy into its own constant block (RecordCompose). The 128-byte mirror the transfer
+     // copies at the end is for the CPU's frame-hold snapshot and status field only.
+     if (_meter.image && _meterGpu) {
+-        Transition(cb, _keep, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+         Transition(cb, _meter, VK_IMAGE_LAYOUT_GENERAL);
+ 
+         DlssNrConstants meter = BaseConstants(s);
+         meter.Mode = DlssNrMode_Calibrate;
+         meter.Width = kDlssNrMeterGrid;
+         meter.Height = kDlssNrMeterGrid;
+-        if (_pass->Dispatch(cb, meter, kDlssNrMeterGrid, kDlssNrMeterGrid, _keep.view, VK_NULL_HANDLE,
++        if (_pass->Dispatch(cb, meter, kDlssNrMeterGrid, kDlssNrMeterGrid, _frame.view, VK_NULL_HANDLE,
                              VK_NULL_HANDLE, VK_NULL_HANDLE, _meter.view, VK_NULL_HANDLE)) {
              if (!_meterStateCleared) {
                  _vk->vkCmdFillBuffer(cb, _meterState, 0, VK_WHOLE_SIZE, 0);
@@ -1170,7 +1247,60 @@ index dc344c4..f7d1120 100644
              pc.source = s.whitePointSource;
              pc.hold = _holding && _frameCaptured ? 1u : 0u;
              _vk->vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, _meterPipeline);
-@@ -1552,6 +1566,23 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1319,18 +1334,16 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+             const VkBufferCopy mirror{ 0, 0, kMeterStateBytes };
+             _vk->vkCmdCopyBuffer(cb, _meterState, _meterMirror.buffer, 1, &mirror);
+         }
+-        Transition(cb, _keep, VK_IMAGE_LAYOUT_GENERAL);
+     }
+ 
+     // What the model is actually handed: the full-resolution proxy, or a reduction of it.
+-    Image* source = &_proxy;
+     if (_work.image) {
+-        Transition(cb, _proxy, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
++        Transition(cb, *source, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+         Transition(cb, _work, VK_IMAGE_LAYOUT_GENERAL);
+ 
+         if (_superSample) {
+             // Enlarge, so the model has more pixels to synthesise into than the frame has.
+-            if (!_superUp->Dispatch(cb, _proxy.view, _work.view, _width, _height, _modelW, _modelH))
++            if (!_superUp->Dispatch(cb, source->view, _work.view, _width, _height, _modelW, _modelH))
+                 return false;
+         } else {
+             // Reduce, with the module's own area filter -- the model then works on fewer pixels and
+@@ -1339,7 +1352,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+             down.Mode = DlssNrMode_Downsample;
+             down.Width = _modelW;
+             down.Height = _modelH;
+-            if (!_pass->Dispatch(cb, down, _modelW, _modelH, _proxy.view, VK_NULL_HANDLE, VK_NULL_HANDLE,
++            if (!_pass->Dispatch(cb, down, _modelW, _modelH, source->view, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                  VK_NULL_HANDLE, _work.view, VK_NULL_HANDLE))
+                 return false;
+         }
+@@ -1485,11 +1498,11 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+             return false;
+         Transition(cb, _modelNative, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+         answer = &_modelNative;
+-        source = &_proxy;
++        source = _proxy.image ? &_proxy : &_frame;
+     }
+ 
+     Transition(cb, *source, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+-    Transition(cb, _keep, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
++    Transition(cb, _frame, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+     Transition(cb, _composed, VK_IMAGE_LAYOUT_GENERAL);
+ 
+     DlssNrConstants res = BaseConstants(s);
+@@ -1520,7 +1533,7 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+                                   0, 0, nullptr, 1, &b, 0, nullptr);
+     }
+ 
+-    if (!_pass->Dispatch(cb, res, _width, _height, source->view, answer->view, _keep.view, VK_NULL_HANDLE,
++    if (!_pass->Dispatch(cb, res, _width, _height, source->view, answer->view, _frame.view, VK_NULL_HANDLE,
+                          _composed.view, VK_NULL_HANDLE))
+         return false;
+ 
+@@ -1552,6 +1565,23 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
      // presented it and the frame the model edited, for the same frame.
      _captureRecorded = false;
      if (_capture.Active()) {
@@ -1194,7 +1324,17 @@ index dc344c4..f7d1120 100644
          const size_t bytes = size_t(_width) * _height * (_workFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 4);
          if (_captureBuf.buffer || MakeHostBuffer(_captureBuf, bytes * 2, VK_BUFFER_USAGE_TRANSFER_DST_BIT)) {
              Transition(cb, _frame, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-@@ -1578,7 +1609,7 @@ void Composition::WriteCapturedFrame() {
+@@ -1567,9 +1597,6 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+             _captureRecorded = true;
+         }
+     }
+-
+-    // The keep is written by the next encode, so it goes back to where that dispatch expects it.
+-    Transition(cb, _keep, VK_IMAGE_LAYOUT_GENERAL);
+     return true;
+ }
+ 
+@@ -1578,7 +1605,7 @@ void Composition::WriteCapturedFrame() {
      _captureRecorded = false;
      const size_t bytes = size_t(_width) * _height * (_workFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 4);
      const uint8_t* base = (const uint8_t*) _captureBuf.mapped;
@@ -1204,10 +1344,22 @@ index dc344c4..f7d1120 100644
  
  
 diff --git a/upstream-layer/layer_linux/src/composition.h b/upstream-layer/layer_linux/src/composition.h
-index 757303b..2b3bb1a 100644
+index 757303b..7147b1b 100644
 --- a/upstream-layer/layer_linux/src/composition.h
 +++ b/upstream-layer/layer_linux/src/composition.h
-@@ -33,6 +33,7 @@ namespace dlssnr {
+@@ -5,8 +5,9 @@
+ // only thing available is a finished swapchain image, and the model lives in another process behind a
+ // shared-memory round trip, so the same pass has to be split in two around that round trip:
+ //
+-//   leg 1   swapchain -> frame -> ENCODE -> proxy (+ the untouched keep)
+-//                              -> DOWNSAMPLE -> work, when the model runs below the frame
++//   leg 1   swapchain -> frame -> ENCODE -> proxy, unless a display-referred UNORM frame is its own
++//                              -> DOWNSAMPLE -> work, when the model runs below the frame or
++//                                 reads the frame directly
+ //                              -> host buffer
+ //     ...   the helper runs the model on those pixels and answers
+ //   leg 2   host buffer -> model image -> RESOLVE -> composed -> swapchain
+@@ -33,6 +34,7 @@ namespace dlssnr {
  // One frame's worth of settings, read from the shared header once so that a control changed
  // mid-frame cannot make the encode and the resolve disagree about what they are doing.
  struct FrameSettings {
@@ -1215,7 +1367,7 @@ index 757303b..2b3bb1a 100644
      float transferStrength = 1.0f;
      float colourStrength = 1.0f;
      float maxRatio = 2.0f;
-@@ -48,6 +49,8 @@ struct FrameSettings {
+@@ -48,6 +50,8 @@ struct FrameSettings {
      float compareSplit = 0.5f;
      float compareZoom = 1.0f;
      float workingScale = 1.0f;
@@ -1224,7 +1376,7 @@ index 757303b..2b3bb1a 100644
      uint32_t transfer = 1;
      uint32_t debugView = 0;
      uint32_t compareMode = 0;
-@@ -111,8 +114,12 @@ class Composition {
+@@ -111,8 +115,12 @@ class Composition {
      // the encode writes normalised linear light instead of an sRGB picture. hdrTransfer = 1 says the
      // swapchain itself carries PQ. Both are honoured only while the device can hold a float16 proxy;
      // Prepare reports the decision it actually made through HdrProxyActive().
@@ -1238,7 +1390,7 @@ index 757303b..2b3bb1a 100644
  
      // The raster the model will work at, for a caller that has to size a transport before Prepare
      // runs. Same arithmetic Prepare uses, in one place so the two cannot disagree.
-@@ -125,7 +132,7 @@ class Composition {
+@@ -125,7 +133,7 @@ class Composition {
      // in the layer derives from this one number so the two sides cannot disagree.
      size_t ModelBytes() const { return size_t(_modelW) * _modelH * (_hdrProxy ? 8 : 4); }
      bool HdrProxyActive() const { return _hdrProxy; }
@@ -1247,7 +1399,7 @@ index 757303b..2b3bb1a 100644
  
      // Point the transport buffers at the shared-memory pixel regions so the GPU reads and writes
      // them directly, with no host copy in between. Null pointers fall back to private host-visible
-@@ -198,8 +205,15 @@ class Composition {
+@@ -198,8 +206,15 @@ class Composition {
      void MarkModelFrame() { _haveModel = true; }
  
      // Write this many matched before/after pairs, starting with the next composed frame.
@@ -1264,22 +1416,45 @@ index 757303b..2b3bb1a 100644
  
      // Called after leg 2's fence, when the readback the compose recorded has landed.
      void WriteCapturedFrame();
-@@ -273,6 +287,7 @@ class Composition {
-     VkFormat _keepFormat = VK_FORMAT_UNDEFINED;
+@@ -270,13 +285,13 @@ class Composition {
+     VkFormat _swapchainFormat = VK_FORMAT_UNDEFINED;
+     VkFormat _workFormat = VK_FORMAT_UNDEFINED;  // usually the swapchain's UNORM twin; see Prepare
+     bool _blitSwapchain = false;                 // set when _workFormat is not the swapchain's twin
+-    VkFormat _keepFormat = VK_FORMAT_UNDEFINED;
      bool _linearHdr = false;
      bool _hdrProxy = false;
 +    bool _nativeEncodedProxy = false;
      uint32_t _hdrTransfer = 0;
      bool _haveModel = false;
  
-@@ -322,6 +337,7 @@ class Composition {
+-    Image _frame{}, _keep{}, _proxy{}, _work{}, _model{}, _composed{};
++    Image _frame{}, _proxy{}, _work{}, _model{}, _composed{};
+ 
+     // Supersampling: the model works above the frame, so the proxy is enlarged on the way in and the
+     // answer averaged back on the way out. _modelNative holds that average; without it the resolve
+@@ -287,7 +302,7 @@ class Composition {
+     bool _superSample = false;
+     uint32_t _scalerFilter = kScalerLanczos3;
+ 
+-    // The white point meter: a grid of tile peak luminances measured off the untouched copy, and the
++    // The white point meter: a grid of tile peak luminances measured off the captured frame, and the
+     // percentile taken across it -- on the GPU. The reduce pass keeps the percentile, the history
+     // and the resolved value in a device-local state buffer; the resolve reads the resolved value
+     // through a four-byte copy into its own constant block, so no tensor crosses to the host. The
+@@ -322,10 +337,11 @@ class Composition {
      bool _answerViaFd = false;
  
      CaptureWriter _capture;
 +    CaptureMetadata _captureMetadata{};
      bool _captureRecorded = false;
  
-     // Frame hold. The freeze point is the raw colour the encode reads, not the proxy: both the proxy
+-    // Frame hold. The freeze point is the raw colour the encode reads, not the proxy: both the proxy
+-    // and the untouched keep are derived from it, and freezing further down would stop a setting
++    // Frame hold. The freeze point is the raw colour the encode reads, not the proxy: the proxy is
++    // derived from it and the resolve reads it, and freezing further down would stop a setting
+     // change from re-encoding, which is the whole point of holding.
+     bool _holding = false;
+     bool _frameCaptured = false;
 diff --git a/upstream-layer/layer_linux/src/dlssnr/DlssNr_Common.h b/upstream-layer/layer_linux/src/dlssnr/DlssNr_Common.h
 index 2690bb9..90440b6 100644
 --- a/upstream-layer/layer_linux/src/dlssnr/DlssNr_Common.h
@@ -1295,7 +1470,7 @@ index 2690bb9..90440b6 100644
  
      // How much of the chroma-agreement gate to apply, 0..1. See colourTrustPercent.
 diff --git a/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl b/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
-index 67c5f9d..d5f9443 100644
+index 67c5f9d..15bd6bf 100644
 --- a/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
 +++ b/upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl
 @@ -29,9 +29,9 @@ cbuffer Params : register(b0)
@@ -1394,13 +1569,13 @@ index 67c5f9d..d5f9443 100644
                  sum += dot(c, kLuma);
                  taken++;
              }
-@@ -704,13 +724,13 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -703,14 +723,11 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+         float4 source = gSource.Load(int3(id.xy, 0));
          float3 frame = max(source.rgb, float3(0.0, 0.0, 0.0));
  
-         // Kept so the resolve has the frame as it was, rather than having to reconstruct it.
+-        // Kept so the resolve has the frame as it was, rather than having to reconstruct it.
 -        gKeep[id.xy] = float4(frame, source.a);
-+        gKeep[id.xy] = source;  // scRGB can contain valid negative wide-gamut channels
- 
+-
          // The float16 proxy. The frame's light -- PQ-decoded first if the swapchain carries PQ --
          // divided by the white point, and that is all: no knee, no sRGB, no ceiling. The whole point
          // of the float proxy is that the model is shown the highlights the SDR encode throws away,
@@ -1410,7 +1585,7 @@ index 67c5f9d..d5f9443 100644
          {
              float3 lin = gHdrTransfer != 0 ? PqToLinear(frame) : frame;
              gTarget[id.xy] = float4(lin / NormScale(), source.a);
-@@ -741,7 +761,10 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -741,7 +758,10 @@ void CSMain(uint3 id : SV_DispatchThreadID)
          // that shows the model highlight gradation the knee throws away. Reached only when the frame
          // is not passthrough (handled and returned above), so NeutwoEncode never sees a tone-mapped
          // frame. Both are undone by the resolve: the knee approximately, Neutwo exactly.
@@ -1422,7 +1597,7 @@ index 67c5f9d..d5f9443 100644
          float3 display;
          if (gReversibleMode == 0)
              display = SoftKnee(normalized);        // soft knee
-@@ -803,7 +826,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -803,7 +823,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      // Nothing was encoded on the way in, so nothing is decoded here either. The float16 proxy is
      // linear light already -- the sRGB decode would fold the highlights flat.
      float3 proxy, model;
@@ -1431,7 +1606,7 @@ index 67c5f9d..d5f9443 100644
      {
          proxy = proxySample.rgb;
          model = modelSample.rgb;
-@@ -843,7 +866,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -843,7 +863,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
              const float2 uvn = saturate(cmpUv + off);
              float3 pn = gSource.SampleLevel(gLinear, uvn, 0).rgb;
              float3 mn = gModel.SampleLevel(gLinear, uvn, 0).rgb;
@@ -1440,7 +1615,7 @@ index 67c5f9d..d5f9443 100644
              {
                  pn = SrgbToLinear(pn);
                  mn = SrgbToLinear(mn);
-@@ -866,7 +889,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -866,7 +886,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      // own hue, which is what makes the failure so confusing to look at.
      const float normScale = NormScale();
      float3 originalRaw = originalSample.rgb;
@@ -1449,7 +1624,7 @@ index 67c5f9d..d5f9443 100644
          originalRaw = PqToLinear(max(originalRaw, 0.0));  // the frame's own light, in nits
      float3 original = originalRaw / normScale;
  
-@@ -878,22 +901,22 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -878,22 +898,22 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      // with and without Neural Rendering. In passthrough the frame is already display-referred.
      if (gApplyModel == 0)
      {
@@ -1477,7 +1652,7 @@ index 67c5f9d..d5f9443 100644
          gTarget[id.xy] = float4(dbg, originalSample.a);
          return;
      }
-@@ -907,8 +930,8 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -907,8 +927,8 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      {
          // Amplified and centred on grey, so both directions of the edit are visible at once.
          float3 shown = saturate(0.5 + edit * 20.0);
@@ -1488,7 +1663,7 @@ index 67c5f9d..d5f9443 100644
          gTarget[id.xy] = float4(dbg, originalSample.a);
          return;
      }
-@@ -973,7 +996,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -973,7 +993,7 @@ void CSMain(uint3 id : SV_DispatchThreadID)
          // same passthrough check the encode has. Without this, a reversible + matched-residual +
          // already-tone-mapped frame would Neutwo-compress a frame the encode left raw. Neutwo already
          // lands in [0,1), so it needs no saturate.
@@ -1497,7 +1672,7 @@ index 67c5f9d..d5f9443 100644
                                 ? original  // the float encode is a divide; the rebuild is the same divide
                                 : gPassthrough != 0
                                 ? saturate(original)
-@@ -1026,7 +1049,11 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -1026,7 +1046,11 @@ void CSMain(uint3 id : SV_DispatchThreadID)
          // Saturated like the blend in the branch below. Detail strength above 1 is carried further
          // down as a power on the luminance ratio, so scaling the edit by it here as well spends it
          // twice.
@@ -1510,7 +1685,7 @@ index 67c5f9d..d5f9443 100644
  
          // What bounds the sum. An addition says nothing about where the result lands, so the model's
          // verdict is read as a ratio on the pair it came from and the sum is held near it.
-@@ -1342,15 +1369,17 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -1342,15 +1366,17 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      if (gDebugView == 4)
      {
          const float a = saturate(colourAllow);
@@ -1531,7 +1706,7 @@ index 67c5f9d..d5f9443 100644
          gTarget[id.xy] = float4(max(dbg, 0.0), originalSample.a);
          return;
      }
-@@ -1362,21 +1391,36 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -1362,21 +1388,36 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      if (gColourStrength > 1.0)
          result = ClampAp1(FromOkLab(float3(1.0, gColourStrength, gColourStrength) * ToOkLab(max(result, 0.0))));
  
@@ -1572,7 +1747,7 @@ index 67c5f9d..d5f9443 100644
  
      // The side being shown untouched takes the frame as it arrived, past every step above -- code
      // for code, transfer included.
-@@ -1392,11 +1436,15 @@ void CSMain(uint3 id : SV_DispatchThreadID)
+@@ -1392,11 +1433,15 @@ void CSMain(uint3 id : SV_DispatchThreadID)
      if (onDivider)
      {
          float3 white = float3(WhitePoint(), WhitePoint(), WhitePoint());

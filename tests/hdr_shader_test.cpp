@@ -313,10 +313,9 @@ Result Run(Context& c, const std::array<float, components>& input, const Options
     const size_t texel = unorm ? 1 : 2, model_components = size_t(model_width) * model_height * 4;
     const size_t proxy_offset = float_bytes * 2, small_offset = proxy_offset + components * texel;
     const size_t model_offset = small_offset + model_components * texel;
-    Image native(c), proxy(c), original(c), output(c), small(c), model(c);
+    Image native(c), proxy(c), output(c), small(c), model(c);
     native.Init(VK_FORMAT_R32G32B32A32_SFLOAT);
     proxy.Init(o.proxyFormat);
-    original.Init(VK_FORMAT_R32G32B32A32_SFLOAT);
     output.Init(VK_FORMAT_R32G32B32A32_SFLOAT);
     if (o.reduced) small.Init(o.proxyFormat, model_width, model_height);
     model.Init(o.proxyFormat, model_width, model_height);
@@ -333,7 +332,6 @@ Result Run(Context& c, const std::array<float, components>& input, const Options
     vkCmdCopyBufferToImage(c.cmd, staging.buffer, native.image, native.layout, 1, &copy);
     native.Transition(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     proxy.Transition(VK_IMAGE_LAYOUT_GENERAL);
-    original.Transition(VK_IMAGE_LAYOUT_GENERAL);
     output.Transition(VK_IMAGE_LAYOUT_GENERAL);
     DlssNrConstants constants{};
     constants.Width = constants.GuideWidth = width;
@@ -355,9 +353,8 @@ Result Run(Context& c, const std::array<float, components>& input, const Options
     constants.ColourTrust = 2;
     constants.RatioSmooth = 1;
     Check(c.pass->Dispatch(c.cmd, constants, width, height, native.view, VK_NULL_HANDLE,
-                          VK_NULL_HANDLE, VK_NULL_HANDLE, proxy.view, original.view), "encode dispatch");
+                          VK_NULL_HANDLE, VK_NULL_HANDLE, proxy.view, VK_NULL_HANDLE), "encode dispatch");
     proxy.Transition(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    original.Transition(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     Image& source = o.reduced ? small : proxy;
     if (o.reduced) {
         small.Transition(VK_IMAGE_LAYOUT_GENERAL);
@@ -411,7 +408,7 @@ Result Run(Context& c, const std::array<float, components>& input, const Options
     model.Transition(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     constants.Mode = DlssNrMode_Resolve;
     Check(c.pass->Dispatch(c.cmd, constants, width, height, source.view, model.view,
-                          original.view, VK_NULL_HANDLE, output.view, VK_NULL_HANDLE), "resolve dispatch");
+                          native.view, VK_NULL_HANDLE, output.view, VK_NULL_HANDLE), "resolve dispatch");
     output.Transition(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
     copy.bufferOffset = float_bytes;
     vkCmdCopyImageToBuffer(c.cmd, output.image, output.layout, staging.buffer, 1, &copy);
