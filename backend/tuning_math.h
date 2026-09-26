@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-// Shared native postprocessing math. These controls operate on a pass's RGB
+// Shared native postprocessing math: the tuning controls, and the 3x3 filter
+// that colour preservation also uses. These controls operate on a pass's RGB
 // residual; they are not NVIDIA NGX model conditioning or semantic masks.
 #if defined(__HIP_DEVICE_COMPILE__)
-#define DLSSLOP_TUNE_INLINE __attribute__((device)) __attribute__((always_inline)) inline
+#define DLSSLOP_INLINE __attribute__((device)) __attribute__((always_inline)) inline
 #else
-#define DLSSLOP_TUNE_INLINE inline
+#define DLSSLOP_INLINE inline
 #endif
 
 namespace dlsslop {
@@ -18,61 +19,77 @@ struct NativeTuning {
     float sharpness = 0.0f;
 };
 
-DLSSLOP_TUNE_INLINE bool native_tuning_is_default(const NativeTuning& tuning)
+DLSSLOP_INLINE bool native_tuning_is_default(const NativeTuning& tuning)
 {
     return tuning.intensity == 1.0f && tuning.tone == 1.0f &&
            tuning.structure == 1.0f && tuning.sharpness == 0.0f;
 }
 
-DLSSLOP_TUNE_INLINE unsigned tune_clamp_coordinate(int position, unsigned low, unsigned high)
+DLSSLOP_INLINE unsigned clamp_coordinate(int position, unsigned low, unsigned high)
 {
     return position < int(low) ? low : position > int(high) ? high : unsigned(position);
 }
 
-DLSSLOP_TUNE_INLINE float tune_neural_component(
-    const float* input_rgba, const float* raw_rgb, unsigned width,
-    unsigned x, unsigned y, unsigned low_x, unsigned low_y,
-    unsigned high_x, unsigned high_y, unsigned channel, const NativeTuning& tuning)
-{
-    const unsigned pixel = y * width + x;
-    const float model = raw_rgb[pixel * 3 + channel];
-    // Preserve default output bit for bit, including the unused padded region.
-    if (native_tuning_is_default(tuning) || x < low_x || x > high_x ||
-        y < low_y || y > high_y)
-        return model;
-    const float input = input_rgba[pixel * 4 + channel];
-    if (tuning.intensity == 0.0f && tuning.sharpness == 0.0f)
-        return input;
+struct Binomial {
+    float residual[3], model[3];
+};
 
-    const float residual = model - input;
-    float edit = residual * tuning.structure;
-    float model_low = 0.0f;
-    if (tuning.tone != tuning.structure || tuning.sharpness != 0.0f) {
-        // Separable [1 2 1]/4 in each axis, evaluated as nine samples. Clamp
-        // to the fitted picture, so letterbox/padding cannot darken its edges.
-        float residual_low = 0.0f;
-        for (int dy = -1; dy <= 1; ++dy) {
-            const unsigned sy = tune_clamp_coordinate(int(y) + dy, low_y, high_y);
-            for (int dx = -1; dx <= 1; ++dx) {
-                const unsigned sx = tune_clamp_coordinate(int(x) + dx, low_x, high_x);
-                const unsigned neighbour = sy * width + sx;
-                const float weight = float((dx ? 1 : 2) * (dy ? 1 : 2)) * 0.0625f;
-                const float model_sample = raw_rgb[neighbour * 3 + channel];
-                const float input_sample = input_rgba[neighbour * 4 + channel];
-                residual_low += weight * (model_sample - input_sample);
-                model_low += weight * model_sample;
+// Separable [1 2 1]/4 in each axis, evaluated as nine samples of the model
+// and of its residual against the reference. Clamp to the fitted picture, so
+// letterbox/padding cannot darken its edges.
+DLSSLOP_INLINE Binomial binomial3x3_rgb(
+    const float* __restrict__ model_rgb, const float* __restrict__ reference_rgba, unsigned width,
+    unsigned x, unsigned y, unsigned low_x, unsigned low_y, unsigned high_x, unsigned high_y)
+{
+    Binomial low{};
+    for (int dy = -1; dy <= 1; ++dy) {
+        const unsigned sy = clamp_coordinate(int(y) + dy, low_y, high_y);
+        for (int dx = -1; dx <= 1; ++dx) {
+            const unsigned q = sy * width + clamp_coordinate(int(x) + dx, low_x, high_x);
+            const float* m = model_rgb + q * 3;
+            const float* r = reference_rgba + q * 4;
+            const float weight = float((dx ? 1 : 2) * (dy ? 1 : 2)) * 0.0625f;
+            for (unsigned c = 0; c < 3; ++c) {
+                low.residual[c] += weight * (m[c] - r[c]);
+                low.model[c] += weight * m[c];
             }
         }
-        edit += (tuning.tone - tuning.structure) * residual_low;
+    }
+    return low;
+}
+
+// out receives the pixel's RGB and must not alias the inputs.
+DLSSLOP_INLINE void tune_neural_pixel(
+    const float* __restrict__ input_rgba, const float* __restrict__ raw_rgb, unsigned width,
+    unsigned x, unsigned y, unsigned low_x, unsigned low_y,
+    unsigned high_x, unsigned high_y, const NativeTuning& tuning, float* __restrict__ out)
+{
+    const unsigned pixel = y * width + x;
+    const float* model = raw_rgb + pixel * 3;
+    const float* input = input_rgba + pixel * 4;
+    // Preserve default output bit for bit, including the unused padded region.
+    if (native_tuning_is_default(tuning) || x < low_x || x > high_x ||
+        y < low_y || y > high_y) {
+        for (unsigned c = 0; c < 3; ++c) out[c] = model[c];
+        return;
+    }
+    if (tuning.intensity == 0.0f && tuning.sharpness == 0.0f) {
+        for (unsigned c = 0; c < 3; ++c) out[c] = input[c];
+        return;
+    }
+
+    float edit[3];
+    for (unsigned c = 0; c < 3; ++c) edit[c] = (model[c] - input[c]) * tuning.structure;
+    Binomial low{};
+    if (tuning.tone != tuning.structure || tuning.sharpness != 0.0f) {
+        low = binomial3x3_rgb(raw_rgb, input_rgba, width, x, y, low_x, low_y, high_x, high_y);
+        for (unsigned c = 0; c < 3; ++c) edit[c] += (tuning.tone - tuning.structure) * low.residual[c];
     }
     // No clipping here: subsequent passes retain floating-point headroom.
     // The final display codec is responsible for its output range.
-    float result = input + tuning.intensity * edit;
+    for (unsigned c = 0; c < 3; ++c) out[c] = input[c] + tuning.intensity * edit[c];
     if (tuning.sharpness != 0.0f)
-        result += tuning.sharpness * (model - model_low);
-    return result;
+        for (unsigned c = 0; c < 3; ++c) out[c] += tuning.sharpness * (model[c] - low.model[c]);
 }
 
 } // namespace dlsslop
-
-#undef DLSSLOP_TUNE_INLINE

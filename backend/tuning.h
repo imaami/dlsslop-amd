@@ -52,14 +52,12 @@ inline void tune_neural_rgb(const float* input_rgba, const float* raw_rgb,
     const unsigned high_x = g.x + g.fit_width - 1;
     const unsigned high_y = g.y + g.fit_height - 1;
     for (unsigned y = 0; y < g.height; ++y)
-        for (unsigned x = 0; x < g.width; ++x)
-            for (unsigned channel = 0; channel < 3; ++channel) {
-                const float value = tune_neural_component(input_rgba, raw_rgb, g.width,
-                    x, y, g.x, g.y, high_x, high_y, channel, tuning);
-                if (!std::isfinite(value))
-                    throw std::runtime_error("native tuning produced nonfinite RGB");
-                output[(std::size_t(y) * g.width + x) * 3 + channel] = value;
-            }
+        for (unsigned x = 0; x < g.width; ++x) {
+            float* const rgb = output.data() + (std::size_t(y) * g.width + x) * 3;
+            tune_neural_pixel(input_rgba, raw_rgb, g.width, x, y, g.x, g.y, high_x, high_y, tuning, rgb);
+            if (!std::isfinite(rgb[0]) || !std::isfinite(rgb[1]) || !std::isfinite(rgb[2]))
+                throw std::runtime_error("native tuning produced nonfinite RGB");
+        }
 }
 
 class GpuTuning {

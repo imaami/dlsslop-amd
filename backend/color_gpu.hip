@@ -9,8 +9,8 @@ struct ColorGeometry {
 };
 
 extern "C" __attribute__((global))
-void dlsslop_preserve_color(const float* original_rgba, const float* model_rgb,
-                          float* output_rgb, ColorGeometry g, float strength)
+void dlsslop_preserve_color(const float* __restrict__ original_rgba, const float* __restrict__ model_rgb,
+                          float* __restrict__ output_rgb, ColorGeometry g, float strength)
 {
     const unsigned pixel = __builtin_amdgcn_workgroup_id_x() * 256u +
                            __builtin_amdgcn_workitem_id_x();

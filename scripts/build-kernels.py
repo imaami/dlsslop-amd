@@ -126,10 +126,12 @@ def build(args):
                 # helper. Record its source as part of the module provenance.
                 header = args.source / "lds_barrier.h"
                 source_hashes[header.name] = hashlib.sha256(header.read_bytes()).hexdigest()
-            for header_name in ("tuning_math.h", "temporal_math.h", "color_preserve_math.h"):
+            # Colour's header includes tuning's: scan each recorded header too.
+            for header_name in ("color_preserve_math.h", "temporal_math.h", "tuning_math.h"):
                 if ('#include "' + header_name + '"').encode() in content:
-                    header = args.codec_source.parent / header_name
-                    source_hashes[header.name] = hashlib.sha256(header.read_bytes()).hexdigest()
+                    text = (args.codec_source.parent / header_name).read_bytes()
+                    content += text
+                    source_hashes[header_name] = hashlib.sha256(text).hexdigest()
         generated = root / f"{name}.generated.hip"
         generated.write_text(source, encoding="utf-8")
         output = root / f"{name}.hsaco"

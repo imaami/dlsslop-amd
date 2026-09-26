@@ -10,16 +10,14 @@ struct TuningGeometry {
 };
 
 extern "C" __attribute__((global))
-void dlsslop_tune_rgb(const float* input_rgba, const float* raw_rgb,
-                    float* output_rgb, TuningGeometry g, dlsslop::NativeTuning tuning)
+void dlsslop_tune_rgb(const float* __restrict__ input_rgba, const float* __restrict__ raw_rgb,
+                    float* __restrict__ output_rgb, TuningGeometry g, dlsslop::NativeTuning tuning)
 {
     const unsigned pixel = __builtin_amdgcn_workgroup_id_x() * 256u +
                            __builtin_amdgcn_workitem_id_x();
     if (pixel >= g.width * g.height)
         return;
     const unsigned x = pixel % g.width, y = pixel / g.width;
-    for (unsigned channel = 0; channel < 3; ++channel)
-        output_rgb[pixel * 3 + channel] = dlsslop::tune_neural_component(
-            input_rgba, raw_rgb, g.width, x, y, g.x, g.y,
-            g.x + g.fit_width - 1, g.y + g.fit_height - 1, channel, tuning);
+    dlsslop::tune_neural_pixel(input_rgba, raw_rgb, g.width, x, y, g.x, g.y,
+        g.x + g.fit_width - 1, g.y + g.fit_height - 1, tuning, output_rgb + pixel * 3);
 }
