@@ -92,14 +92,15 @@ Compilation does not require a GPU, ROCm runtime or model weights. Qt uses the
 distribution's shared Qt 6 libraries; the worker and layer have no Qt dependency.
 For an independent GUI build, see [gui/README.md](gui/README.md).
 
-On a successful push or manual Actions run, CI packages fresh
-runtime outputs as `dist/dlsslop-amd-linux-gfx1201.tar.xz` in the
-`dlsslop-amd-linux-gfx1201` artifact. The archive contains the installer, compiled
-binaries and HIP modules, runtime Python tools, and required notices; it contains
-no source tree or model weights. Extract it, enter the extracted directory and
-check `sha256sum --check PACKAGE-SHA256SUMS` before installation.
-`licenses/SOURCES` identifies the corresponding source revision. Pull-request
-runs check the package without uploading it: their merge commit is temporary.
+On a successful push or manual Actions run, CI packages fresh runtime outputs
+and uploads the archive itself as the `dlsslop-amd-linux-gfx1201.tar.xz`
+artifact. Its root is an installation prefix (`bin/`, `lib/`, `libexec/`,
+`share/`) holding the compiled binaries and HIP modules, runtime Python tools,
+the Vulkan layer manifest and required notices, stamped with the packaging time;
+it contains no source tree or model weights. `share/doc/dlsslop-amd/SHA256SUMS`
+lists every file relative to that root, and `share/doc/dlsslop-amd/licenses/SOURCES`
+identifies the corresponding source revision. Pull-request runs check the package
+without uploading it: their merge commit is temporary.
 
 ## Install
 
@@ -111,9 +112,10 @@ python3 install.py
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The same installer handles a source build or an extracted CI archive. It
-installs into `~/.local` by default; `install.py --help` describes prefix,
-build-directory and manifest overrides. It installs these commands:
+The installer lays a source build out exactly like the binary release (see
+[packaging/README.md](packaging/README.md)), in `~/.local` by default;
+`install.py --help` describes the prefix and build-directory options. It
+installs these commands:
 
 | Command | Purpose |
 |---|---|

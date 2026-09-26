@@ -139,6 +139,22 @@ def main():
             got = json.loads(result.stdout)["env"]
             assert got["DLSSNR_SHM"] == str(channel)
             assert got["DLSSNR_LOG"] == str(channel.parent / "layer.log")
+            assert "VK_ADD_IMPLICIT_LAYER_PATH" not in got, "the source tree has no layer manifests"
+            # Installed anywhere, the launcher points the loader at its own
+            # prefix's manifests, ahead of any inherited search path.
+            prefix = base / "any prefix"
+            (prefix / "bin").mkdir(parents=True)
+            (prefix / "share/vulkan/implicit_layer.d").mkdir(parents=True)
+            installed = prefix / "bin/dlsslop-run"
+            installed.write_bytes(LAUNCHER.read_bytes())
+            installed.chmod(0o755)
+            layers = str(prefix / "share/vulkan/implicit_layer.d")
+            assert f"({layers})" in run([BASH, str(installed), "--help"], env=env).stdout
+            result = run([BASH, str(installed), str(recorder)], expected=37,
+                         env=dict(launch_env, VK_ADD_IMPLICIT_LAYER_PATH="/inherited"))
+            assert json.loads(result.stdout)["env"]["VK_ADD_IMPLICIT_LAYER_PATH"] == layers + ":/inherited"
+            result = run([BASH, str(installed), str(recorder)], expected=37, env=launch_env)
+            assert json.loads(result.stdout)["env"]["VK_ADD_IMPLICIT_LAYER_PATH"] == layers
             result = run([BASH, str(LAUNCHER), "missing-dlsslop-amd-command"], expected=127, env=env)
             assert "could not execute" in result.stderr
 

@@ -7,6 +7,11 @@ channel_default=${DLSSNR_SHM:-/tmp/dlsslop-amd-${UID}/shm.bin}
 [[ $channel_default == /* ]] || channel_default=$PWD/$channel_default
 channel=$channel_default
 log=${DLSSNR_LOG:-}
+# The layer manifest installed beside this launcher; the Vulkan loader does not
+# search every prefix (/opt/dlsslop-amd, say) by itself.
+self=$(readlink -f -- "${BASH_SOURCE[0]}")
+layers=${self%/bin/*}/share/vulkan/implicit_layer.d
+[[ -d $layers ]] || layers=
 
 fail() {
     printf '%s\n' "$2" >&2
@@ -31,6 +36,8 @@ Relative paths are resolved against the launcher's working directory.
 
 The launcher sets these values for COMMAND, overriding inherited values:
   DLSSLOP_AMD_ENABLE=1  DLSSNR_ENABLE=1  DLSSNR_IDLE_REPAINT=0
+It prepends the installation's layer manifests to VK_ADD_IMPLICIT_LAYER_PATH
+(${layers:-none: no share/vulkan/implicit_layer.d beside this launcher}).
 It unsets DLSSNR_DISABLE and VKLayer_DLSS5. Other environment is inherited.
 COMMAND and its arguments are passed unchanged; its exit status is preserved.
 Start dlsslopd separately before launching the game.
@@ -64,6 +71,7 @@ case $? in
     *) fail 1 'Could not inspect the native worker channel.' ;;
 esac
 export DLSSNR_SHM=$channel DLSSNR_LOG=$log DLSSLOP_AMD_ENABLE=1 DLSSNR_ENABLE=1 DLSSNR_IDLE_REPAINT=0
+[[ $layers ]] && export VK_ADD_IMPLICIT_LAYER_PATH=$layers${VK_ADD_IMPLICIT_LAYER_PATH:+:$VK_ADD_IMPLICIT_LAYER_PATH}
 unset DLSSNR_DISABLE VKLayer_DLSS5
 shopt -s execfail
 exec -- "$@"

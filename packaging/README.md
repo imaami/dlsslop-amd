@@ -24,20 +24,26 @@ and Vulkan layer run independently of the GUI.
 
 ## Install
 
-Extract the archive, enter its `dlsslop-amd` directory, and stop the game and worker
-before installing or updating:
+The archive's root is an installation prefix. Stop the game and worker, extract
+it into the prefix of your choice and check it there:
 
 ```bash
-sha256sum --check PACKAGE-SHA256SUMS
-python3 install.py
+tar -xf dlsslop-amd-linux-gfx1201.tar.xz -C ~/.local
+(cd ~/.local && sha256sum --check share/doc/dlsslop-amd/SHA256SUMS)
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Add `~/.local/bin` to your usual shell's `PATH` if needed. The default prefix is
-`~/.local`. The Vulkan manifest goes in `$XDG_DATA_HOME/vulkan/implicit_layer.d`,
-or `~/.local/share/vulkan/implicit_layer.d` when `XDG_DATA_HOME` is unset. Use
-`install.py --help` for prefix and manifest overrides. Installation includes the
-GUI and creates the Vulkan manifest; the layer activates through `dlsslop-run`.
+Add the prefix's `bin/` to your usual shell's `PATH` if needed. `~/.local` suits
+one user; for everyone, extract into `/usr/local`, or into a directory of its own
+such as `/opt/dlsslop-amd`. The worker finds its GPU modules, and the launcher its
+Vulkan layer manifest (`share/vulkan/implicit_layer.d`), relative to their own
+location, so the tree works from any prefix; the layer activates only through
+`dlsslop-run`. Steam's runtime container, which runs Proton games, reads layer
+manifests only from the Vulkan loader's standard directories: for those games,
+extract into `~/.local` or `/usr/local`. The archive holds no directories of its own, so extracting over
+`~/.local` changes nothing but these files. To update, extract a new archive over
+the old one; to uninstall, delete the files `share/doc/dlsslop-amd/SHA256SUMS`
+lists.
 
 ## Set up the model
 

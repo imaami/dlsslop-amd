@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check binary release boundaries and complete source/release installation."""
+"""Check the binary release tree, its archive and complete source installation."""
 import hashlib
 import importlib.util
 import json
@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from unittest.mock import patch
 
 
@@ -67,7 +68,7 @@ def fixture(root):
     return build, modules
 
 
-def installed(prefix, manifest, runtime, env):
+def installed(prefix, runtime, env):
     commands = {"dlsslopd", "dlsslopctl", "dlsslop-gui", "dlsslop-run", "dlsslop-test", "dlsslop-setup"}
     assert {path.name for path in (prefix / "bin").iterdir()} == commands
     for name, (source, mode) in runtime.items():
@@ -92,17 +93,20 @@ def installed(prefix, manifest, runtime, env):
     helper, captures = json.loads(inspection)
     assert helper == str(prefix / "libexec/dlsslop-amd/color_metrics.py")
     assert captures == str(Path(env["XDG_STATE_HOME"]) / "dlssnr/captures")
-    layer = json.loads((manifest / "VK_LAYER_LOCAL_dlsslop_amd.json").read_text())["layer"]
-    assert layer["library_path"] == str(prefix / INSTALLER.LAYER_LIBRARY)
+    manifest = prefix / INSTALLER.LAYER_MANIFEST
+    layer = json.loads(manifest.read_text())["layer"]
+    # Relative to the manifest, so any prefix works, including a moved one.
+    assert not layer["library_path"].startswith("/")
+    assert (manifest.parent / layer["library_path"]).resolve() == (prefix / INSTALLER.LAYER_LIBRARY).resolve()
     assert layer["enable_environment"] == {"DLSSLOP_AMD_ENABLE": "1"}
     assert layer["disable_environment"] == {"DLSSNR_DISABLE": "1"}
     assert layer["name"] == "VK_LAYER_LOCAL_dlsslop_amd"
 
 
 def refuses_install(source, build, base, env, label):
-    prefix, manifest = base / (label + "-prefix"), base / (label + "-manifest")
-    run([sys.executable, source / "install.py", "-b", build, "-p", prefix, "-m", manifest], env, 2)
-    assert not prefix.exists() and not manifest.exists(), "invalid input mutated installation"
+    prefix = base / (label + "-prefix")
+    run([sys.executable, source / "install.py", "-b", build, "-p", prefix], env, 2)
+    assert not prefix.exists(), "invalid input mutated installation"
 
 
 def main():
@@ -117,11 +121,13 @@ def main():
         env.update(XDG_DATA_HOME=str(base / "xdg data"), XDG_STATE_HOME=str(base / "xdg state"),
                    PYTHONDONTWRITEBYTECODE="1")
         runtime = INSTALLER.runtime_files(source, build)
-        for option in ("--prefix", "--build-dir", "--manifest-dir", "default:"):
-            assert option in run([sys.executable, source / "install.py", "--help"], env)
-        prefix, manifest = base / "installed '$() ` with spaces", base / "manifest path"
-        run([sys.executable, source / "install.py", "-b", build, "-p", prefix, "-m", manifest], env)
-        installed(prefix, manifest, runtime, env)
+        install_help = run([sys.executable, source / "install.py", "--help"], env)
+        for option in ("--prefix", "--build-dir", "default:"):
+            assert option in install_help
+        assert "--manifest-dir" not in install_help
+        prefix = base / "installed '$() ` with spaces"
+        run([sys.executable, source / "install.py", "-b", build, "-p", prefix], env)
+        installed(prefix, runtime, env)
         assert (prefix / "share/doc/dlsslop-amd/README.md").read_bytes() == (source / "packaging/README.md").read_bytes()
         for name, source_name in INSTALLER.LICENSE_SOURCES.items():
             assert (prefix / "share/doc/dlsslop-amd" / name).read_bytes() == (source / source_name).read_bytes()
@@ -160,28 +166,36 @@ def main():
             path.write_text("must not ship\n")
         output = base / "release.tar.xz"
         source_url = "https://example.invalid/source/exact-revision"
-        PACKAGER.package(source, build, output, source_url)
+        with patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "1790000000"}):
+            PACKAGER.package(source, build, output, source_url)
+        tree = INSTALLER.tree(source, build, "")
+        inventory = INSTALLER.DOC_DIRECTORY + "/SHA256SUMS"
         with tarfile.open(output) as archive:
-            names = {member.name.removeprefix("dlsslop-amd/") for member in archive.getmembers()}
-            assert names == INSTALLER.release_names(runtime) | {"PACKAGE-SHA256SUMS"}
-            assert all(member.isfile() and member.name.startswith("dlsslop-amd/")
-                       and ".." not in Path(member.name).parts for member in archive.getmembers())
-            archive.extractall(base / "extracted", filter="data")
-        release = base / "extracted/dlsslop-amd"
-        release_runtime = INSTALLER.runtime_files(release, build, True)
-        INSTALLER.validate_release(release, release_runtime)
-        checked = subprocess.run(["sha256sum", "--check", "PACKAGE-SHA256SUMS"], cwd=release,
+            members = archive.getmembers()
+            # The archive root is the prefix: regular files only (no directory
+            # entries to retouch an existing ~/.local), stamped with the build time.
+            assert {member.name for member in members} == set(tree) | {inventory}
+            assert all(member.isfile() and not member.name.startswith("/") and ".." not in Path(member.name).parts
+                       and member.mtime == 1790000000 for member in members)
+            modes = {member.name: member.mode for member in members}
+            assert all(modes[name] == mode for name, (_, mode) in tree.items())
+        release = base / "extracted prefix"
+        release.mkdir()
+        with tarfile.open(output) as archive:
+            archive.extractall(release, filter="data")
+        checked = subprocess.run(["sha256sum", "--check", inventory], cwd=release,
                                  env=env, capture_output=True, text=True)
         assert checked.returncode == 0, checked.stderr
-        assert source_url in (release / "licenses/SOURCES").read_text()
-        assert not (release / "build").exists() and not (release / "scripts").exists()
-        release_prefix, release_manifest = base / "release prefix", base / "release manifest"
-        run([sys.executable, release / "install.py", "-p", release_prefix, "-m", release_manifest], env)
-        installed(release_prefix, release_manifest, release_runtime, env)
-        for name in ("README.md", *INSTALLER.LICENSE_SOURCES, "licenses/SOURCES"):
-            assert (release_prefix / "share/doc/dlsslop-amd" / name).read_bytes() == (release / name).read_bytes()
-        (release / "bin/dlsslopd").write_bytes(original + b"tampered")
-        refuses_install(release, build, base, env, "changed-release")
+        installed(release, runtime, env)
+        assert source_url in (release / INSTALLER.DOC_DIRECTORY / "licenses/SOURCES").read_text()
+        for name in ("install.py", "build", "scripts", "assets"):
+            assert not (release / name).exists(), name
+        # Without SOURCE_DATE_EPOCH the entries carry the packaging time.
+        with patch.dict(os.environ, {}, clear=True):
+            before = int(time.time())
+            PACKAGER.package(source, build, output, source_url)
+        with tarfile.open(output) as archive:
+            assert all(before <= member.mtime <= time.time() + 1 for member in archive.getmembers())
 
         # Package validation also finishes before replacing an existing archive.
         output.write_bytes(b"existing archive")

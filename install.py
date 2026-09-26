@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a complete source build or extracted dlsslop-amd binary release."""
+"""Install a complete dlsslop-amd source build into a prefix, laid out like the binary release."""
 import argparse
 import hashlib
 import json
@@ -19,6 +19,10 @@ MODULE_NAMES = (
 )
 MODULE_DIRECTORY = "share/dlsslop-amd/HIP/gfx1201"
 LAYER_LIBRARY = "lib/dlsslop-amd/libVkLayer_DLSSLOP_amd.so"
+# Where the Vulkan loader finds it for a ~/.local or /usr/local prefix; the
+# launcher adds this directory to the loader's search for any other prefix.
+LAYER_MANIFEST = "share/vulkan/implicit_layer.d/VK_LAYER_LOCAL_dlsslop_amd.json"
+DOC_DIRECTORY = "share/doc/dlsslop-amd"
 NATIVE_SOURCES = {
     "bin/dlsslopd": "dlsslopd",
     "bin/dlsslopctl": "dlssnr-shmctl",
@@ -102,39 +106,54 @@ def validate_modules(directory):
             raise ValueError(f"GPU module metadata or checksum mismatch: {path}")
 
 
-def runtime_files(root, build, release=False):
+def runtime_files(root, build):
     """Return the exact installed runtime allowlist and validate every input."""
     files = {}
     for destination, source in NATIVE_SOURCES.items():
-        path = root / destination if release else build / source
+        path = build / source
         check_elf(path, shared=destination == LAYER_LIBRARY)
         files[destination] = (path, 0o755)
     for destination, (source, first_line, mode) in SCRIPT_SOURCES.items():
-        path = root / (destination if release else source)
+        path = root / source
         require_file(path)
         if not path.read_bytes().startswith(first_line):
             raise ValueError(f"incorrect executable interpreter: {path}")
         files[destination] = (path, mode)
-    module_source = root / (MODULE_DIRECTORY if release else "assets/HIP/gfx1201")
+    module_source = root / "assets/HIP/gfx1201"
     validate_modules(module_source)
     for name in (*[name + ".hsaco" for name in MODULE_NAMES], "modules.json", "SHA256SUMS"):
         files[f"{MODULE_DIRECTORY}/{name}"] = (module_source / name, 0o644)
     return files
 
 
-def release_names(runtime):
-    return {*runtime, "install.py", *DOCUMENT_SOURCES, "licenses/SOURCES"}
+def layer_manifest():
+    """The implicit layer manifest, naming the library relative to itself so the tree relocates."""
+    library = os.path.relpath(LAYER_LIBRARY, PurePosixPath(LAYER_MANIFEST).parent)
+    return json.dumps({
+        "file_format_version": "1.2.0",
+        "layer": {
+            "name": "VK_LAYER_LOCAL_dlsslop_amd",
+            "type": "GLOBAL",
+            "library_path": library,
+            "api_version": "1.3.277",
+            "implementation_version": "1",
+            "description": "DLSS Linux Open Proxy for AMD presentation layer",
+            "enable_environment": {"DLSSLOP_AMD_ENABLE": "1"},
+            "disable_environment": {"DLSSNR_DISABLE": "1"},
+        },
+    }, indent=2) + "\n"
 
 
-def validate_release(root, runtime):
-    checksums = checksum_records(root / "PACKAGE-SHA256SUMS")
-    if set(checksums) != release_names(runtime):
-        raise ValueError("binary release checksum inventory does not match its runtime allowlist")
-    for name, expected in checksums.items():
-        path = root / name
-        require_file(path)
-        if sha256(path) != expected:
-            raise ValueError(f"release checksum mismatch: {path}")
+def tree(root, build, source_notice):
+    """Every installed file relative to the prefix, as (content, mode); all inputs validated first."""
+    files = runtime_files(root, build)
+    for source in DOCUMENT_SOURCES.values():
+        require_file(root / source)
+    files.update((f"{DOC_DIRECTORY}/{name}", (root / source, 0o644)) for name, source in DOCUMENT_SOURCES.items())
+    entries = {name: (path.read_bytes(), mode) for name, (path, mode) in files.items()}
+    entries[f"{DOC_DIRECTORY}/licenses/SOURCES"] = (source_notice.encode(), 0o644)
+    entries[LAYER_MANIFEST] = (layer_manifest().encode(), 0o644)
+    return entries
 
 
 def atomic_write(target, data, mode=0o644):
@@ -152,59 +171,26 @@ def atomic_write(target, data, mode=0o644):
 
 def main():
     root = Path(__file__).resolve().parent
-    release = (root / "bin").is_dir()
-    data = Path(os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local/share")).expanduser()
     parser = argparse.ArgumentParser(description=__doc__, add_help=False, allow_abbrev=False)
     parser.add_argument("-h", "--help", action="help", help="show this help and exit (default: off)")
     parser.add_argument("-p", "--prefix", type=Path, default=Path.home() / ".local",
                         help="installation prefix (default: %(default)s)")
     parser.add_argument("-b", "--build-dir", type=Path, default=root / "build",
-                        help="source-build binaries (default: %(default)s; ignored in an extracted release)")
-    parser.add_argument("-m", "--manifest-dir", type=Path, default=data / "vulkan/implicit_layer.d",
-                        help="Vulkan layer manifests (default: %(default)s, using XDG_DATA_HOME or ~/.local/share)")
+                        help="source-build binaries (default: %(default)s)")
     args = parser.parse_args()
     prefix = args.prefix.expanduser().resolve()
-    manifest_path = args.manifest_dir.expanduser().resolve() / "VK_LAYER_LOCAL_dlsslop_amd.json"
+    notice = ("dlsslop-amd corresponding source\n\n"
+              f"Installed from local source checkout: {root.as_uri()}\n"
+              "Dependency source URLs and revisions are recorded in upstreams.lock.json\n"
+              "in that checkout. See THIRD-PARTY.txt for component attribution.\n")
     try:
-        files = runtime_files(root, args.build_dir.expanduser().resolve(), release)
         # Read and validate every input before creating or changing installed files.
-        if release:
-            validate_release(root, files)
-            documents = {name: name for name in (*DOCUMENT_SOURCES, "licenses/SOURCES")}
-            outputs = {}
-        else:
-            documents = DOCUMENT_SOURCES
-            for source in documents.values():
-                require_file(root / source)
-            outputs = {"share/doc/dlsslop-amd/licenses/SOURCES": ((
-                "dlsslop-amd corresponding source\n\n"
-                f"Installed from local source checkout: {root.as_uri()}\n"
-                "Dependency source URLs and revisions are recorded in upstreams.lock.json\n"
-                "in that checkout. See THIRD-PARTY.txt for component attribution.\n"
-            ).encode(), 0o644)}
-        files.update(("share/doc/dlsslop-amd/" + name, (root / source, 0o644)) for name, source in documents.items())
-        outputs.update((name, (source.read_bytes(), mode)) for name, (source, mode) in files.items())
-        for name, (content, mode) in outputs.items():
+        for name, (content, mode) in tree(root, args.build_dir.expanduser().resolve(), notice).items():
             atomic_write(prefix / name, content, mode)
-        manifest = {
-            "file_format_version": "1.2.0",
-            "layer": {
-                "name": "VK_LAYER_LOCAL_dlsslop_amd",
-                "type": "GLOBAL",
-                "library_path": str(prefix / LAYER_LIBRARY),
-                "api_version": "1.3.277",
-                "implementation_version": "1",
-                "description": "DLSS Linux Open Proxy for AMD presentation layer",
-                "enable_environment": {"DLSSLOP_AMD_ENABLE": "1"},
-                "disable_environment": {"DLSSNR_DISABLE": "1"},
-            },
-        }
-        atomic_write(manifest_path, (json.dumps(manifest, indent=2) + "\n").encode())
     except (OSError, ValueError, TypeError) as exc:
         parser.error(str(exc))
     print(f"Installed dlsslop-amd in {prefix}")
-    print(f"Layer manifest: {manifest_path}")
-    print("Import your model with dlsslop-setup, then start dlsslopd from a host terminal.")
+    print("Import your model with dlsslop-setup; see share/doc/dlsslop-amd/README.md there for the worker service.")
     print(f"Steam launch options: {shlex.quote(str(prefix / 'bin/dlsslop-run'))} -- %command%")
     return 0
 

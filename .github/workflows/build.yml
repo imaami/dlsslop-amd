@@ -51,6 +51,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: github.event_name != 'pull_request'
         with:
-          name: dlsslop-amd-linux-gfx1201
-          path: dist/*.tar.xz
+          # The archive itself, not a zip around it; the file name names it.
+          path: dist/dlsslop-amd-linux-gfx1201.tar.xz
+          archive: false
           if-no-files-found: error

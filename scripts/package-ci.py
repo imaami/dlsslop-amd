@@ -10,6 +10,7 @@ import re
 import sys
 import tarfile
 import tempfile
+import time
 from urllib.parse import urlparse
 
 
@@ -44,14 +45,9 @@ def package(root, build, output, source_url):
             or any(character in (source_url or "") for character in "\r\n")):
         raise ValueError("provide --source-url for the exact corresponding source, or set GITHUB_REPOSITORY and GITHUB_SHA")
     installer = load_installer(root)
-    # Do not enumerate the checkout or build directory: only these runtime
-    # destinations can enter the archive, regardless of other files present.
-    files = installer.runtime_files(root, build)
-    files["install.py"] = (root / "install.py", 0o755)
-    files.update({name: (root / source, 0o644) for name, source in installer.DOCUMENT_SOURCES.items()})
-    for source in ("install.py", *installer.DOCUMENT_SOURCES.values()):
-        installer.require_file(root / source)
-    source_notice = (
+    # Only the installer's allowlist can enter the archive: the checkout and
+    # build directory are never enumerated, whatever else they contain.
+    entries = installer.tree(root, build, (
         "dlsslop-amd corresponding source\n"
         "==============================\n\n"
         f"Exact source for this release: {source_url}\n\n"
@@ -59,21 +55,20 @@ def package(root, build, output, source_url):
         "build instructions. The pinned dependencies are available through the\n"
         "upstream URLs recorded in upstreams.lock.json at that revision. See\n"
         "THIRD-PARTY.txt and the accompanying licenses for component attribution.\n"
-        "Model weights are a separate dependency and are not included.\n"
-    ).encode()
-    entries = {name: (source.read_bytes(), mode) for name, (source, mode) in files.items()}
-    entries["licenses/SOURCES"] = (source_notice, 0o644)
-    entries["PACKAGE-SHA256SUMS"] = ("".join(f"{hashlib.sha256(content).hexdigest()}  {name}\n"
-                                             for name, (content, _) in sorted(entries.items())).encode(), 0o644)
+        "Model weights are a separate dependency and are not included.\n"))
+    entries[f"{installer.DOC_DIRECTORY}/SHA256SUMS"] = ("".join(
+        f"{hashlib.sha256(content).hexdigest()}  {name}\n" for name, (content, _) in sorted(entries.items())).encode(), 0o644)
+    # The archive root is the installation prefix. It holds no directory
+    # entries, so extracting over ~/.local never changes existing directories.
+    stamp = int(os.environ.get("SOURCE_DATE_EPOCH") or time.time())
     output.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=output.name + ".", dir=output.parent)
     os.close(descriptor)
     try:
         with tarfile.open(temporary, "w:xz") as archive:
             for name, (content, mode) in sorted(entries.items()):
-                info = tarfile.TarInfo("dlsslop-amd/" + name)
-                info.size, info.mode = len(content), mode
-                info.uid = info.gid = info.mtime = 0
+                info = tarfile.TarInfo(name)
+                info.size, info.mode, info.mtime = len(content), mode, stamp
                 archive.addfile(info, io.BytesIO(content))
         os.replace(temporary, output)
     finally:
