@@ -42,17 +42,18 @@ python3 scripts/build-kernels.py --only linux_color \
 ```
 
 The test needs a compatible HIP runtime and Radeon, but no weights or game.
-It compares four strengths with the CPU reference, checks retained-reference
-isolation and prints kernel timing. Exit 77 means the module or a compatible
-runtime or device is unavailable. See [VALIDATION.md](VALIDATION.md) for
-integration tests.
+It compares four strengths with the CPU reference for two references and
+prints kernel timing. Exit 77 means the module or a compatible runtime or
+device is unavailable. See [VALIDATION.md](VALIDATION.md) for integration
+tests.
 
-The worker loads the module when correction is first enabled. It retains the
-reference using an asynchronous device copy and adds one kernel per pass on
-the inference stream, with no correction-related host transfers or waits.
-Extra storage is 28 bytes per padded pixel, approximately 59.1 MiB at
-1920×1152. A module that is missing or fails to load or launch stops the
-worker with an error. Strength zero skips correction work.
+The worker loads the module when correction is first enabled. Feedback never
+overwrites the encoded input, so the kernel reads it as the reference; it adds
+one kernel per pass on the inference stream, with no correction-related copies,
+host transfers or waits. Extra storage is 12 bytes per padded pixel,
+approximately 25.3 MiB at 1920×1152. A module that is missing or fails to
+load or launch stops the worker with an error. Strength zero skips correction
+work.
 
 Opt-in tracing records `color_preserve` and `pass-NN-color.pfm`. The
 automated color diagnostic disables preservation for its baseline comparisons

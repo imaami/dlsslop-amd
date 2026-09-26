@@ -378,7 +378,8 @@ class Engine {
     std::unique_ptr<dlsslop::GpuTuning> gpu_tuning_;
     std::unique_ptr<dlsslop::GpuColor> gpu_color_;
     std::unique_ptr<dlsslop::GpuTemporal> temporal_;
-    void* device_input_ = nullptr;
+    void* device_input_ = nullptr; // The encoded frame, unchanged until the next one.
+    void* device_feedback_ = nullptr; // Later passes' input, allocated for multi-pass.
     void* device_output_ = nullptr;
     void* device_tuned_ = nullptr;
     void* answer_ = nullptr; // The latest frame's final network answer.
@@ -409,10 +410,9 @@ public:
         gpu_tuning_.reset();
         gpu_color_.reset();
         gpu_codec_.reset();
-        if (device_input_) api.hipFree(device_input_);
-        if (device_output_) api.hipFree(device_output_);
-        if (device_tuned_) api.hipFree(device_tuned_);
-        device_input_ = device_output_ = device_tuned_ = answer_ = nullptr;
+        for (void* buffer : {device_input_, device_feedback_, device_output_, device_tuned_})
+            if (buffer) api.hipFree(buffer);
+        device_input_ = device_feedback_ = device_output_ = device_tuned_ = answer_ = nullptr;
         network_.reset();
     }
     void prepare()
@@ -494,6 +494,11 @@ public:
             gpu_tuning_ = std::make_unique<dlsslop::GpuTuning>(api, network_->Stream(), options_.modules + "/linux_tuning.hsaco");
             api.Check(api.hipMalloc(&device_tuned_, size_t(width_) * height_ * 12), "allocate native tuning output");
         }
+        if (settings.color_preserve > 0 && !gpu_color_)
+            gpu_color_ = std::make_unique<dlsslop::GpuColor>(api, network_->Stream(),
+                                                             options_.modules + "/linux_color.hsaco", width_, height_);
+        if (passes > 1 && !device_feedback_)
+            api.Check(api.hipMalloc(&device_feedback_, size_t(width_) * height_ * 16), "allocate inter-pass feedback");
         mark(0);
         if (gpu_codec_) {
             gpu_codec_->encode(input, g, device_input_, settings.fp16);
@@ -508,12 +513,6 @@ public:
         } else {
             dlsslop::encode_proxy(input, g, settings.fp16, encoded_);
             api.Check(api.hipMemcpy(device_input_, encoded_.data(), encoded_.size() * sizeof(float), 1), "upload encoded frame");
-        }
-        if (settings.color_preserve > 0) {
-            if (!gpu_color_)
-                gpu_color_ = std::make_unique<dlsslop::GpuColor>(api, network_->Stream(),
-                                                                 options_.modules + "/linux_color.hsaco", width_, height_);
-            gpu_color_->begin(device_input_, g);
         }
         mark(1);
         if (settings.motion) {
@@ -534,12 +533,13 @@ public:
         }
         void* answer = device_output_;
         for (unsigned pass = 0; pass < passes; ++pass) {
+            void* const pass_input = pass ? device_feedback_ : device_input_;
             if (pass) {
                 if (gpu_codec_) {
-                    gpu_codec_->feedback(g, answer, device_input_, settings.precision16);
+                    gpu_codec_->feedback(g, answer, pass_input, settings.precision16);
                     if (verify) {
                         dlsslop::feedback_neural_rgb(neural_.data(), g, feedback_, settings.precision16);
-                        selftest::compare(selftest::Buffer::read_pointer(api, network_->Stream(), device_input_,
+                        selftest::compare(selftest::Buffer::read_pointer(api, network_->Stream(), pass_input,
                                           feedback_.size()), feedback_, "GPU inter-pass feedback");
                         std::printf("GPU feedback for pass %u/%u vs CPU reference: FP32 bit-identical\n",
                                     pass + 1, passes);
@@ -547,26 +547,26 @@ public:
                 } else {
                     // Retain the initial encoded_ for final CPU composition.
                     dlsslop::feedback_neural_rgb(neural_.data(), g, feedback_, settings.precision16);
-                    api.Check(api.hipMemcpy(device_input_, feedback_.data(), feedback_.size() * sizeof(float), 1),
+                    api.Check(api.hipMemcpy(pass_input, feedback_.data(), feedback_.size() * sizeof(float), 1),
                               "upload inter-pass feedback");
                 }
             }
             char stage[32]{};
             if (trace) {
                 std::snprintf(stage, sizeof stage, "pass-%02u", pass + 1);
-                trace_image(std::string(stage) + "-input", device_input_, 4);
+                trace_image(std::string(stage) + "-input", pass_input, 4);
             }
-            void* history = settings.motion ? temporal_->history(pass, device_input_) : nullptr;
-            network_->Enqueue(device_input_, history, device_output_, 0);
+            void* history = settings.motion ? temporal_->history(pass, pass_input) : nullptr;
+            network_->Enqueue(pass_input, history, device_output_, 0);
             answer = device_output_;
             if (trace) trace_image(std::string(stage) + "-raw", answer, 3);
             if (tuned) {
-                gpu_tuning_->apply(g, device_input_, device_output_, device_tuned_, settings.tuning);
+                gpu_tuning_->apply(g, pass_input, device_output_, device_tuned_, settings.tuning);
                 answer = device_tuned_;
                 if (trace) trace_image(std::string(stage) + "-tuned", answer, 3);
             }
             if (settings.color_preserve > 0) {
-                answer = gpu_color_->apply(answer, g, settings.color_preserve);
+                answer = gpu_color_->apply(device_input_, answer, g, settings.color_preserve);
                 if (trace) trace_image(std::string(stage) + "-color", answer, 3);
             }
             if (settings.motion) temporal_->finish_pass(pass, answer);

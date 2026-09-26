@@ -20,7 +20,7 @@ int main(int argc,char** argv)
                 " -m, --module PATH  Kernel module (default: assets/HIP/gfx1201/linux_color.hsaco)\n"
                 " -d, --device N     HIP device (default: auto, first gfx1201)\n"
                 " -h, --help         Show help (default: off)\n"
-                "Tests correction against CPU reference, then times a 1080-tier kernel.\n"
+                "Tests correction against CPU reference for two references, then times a 1080-tier kernel.\n"
                 "No model assets required. Exit 77 means the module, HIP runtime or device is unavailable.");return 0;
         }
         if(code=='m') {module=optarg;continue;}
@@ -69,30 +69,35 @@ int main(int argc,char** argv)
         api.Check(api.hipMemcpy(raw,model.data(),model.size()*sizeof(float),1),"upload test model");
         {
             dlsslop::GpuColor color(api,stream,module,g.width,g.height);
-            color.begin(original,g);
-            // Subsequent input reuse must not overwrite the captured reference.
-            api.Check(api.hipMemsetAsync(original,0,input.size()*sizeof(float),stream),"reuse source buffer after reference capture");
-            for(float strength : {0.f,.25f,.5f,1.f}) {
-                dlsslop::preserve_color(input.data(),model.data(),g,strength,expected);
-                void* output=color.apply(raw,g,strength);
-                api.Check(api.hipStreamSynchronize(stream),"finish correction");
-                api.Check(api.hipMemcpy(actual.data(),output,actual.size()*sizeof(float),2),"read correction");
-                float worst=0;
-                for(std::size_t i=0;i<actual.size();++i) {
-                    if(!std::isfinite(actual[i])) throw std::runtime_error("nonfinite GPU correction");
-                    worst=std::max(worst,std::fabs(actual[i]-expected[i]));
+            for(unsigned reference=0;reference<2;++reference) {
+                if(reference) {
+                    // Each apply reads the caller's reference as it is when the kernel runs.
+                    for(std::size_t p=0;p<pixels;++p)
+                        for(unsigned c=0;c<3;++c) input[p*4+c]=float((p*53+c*29)%1000)/999;
+                    api.Check(api.hipMemcpy(original,input.data(),input.size()*sizeof(float),1),"replace test reference");
                 }
-                std::printf("strength=%g max_abs_error=%.9g\n",double(strength),double(worst));
-                if(worst>2e-6f) throw std::runtime_error("GPU correction differs from CPU reference");
+                for(float strength : {0.f,.25f,.5f,1.f}) {
+                    dlsslop::preserve_color(input.data(),model.data(),g,strength,expected);
+                    void* output=color.apply(original,raw,g,strength);
+                    api.Check(api.hipStreamSynchronize(stream),"finish correction");
+                    api.Check(api.hipMemcpy(actual.data(),output,actual.size()*sizeof(float),2),"read correction");
+                    float worst=0;
+                    for(std::size_t i=0;i<actual.size();++i) {
+                        if(!std::isfinite(actual[i])) throw std::runtime_error("nonfinite GPU correction");
+                        worst=std::max(worst,std::fabs(actual[i]-expected[i]));
+                    }
+                    std::printf("reference=%u strength=%g max_abs_error=%.9g\n",reference,double(strength),double(worst));
+                    if(worst>2e-6f) throw std::runtime_error("GPU correction differs from CPU reference");
+                }
             }
             api.Check(api.hipEventCreate(&start),"create start event");
             api.Check(api.hipEventCreate(&end),"create end event");
             api.Check(api.hipEventRecord(start,stream),"record start");
-            for(unsigned i=0;i<20;++i) color.apply(raw,g,1);
+            for(unsigned i=0;i<20;++i) color.apply(original,raw,g,1);
             api.Check(api.hipEventRecord(end,stream),"record end");
             api.Check(api.hipEventSynchronize(end),"wait for timing");
             float ms=0;api.Check(api.hipEventElapsedTime(&ms,start,end),"measure correction");
-            std::printf("GPU correction mean_ms=%.6f over 20 runs; excludes frame-reference copy and inference\n",double(ms)/20);
+            std::printf("GPU correction mean_ms=%.6f over 20 runs; excludes inference\n",double(ms)/20);
         }
     } catch(const std::exception& e) {std::fprintf(stderr,"%s\n",e.what());result=1;}
     if(stream) api.hipStreamSynchronize(stream);
