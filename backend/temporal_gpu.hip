@@ -37,8 +37,7 @@ DEV bool cut_sample(const float* current, const float* previous,
 {
     const float x = float(w.x) + (float(i % 8) + .5f) * float(w.fit_width) / 8 - .5f;
     const float y = float(w.y) + (float(i / 8) + .5f) * float(w.fit_height) / 8 - .5f;
-    const dlsslop_temporal::Flow f = dlsslop_temporal::sample_flow(flow, w.grid,
-        (x + .5f) / float(w.step) - .5f, (y + .5f) / float(w.step) - .5f);
+    const dlsslop_temporal::Flow f = dlsslop_temporal::sample_flow(flow, w.grid, w.step, x, y);
     dlsslop_temporal::Patch<1> reference;
     dlsslop_temporal::sample_patch<1>(reference, current, w.image, x, y);
     return !(dlsslop_temporal::patch_cost<1>(reference, previous, w.image, x, y, f.x, f.y) < .1f);

@@ -82,8 +82,7 @@ dlsslop_temporal::Flow reference_estimate(const float* current, const float* pre
     const float y = clamp((float(index / s.grid.width) + .5f) * float(s.step) - .5f, 0, float(s.image.height - 1));
     dlsslop_temporal::Flow start{};
     if (s.has_coarse) {
-        start = dlsslop_temporal::sample_flow(coarse, s.coarse_grid, (x + .5f) / float(s.step * 2) - .5f,
-                                              (y + .5f) / float(s.step * 2) - .5f);
+        start = dlsslop_temporal::sample_flow(coarse, s.coarse_grid, s.step * 2, x, y);
         start.x = float(dlsslop_temporal::round_int(start.x * 2));
         start.y = float(dlsslop_temporal::round_int(start.y * 2));
     }
@@ -109,6 +108,30 @@ dlsslop_temporal::Flow reference_estimate(const float* current, const float* pre
         if (cost < best.error) best = {best.x + dx, best.y + dy, cost};
     }
     return best;
+}
+// The flow grid holds one vector per step x step pixels, vector i at pixel (i + .5) * step - .5
+// as the search places it. The search's coarse start, the warp and the scene-cut kernel all read
+// the grid through sample_flow: on a linear field, every pixel position, in the frame or past its
+// edges, must read back its own grid coordinate, clamped to the grid.
+void flow_grid()
+{
+    const dlsslop_temporal::Extent g{5, 4};
+    std::vector<dlsslop_temporal::Flow> ramp(g.width * g.height);
+    for (unsigned j = 0; j < g.height; ++j)
+        for (unsigned i = 0; i < g.width; ++i) ramp[j * g.width + i] = {float(i), float(j), float(i + j)};
+    unsigned positions = 0;
+    for (unsigned step = 1; step <= 8; step *= 2) {
+        for (float y = -.5f; y <= float(g.height * step + 1); y += .25f) {
+            for (float x = -.5f; x <= float(g.width * step + 1); x += .25f, ++positions) {
+                const float gx = std::clamp((x + .5f) / float(step) - .5f, 0.f, float(g.width - 1));
+                const float gy = std::clamp((y + .5f) / float(step) - .5f, 0.f, float(g.height - 1));
+                const auto f = dlsslop_temporal::sample_flow(ramp.data(), g, step, x, y);
+                require(std::fabs(f.x - gx) < 1e-5f && std::fabs(f.y - gy) < 1e-5f &&
+                        std::fabs(f.error - gx - gy) < 1e-5f, "a pixel does not read the flow at its grid coordinate");
+            }
+        }
+    }
+    std::printf("flow grid: %u pixel positions read their grid coordinate\n", positions);
 }
 // Random pictures, some translated, some static, at every quality, grid, coarse start and
 // level: the search must return exactly what resampling every candidate returns.
@@ -254,6 +277,7 @@ void run()
         require(output[p * 4 + 3] == 1, "scene cut fallback is not opaque");
     }
     letterbox();
+    flow_grid();
     search_equivalence();
     std::puts("temporal tests passed");
 }

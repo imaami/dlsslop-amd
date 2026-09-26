@@ -59,9 +59,11 @@ DLSSLOP_INLINE float patch_cost(const Patch<patch>& reference, const float* prev
                                                y + float(i / side - patch) + dy));
     return cost / float(side * side);
 }
-DLSSLOP_INLINE Flow sample_flow(const Flow* image, Extent e, float x, float y)
+// The flow at pixel (x, y) of a grid of one vector per step x step pixels.
+DLSSLOP_INLINE Flow sample_flow(const Flow* image, Extent e, unsigned step, float x, float y)
 {
-    x = clamp(x, 0, float(e.width - 1)); y = clamp(y, 0, float(e.height - 1));
+    x = clamp((x + .5f) / float(step) - .5f, 0, float(e.width - 1));
+    y = clamp((y + .5f) / float(step) - .5f, 0, float(e.height - 1));
     const unsigned ix = unsigned(x), iy = unsigned(y);
     const unsigned hx = min_u(ix + 1, e.width - 1), hy = min_u(iy + 1, e.height - 1);
     const float fx = x - float(ix), fy = y - float(iy);
@@ -81,8 +83,7 @@ DLSSLOP_INLINE Flow estimate_patch(const float* current, const float* previous,
                           0, float(s.image.height - 1));
     Flow start{};
     if (s.has_coarse) {
-        start = sample_flow(coarse, s.coarse_grid, (x + .5f) / float(s.step * 2) - .5f,
-                            (y + .5f) / float(s.step * 2) - .5f);
+        start = sample_flow(coarse, s.coarse_grid, s.step * 2, x, y);
         start.x = float(round_int(start.x * 2)); start.y = float(round_int(start.y * 2));
     }
     // The current patch does not depend on the candidate: sample it once.
@@ -147,8 +148,7 @@ DLSSLOP_INLINE void warp(const float* __restrict__ current_luma, const float* __
     const unsigned x = index % w.image.width, padded_y = index / w.image.width;
     const unsigned y = padded_y < w.image.height ? padded_y : 2 * w.image.height - 2 - padded_y;
     const unsigned pixel = y * w.image.width + x;
-    const Flow f = sample_flow(flow, w.grid, (float(x) + .5f) / float(w.step) - .5f,
-                               (float(y) + .5f) / float(w.step) - .5f);
+    const Flow f = sample_flow(flow, w.grid, w.step, float(x), float(y));
     const float px = float(x) + f.x, py = float(y) + f.y;
     // Both samples weight only the fitted picture; the bars' history is the network's answer for
     // black. Validity below already requires px >= w.x and py >= w.y.
