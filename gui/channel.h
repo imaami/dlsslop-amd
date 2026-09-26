@@ -50,9 +50,6 @@ public:
     dev_t device() const { return stat_.st_dev; }
     ino_t inode() const { return stat_.st_ino; }
 
-    static double value(const dlsslop_control::Setting& s, uint32_t raw)
-    { return s.isFloat ? static_cast<double>(BitsToFloat(raw)) : static_cast<double>(raw); }
-
     // Validate the complete batch before writing any field. Only edited fields
     // are written, preserving unrelated edits made by the CLI or another GUI.
     void write(const std::map<std::size_t, double>& changes)
@@ -65,7 +62,7 @@ public:
             const auto& s = dlsslop_control::kSettings[index];
             if (!dlsslop_control::inRange(s, number) || (!s.isFloat && std::trunc(number) != number))
                 throw std::invalid_argument("Setting outside supported range");
-            if (dlsslop_control::fixed(s) && number != value(s, (defaults.*s.field).load()))
+            if (dlsslop_control::fixed(s) && number != dlsslop_control::value(s, (defaults.*s.field).load()))
                 throw std::invalid_argument("This captured model fixes that setting");
         }
         bool tuningChanged = false;
@@ -83,9 +80,7 @@ public:
     void reset()
     {
         ShmHeader defaults{};
-        const bool bypass = header_->heartbeat.load() && !header_->nativeModelMaxWidth.load() &&
-                            !header_->nativeModelMaxHeight.load();
-        ShmInitNativeDefaults(&defaults, bypass);
+        ShmInitNativeDefaults(&defaults, dlsslop_control::workerBypass(header_));
         for (const auto& s : dlsslop_control::kSettings)
             (header_->*s.field).store((defaults.*s.field).load());
         header_->tuningSeq.fetch_add(1);

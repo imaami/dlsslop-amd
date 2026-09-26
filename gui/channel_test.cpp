@@ -75,7 +75,7 @@ int main()
                 if (dlsslop_control::fixed(s)) continue;
                 for (const double bound : {s.minimum, s.maximum}) {
                     channel.write({{i, bound}});
-                    require(dlsslop_control::inRange(s, dlsslop_gui::Channel::value(s, (header->*s.field).load())),
+                    require(dlsslop_control::inRange(s, dlsslop_control::value(s, (header->*s.field).load())),
                             "a written bound reads back out of range");
                 }
             }
@@ -85,6 +85,16 @@ int main()
             channel.reset();
             require(header->quit.load() == 1, "reset changed stop request");
             require(BitsToFloat(header->intensityBits.load()) == 1, "reset missed intensity");
+            require(header->compositionBypass.load() == 0, "a never-started channel reset bypass on");
+            // A running worker that publishes no neural raster returns a final
+            // image, so its reset default presents it; a neural raster composes.
+            header->heartbeat.store(1);
+            channel.reset();
+            require(header->compositionBypass.load() == 1, "worker-mode reset left bypass off");
+            header->nativeModelMaxWidth.store(1280);
+            header->nativeModelMaxHeight.store(720);
+            channel.reset();
+            require(header->compositionBypass.load() == 0, "neural-raster reset left bypass on");
             channel.stop(false);
             require(!header->quit.load(), "resume failed");
             channel.stop(true);

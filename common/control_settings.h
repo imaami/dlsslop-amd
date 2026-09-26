@@ -76,4 +76,15 @@ inline bool tuning(const Setting& s)
     return s.field == &ShmHeader::intensityBits || s.field == &ShmHeader::localToneBits ||
         s.field == &ShmHeader::localStructureBits || s.field == &ShmHeader::sharpnessBits;
 }
+inline double value(const Setting& s, uint32_t raw)
+{
+    return s.isFloat ? double(BitsToFloat(raw)) : double(raw);
+}
+// The bypass default for the worker mode: a started worker that publishes no
+// neural raster (--cpu-compose, --test-identity) returns final images. A
+// never-started channel keeps the native-composition default.
+inline bool workerBypass(const ShmHeader* h)
+{
+    return h->heartbeat.load() && !h->nativeModelMaxWidth.load() && !h->nativeModelMaxHeight.load();
+}
 } // namespace dlsslop_control

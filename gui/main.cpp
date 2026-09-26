@@ -165,19 +165,18 @@ class Window final : public QWidget {
             Channel channel(path.constData(), false);
             auto* h = channel.header();
             ShmHeader defaults{};
-            ShmInitNativeDefaults(&defaults, h->heartbeat.load() && !h->nativeModelMaxWidth.load() &&
-                                  !h->nativeModelMaxHeight.load());
+            ShmInitNativeDefaults(&defaults, dlsslop_control::workerBypass(h));
             // Reject invalid live values rather than displaying a silently clamped setting.
             std::vector<double> values;
             for (const auto& s : kSettings) {
-                const double value = Channel::value(s, (h->*s.field).load());
+                const double value = dlsslop_control::value(s, (h->*s.field).load());
                 if (!dlsslop_control::inRange(s, value))
                     throw std::runtime_error(std::string("Invalid live setting: ") + s.name);
                 values.push_back(value);
             }
             for (std::size_t i = 0; i < editors_.size(); ++i) {
                 auto& e = editors_[i];
-                e.defaultValue = Channel::value(kSettings[i], (defaults.*kSettings[i].field).load());
+                e.defaultValue = dlsslop_control::value(kSettings[i], (defaults.*kSettings[i].field).load());
                 e.reset->setToolTip(QString("Reset to %1").arg(e.defaultValue, 0, 'g', 9));
                 display(i, values[i]);
             }
