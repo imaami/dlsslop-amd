@@ -206,6 +206,20 @@ inline float half_value(std::uint16_t value)
     return sign * std::ldexp(float(1024u + fraction), int(exponent) - 25);
 }
 
+// Runs one FP16 frame through the codec; true when finish() rejects it.
+inline bool codec_rejects(GpuCodec& codec, const std::vector<std::uint8_t>& proxy, const Geometry& g,
+                          void* device_input, void* device_rgb, std::vector<std::uint8_t>& decoded)
+{
+    codec.encode(proxy.data(), g, device_input, true);
+    codec.decode(g, device_rgb, decoded.data());
+    try {
+        codec.finish();
+    } catch (const std::range_error&) {
+        return true;
+    }
+    return false;
+}
+
 inline void check_codec(hip_probe::Api& api, hip_probe::Handle stream, const std::string& modules)
 {
     const Geometry g = geometry(7, 5, 720);
@@ -244,6 +258,20 @@ inline void check_codec(hip_probe::Api& api, hip_probe::Handle stream, const std
     require(half_value(first_red) == -.25f && half_value(first_green) == 1.5f,
             "GPU FP16 proxy decode clipped signed/extended-range values");
 
+    // The encoder (a NaN proxy sample) and the decoder (an answer beyond
+    // binary16) each reject the frame, and every encode starts clean.
+    auto poisoned = proxy;
+    const std::uint16_t nan = 0x7e00;
+    std::memcpy(poisoned.data(), &nan, sizeof(nan));
+    require(codec_rejects(codec, poisoned, g, device_input.pointer, device_rgb.pointer, decoded),
+            "GPU codec accepted a NaN FP16 proxy sample");
+    require(!codec_rejects(codec, proxy, g, device_input.pointer, device_rgb.pointer, decoded),
+            "GPU codec rejection outlived its frame");
+    for (float& value : model) value = 65536.0f;
+    device_rgb.upload(model);
+    require(codec_rejects(codec, proxy, g, device_input.pointer, device_rgb.pointer, decoded),
+            "GPU codec accepted an answer beyond binary16");
+
     for (std::size_t p = 0; p < pixels; ++p) {
         model[p * 3] = float(int(p % 29) - 3) / 16.0f;
         model[p * 3 + 1] = float((p / g.width) % 23) / 16.0f;
@@ -255,7 +283,7 @@ inline void check_codec(hip_probe::Api& api, hip_probe::Handle stream, const std
         codec.feedback(g, device_rgb.pointer, device_input.pointer, precision16);
         compare(device_input.read(), reference, precision16 ? "GPU FP16 feedback" : "GPU UNORM8 feedback");
     }
-    std::printf("GPU control self-test: FP16 proxy encode, decode and 16/8-bit feedback exact\n");
+    std::printf("GPU control self-test: FP16 proxy encode, decode, rejection and 16/8-bit feedback exact\n");
     std::fflush(stdout);
 }
 
