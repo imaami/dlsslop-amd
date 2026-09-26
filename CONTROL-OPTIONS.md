@@ -3,7 +3,7 @@
 `dlsslopctl --help` is the canonical option, range and default reference.
 `--settings` prints current values alongside reset defaults. Omitted options leave
 current settings unchanged. There are 40 settings: 39 of the 41 inherited controls
-mapped below, plus native per-pass color preservation described at the end.
+and native per-pass color preservation, all mapped below.
 
 “Native equivalent” means an implemented AMD-side operation, not an implementation
 of NVIDIA's proprietary parameter mapping. “Fixed” means the extracted network
@@ -53,6 +53,7 @@ opening or modifying the control channel.
 | `applymodel` | `-m`, `--apply-model` | Shows the clean frame or applies the computed edit; inference still runs. |
 | `hold` | `-H`, `--hold` | Freezes captured input while allowing settings to rerun processing. |
 | `togglekey` | `-k`, `--toggle-key` | Selects the Linux input key watched by the layer. |
+| None | `-L`, `--color-preserve` | **Native:** anchors each pass's broad chroma changes to the original input before history and feedback; see [COLOR-PRESERVATION.md](COLOR-PRESERVATION.md). |
 
 The native residual controls operate after **each** evaluation and before its
 output feeds the next pass. The low-frequency component is a 3×3 binomial blur;
@@ -71,8 +72,8 @@ Motion is estimated from consecutive presented frames; it is not supplied by the
 game engine. Each neural pass retains its own temporal history.
 
 The general actions are `--status`, `--settings`, `--reset`, `--quit`, `--resume`,
-`--capture`, `--toggle`, `--toggle-enabled`, `--shm`, and `--help`; all have short
-forms and explicit defaults in help. For example:
+`--capture`, `--toggle`, `--shm`, and `--help`; all have short forms and explicit
+defaults in help. For example:
 
 ```bash
 dlsslopctl --hold 1 --passes 2
@@ -84,11 +85,3 @@ dlsslopctl --hold 0
 `--toggle` accepts only writable boolean settings. In particular,
 `--passes 2 --toggle auto-mask` fails without changing passes or any other field.
 `--reset` restores settings while preserving transport status and stop state.
-
-## Native per-pass color preservation
-
-`-L`, `--color-preserve 0..1` (default **0**) anchors broad chroma changes to
-the original encoded input after each pass, before history/feedback. It is the
-40th setting and appears in the Qt controller's Neural passes section.
-It runs on the GPU without correction-related host transfers.
-Unlike `--color`, it operates before feedback. See COLOR-PRESERVATION.md.

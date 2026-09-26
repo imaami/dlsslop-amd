@@ -110,7 +110,8 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
         ('--toggle', 'auto-mask'), ('--toggle', 'intensity'), ('--toggle', 'hdr-mode'),
         ('--toggle', 'unknown'), ('--toggle',), ('--toggle', 'hold', '--hold', '1'),
         ('set', 'workingscale', '1'), ('toggle', 'enabled'), ('status',),
-        ('--quit', '--resume'), ('--toggle-enabled', '--enabled', '1'),
+        ('--quit', '--resume'), ('-A', 'enabled', '--enabled', '1'),
+        ('-T',), ('--toggle-enabled',),
         ('--working-scale', '0.5', '--', 'extra'), ('--shm', ''),
     ]
     for options in invalid_options:
@@ -189,8 +190,8 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     assert changed.pop('hold') == (1, 0) and changed.pop('enabled') == (0, 1), changed
     assert changed.pop('passes') == (2, 1), changed
     assert all(current == default for current, default in changed.values()), changed
-    assert settings(run('-T', '-A', 'enabled', '-l'))['enabled'][0] == 1
-    assert settings(run('-T', '-T', '-l'))['enabled'][0] == 0
+    assert settings(run('-A', 'enabled', '--toggle', 'enabled', '-l'))['enabled'][0] == 1
+    assert settings(run('-A', 'enabled', '-A', 'enabled', '-l'))['enabled'][0] == 0
     assert settings(run('-A', 'hold', '-A', 'hold', '-l'))['hold'][0] == 0
     run('--reset')
 
@@ -198,7 +199,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     assert changed['working-scale'] == (0.5, 1)
     assert changed['transfer'] == (0, 2)
     assert changed['enabled'] == (0, 1)
-    assert settings(run('-T', '-l'))['enabled'] == (1, 1)
+    assert settings(run('-A', 'enabled', '-l'))['enabled'] == (1, 1)
     assert settings(run('--working-scale', '0.5', '-w', '0.75', '-l'))['working-scale'][0] == 0.75
     assert settings(run('-w', '0.5', '-r', '-l'))['working-scale'][0] == 0.5
     assert settings(run('--passes', '2', '--settings'))['passes'] == (2, 1)
