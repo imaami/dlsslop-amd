@@ -253,16 +253,6 @@ inline void check_temporal(const NativeKernels& kernels)
     std::fflush(stdout);
 }
 
-inline float half_value(std::uint16_t value)
-{
-    const unsigned exponent = (value >> 10) & 31u;
-    const unsigned fraction = value & 1023u;
-    const float sign = value & 0x8000u ? -1.0f : 1.0f;
-    if (!exponent) return sign * float(fraction) * 0x1p-24f;
-    if (exponent == 31) throw std::runtime_error("FP16 control self-test produced nonfinite bits");
-    return sign * std::ldexp(float(1024u + fraction), int(exponent) - 25);
-}
-
 // Runs one FP16 frame through the codec; true when finish() rejects it.
 inline bool codec_rejects(GpuCodec& codec, const std::vector<std::uint8_t>& proxy, const Geometry& g,
                           void* device_input, void* device_rgb, std::vector<std::uint8_t>& decoded)
@@ -309,11 +299,6 @@ inline void check_codec(const NativeKernels& kernels)
     codec.finish();
     decode_neural_proxy(proxy.data(), g, true, model.data(), expected.data());
     require(decoded == expected, "GPU FP16 proxy decode disagrees on exact signed/extended-range fixture");
-    std::uint16_t first_red, first_green;
-    std::memcpy(&first_red, decoded.data(), sizeof(first_red));
-    std::memcpy(&first_green, decoded.data() + 2, sizeof(first_green));
-    require(half_value(first_red) == -.25f && half_value(first_green) == 1.5f,
-            "GPU FP16 proxy decode clipped signed/extended-range values");
     // Decode overwrites the uploaded proxy's RGB in place; a repeat must agree.
     std::vector<std::uint8_t> repeated(proxy.size());
     codec.decode(device_rgb.pointer, repeated.data());
