@@ -3,7 +3,6 @@
 #include "codec.h"
 #include "temporal_math.h"
 #include "vendor/hip_api.h"
-#include <cstring>
 #include <string>
 #include <vector>
 
@@ -47,10 +46,20 @@ class GpuTemporal {
             !g.width || !g.valid_height || g.valid_height > g.height ||
             g.height > 2 * g.valid_height - 2 || g.valid_width != g.width)
             throw std::invalid_argument("invalid temporal settings or geometry");
-        if (configured_ && !std::memcmp(&g, &geometry_, sizeof g) && quality == quality_ &&
-            grid == grid_ && units == units_ && passes == passes_) return;
+        // Buffer sizes do not depend on the source size, the picture's
+        // placement or the vector units; only a new placement invalidates the
+        // history. Flow is derived anew every frame, so units carry no state.
+        const bool same_size = configured_ && g.width == geometry_.width && g.height == geometry_.height &&
+            g.valid_height == geometry_.valid_height && quality == quality_ && grid == grid_ && passes == passes_;
+        const bool moved = g.x != geometry_.x || g.y != geometry_.y || g.fit_width != geometry_.fit_width ||
+            g.fit_height != geometry_.fit_height;
+        geometry_ = g; units_ = units;
+        if (same_size) {
+            valid_ = valid_ && !moved;
+            return;
+        }
         release_buffers();
-        geometry_ = g; quality_ = quality; grid_ = grid; units_ = units; passes_ = passes;
+        quality_ = quality; grid_ = grid; passes_ = passes;
         try {
             const std::size_t pixels = std::size_t(g.width) * g.height;
             allocate(warped_, pixels * 16, "allocate warped temporal history");
