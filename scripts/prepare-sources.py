@@ -28,7 +28,9 @@ def prepare(destination):
         record = destination / '.prepared-sources.json'
         previous = json.loads(record.read_text()) if record.exists() else {}
         for folder in PREPARED:
-            for path in (destination / folder).rglob('*'):
+            for path in (destination / folder, *(destination / folder).rglob('*')):
+                if path.is_symlink():  # Would be read, and written, through.
+                    raise RuntimeError(f'symlink in prepared source: {path}')
                 name = path.relative_to(destination).as_posix()
                 if path.is_file() and digest(path) not in (previous.get(name), staged.get(name)):
                     raise RuntimeError(f'local changes at {path}; preserve them before preparing sources')

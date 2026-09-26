@@ -233,6 +233,23 @@ class SubmodulesTest(unittest.TestCase):
             command(sys.executable, 'scripts/prepare-sources.py', cwd=clone)
             self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched\n')
             self.assertEqual((clone / 'backend/vendor/api.h').read_bytes(), b'api\n')
+            # A symlink in a prepared tree is refused, never written through, even
+            # when its target holds exactly what the record says was prepared.
+            outside = clone.parent / 'outside.txt'
+            outside.write_bytes(b'patched\n')
+            (clone / 'upstream-layer/example.txt').unlink()
+            (clone / 'upstream-layer/example.txt').symlink_to(outside)
+            (clone / 'patches/linux-integration.patch').write_bytes(
+                committed['patches/linux-integration.patch'].replace(b'+patched\n', b'+patched again\n'))
+            linked = command(sys.executable, 'scripts/prepare-sources.py', cwd=clone, check=False)
+            self.assertNotEqual(linked.returncode, 0)
+            self.assertIn('symlink in prepared source', linked.stderr)
+            self.assertEqual(outside.read_bytes(), b'patched\n')
+            (clone / 'upstream-layer/example.txt').unlink()
+            (clone / 'upstream-layer/example.txt').write_bytes(b'patched\n')
+            (clone / 'patches/linux-integration.patch').write_bytes(committed['patches/linux-integration.patch'])
+            command(sys.executable, 'scripts/prepare-sources.py', cwd=clone)
+            self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched\n')
 
             # Local URL overrides take precedence over .gitmodules and do not
             # alter provenance recorded in the lock. Repeated fetches are safe.
