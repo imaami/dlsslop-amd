@@ -436,12 +436,11 @@ public:
         api.Check(api.hipMalloc(&device_input_, pixels * 16), "allocate network input");
         api.Check(api.hipMalloc(&device_output_, pixels * 12), "allocate network output");
         width_ = w; height_ = h;
-        encoded_.resize(pixels * 4);
-        neural_.resize(pixels * 3);
-        // Warm once before announcing readiness. Weights and scratch are lazy in upstream.
-        // Keep alpha at one, as in the sRGB codec; warmup has no temporal history.
-        for (size_t p = 0; p < pixels; ++p) encoded_[p * 4 + 3] = 1.0f;
-        api.Check(api.hipMemcpy(device_input_, encoded_.data(), pixels * 16, 1), "warm input");
+        // The host copy of the answer serves the CPU codec and the self-test's checks.
+        if (!gpu_codec_ || options_.self_test) neural_.resize(pixels * 3);
+        // Warm once before announcing readiness: upstream allocates weights and
+        // scratch lazily, whatever the input; warmup has no temporal history.
+        api.Check(api.hipMemsetAsync(device_input_, 0, pixels * 16, network_->Stream()), "warm input");
         network_->Enqueue(device_input_, nullptr, device_output_, 0);
         network_->Synchronize();
         network_->PrintMemory();
