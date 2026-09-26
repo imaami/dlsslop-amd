@@ -40,9 +40,11 @@ fences in affected HIP kernels. It leaves the upstream working trees unchanged.
 In `backend/vendor/`, the patch makes `hip_api.h` load the Linux HIP runtime
 (`libamdhip64.so.7`, `.so.6` or the unversioned soname, also from
 `/opt/rocm/lib` or an explicit `DLSSLOP_HIP_LIBRARY` path) with
-`dlopen`/`dlsym`, and makes `hip_reference_network.h` ignore the Windows-only
+`dlopen`/`dlsym`. It makes `hip_reference_network.h` ignore the Windows-only
 F8 hotkey option (`DLSS5_VIT_REUSE_HOTKEY`) instead of calling Win32 keyboard
-APIs. The scheduler and the network mathematics are otherwise unchanged. The
+APIs, and makes device `Enqueue` write the final RGB straight into the caller's
+buffer instead of copying it from a pooled tensor on every pass. The scheduler
+and the network mathematics are otherwise unchanged. The
 worker clears the production options' block-skip set unless `--performance`
 restores upstream's skipped blocks 42, 43 and 46. Like upstream's shipped HIP
 configurations (`scripts/hip-*-flags.txt`), it also enables the bit-exact byte
