@@ -492,6 +492,8 @@ public:
         };
         if (settings.fp16 && options_.cpu_compose)
             throw std::range_error("FP16 proxy transport requires Vulkan composition; disable --cpu-compose");
+        if (!std::isfinite(settings.color_preserve) || settings.color_preserve < 0 || settings.color_preserve > 1)
+            throw std::range_error("invalid color preservation strength");
         const bool tuned = !dlsslop::native_tuning_is_default(settings.tuning);
         if (tuned && !gpu_tuning_) {
             gpu_tuning_ = std::make_unique<dlsslop::GpuTuning>(api, network_->Stream(), options_.modules + "/linux_tuning.hsaco");
@@ -512,8 +514,6 @@ public:
             dlsslop::encode_proxy(input, g, settings.fp16, encoded_);
             api.Check(api.hipMemcpy(device_input_, encoded_.data(), encoded_.size() * sizeof(float), 1), "upload encoded frame");
         }
-        if (!std::isfinite(settings.color_preserve) || settings.color_preserve < 0 || settings.color_preserve > 1)
-            throw std::range_error("invalid color preservation strength");
         if (settings.color_preserve > 0) {
             if (!color_backend_checked_) {
                 const auto path = options_.modules + "/linux_color.hsaco";
