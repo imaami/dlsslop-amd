@@ -148,6 +148,62 @@ void test_fit_and_output()
             "UNORM clamp / alpha preservation");
 }
 
+// A source larger than the fit is integrated over each pixel's footprint: a
+// one-texel stripe of period 3 at exactly 3 texels per pixel encodes to its
+// mean at every phase, where a bilinear tap would read all 1 or all 0.
+// At 1.5 texels per pixel, the pixels alternate and keep the mean.
+void test_area_downscale()
+{
+    const auto g = dlsslop::geometry(3840, 2160, 720);
+    require(g.fit_width == 1280 && g.fit_height == 720, "3x downscale geometry");
+    std::vector<std::uint8_t> rgba8(std::size_t(g.source_width) * g.source_height * 4);
+    std::vector<std::uint8_t> fp16(rgba8.size() * 2);
+    std::vector<float> encoded;
+    const float mean = 0.333251953125f; // 1/3 rounded to binary16.
+    for (unsigned phase = 0; phase < 3; ++phase) {
+        for (std::size_t p = 0; p < rgba8.size() / 4; ++p) {
+            const bool lit = (p % g.source_width) % 3 == phase;
+            const std::uint16_t half = lit ? 0x3c00 : 0;
+            for (unsigned c = 0; c < 4; ++c) {
+                rgba8[p * 4 + c] = lit || c == 3 ? 255 : 0;
+                std::memcpy(fp16.data() + p * 8 + c * 2, &half, sizeof half);
+            }
+        }
+        for (bool half : {false, true}) {
+            dlsslop::encode_proxy(half ? fp16.data() : rgba8.data(), g, half, encoded);
+            for (std::size_t p = 0; p < std::size_t(g.width) * g.valid_height; ++p)
+                require(encoded[p * 4] == mean && encoded[p * 4 + 1] == mean && encoded[p * 4 + 2] == mean,
+                        "3x downscale does not encode a period-3 stripe to its mean");
+        }
+    }
+
+    const auto h = dlsslop::geometry(1920, 1080, 720);
+    require(h.fit_width == 1280 && h.fit_height == 720, "1.5x downscale geometry");
+    for (std::size_t p = 0; p < std::size_t(h.source_width) * h.source_height; ++p)
+        for (unsigned c = 0; c < 3; ++c)
+            rgba8[p * 4 + c] = (p % h.source_width) % 3 ? 0 : 255;
+    dlsslop::encode_rgba8(rgba8.data(), h, encoded);
+    double sum = 0;
+    for (unsigned x = 0; x < h.width; ++x) {
+        const float expected = x % 2 ? 0.0f : 0.66650390625f; // 2/3 rounded to binary16.
+        require(encoded[(std::size_t(360) * h.width + x) * 4] == expected, "1.5x downscale weights");
+        sum += encoded[(std::size_t(360) * h.width + x) * 4];
+    }
+    require(std::fabs(sum / h.width - 1.0 / 3.0) < 1e-3, "1.5x downscale changed the mean");
+
+    // Every texel under a footprint is read, so a NaN at texel (0, 0), which
+    // no bilinear tap at 3x reaches, still rejects the FP16 frame.
+    const std::uint16_t nonfinite = 0x7e00;
+    std::memcpy(fp16.data(), &nonfinite, sizeof nonfinite);
+    bool rejected = false;
+    try {
+        dlsslop::encode_proxy(fp16.data(), g, true, encoded);
+    } catch (const std::range_error&) {
+        rejected = true;
+    }
+    require(rejected, "3x downscale accepted a nonfinite FP16 texel");
+}
+
 void expect_decode_rejection(const std::vector<std::uint8_t>& source, const dlsslop::Geometry& g,
                              const std::vector<float>& encoded, const std::vector<float>& neural)
 {
@@ -369,12 +425,13 @@ int main()
         test_geometry();
         test_input_contract_and_identity();
         test_fit_and_output();
+        test_area_downscale();
         test_feedback_precision_and_padding();
         test_feedback_invalid_samples();
         test_decode_invalid_samples();
         test_fp16_proxy();
         test_feedback_unorm8();
-        std::puts("codec: geometry, SDR/FP16 transport, reflection, round-trip, fitting, composition, invalid-sample rejection and 8/16-bit multi-pass feedback passed");
+        std::puts("codec: geometry, SDR/FP16 transport, reflection, round-trip, fitting, area-weighted downscale, composition, invalid-sample rejection and 8/16-bit multi-pass feedback passed");
     } catch (const std::exception& e) {
         std::fprintf(stderr, "codec test failed: %s\n", e.what());
         return EXIT_FAILURE;

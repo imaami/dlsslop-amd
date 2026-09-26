@@ -19,6 +19,8 @@ Geometry geometry(unsigned source_width, unsigned source_height,
 // This deliberately does NOT gamma-decode input before neural inference.
 // Output is padded, raster-interleaved RGBA32F; each input RGB sample is rounded
 // through FP16 as in the upstream RGBA16_FLOAT encoding texture. Alpha is one.
+// A source no larger than the fit is sampled bilinearly; a larger one is
+// averaged over each pixel's footprint.
 void encode_rgba8(const std::uint8_t* source, const Geometry& g,
                   std::vector<float>& rgba);
 

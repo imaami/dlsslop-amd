@@ -45,10 +45,11 @@ def main():
         for i, match in enumerate(symbols)
     }
     # RGBA8 kernels and feedback round float->half->float. The FP16 encoder
-    # additionally unpacks four RGB input texels; the decoder packs final RGB.
+    # additionally unpacks the RGB of its four bilinear texels and, once in
+    # its loop, of each area-weighted texel; the decoder packs final RGB.
     expected_conversions = {
         "dlsslop_encode_rgba8": (3, 3),
-        "dlsslop_encode_rgba16f": (3, 15),
+        "dlsslop_encode_rgba16f": (3, 18),
         "dlsslop_feedback_rgb": (6, 6),
         "dlsslop_decode_rgba8": (12, 12),
         "dlsslop_decode_rgba16f": (15, 12),

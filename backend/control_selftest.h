@@ -347,6 +347,22 @@ inline void check_codec(const NativeKernels& kernels)
         compare(device_input.read(), reference, precision16 ? "GPU FP16 feedback" : "GPU UNORM8 feedback");
     }
     std::printf("GPU control self-test: FP16 proxy encode, decode, rejection and 16/8-bit feedback exact\n");
+
+    // A source larger than the fit (4 and 4.17 texels per pixel) takes the
+    // area-weighted encode, which no other check reaches.
+    const Geometry large = geometry(40, 3000, 720);
+    std::vector<std::uint8_t> source(std::size_t(large.source_width) * large.source_height * 8);
+    for (std::size_t i = 0; i < source.size() / 2; ++i) {
+        const std::uint16_t value = std::uint16_t(0x2c00u + (i * 37u) % 0x1000u); // 1/16 up to 1
+        std::memcpy(source.data() + i * 2, &value, sizeof(value));
+    }
+    Buffer device_large(kernels, std::size_t(large.width) * large.height * 4 * sizeof(float));
+    for (bool fp16 : {false, true}) {
+        encode_proxy(source.data(), large, fp16, reference);
+        codec.encode(source.data(), large, device_large.pointer, fp16);
+        compare(device_large.read(), reference, fp16 ? "GPU FP16 downscaling encode" : "GPU RGBA8 downscaling encode");
+    }
+    std::printf("GPU control self-test: RGBA8 and FP16 area-weighted downscaling encode exact\n");
     std::fflush(stdout);
 }
 

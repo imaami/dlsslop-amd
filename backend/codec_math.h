@@ -63,13 +63,36 @@ DLSSLOP_INLINE Rgb bilinear(const Read& read, float x, float y, unsigned low_x, 
     return lerp(lerp(read(x0, y0), read(x1, y0), fx), lerp(read(x0, y1), read(x1, y1), fx), fy);
 }
 
-// Encode: the proxy at the centre of fitted processing pixel (x, y).
+// Encode: the proxy over fitted processing pixel (x, y). Identity and
+// upscaling take the bilinear tap at its centre. A source larger than the fit
+// is integrated over the pixel's footprint with area weights, as the layer's
+// downscaler does, rather than dropping the texels between the taps.
 template<class Read>
 DLSSLOP_INLINE Rgb sample_proxy(const Read& read, const Geometry& g, unsigned x, unsigned y)
 {
-    return bilinear(read, (float(x) + 0.5f - float(g.x)) * float(g.source_width) / float(g.fit_width) - 0.5f,
-                    (float(y) + 0.5f - float(g.y)) * float(g.source_height) / float(g.fit_height) - 0.5f,
-                    0, 0, g.source_width - 1, g.source_height - 1);
+    const float sw = float(g.source_width), sh = float(g.source_height);
+    const float fw = float(g.fit_width), fh = float(g.fit_height);
+    if (g.source_width <= g.fit_width && g.source_height <= g.fit_height)
+        return bilinear(read, (float(x) + 0.5f - float(g.x)) * sw / fw - 0.5f,
+                        (float(y) + 0.5f - float(g.y)) * sh / fh - 0.5f,
+                        0, 0, g.source_width - 1, g.source_height - 1);
+    x -= g.x;
+    y -= g.y;
+    const float x0 = float(x) * sw / fw, x1 = float(x + 1) * sw / fw;
+    const float y0 = float(y) * sh / fh, y1 = float(y + 1) * sh / fh;
+    Rgb sum{};
+    // Every texel overlaps the footprint; rounding may take the last one
+    // past the source's edge.
+    for (unsigned j = unsigned(y0); float(j) < y1; ++j) {
+        const float wy = (y1 < float(j + 1) ? y1 : float(j + 1)) - (y0 > float(j) ? y0 : float(j));
+        for (unsigned i = unsigned(x0); float(i) < x1; ++i) {
+            const float w = ((x1 < float(i + 1) ? x1 : float(i + 1)) - (x0 > float(i) ? x0 : float(i))) * wy;
+            const Rgb c = read(i < g.source_width ? i : g.source_width - 1, j < g.source_height ? j : g.source_height - 1);
+            sum = {sum.r + c.r * w, sum.g + c.g * w, sum.b + c.b * w};
+        }
+    }
+    const float area = (x1 - x0) * (y1 - y0);
+    return {sum.r / area, sum.g / area, sum.b / area};
 }
 
 // Decode: the network's answer at the centre of source pixel (x, y).
