@@ -11,21 +11,17 @@ set(CMAKE_SKIP_RPATH TRUE)
 # CPU references must match their HIP kernels bit for bit under any -march:
 # never fuse a multiply and an add.
 add_compile_options(-ffp-contract=off)
+add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
+# Section GC and a stripped Release drop the unreached parts of the statically
+# linked libstdc++ and the symbol tables from every binary.
+add_compile_options(-ffunction-sections -fdata-sections)
+add_link_options(-Wl,--gc-sections $<$<CONFIG:Release>:-s>)
 find_package(Threads REQUIRED)
 include(CTest)
 
 set(LAYER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/upstream-layer")
 find_path(X11_HEADERS X11/Xlib.h REQUIRED)
 find_path(XINPUT_HEADERS X11/extensions/XInput2.h REQUIRED)
-set(LAYER_SOURCES
-    ${LAYER_ROOT}/layer_linux/src/layer.cpp
-    ${LAYER_ROOT}/layer_linux/src/shader_vk.cpp
-    ${LAYER_ROOT}/layer_linux/src/dlssnr_pass.cpp
-    ${LAYER_ROOT}/layer_linux/src/composition.cpp
-    ${LAYER_ROOT}/layer_linux/src/capture.cpp
-    ${LAYER_ROOT}/layer_linux/src/scaler_vk.cpp
-    ${LAYER_ROOT}/layer_linux/src/hotkey.cpp)
-
 # Every layer shader is compiled from its prepared source into the build tree,
 # where the layer's quoted includes find it. Pass -DDXC=<path> for a DXC that
 # is not on PATH.
@@ -68,16 +64,26 @@ static const size_t kMeterReduceSpvLen = sizeof(kMeterReduceSpv) / sizeof(kMeter
 ]])
 add_custom_target(layer-shaders DEPENDS ${LAYER_SHADERS} ${METER}.h)
 
+# Only layer.cpp differs between the layers; both and the layer tests link
+# the other translation units compiled once.
+add_library(dlsslop-layer-objects OBJECT
+    ${LAYER_ROOT}/layer_linux/src/shader_vk.cpp ${LAYER_ROOT}/layer_linux/src/dlssnr_pass.cpp
+    ${LAYER_ROOT}/layer_linux/src/composition.cpp ${LAYER_ROOT}/layer_linux/src/capture.cpp
+    ${LAYER_ROOT}/layer_linux/src/scaler_vk.cpp ${LAYER_ROOT}/layer_linux/src/hotkey.cpp)
+set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+add_dependencies(dlsslop-layer-objects layer-shaders)
+target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC
+    ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party
+    ${X11_HEADERS} ${XINPUT_HEADERS})
+target_link_libraries(dlsslop-layer-objects PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+
 function(add_neural_layer target)
-    add_library(${target} SHARED ${LAYER_SOURCES})
-    add_dependencies(${target} layer-shaders)
-    target_include_directories(${target} PRIVATE ${SHADER_DIR} layer
-        ${LAYER_ROOT}/standalone_runner/third_party ${X11_HEADERS} ${XINPUT_HEADERS})
-    target_link_libraries(${target} PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+    add_library(${target} SHARED ${LAYER_ROOT}/layer_linux/src/layer.cpp)
+    target_include_directories(${target} PRIVATE layer)
+    target_link_libraries(${target} PRIVATE dlsslop-layer-objects)
     target_link_options(${target} PRIVATE
         -static-libstdc++ -static-libgcc -Wl,-Bsymbolic
         "-Wl,--version-script=${LAYER_ROOT}/layer_linux/dlssnr.map")
-    target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-unused-parameter)
     target_compile_definitions(${target} PRIVATE DLSSLOP_LAYER_NAME="VK_LAYER_LOCAL_dlsslop_amd")
 endfunction()
 
@@ -85,13 +91,13 @@ add_neural_layer(VkLayer_DLSSLOP_amd)
 add_executable(dlssnr-shmctl ${LAYER_ROOT}/tools/shmctl.cpp)
 target_link_options(dlssnr-shmctl PRIVATE -static-libstdc++ -static-libgcc)
 
+add_library(dlsslop-codec OBJECT backend/codec.cpp)
 # The worker uses a small, versioned HIP ABI loaded with dlopen. The build itself
 # deliberately does not require ROCm headers or a GPU; real inference does.
-add_executable(dlsslopd backend/worker.cpp backend/codec.cpp)
+add_executable(dlsslopd backend/worker.cpp)
 target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
-target_link_libraries(dlsslopd PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(dlsslopd PRIVATE dlsslop-codec Threads::Threads ${CMAKE_DL_LIBS})
 target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
-target_compile_options(dlsslopd PRIVATE -Wall -Wextra -Wno-unused-parameter)
 
 if(BUILD_TESTING)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
@@ -123,7 +129,8 @@ if(BUILD_TESTING)
     target_include_directories(vulkan-storage-test PRIVATE ${SHADER_DIR} layer
         ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party)
     add_test(NAME vulkan-storage COMMAND vulkan-storage-test)
-    add_executable(codec-test backend/codec_test.cpp backend/codec.cpp)
+    add_executable(codec-test backend/codec_test.cpp)
+    target_link_libraries(codec-test PRIVATE dlsslop-codec)
     add_test(NAME codec COMMAND codec-test)
     add_executable(color-gpu-test tests/color_gpu_test.cpp)
     target_link_libraries(color-gpu-test PRIVATE ${CMAKE_DL_LIBS})
@@ -135,18 +142,17 @@ if(BUILD_TESTING)
     add_test(NAME color-kernel-host COMMAND color-kernel-host-test)
     add_executable(color-preserve-test tests/color_preserve_test.cpp)
     add_test(NAME color-preserve COMMAND color-preserve-test)
-    add_executable(tuning-test tests/tuning_test.cpp backend/codec.cpp)
+    add_executable(tuning-test tests/tuning_test.cpp)
     target_include_directories(tuning-test PRIVATE backend)
+    target_link_libraries(tuning-test PRIVATE dlsslop-codec)
     add_test(NAME tuning COMMAND tuning-test)
     add_executable(temporal-test tests/temporal_test.cpp)
     target_include_directories(temporal-test PRIVATE backend)
     add_test(NAME temporal COMMAND temporal-test)
     add_executable(trace-test tests/trace_test.cpp)
     add_test(NAME trace COMMAND trace-test ${Python3_EXECUTABLE})
-    add_executable(capture-writer-test tests/capture_writer_test.cpp
-        ${LAYER_ROOT}/layer_linux/src/capture.cpp)
-    target_include_directories(capture-writer-test PRIVATE
-        ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party)
+    add_executable(capture-writer-test tests/capture_writer_test.cpp)
+    target_link_libraries(capture-writer-test PRIVATE dlsslop-layer-objects)
     add_test(NAME capture-writer COMMAND capture-writer-test)
     add_test(NAME color-metrics COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_metrics_test.py)
@@ -171,24 +177,11 @@ if(BUILD_TESTING)
     target_include_directories(vulkan-smoke PRIVATE
         ${LAYER_ROOT}/standalone_runner/third_party ${X11_HEADERS})
     target_link_libraries(vulkan-smoke PRIVATE ${VULKAN_LOADER} ${X11_LIBRARY})
-    add_executable(hdr-shader-test tests/hdr_shader_test.cpp
-        ${LAYER_ROOT}/layer_linux/src/dlssnr_pass.cpp
-        ${LAYER_ROOT}/layer_linux/src/shader_vk.cpp)
-    add_dependencies(hdr-shader-test layer-shaders)
-    target_include_directories(hdr-shader-test PRIVATE ${SHADER_DIR}
-        ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party)
-    target_link_libraries(hdr-shader-test PRIVATE ${VULKAN_LOADER} Threads::Threads)
+    add_executable(hdr-shader-test tests/hdr_shader_test.cpp)
+    target_link_libraries(hdr-shader-test PRIVATE dlsslop-layer-objects ${VULKAN_LOADER})
     add_test(NAME hdr-shader COMMAND hdr-shader-test)
-    add_executable(composition-rebuild-test tests/composition_rebuild_test.cpp
-        ${LAYER_ROOT}/layer_linux/src/composition.cpp
-        ${LAYER_ROOT}/layer_linux/src/capture.cpp
-        ${LAYER_ROOT}/layer_linux/src/scaler_vk.cpp
-        ${LAYER_ROOT}/layer_linux/src/dlssnr_pass.cpp
-        ${LAYER_ROOT}/layer_linux/src/shader_vk.cpp)
-    add_dependencies(composition-rebuild-test layer-shaders)
-    target_include_directories(composition-rebuild-test PRIVATE ${SHADER_DIR}
-        ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party)
-    target_link_libraries(composition-rebuild-test PRIVATE ${VULKAN_LOADER} Threads::Threads)
+    add_executable(composition-rebuild-test tests/composition_rebuild_test.cpp)
+    target_link_libraries(composition-rebuild-test PRIVATE dlsslop-layer-objects ${VULKAN_LOADER})
     add_test(NAME composition-rebuild COMMAND composition-rebuild-test)
     add_test(NAME vulkan-smoke COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/run-smoke.py
         --build-dir ${CMAKE_CURRENT_BINARY_DIR} --headless)
