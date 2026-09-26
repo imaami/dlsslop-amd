@@ -80,7 +80,7 @@ index eee312c..78542b8 100644
  };
  }
 diff --git a/upstream-layer/common/shm_protocol.h b/upstream-layer/common/shm_protocol.h
-index fd7c1cd..0b01f8e 100644
+index fd7c1cd..4ec527a 100644
 --- a/upstream-layer/common/shm_protocol.h
 +++ b/upstream-layer/common/shm_protocol.h
 @@ -14,11 +14,11 @@
@@ -100,23 +100,17 @@ index fd7c1cd..0b01f8e 100644
  #include <atomic>
  #include <cstdint>
  #include <cstdlib>
-@@ -37,7 +37,14 @@ static constexpr uint32_t kShmMagic = 0x32524E47;
+@@ -37,7 +37,8 @@ static constexpr uint32_t kShmMagic = 0x32524E47;
  // 64 KiB because VK_EXT_external_memory_host demands the imported pointer meet
  // minImportedHostPointerAlignment and NVIDIA answers 64 KiB, and the dma-buf exchange and HDR
  // and round-trip attribution. A stale mapping of either lineage must be re-created, not half-read.
 -static constexpr uint32_t kShmVersion = 20;
-+// v21: the native HIP worker publishes the real neural raster bounds. The layer
-+// must reduce its proxy before transport, not mistake an enlarged answer for a
-+// native-resolution model result.
-+// v22: the native worker accepts negotiated RGBA16F display-encoded proxies,
-+// and exposes native per-pass tuning, precision and motion controls. Old native
-+// workers interpret this payload as RGBA8 and must not share the channel.
-+// v23: appends colorPreserveBits, the native per-pass color anchoring.
++// v21-v23: native HIP raster bounds, request-published proxy precision and color anchoring.
 +static constexpr uint32_t kShmVersion = 23;
  
  
  static constexpr uint32_t kMaxW = 7680, kMaxH = 4320;
-@@ -46,6 +53,8 @@ static constexpr uint32_t kMaxW = 7680, kMaxH = 4320;
+@@ -46,6 +47,8 @@ static constexpr uint32_t kMaxW = 7680, kMaxH = 4320;
  // (Xid 109, CTX SWITCH TIMEOUT), taking the game down with it. 300x300 is known good; nothing below
  // this is a frame worth composing anyway.
  static constexpr uint32_t kMinW = 64, kMinH = 64;
@@ -125,7 +119,7 @@ index fd7c1cd..0b01f8e 100644
  // Eight bytes a pixel: the float16 proxy needs them, and the 8-bit path simply uses the first half of
  // each region. The mapping is file-backed and sparse, so an SDR session never commits the second half.
  static constexpr size_t kMaxFrame = size_t(kMaxW) * kMaxH * 8;
-@@ -139,11 +148,12 @@ enum HelperState : uint32_t {
+@@ -139,11 +142,12 @@ enum HelperState : uint32_t {
  };
  
  // How the motion field the helper hands the model is scaled. From bmitch87's motion-vector work.
@@ -141,7 +135,7 @@ index fd7c1cd..0b01f8e 100644
      kHdrForce = 2,  // float16 proxy even for an SDR swapchain (an A/B tool, not a preference)
  };
  
-@@ -203,6 +213,14 @@ inline std::string ShmRuntimeDir() {
+@@ -203,6 +207,14 @@ inline std::string ShmRuntimeDir() {
  
  inline std::string ShmDefaultPath() { return ShmRuntimeDir() + "/shm.bin"; }
  
@@ -156,7 +150,7 @@ index fd7c1cd..0b01f8e 100644
  inline size_t ShmTotalBytes() { return kHeaderBytes + kMaxFrame * 2; }
  
  // One pass's overrides. Every field is present; `overrideMask` says which of them mean anything.
-@@ -316,7 +334,7 @@ struct ShmHeader {
+@@ -316,7 +328,7 @@ struct ShmHeader {
      // Only useful where the layer can read the keyboard at all: an X11 or XWayland session, inside
      // gamescope, or anywhere the user is in the 'input' group. A game presenting through winewayland
      // is a Wayland client whose keys never reach this process, and keyboards get no uaccess ACL, so
@@ -165,7 +159,7 @@ index fd7c1cd..0b01f8e 100644
      std::atomic<uint32_t> toggleKey;
  
      // Which proxy the model is shown, and whether its answer is composed or substituted. See
-@@ -457,10 +475,9 @@ struct ShmHeader {
+@@ -457,10 +469,9 @@ struct ShmHeader {
      std::atomic<uint32_t> hdrActive;
      std::atomic<uint32_t> proxyFormat;
      // What the proxy bytes in the shared region actually are for the request being made: the layer
@@ -179,7 +173,7 @@ index fd7c1cd..0b01f8e 100644
      std::atomic<uint32_t> hdrEncode;
  
      // trip, which is what it has always been; N takes an answer up only on a frame whose count is a
-@@ -533,6 +550,12 @@ struct ShmHeader {
+@@ -533,6 +544,12 @@ struct ShmHeader {
      std::atomic<uint32_t> sdr16Multipass;
      std::atomic<uint32_t> mvecPixelSize;
  
@@ -192,7 +186,7 @@ index fd7c1cd..0b01f8e 100644
  };
  
  static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region");
-@@ -548,7 +571,7 @@ static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region")
+@@ -548,7 +565,7 @@ static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region")
  // The version check already existed to prevent exactly that; what was missing was anything to make
  // someone remember to use it. If these fire, the layout changed: bump kShmVersion in the same commit,
  // then update these numbers.
@@ -201,46 +195,7 @@ index fd7c1cd..0b01f8e 100644
  
  static_assert(offsetof(ShmHeader, enabled) == 44, "layout changed -- bump kShmVersion");
  static_assert(offsetof(ShmHeader, transferStrengthBits) == 88, "layout changed -- bump kShmVersion");
-@@ -615,6 +638,7 @@ inline void ShmResetSettings(ShmHeader* h) {
-         uint32_t answerExportSeq, answerPid, answerFd, answerGen;
-         uint32_t layerProxySeq, layerAnswerSeq;
-         uint32_t hdrDetected, hdrActive, proxyFormat, hdrEncode;
-+        uint32_t nativeModelMaxWidth, nativeModelMaxHeight;
-     } v;
- #define DLSSNR_SAVE(f) v.f = h->f.load()
-     DLSSNR_SAVE(seq_req); DLSSNR_SAVE(seq_resp); DLSSNR_SAVE(width); DLSSNR_SAVE(height);
-@@ -633,6 +657,7 @@ inline void ShmResetSettings(ShmHeader* h) {
-     DLSSNR_SAVE(answerExportSeq); DLSSNR_SAVE(answerPid); DLSSNR_SAVE(answerFd);
-     DLSSNR_SAVE(answerGen); DLSSNR_SAVE(layerProxySeq); DLSSNR_SAVE(layerAnswerSeq);
-     DLSSNR_SAVE(hdrDetected); DLSSNR_SAVE(hdrActive); DLSSNR_SAVE(proxyFormat); DLSSNR_SAVE(hdrEncode);
-+    DLSSNR_SAVE(nativeModelMaxWidth); DLSSNR_SAVE(nativeModelMaxHeight);
- #undef DLSSNR_SAVE
-     char helperReason[kReasonBytes], layerReason[kReasonBytes], gameName[kNameBytes];
-     std::memcpy(helperReason, h->helperReason, sizeof(helperReason));
-@@ -657,7 +682,14 @@ inline void ShmResetSettings(ShmHeader* h) {
-     DLSSNR_LOAD(answerExportSeq); DLSSNR_LOAD(answerPid); DLSSNR_LOAD(answerFd);
-     DLSSNR_LOAD(answerGen); DLSSNR_LOAD(layerProxySeq); DLSSNR_LOAD(layerAnswerSeq);
-     DLSSNR_LOAD(hdrDetected); DLSSNR_LOAD(hdrActive); DLSSNR_LOAD(proxyFormat); DLSSNR_LOAD(hdrEncode);
-+    DLSSNR_LOAD(nativeModelMaxWidth); DLSSNR_LOAD(nativeModelMaxHeight);
- #undef DLSSNR_LOAD
-+    if (v.nativeModelMaxWidth && v.nativeModelMaxHeight) {
-+        // Native HIP uses a reduced raster and must retain native-detail
-+        // composition when resetting UI tuning to backend-appropriate defaults.
-+        h->compositionBypass.store(0);
-+        h->transfer.store(2);
-+    }
-     std::memcpy(h->helperReason, helperReason, sizeof(helperReason));
-     std::memcpy(h->layerReason, layerReason, sizeof(layerReason));
-     std::memcpy(h->gameName, gameName, sizeof(gameName));
-@@ -681,6 +713,7 @@ inline void ShmInitDefaults(ShmHeader* h) {
-     h->localStructureBits.store(FloatToBits(1.0f));
-     h->skinStructureBits.store(FloatToBits(-1.0f));
-     h->sharpnessBits.store(FloatToBits(0.0f));
-+    h->colorPreserveBits.store(FloatToBits(0.0f));
- 
-     h->transferStrengthBits.store(FloatToBits(1.0f));
-     h->colourStrengthBits.store(FloatToBits(1.0f));
-@@ -733,6 +766,19 @@ inline void ShmInitDefaults(ShmHeader* h) {
+@@ -733,6 +750,19 @@ inline void ShmInitDefaults(ShmHeader* h) {
      }
  }
  
