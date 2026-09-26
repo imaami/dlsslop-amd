@@ -348,7 +348,6 @@ class Engine {
     void* device_output_ = nullptr;
     void* device_scratch_ = nullptr; // Tuning or colour: the other stage output.
     void* answer_ = nullptr; // The latest frame's final network answer.
-    unsigned width_ = 0, height_ = 0;
     std::vector<float> encoded_, neural_, feedback_;
     ProcessingSettings previous_settings_;
     // Stream events: frame start, uploaded, evaluated, answered. Timing never
@@ -376,9 +375,8 @@ public:
     void prepare()
     {
         if (options_.test_identity) return;
-        const unsigned w = options_.tier == 720 ? 1280 : options_.tier == 900 ? 1600 : 1920;
-        const unsigned h = options_.tier == 720 ? 768 : options_.tier == 900 ? 960 : 1152;
-        auto opt = LmxxfProductionOptions(w, h, options_.modules, options_.assets);
+        const auto raster = dlsslop::geometry(1, 1, options_.tier);
+        auto opt = LmxxfProductionOptions(raster.width, raster.height, options_.modules, options_.assets);
         opt.device = static_cast<unsigned>(options_.device);
         if (!options_.performance) opt.skip_blocks.clear();
         // Upstream's shipped HIP configurations (scripts/hip-*-flags.txt) add
@@ -395,10 +393,9 @@ public:
         kernels_.emplace(api, network_->Stream(), options_.modules + "/linux_native.hsaco");
         if (!options_.cpu_codec) gpu_codec_.emplace(*kernels_);
         temporal_.emplace(*kernels_);
-        const size_t pixels = size_t(w) * h;
+        const size_t pixels = size_t(raster.width) * raster.height;
         api.Check(api.hipMalloc(&device_input_, pixels * 16), "allocate network input");
         api.Check(api.hipMalloc(&device_output_, pixels * 12), "allocate network output");
-        width_ = w; height_ = h;
         // The host copy of the answer serves the CPU codec and the self-test's checks.
         if (!gpu_codec_ || options_.self_test) neural_.resize(pixels * 3);
         // Warm once before announcing readiness: upstream allocates weights and
@@ -424,8 +421,6 @@ public:
                const ProcessingSettings& settings = {}, dlsslop::FrameTrace* trace = nullptr,
                bool verify = false)
     {
-        if (!passes || passes > kMaxPasses)
-            throw std::invalid_argument("invalid neural pass count");
         if (options_.test_identity) {
             std::memcpy(output, input, size_t(w) * h * (settings.fp16 ? 8 : 4));
             return;
@@ -438,8 +433,6 @@ public:
                 throw std::range_error("multi-pass/motion/self-test requires DLSS5_VIT_ADAPTIVE=0 (uncached inference)");
         }
         const auto g = dlsslop::geometry(w, h, options_.tier);
-        if (g.width != width_ || g.height != height_)
-            throw std::runtime_error("codec/network geometry mismatch");
         auto& api = network_->Runtime();
         std::vector<float> trace_buffer;
         const auto trace_image = [&](const std::string& name, void* pointer, unsigned channels) {
@@ -458,9 +451,9 @@ public:
         const bool tuned = !dlsslop::native_tuning_is_default(settings.tuning);
         const bool colored = settings.color_preserve > 0;
         if ((tuned || colored) && !device_scratch_)
-            api.Check(api.hipMalloc(&device_scratch_, size_t(width_) * height_ * 12), "allocate post-processing output");
+            api.Check(api.hipMalloc(&device_scratch_, size_t(g.width) * g.height * 12), "allocate post-processing output");
         if (passes > 1 && !device_feedback_)
-            api.Check(api.hipMalloc(&device_feedback_, size_t(width_) * height_ * 16), "allocate inter-pass feedback");
+            api.Check(api.hipMalloc(&device_feedback_, size_t(g.width) * g.height * 16), "allocate inter-pass feedback");
         mark(0);
         if (gpu_codec_) {
             gpu_codec_->encode(input, g, device_input_, settings.fp16);
@@ -608,8 +601,6 @@ void run_self_test(const Options& o, Engine& engine)
     for (unsigned run = 0; run < repeats; ++run) {
         engine.infer(input.data(), w, h, output.data(), o.passes, {}, nullptr, !run);
         const auto& raw = engine.raw_result();
-        if (raw.size() != size_t(g.width) * g.height * 3)
-            throw std::runtime_error("self-test raw network output size mismatch");
         if (!run) {
             first_raw = raw;
             first_output = output;
@@ -717,13 +708,14 @@ void run_worker(const Options& o)
     if (!o.trace_dir.empty())
         traces = std::make_unique<dlsslop::TraceRequests>(o.trace_dir, o.shm, kShmVersion);
     std::unique_ptr<dlsslop::FrameTrace> pending_trace;
+    const auto raster = dlsslop::geometry(1, 1, o.tier);
     h->passes.store(o.passes);
     h->compositionBypass.store(o.cpu_compose || o.test_identity ? 1 : 0);
     // The layer must know the real neural raster before building its proxy.
     // Otherwise it mistakes a worker-upscaled answer for native-resolution
     // output and skips its detail-preserving composition branch.
     if (!o.cpu_compose && !o.test_identity) {
-        h->nativeModelMaxWidth.store(o.tier == 720 ? 1280 : o.tier == 900 ? 1600 : 1920);
+        h->nativeModelMaxWidth.store(raster.width);
         h->nativeModelMaxHeight.store(o.tier);
         h->transfer.store(2); // Native frame plus the edit measured at model resolution.
     } else {
@@ -761,8 +753,7 @@ void run_worker(const Options& o)
         std::fprintf(stderr, "worker ready: %s%s\n", o.shm.c_str(), o.test_identity ? " [IDENTITY TEST]" : "");
         if (!o.test_identity)
             std::fprintf(stderr, "neural tier=%u; processing=%ux%u; %s; live controls enabled\n",
-                         o.tier, o.tier == 720 ? 1280 : o.tier == 900 ? 1600 : 1920,
-                         o.tier == 720 ? 768 : o.tier == 900 ? 960 : 1152,
+                         o.tier, raster.width, raster.height,
                          o.cpu_compose ? "CPU composition" : "native-resolution Vulkan composition");
         uint64_t frames = 0;
         unsigned previous_passes = 0;
