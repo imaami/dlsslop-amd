@@ -85,7 +85,8 @@ visual quality or game performance.
 
 ## Game and desktop testing
 
-Run the worker and launch the game using the instructions in README.md. Test on
+Run the worker and launch the game using the instructions in
+[packaging/README.md](packaging/README.md). Test on
 the intended distribution, desktop session and Radeon device with the intended
 model coefficients.
 
@@ -99,4 +100,5 @@ model coefficients.
   connection, live controls and channel replacement behaviour.
 
 Use [COLOR-PRESERVATION.md](COLOR-PRESERVATION.md) for the correction algorithm
-and GPU test, and the color diagnostic in README.md to inspect per-pass changes.
+and GPU test, and the color diagnostic in packaging/README.md to inspect
+per-pass changes.

@@ -98,18 +98,19 @@ check `sha256sum --check PACKAGE-SHA256SUMS` before installation.
 `licenses/SOURCES` identifies the corresponding source revision. Pull-request
 runs check the package without uploading it: their merge commit is temporary.
 
-## Install and import weights
+## Install
 
-After building, or after extracting a successful CI artifact, stop any running
-game and worker and install:
+After building, stop any running game and worker, then install from the
+checkout:
 
 ```bash
 python3 install.py
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-The same installer handles a source build or extracted CI archive and installs
-the worker, CLI, GUI, diagnostic, model importer and game launcher together.
-Installation defaults to `~/.local`:
+The same installer handles a source build or an extracted CI archive. It
+installs into `~/.local` by default; `install.py --help` describes prefix,
+build-directory and manifest overrides. It installs these commands:
 
 | Command | Purpose |
 |---|---|
@@ -120,116 +121,25 @@ Installation defaults to `~/.local`:
 | `dlsslop-setup` | Model coefficient importer |
 | `dlsslop-run` | Game launcher |
 
-The worker, CLI and GUI are installed executables, and the diagnostic and importer
-are Python programs. Only the game launcher uses Bash. The Vulkan manifest uses
-`$XDG_DATA_HOME/vulkan/implicit_layer.d`, or `~/.local/share/vulkan/implicit_layer.d`.
-`install.py --help` describes prefix, build-directory and manifest overrides.
-The layer activates only through the launch wrapper.
+It also installs the release README, [packaging/README.md](packaging/README.md),
+as `~/.local/share/doc/dlsslop-amd/README.md`. Check its runtime requirements,
+then follow it from "Set up the model" onward to import the model, start a game,
+use the controllers and run capture and color checks.
+[CONTROL-OPTIONS.md](CONTROL-OPTIONS.md) describes every setting and
+[COLOR-PRESERVATION.md](COLOR-PRESERVATION.md) the color correction.
 
-Runtime inference needs an RX 9070 XT / `gfx1201` device, a compatible Linux HIP
-runtime, access to `/dev/kfd` and the render device, and Mesa RADV with the normal
-`amdgpu` kernel driver. Run the HIP worker on the host, outside Steam's runtime
-container. `DLSSLOP_HIP_LIBRARY` can select a particular `libamdhip64.so`.
+## Source-tree notes
 
-Obtain compatible model coefficients separately, using the source project's
-[upstream instructions](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting).
-Import a local package or extracted model directory:
-
-```bash
-dlsslop-setup --source /path/to/model-package.zip
-```
-
-The importer and worker default to `$XDG_DATA_HOME/dlsslop-amd/model`, or
-`~/.local/share/dlsslop-amd/model` when `XDG_DATA_HOME` is unset or empty. Use the
-importer's `--output` and worker's `--assets` options for a different location.
-The importer reads coefficient files only, checks all 184 required tables and
-their exact sizes, and writes a SHA-256 inventory. It does not execute packaged
-Windows programs. Size checks do not establish numerical model compatibility.
-`dlsslop-setup --check ~/.local/share/dlsslop-amd/model` checks an imported
-model's sizes and its inventory again, for example after a disk error.
-Weights are external to this repository, its source licenses and CI artifacts.
-
-## Run
-
-Ensure `~/.local/bin` is on `PATH`, then check the device and real model:
-
-```bash
-dlsslopd --diagnose
-dlsslopd --tier 720 --self-test --output neural-test.ppm
-```
-
-The self-test checks codec agreement, output sanity and repeated identical-input
-inference. `--device N` selects a visible compatible HIP device. The worker finds
-HIP modules under `share/dlsslop-amd/HIP/gfx1201` relative to its executable
-prefix, with `assets/HIP/gfx1201` as the development fallback. Set
-`DLSSLOP_MODULES` or pass `-m` / `--modules` to select another directory.
-Start the worker after testing:
-
-```bash
-dlsslopd --tier 720
-```
-
-Wait for `worker ready`. With Proton GE selected, put this in the game's Steam
-launch options, replacing the home-directory placeholder:
-
-```text
-/home/YOUR_USER/.local/bin/dlsslop-run -- %command%
-```
-
-The target is native Linux Steam with 64-bit Vulkan, DXVK or vkd3d-proton games.
-Native Vulkan applications can also use the wrapper. OpenGL through WineD3D
-does not use this layer.
-
-From another terminal, use `dlsslop-gui` or the CLI:
-
-```bash
-dlsslopctl --status
-dlsslopctl --passes 2 --color-preserve 1
-dlsslopctl --enabled 0
-dlsslopctl --enabled 1
-dlsslopctl --quit
-```
-
-Use `--help` for options and defaults, and `--settings` for current/reset
-values. See [CONTROL-OPTIONS.md](CONTROL-OPTIONS.md) and
-[COLOR-PRESERVATION.md](COLOR-PRESERVATION.md). Start a fresh worker after
-`--quit`. Removing the Steam launch option disables the integration for that
-game. The native tools' default channel and launcher-selected layer log are
-under `/tmp/dlsslop-amd-UID/`, where `UID` is the current user's numeric ID.
-For separate concurrent sessions, give each worker, launcher and controller
-the same distinct `DLSSNR_SHM` path inside a private directory.
+The worker finds HIP modules under `share/dlsslop-amd/HIP/gfx1201` relative to
+its executable prefix, with `assets/HIP/gfx1201` as the development fallback.
+Set `DLSSLOP_MODULES` or pass `-m` / `--modules` to select another directory.
+`--device N` selects a visible compatible HIP device.
 
 The layer retains upstream `DLSSNR_*` environment names. Its shared runtime
 fallback is `/tmp/dlssnr-UID/`, with `DLSSNR_UID` overriding that ID; the
 native tools select their own default channel independently of `DLSSNR_UID`.
-
-## Scope and diagnostics
-
-`--tier` selects a 1280×720, 1600×900 or 1920×1080 neural raster; it does not
-change the game's resolution. The edit is composed against the native frame.
-Successive passes consume the previous output and add neural work; they do
-not guarantee better quality. Motion estimation is optional and disabled by
-default. HUDs are part of the image and can be altered. Capture, host staging
-and inference are synchronous, so this path adds latency and competes with the
-game for GPU time. It provides image transformation, not frame generation.
-
-`--hold 1` freezes the input for comparisons; `--hold 0` resumes. `--capture 3`
-requests matched before/after frames under `$XDG_STATE_HOME/dlssnr/captures`
-(default `~/.local/state/dlssnr/captures`). Capture batches are preserved.
-For raw per-pass color diagnosis, restart the worker with
-`--trace-dir "$HOME/.local/state/dlsslop-amd/color-trace"`, then run:
-
-```bash
-dlsslop-test --trace-dir "$HOME/.local/state/dlsslop-amd/color-trace" \
-    --output-dir color-report
-```
-
-The report directory must be new. The diagnostic holds one input, captures
-comparison stages, moves its capture batches and raw traces into the report
-and restores changed controls. Do not adjust controls during it. Raw tracing
-adds readbacks, disk use and timing overhead. Reports locate color shifts.
-Normal inference never substitutes an identity filter;
-`--test-identity` is an explicit transport-test mode. If no valid worker result
+Normal inference never substitutes an identity filter; `dlsslopd
+--test-identity` is an explicit transport-test mode. If no valid worker result
 arrives, the layer presents the original frame.
 
 When changing prepared upstream sources, use `scripts/update-source-patch.py`

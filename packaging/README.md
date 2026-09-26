@@ -49,11 +49,15 @@ Import your local ZIP or extracted coefficient directory:
 dlsslop-setup --source /path/to/model-package.zip
 ```
 
-The importer checks all 184 coefficient tables and their sizes. It imports only
-coefficient files. The default model directory is `$XDG_DATA_HOME/dlsslop-amd/model`,
-or `~/.local/share/dlsslop-amd/model`; `dlsslopd` uses the same default. To use a
-different directory, pass `--output DIR` to the importer and `--assets DIR` to
-the worker. The model's terms are separate from the software licenses.
+The importer checks all 184 coefficient tables and their sizes, imports only
+coefficient files and writes a SHA-256 inventory. It does not run packaged
+Windows programs, and size checks do not prove numerical compatibility.
+`dlsslop-setup --check DIR` checks an imported model's sizes and inventory
+again, for example after a disk error. The default model directory is
+`$XDG_DATA_HOME/dlsslop-amd/model`, or `~/.local/share/dlsslop-amd/model`;
+`dlsslopd` uses the same default. To use a different directory, pass
+`--output DIR` to the importer and `--assets DIR` to the worker. The model's
+terms are separate from the software licenses.
 
 ## Start a game
 
@@ -89,9 +93,14 @@ dlsslopctl --quit
 ```
 
 Start a fresh worker after `--quit`. Every command has `--help`; `dlsslopctl
---settings` lists the current settings and reset values. `--tier` selects the
-neural raster (720, 900 or 1080), independently of the game's resolution. Extra
-passes add GPU work and latency. HUDs are part of the image and may change.
+--settings` lists the current settings and reset values. `--tier` selects a
+1280×720, 1600×900 or 1920×1080 neural raster, independently of the game's
+resolution; the edit is composed against the native frame. Each extra pass
+consumes the previous output and adds GPU work and latency without guaranteeing
+better quality. Motion estimation is optional and off by default. HUDs are part
+of the image and may change. Capture, host staging and inference are
+synchronous, so the worker adds latency and competes with the game for GPU
+time. It transforms images; it does not generate frames.
 
 The worker, launcher and controllers use `/tmp/dlsslop-amd-UID/shm.bin`, where
 `UID` is your numeric user ID. The launcher writes the layer log beside that file.
@@ -102,7 +111,8 @@ the same distinct `DLSSNR_SHM` path inside a private directory.
 
 `dlsslopctl --hold 1` freezes input; `--hold 0` resumes it. `--capture 3` requests
 matched before/after frames under `$XDG_STATE_HOME/dlssnr/captures`, or
-`~/.local/state/dlssnr/captures` by default.
+`~/.local/state/dlssnr/captures` by default. Each request writes a new batch
+directory; earlier batches are kept.
 
 For per-pass color checks, restart the worker with tracing and keep a game running:
 
