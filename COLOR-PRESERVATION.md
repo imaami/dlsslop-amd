@@ -50,10 +50,10 @@ tests.
 The worker loads the module when correction is first enabled. Feedback never
 overwrites the encoded input, so the kernel reads it as the reference; it adds
 one kernel per pass on the inference stream, with no correction-related copies,
-host transfers or waits. Extra storage is 12 bytes per padded pixel,
-approximately 25.3 MiB at 1920×1152. A module that is missing or fails to
-load or launch stops the worker with an error. Strength zero skips correction
-work.
+host transfers or waits. Its output buffer, 12 bytes per padded pixel
+(approximately 25.3 MiB at 1920×1152), is shared with native tuning. A module
+that is missing or fails to load or launch stops the worker with an error.
+Strength zero skips correction work.
 
 Opt-in tracing records `color_preserve` and `pass-NN-color.pfm`. The
 automated color diagnostic disables preservation for its baseline comparisons

@@ -38,7 +38,7 @@ int main(int argc,char** argv)
     catch(const std::exception& e) {std::fprintf(stderr,"SKIP: %s\n",e.what());return 77;}
     auto& api=*holder;
     hip_probe::Handle stream=nullptr,start=nullptr,end=nullptr;
-    void* original=nullptr;void* raw=nullptr;
+    void* original=nullptr;void* raw=nullptr;void* output=nullptr;
     int result=0;
     try {
         api.Check(api.hipInit(0),"initialize HIP");
@@ -64,11 +64,17 @@ int main(int argc,char** argv)
             input[p*4+3]=1;
         }
         api.Check(api.hipMalloc(&original,input.size()*sizeof(float)),"allocate test input");
-        api.Check(api.hipMalloc(&raw,model.size()*sizeof(float)),"allocate test output");
+        api.Check(api.hipMalloc(&raw,model.size()*sizeof(float)),"allocate test model");
+        api.Check(api.hipMalloc(&output,model.size()*sizeof(float)),"allocate test output");
         api.Check(api.hipMemcpy(original,input.data(),input.size()*sizeof(float),1),"upload test reference");
         api.Check(api.hipMemcpy(raw,model.data(),model.size()*sizeof(float),1),"upload test model");
         {
             dlsslop::GpuColor color(api,stream,module,g.width,g.height);
+            // The kernel reads a neighbourhood of the model output, so it cannot run in place.
+            bool rejected=false;
+            try {color.apply(original,raw,raw,g,1);}
+            catch(const std::invalid_argument&) {rejected=true;}
+            if(!rejected) throw std::runtime_error("GPU correction accepted an in-place output");
             for(unsigned reference=0;reference<2;++reference) {
                 if(reference) {
                     // Each apply reads the caller's reference as it is when the kernel runs.
@@ -78,7 +84,7 @@ int main(int argc,char** argv)
                 }
                 for(float strength : {0.f,.25f,.5f,1.f}) {
                     dlsslop::preserve_color(input.data(),model.data(),g,strength,expected);
-                    void* output=color.apply(original,raw,g,strength);
+                    color.apply(original,raw,output,g,strength);
                     api.Check(api.hipStreamSynchronize(stream),"finish correction");
                     api.Check(api.hipMemcpy(actual.data(),output,actual.size()*sizeof(float),2),"read correction");
                     float worst=0;
@@ -93,7 +99,7 @@ int main(int argc,char** argv)
             api.Check(api.hipEventCreate(&start),"create start event");
             api.Check(api.hipEventCreate(&end),"create end event");
             api.Check(api.hipEventRecord(start,stream),"record start");
-            for(unsigned i=0;i<20;++i) color.apply(original,raw,g,1);
+            for(unsigned i=0;i<20;++i) color.apply(original,raw,output,g,1);
             api.Check(api.hipEventRecord(end,stream),"record end");
             api.Check(api.hipEventSynchronize(end),"wait for timing");
             float ms=0;api.Check(api.hipEventElapsedTime(&ms,start,end),"measure correction");
@@ -103,6 +109,7 @@ int main(int argc,char** argv)
     if(stream) api.hipStreamSynchronize(stream);
     if(end) api.hipEventDestroy(end);
     if(start) api.hipEventDestroy(start);
+    if(output) api.hipFree(output);
     if(raw) api.hipFree(raw);
     if(original) api.hipFree(original);
     if(stream) api.hipStreamDestroy(stream);

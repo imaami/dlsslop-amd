@@ -381,7 +381,7 @@ class Engine {
     void* device_input_ = nullptr; // The encoded frame, unchanged until the next one.
     void* device_feedback_ = nullptr; // Later passes' input, allocated for multi-pass.
     void* device_output_ = nullptr;
-    void* device_tuned_ = nullptr;
+    void* device_scratch_ = nullptr; // Tuning or colour: the other stage output.
     void* answer_ = nullptr; // The latest frame's final network answer.
     unsigned width_ = 0, height_ = 0;
     std::vector<float> encoded_, neural_, feedback_;
@@ -410,9 +410,9 @@ public:
         gpu_tuning_.reset();
         gpu_color_.reset();
         gpu_codec_.reset();
-        for (void* buffer : {device_input_, device_feedback_, device_output_, device_tuned_})
+        for (void* buffer : {device_input_, device_feedback_, device_output_, device_scratch_})
             if (buffer) api.hipFree(buffer);
-        device_input_ = device_feedback_ = device_output_ = device_tuned_ = answer_ = nullptr;
+        device_input_ = device_feedback_ = device_output_ = device_scratch_ = answer_ = nullptr;
         network_.reset();
     }
     void prepare()
@@ -490,13 +490,14 @@ public:
         if (!std::isfinite(settings.color_preserve) || settings.color_preserve < 0 || settings.color_preserve > 1)
             throw std::range_error("invalid color preservation strength");
         const bool tuned = !dlsslop::native_tuning_is_default(settings.tuning);
-        if (tuned && !gpu_tuning_) {
+        const bool colored = settings.color_preserve > 0;
+        if (tuned && !gpu_tuning_)
             gpu_tuning_ = std::make_unique<dlsslop::GpuTuning>(api, network_->Stream(), options_.modules + "/linux_tuning.hsaco");
-            api.Check(api.hipMalloc(&device_tuned_, size_t(width_) * height_ * 12), "allocate native tuning output");
-        }
-        if (settings.color_preserve > 0 && !gpu_color_)
+        if (colored && !gpu_color_)
             gpu_color_ = std::make_unique<dlsslop::GpuColor>(api, network_->Stream(),
                                                              options_.modules + "/linux_color.hsaco", width_, height_);
+        if ((tuned || colored) && !device_scratch_)
+            api.Check(api.hipMalloc(&device_scratch_, size_t(width_) * height_ * 12), "allocate post-processing output");
         if (passes > 1 && !device_feedback_)
             api.Check(api.hipMalloc(&device_feedback_, size_t(width_) * height_ * 16), "allocate inter-pass feedback");
         mark(0);
@@ -556,20 +557,26 @@ public:
                 std::snprintf(stage, sizeof stage, "pass-%02u", pass + 1);
                 trace_image(std::string(stage) + "-input", pass_input, 4);
             }
-            void* history = settings.motion ? temporal_->history(pass, pass_input) : nullptr;
-            network_->Enqueue(pass_input, history, device_output_, 0);
-            answer = device_output_;
-            if (trace) trace_image(std::string(stage) + "-raw", answer, 3);
+            // Stages alternate between two buffers, since tuning and colour read
+            // neighbours; with motion, the last writes the pass's history slot.
+            void* history = nullptr;
+            void* stages[] = {device_output_, device_scratch_, device_output_};
+            if (settings.motion) {
+                history = temporal_->history(pass, pass_input);
+                stages[tuned + colored] = temporal_->target(pass);
+            }
+            // Graph replay (upstream o.graph, off) would need one stable rgb_output.
+            network_->Enqueue(pass_input, history, stages[0], 0);
+            if (trace) trace_image(std::string(stage) + "-raw", stages[0], 3);
             if (tuned) {
-                gpu_tuning_->apply(g, pass_input, device_output_, device_tuned_, settings.tuning);
-                answer = device_tuned_;
-                if (trace) trace_image(std::string(stage) + "-tuned", answer, 3);
+                gpu_tuning_->apply(g, pass_input, stages[0], stages[1], settings.tuning);
+                if (trace) trace_image(std::string(stage) + "-tuned", stages[1], 3);
             }
-            if (settings.color_preserve > 0) {
-                answer = gpu_color_->apply(device_input_, answer, g, settings.color_preserve);
-                if (trace) trace_image(std::string(stage) + "-color", answer, 3);
+            if (colored) {
+                gpu_color_->apply(device_input_, stages[tuned], stages[1 + tuned], g, settings.color_preserve);
+                if (trace) trace_image(std::string(stage) + "-color", stages[1 + tuned], 3);
             }
-            if (settings.motion) temporal_->finish_pass(pass, answer);
+            answer = stages[tuned + colored];
             // The CPU codec, like the GPU one, rejects the nonfinite samples it reads.
             if (!gpu_codec_ || verify) {
                 network_->Synchronize();

@@ -13,12 +13,10 @@ static_assert(sizeof(Geometry) == 40 && offsetof(Geometry, x) == 24 &&
 class GpuColor {
     hip_probe::Api& api_;
     hip_probe::Handle stream_{}, module_{}, kernel_{};
-    void* output_{};
     unsigned width_{}, height_{};
     void release() noexcept
     {
         api_.hipStreamSynchronize(stream_);
-        if (output_) api_.hipFree(output_);
         if (module_) api_.hipModuleUnload(module_);
     }
     void validate(const Geometry& g) const
@@ -37,26 +35,26 @@ public:
         try {
             api_.Check(api_.LoadModule(&module_, path.c_str()), "load color preservation module");
             api_.Check(api_.hipModuleGetFunction(&kernel_, module_, "dlsslop_preserve_color"), "find color kernel");
-            api_.Check(api_.hipMalloc(&output_, std::size_t(width)*height*3*sizeof(float)), "allocate color output");
         } catch (...) { release(); throw; }
     }
     ~GpuColor() { release(); }
     GpuColor(const GpuColor&) = delete;
     GpuColor& operator=(const GpuColor&) = delete;
     // Queued on the inference stream; the caller keeps the frame's encoded
-    // input (the reference, original_rgba) unchanged until the kernel runs.
-    void* apply(const void* original_rgba, void* raw_rgb, const Geometry& g, float strength)
+    // input (the reference, original_rgba) and raw_rgb unchanged until the
+    // kernel runs. It reads neighbours, so output_rgb is a distinct buffer.
+    void apply(const void* original_rgba, const void* raw_rgb, void* output_rgb,
+               const Geometry& g, float strength)
     {
         validate(g);
-        if (!original_rgba || !raw_rgb || original_rgba == output_ || raw_rgb == output_ ||
-            !std::isfinite(strength) || strength < 0 || strength > 1)
+        if (!original_rgba || !raw_rgb || !output_rgb || output_rgb == original_rgba ||
+            output_rgb == raw_rgb || !std::isfinite(strength) || strength < 0 || strength > 1)
             throw std::invalid_argument("invalid color kernel arguments or buffer alias");
         Geometry geometry_arg = g;
-        void* arguments[] = {&original_rgba, &raw_rgb, &output_, &geometry_arg, &strength};
+        void* arguments[] = {&original_rgba, &raw_rgb, &output_rgb, &geometry_arg, &strength};
         const std::size_t pixels = std::size_t(width_)*height_;
         api_.Check(api_.hipModuleLaunchKernel(kernel_, unsigned((pixels+255)/256),1,1,
             256,1,1,0,stream_,arguments,nullptr), "apply GPU color preservation");
-        return output_;
     }
 };
 } // namespace dlsslop

@@ -156,7 +156,8 @@ inline void check_temporal(hip_probe::Api& api, hip_probe::Handle stream, const 
     temporal.begin(device_input.pointer, g, 2, 2, 1, 2);
     for (unsigned pass = 0; pass < 2; ++pass) {
         require(!temporal.history(pass, device_fallback.pointer), "GPU temporal first frame returned uninitialized history");
-        temporal.finish_pass(pass, results[pass]);
+        api.Check(api.hipMemcpyAsync(temporal.target(pass), results[pass], pixels * 12, 3, stream),
+                   "store GPU temporal self-test history");
     }
     temporal.end();
     temporal.begin(device_input.pointer, g, 2, 2, 1, 2);
@@ -168,7 +169,8 @@ inline void check_temporal(hip_probe::Api& api, hip_probe::Handle stream, const 
             expected[p * 4 + 3] = 1;
         }
         compare(warped, expected, "GPU static temporal history");
-        temporal.finish_pass(pass, results[pass]);
+        api.Check(api.hipMemcpyAsync(temporal.target(pass), results[pass], pixels * 12, 3, stream),
+                   "store GPU temporal self-test history");
     }
     temporal.end();
 
@@ -191,7 +193,8 @@ inline void check_temporal(hip_probe::Api& api, hip_probe::Handle stream, const 
                     pass + 1, good, tested);
         std::fflush(stdout);
         require(good * 10 > tested * 8, "GPU temporal translation/history isolation check failed");
-        temporal.finish_pass(pass, results[pass]);
+        api.Check(api.hipMemcpyAsync(temporal.target(pass), results[pass], pixels * 12, 3, stream),
+                   "store GPU temporal self-test history");
     }
     temporal.end();
 }

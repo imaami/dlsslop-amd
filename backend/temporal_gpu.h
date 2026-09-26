@@ -155,13 +155,14 @@ public:
         launch(warp_, geometry_.width * geometry_.height, args, "warp same-pass neural history");
         return warped_;
     }
-    void finish_pass(unsigned pass, void* rgb)
+    // Call after history() for this pass: the pass's final RGB answer goes
+    // here, where the next frame's warp for the same pass reads it.
+    void* target(unsigned pass)
     {
-        if (!pending_ || pass != completed_ || pass >= passes_ || !rgb)
-            throw std::logic_error("temporal finish pass order");
-        api_.Check(api_.hipMemcpyAsync(history_[pass], rgb,
-            std::size_t(geometry_.width) * geometry_.height * 12, 3, stream_), "retain per-pass neural history");
+        if (!pending_ || pass != completed_ || pass >= passes_)
+            throw std::logic_error("temporal target pass order");
         ++completed_;
+        return history_[pass];
     }
     void end()
     {
