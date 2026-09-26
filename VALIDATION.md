@@ -46,7 +46,7 @@ Inspect the CTest result for skips. These checks do not establish neural image
 quality. After the build described in README.md:
 
 ```bash
-QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure
 ```
 
 ## Hardware checks

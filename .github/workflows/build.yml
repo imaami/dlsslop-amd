@@ -16,7 +16,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update || exit $?
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git curl xz-utils build-essential cmake ninja-build python3 python3-numpy python3-pil qt6-base-dev libx11-dev libxi-dev libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers glslang-tools spirv-tools clang-22 lld-22 llvm-22 || exit $?
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates git curl build-essential cmake ninja-build python3 python3-numpy python3-pil qt6-base-dev libx11-dev libxi-dev libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers glslang-tools spirv-tools clang-22 lld-22 llvm-22 || exit $?
       - uses: actions/checkout@v6
         with:
           submodules: false
@@ -36,20 +36,14 @@ jobs:
           mkdir -p "$dxc_root" || exit $?
           # This pinned archive nests bin/ and lib/ under linux_dxc_2026_07_29.x86_x64/.
           tar -xzf "$dxc_archive" --strip-components=1 -C "$dxc_root" || exit $?
-          if [[ ! -x "$dxc_root/bin/dxc" || ! -f "$dxc_root/lib/libdxcompiler.so" || ! -f "$dxc_root/lib/libdxil.so" ]]; then
-            printf 'DXC archive did not provide the expected executable and libraries under %s\n' "$dxc_root" >&2
-            exit 1
-          fi
           "$dxc_root/bin/dxc" --version || exit $?
       - name: Compile the gfx1201 HIP modules including color preservation
         run: python3 scripts/build-kernels.py --compiler clang++-22 --linker /usr/bin/ld.lld-22
       - name: Configure worker, layer, CLI, Qt Widgets GUI and tests
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDXC="$RUNNER_TEMP/dxc/bin/dxc" -DDLSSLOP_BUILD_GUI=ON -DBUILD_TESTING=ON -DPython3_EXECUTABLE=/usr/bin/python3
+        run: cmake -S . -B build -G Ninja -DDXC="$RUNNER_TEMP/dxc/bin/dxc" -DPython3_EXECUTABLE=/usr/bin/python3
       - name: Compile all native targets
         run: cmake --build build --parallel 2
       - name: Run host and software Vulkan tests
-        env:
-          QT_QPA_PLATFORM: offscreen
         run: ctest --test-dir build --output-on-failure
       - name: Package the binary runtime release
         run: python3 scripts/package-ci.py

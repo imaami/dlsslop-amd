@@ -62,7 +62,7 @@ on Ubuntu 26.04. Its build dependencies are:
 ```bash
 sudo apt-get update
 sudo apt-get install --no-install-recommends \
-    ca-certificates git curl xz-utils build-essential cmake ninja-build \
+    ca-certificates git curl build-essential cmake ninja-build \
     python3 python3-numpy python3-pil qt6-base-dev libx11-dev libxi-dev \
     libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers glslang-tools \
     spirv-tools clang-22 lld-22 llvm-22
@@ -74,10 +74,10 @@ the archive's top-level directory), then build from the prepared checkout:
 
 ```bash
 python3 scripts/build-kernels.py --compiler clang++-22 --linker /usr/bin/ld.lld-22
-cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDXC="$DXC_DIR/bin/dxc" \
-    -DDLSSLOP_BUILD_GUI=ON -DBUILD_TESTING=ON -DPython3_EXECUTABLE=/usr/bin/python3
+cmake -S . -B build -G Ninja -DDXC="$DXC_DIR/bin/dxc" \
+    -DPython3_EXECUTABLE=/usr/bin/python3
 cmake --build build --parallel 2
-QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure
 ```
 
 This compiles and validates ten Vulkan shaders, compiles the `gfx1201` HIP modules

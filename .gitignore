@@ -1,18 +1,9 @@
-# Generated sources, build outputs and model assets.
+# Generated sources and build outputs.
 /upstream-layer/
 /kernels/
 /backend/vendor/
 /.prepared-sources.json
 /build*/
 /assets/HIP/
-/assets/weights/
-*.bin
-*.safetensors
-*.onnx
-*.pt
-*.pth
 __pycache__/
-*.pyc
 /dist/
-/CI-BUILD.json
-/PACKAGE-SHA256SUMS
