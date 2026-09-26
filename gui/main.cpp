@@ -27,7 +27,6 @@
 #include <QVBoxLayout>
 #include <algorithm>
 #include <cstdio>
-#include <cstdlib>
 #include <functional>
 #include <getopt.h>
 #include <vector>
@@ -413,8 +412,7 @@ public:
 
 int main(int argc, char** argv)
 {
-    const char* environment = std::getenv("DLSSNR_SHM");
-    std::string path = environment && *environment ? environment : ShmNativeDefaultPath();
+    std::string path = ShmNativeChannelPath();
     const option options[] = {{"shm", required_argument, nullptr, 's'}, {"help", no_argument, nullptr, 'h'}, {nullptr, 0, nullptr, 0}};
     int code;
     // Parse help before QApplication, so --help works without a display server.

@@ -70,7 +70,7 @@ std::string default_modules()
 }
 
 struct Options {
-    std::string assets, modules, shm = ShmNativeDefaultPath();
+    std::string assets, modules, shm = ShmNativeChannelPath();
     std::string input, output, trace_dir;
     unsigned tier = kNativeDefaultTier, width = 0, height = 0, self_test_runs = 10;
     unsigned passes = kNativeDefaultPasses;
@@ -84,7 +84,6 @@ Options default_options()
     Options o;
     o.assets = default_assets();
     o.modules = default_modules();
-    if (const char* path = std::getenv("DLSSNR_SHM"); path && *path) o.shm = path;
     return o;
 }
 

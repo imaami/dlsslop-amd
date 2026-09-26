@@ -80,7 +80,7 @@ index eee312c..78542b8 100644
  };
  }
 diff --git a/upstream-layer/common/shm_protocol.h b/upstream-layer/common/shm_protocol.h
-index fd7c1cd..4ec527a 100644
+index fd7c1cd..83d0ceb 100644
 --- a/upstream-layer/common/shm_protocol.h
 +++ b/upstream-layer/common/shm_protocol.h
 @@ -14,11 +14,11 @@
@@ -135,7 +135,7 @@ index fd7c1cd..4ec527a 100644
      kHdrForce = 2,  // float16 proxy even for an SDR swapchain (an A/B tool, not a preference)
  };
  
-@@ -203,6 +207,14 @@ inline std::string ShmRuntimeDir() {
+@@ -203,6 +207,20 @@ inline std::string ShmRuntimeDir() {
  
  inline std::string ShmDefaultPath() { return ShmRuntimeDir() + "/shm.bin"; }
  
@@ -145,12 +145,18 @@ index fd7c1cd..4ec527a 100644
 +inline std::string ShmNativeDefaultPath() {
 +    return "/tmp/dlsslop-amd-" + std::to_string(static_cast<unsigned>(getuid())) + "/shm.bin";
 +}
++
++// Nonempty DLSSNR_SHM, otherwise the native default.
++inline std::string ShmNativeChannelPath() {
++    const char* path = std::getenv("DLSSNR_SHM");
++    return path && *path ? path : ShmNativeDefaultPath();
++}
 +#endif
 +
  inline size_t ShmTotalBytes() { return kHeaderBytes + kMaxFrame * 2; }
  
  // One pass's overrides. Every field is present; `overrideMask` says which of them mean anything.
-@@ -316,7 +328,7 @@ struct ShmHeader {
+@@ -316,7 +334,7 @@ struct ShmHeader {
      // Only useful where the layer can read the keyboard at all: an X11 or XWayland session, inside
      // gamescope, or anywhere the user is in the 'input' group. A game presenting through winewayland
      // is a Wayland client whose keys never reach this process, and keyboards get no uaccess ACL, so
@@ -159,7 +165,7 @@ index fd7c1cd..4ec527a 100644
      std::atomic<uint32_t> toggleKey;
  
      // Which proxy the model is shown, and whether its answer is composed or substituted. See
-@@ -457,10 +469,9 @@ struct ShmHeader {
+@@ -457,10 +475,9 @@ struct ShmHeader {
      std::atomic<uint32_t> hdrActive;
      std::atomic<uint32_t> proxyFormat;
      // What the proxy bytes in the shared region actually are for the request being made: the layer
@@ -173,7 +179,7 @@ index fd7c1cd..4ec527a 100644
      std::atomic<uint32_t> hdrEncode;
  
      // trip, which is what it has always been; N takes an answer up only on a frame whose count is a
-@@ -533,6 +544,12 @@ struct ShmHeader {
+@@ -533,6 +550,12 @@ struct ShmHeader {
      std::atomic<uint32_t> sdr16Multipass;
      std::atomic<uint32_t> mvecPixelSize;
  
@@ -186,7 +192,7 @@ index fd7c1cd..4ec527a 100644
  };
  
  static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region");
-@@ -548,7 +565,7 @@ static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region")
+@@ -548,7 +571,7 @@ static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region")
  // The version check already existed to prevent exactly that; what was missing was anything to make
  // someone remember to use it. If these fire, the layout changed: bump kShmVersion in the same commit,
  // then update these numbers.
@@ -195,7 +201,7 @@ index fd7c1cd..4ec527a 100644
  
  static_assert(offsetof(ShmHeader, enabled) == 44, "layout changed -- bump kShmVersion");
  static_assert(offsetof(ShmHeader, transferStrengthBits) == 88, "layout changed -- bump kShmVersion");
-@@ -733,6 +750,19 @@ inline void ShmInitDefaults(ShmHeader* h) {
+@@ -733,6 +756,19 @@ inline void ShmInitDefaults(ShmHeader* h) {
      }
  }
  
@@ -2149,10 +2155,10 @@ index f4579c1..d4fba4b 100644
      X(vkGetPhysicalDeviceMemoryProperties2)                                                        \
      X(vkGetPhysicalDeviceProperties2)
 diff --git a/upstream-layer/tools/shmctl.cpp b/upstream-layer/tools/shmctl.cpp
-index 4e16702..1e0b3bf 100644
+index 4e16702..7ad34ef 100644
 --- a/upstream-layer/tools/shmctl.cpp
 +++ b/upstream-layer/tools/shmctl.cpp
-@@ -1,168 +1,312 @@
+@@ -1,168 +1,306 @@
 -// dlssnr-shmctl — read and write the shared-memory header from shell.
 -//
 -// This exists because the helper CLI used to poke the header with
@@ -2271,7 +2277,7 @@ index 4e16702..1e0b3bf 100644
 +    }
  };
  
--void Usage() {
+ void Usage() {
 -    std::fprintf(stderr,
 -                 "usage: dlssnr-shmctl <shm-path> <command> [args]\n"
 -                 "\n"
@@ -2286,18 +2292,6 @@ index 4e16702..1e0b3bf 100644
 -                 "  settings        list the settings and their current values\n");
 -    std::fprintf(stderr, "\nsettings:\n");
 -    for (const auto& s : kSettings) std::fprintf(stderr, "  %-16s %s\n", s.name, s.help);
-+std::string DefaultPath() {
-+    const char* path = std::getenv("DLSSNR_SHM");
-+    if (path && *path) return path;
-+    return ShmNativeDefaultPath();
- }
- 
--// Maps the header only. The two pixel regions are megabytes and nothing here reads them.
--ShmHeader* MapHeader(const char* path, bool create, void** base, int* fdOut) {
--    const int flags = create ? (O_RDWR | O_CREAT) : O_RDWR;
--    const int fd = open(path, flags, 0600);
--    if (fd < 0) return nullptr;
-+void Usage() {
 +    ShmHeader defaults{};
 +    ShmInitNativeDefaults(&defaults);
 +    std::printf(
@@ -2321,7 +2315,7 @@ index 4e16702..1e0b3bf 100644
 +        "  -T, --toggle-enabled    Toggle enabled once, useful for a key binding (default: off)\n"
 +        "  -A, --toggle NAME       Toggle a boolean setting once; repeat for different settings (default: none)\n"
 +        "  -h, --help              Print help without accessing the channel (default: off)\n"
-+        "\nSettings (all require a value):\n", DefaultPath().c_str(), kCapture.minimum, kCapture.maximum);
++        "\nSettings (all require a value):\n", ShmNativeChannelPath().c_str(), kCapture.minimum, kCapture.maximum);
 +    for (const auto& s : kSettings)
 +        std::printf("  -%c, --%-18s VALUE  %s\n"
 +                    "                                Range: %g..%g; default: %g\n",
@@ -2356,8 +2350,14 @@ index 4e16702..1e0b3bf 100644
 +        "  dlsslopctl --passes 2\n"
 +        "  dlsslopctl -e 0\n"
 +        "  dlsslopctl --reset --settings\n", kNativeDefaultTier);
-+}
+ }
  
+-// Maps the header only. The two pixel regions are megabytes and nothing here reads them.
+-ShmHeader* MapHeader(const char* path, bool create, void** base, int* fdOut) {
+-    const int flags = create ? (O_RDWR | O_CREAT) : O_RDWR;
+-    const int fd = open(path, flags, 0600);
+-    if (fd < 0) return nullptr;
+-
 -    struct stat st {};
 -    if (fstat(fd, &st) != 0) {
 -        close(fd);
@@ -2381,19 +2381,19 @@ index 4e16702..1e0b3bf 100644
      }
 +    return true;
 +}
-+
-+const Setting* FindSetting(const char* name) {
-+    for (const auto& setting : kSettings)
-+        if (!std::strcmp(name, setting.name)) return &setting;
-+    return nullptr;
-+}
  
 -    if ((size_t) st.st_size < ShmTotalBytes()) {
 -        if (!create) {  // nothing has ever attached; there is nothing to talk to
 -            close(fd);
 -            return nullptr;
++const Setting* FindSetting(const char* name) {
++    for (const auto& setting : kSettings)
++        if (!std::strcmp(name, setting.name)) return &setting;
++    return nullptr;
++}
++
 +bool ParseOptions(int argc, char** argv, Options& options) {
-+    options.path = DefaultPath();
++    options.path = ShmNativeChannelPath();
 +    std::vector<option> longOptions = {
 +        {"shm", required_argument, nullptr, 's'},
 +        {"status", no_argument, nullptr, 'S'},
@@ -2504,8 +2504,8 @@ index 4e16702..1e0b3bf 100644
 -        if (s.isFloat) std::printf("%s=%g\n", s.name, double(BitsToFloat(raw)));
 -        else std::printf("%s=%u\n", s.name, raw);
 +bool CreateDefaultDirectory(const std::string& path) {
-+    const std::string directory = "/tmp/dlsslop-amd-" + std::to_string(getuid());
-+    if (path != directory + "/shm.bin") return true;
++    if (path != ShmNativeDefaultPath()) return true;
++    const std::string directory = path.substr(0, path.rfind('/'));
 +    if (mkdir(directory.c_str(), 0700) && errno != EEXIST) return false;
 +    struct stat st {};
 +    if (lstat(directory.c_str(), &st)) return false;
@@ -2597,7 +2597,7 @@ index 4e16702..1e0b3bf 100644
  }
  
  void PrintStatus(const ShmHeader* h) {
-@@ -171,11 +315,20 @@ void PrintStatus(const ShmHeader* h) {
+@@ -171,11 +309,20 @@ void PrintStatus(const ShmHeader* h) {
      if (!Initialised(h)) return;
      std::printf("seq_req=%u\nseq_resp=%u\n", h->seq_req.load(), h->seq_resp.load());
      std::printf("width=%u\nheight=%u\n", h->width.load(), h->height.load());
@@ -2620,7 +2620,7 @@ index 4e16702..1e0b3bf 100644
      std::printf("layer_pid=%u\nlayer_composition_up=%u\nlayer_frames=%llu\nlayer_ms=%.2f\n",
                  h->layerPid.load(),
                  h->layerCompositionUp.load(),
-@@ -189,99 +342,62 @@ void PrintStatus(const ShmHeader* h) {
+@@ -189,99 +336,62 @@ void PrintStatus(const ShmHeader* h) {
      if (!reason.empty()) std::printf("helper_reason=%s\n", reason.c_str());
  }
  
