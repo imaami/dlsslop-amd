@@ -1,0 +1,105 @@
+# .coderabbit.yaml -- dlsslop-amd review rules, first version.
+# NOTE: a committed config replaces the Organization UI settings
+# entirely for this repo, so the review profile is restated here.
+tone_instructions: >-
+  Terse and technical. Findings only, no praise, no restating the
+  diff. When a house rule from path instructions conflicts with a
+  general best practice, the house rule wins.
+reviews:
+  profile: assertive
+  path_instructions:
+    - path: "**"
+      instructions: >-
+        Performance is the point of this project: extra copies, syncs,
+        allocations or full-image passes on the per-frame path are
+        defects. Deletion bias: prefer suggestions that shrink the
+        diff and the binary, unless less code costs runtime. House
+        style prefers lookup tables over branch ladders, never testing
+        the same condition twice in one function, and at most two
+        nesting levels via guard clauses. AGENTS.md is binding:
+        getopt-style short and long options with every default in
+        --help generated from the definitions used at
+        initialization; no `using namespace`; "\n" rather than
+        std::endl.
+    - path: "{backend,common,layer}/**/*.{cpp,h,hip}"
+      instructions: >-
+        C++17 worker and project headers; HIP kernels are compiled by
+        clang for gfx1201 (wave32). Check GPU stream ordering,
+        host/device synchronization and buffer lifetimes, and races on
+        the cross-process shared-memory channel: the layer can rewrite
+        it while the worker runs, and values read from it are
+        validated once where they are read -- do not ask for internal
+        re-checks that hold by construction. Bit-exactness is a
+        contract: default native tuning preserves the raw network
+        output bit for bit and the GPU codec matches its CPU reference
+        exactly; flag changes that alter output without saying so.
+        Qt never enters the worker or the layer.
+    - path: "patches/linux-integration.patch"
+      instructions: >-
+        Project hunks applied to pinned upstream sources
+        (upstreams.lock.json); upstream-layer/, kernels/ and
+        backend/vendor/ are generated projections and not tracked.
+        Upstream lines change only for a real bug that cannot be
+        fixed otherwise or a significant performance gain, and the
+        commit says why; upstream names and contracts are preserved.
+        Review the changed hunks, not the surrounding upstream code;
+        never suggest restyling upstream or vendored code, including
+        the densely formatted vendored HIP network.
+    - path: "gui/**"
+      instructions: >-
+        Qt 6 Widgets controller; Qt stays at this boundary. The
+        settings metadata comes from the shared settings table, not
+        from GUI re-declarations.
+    - path: "tests/**"
+      instructions: >-
+        Test code is exempt from the production style rules by
+        maintainer policy. Repetition, long functions, short
+        identifiers, boilerplate and duplicated assertions are all
+        acceptable; more checks are always welcome. Review only
+        functional correctness: wrong expectations, race conditions,
+        unchecked failure paths, tests that cannot fail. Do not raise
+        readability, naming, length or duplication findings here.
+    - path: "**/*_test.cpp"
+      instructions: >-
+        Same test-code exemption as tests/**: review only functional
+        correctness.
+    - path: "{scripts/**,install.py}"
+      instructions: >-
+        Python 3 tooling and the Bash launcher. Python CLIs use
+        argparse with short and long options and state every default
+        in --help. Bash scripts use #!/usr/bin/bash, Bash
+        conditionals and arrays, no global set -e or set -u, and
+        handle consequential errors explicitly while preserving
+        arguments and exit status; do not suggest POSIX-sh rewrites.
+    - path: ".claude/skills/**/*.sh"
+      instructions: >-
+        Bash by choice; do not suggest POSIX-sh portability rewrites.
+        Entry-point scripts pair with a sourcing-only library: lib.sh
+        deliberately has no shebang, is not executable, and contains
+        only function definitions -- never flag the missing shebang,
+        "unused" functions, or variables (e.g. BOT) that the sourcing
+        entry point assigns. gh api --jq filters splice shell
+        variables into the jq program text because gojq has no --arg
+        plumbing; the spliced values are repo-controlled constants,
+        not user input.
+    - path: ".github/gpt-review/**"
+      instructions: >-
+        Comment-triggered reviewer ported from the srtview repository.
+        It runs from the default branch with a secret and must never
+        check out, build or execute the PR head. review.sh and
+        sweep.sh keep set -euo pipefail by design; that is a recorded
+        exception to the AGENTS.md shell rule.
+    - path: "**/CMakeLists.txt"
+      instructions: >-
+        Shader headers and SPIR-V are generated from the prepared
+        sources with DXC and glslangValidator and are never committed;
+        do not suggest committing them.
+  tools:
+    # clang-tidy's default checks (readability-identifier-length,
+    # braces-around-statements, init-variables) contradict the house
+    # style; the build already runs gcc with -Wall -Wextra.
+    clang:
+      enabled: false
+knowledge_base:
+  learnings:
+    scope: local
