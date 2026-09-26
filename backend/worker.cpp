@@ -289,7 +289,7 @@ int select_device(int requested)
 }
 
 class Mapping {
-    struct Descriptor { int fd = -1; ~Descriptor() { if (fd >= 0) close(fd); } } file_;
+    dlsslop::Descriptor file_;
 public:
     ShmHeader* h = nullptr;
     uint8_t* input = nullptr;
@@ -703,7 +703,7 @@ void run_worker(const Options& o)
     auto* h = mapping.h;
     std::unique_ptr<dlsslop::TraceRequests> traces;
     if (!o.trace_dir.empty())
-        traces = std::make_unique<dlsslop::TraceRequests>(o.trace_dir, o.shm, kShmVersion);
+        traces = std::make_unique<dlsslop::TraceRequests>(o.trace_dir, o.shm);
     std::unique_ptr<dlsslop::FrameTrace> pending_trace;
     const auto raster = dlsslop::geometry(1, 1, o.tier);
     h->passes.store(o.passes);
@@ -856,8 +856,7 @@ void run_worker(const Options& o)
                 if (o.once) break;
             } catch (const std::exception& e) {
                 if (pending_trace) {
-                    pending_trace->fail(e.what());
-                    pending_trace->finish("{\"frame_seq\":" + std::to_string(request) + "}");
+                    pending_trace->finish("{\"frame_seq\":" + std::to_string(request) + "}", e.what());
                     pending_trace.reset();
                 }
                 if (failure != e.what()) { // Report a persistent rejection once, not every frame.

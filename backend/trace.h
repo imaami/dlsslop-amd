@@ -1,16 +1,12 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "codec.h"
-#include <algorithm>
-#include <array>
-#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
-#include <limits>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -84,6 +80,9 @@ inline bool trace_valid_token(const std::string& token)
     return token != "request"; // DIR/request is the request file itself
 }
 
+// Owns a descriptor, and with it any flock on the file.
+struct Descriptor { int fd = -1; ~Descriptor() { if (fd >= 0) close(fd); } };
+
 // Creates DIR as 0700, or accepts an existing real directory the current user
 // owns with exactly that mode, so no other user can plant or swap files in it.
 inline void private_directory(const std::filesystem::path& directory, const char* what)
@@ -108,50 +107,11 @@ inline void trace_write_text(const std::filesystem::path& file, const std::strin
     std::filesystem::rename(temporary, file);
 }
 
-struct TraceStats {
-    std::array<double, 3> sum{}, minimum{}, maximum{};
-    std::array<std::uint64_t, 3> finite{}, at_zero{}, at_one{}, nonfinite{};
-    std::uint64_t pixels = 0;
-    TraceStats() {
-        minimum.fill(std::numeric_limits<double>::infinity());
-        maximum.fill(-std::numeric_limits<double>::infinity());
-    }
-    void add(const float* rgb) {
-        ++pixels;
-        for (unsigned c = 0; c < 3; ++c) {
-            const double value = rgb[c];
-            if (!std::isfinite(value)) { ++nonfinite[c]; continue; }
-            ++finite[c]; sum[c] += value;
-            minimum[c] = std::min(minimum[c], value);
-            maximum[c] = std::max(maximum[c], value);
-            at_zero[c] += value <= 0; at_one[c] += value >= 1;
-        }
-    }
-    std::string json() const {
-        std::ostringstream out;
-        out << std::setprecision(17) << "{\"pixels\":" << pixels << ",\"channels\":[";
-        for (unsigned c = 0; c < 3; ++c) {
-            if (c) out << ',';
-            out << "{\"finite\":" << finite[c] << ",\"nonfinite\":" << nonfinite[c]
-                << ",\"at_or_below_zero\":" << at_zero[c] << ",\"at_or_above_one\":" << at_one[c]
-                << ",\"mean\":";
-            if (finite[c]) out << sum[c] / double(finite[c]); else out << "null";
-            out << ",\"min\":";
-            if (finite[c]) out << minimum[c]; else out << "null";
-            out << ",\"max\":";
-            if (finite[c]) out << maximum[c]; else out << "null";
-            out << '}';
-        }
-        out << "]}";
-        return out.str();
-    }
-};
-
 // PFM is bottom-up RGB float32. Negative scale identifies little-endian data.
 // Retain model-domain values, including signed/extended values and NaNs: this
 // is evidence, not a preview image, and no display transform is applied.
-inline TraceStats trace_write_pfm(const std::filesystem::path& file, const float* data,
-                                  const Geometry& g, unsigned channels)
+inline void trace_write_pfm(const std::filesystem::path& file, const float* data,
+                            const Geometry& g, unsigned channels)
 {
     if (!data || (channels != 3 && channels != 4) || !fits(g))
         throw std::invalid_argument("invalid diagnostic image geometry");
@@ -159,62 +119,51 @@ inline TraceStats trace_write_pfm(const std::filesystem::path& file, const float
     const bool little = *reinterpret_cast<const unsigned char*>(&endian) == 1;
     std::ofstream out(file, std::ios::binary);
     out << "PF\n" << g.fit_width << ' ' << g.fit_height << '\n' << (little ? "-1.0\n" : "1.0\n");
-    TraceStats stats;
     std::vector<float> row(std::size_t(g.fit_width) * 3);
     for (unsigned iy = g.fit_height; iy-- > 0;) {
-        for (unsigned x = 0; x < g.fit_width; ++x) {
-            const float* rgb = data + (std::size_t(g.y + iy) * g.width + g.x + x) * channels;
-            std::memcpy(row.data() + std::size_t(x) * 3, rgb, 3 * sizeof(float));
-            stats.add(rgb);
-        }
+        const float* source = data + (std::size_t(g.y + iy) * g.width + g.x) * channels;
+        for (unsigned x = 0; x < g.fit_width; ++x)
+            std::memcpy(row.data() + std::size_t(x) * 3, source + std::size_t(x) * channels, 3 * sizeof(float));
         out.write(reinterpret_cast<const char*>(row.data()), static_cast<std::streamsize>(row.size() * sizeof(float)));
     }
     out.close();
     if (!out) throw std::runtime_error("write diagnostic image: " + file.string());
-    return stats;
 }
 
 class FrameTrace {
     std::filesystem::path directory_;
-    std::vector<std::string> stages_;
+    std::string stages_; // Comma-separated JSON stage objects.
     std::string error_;
     bool finished_ = false;
 public:
     explicit FrameTrace(const std::filesystem::path& directory) : directory_(directory) {
-        if (!std::filesystem::create_directory(directory_))
-            throw std::runtime_error("diagnostic token already exists: " + directory_.string());
-        if (chmod(directory_.c_str(), 0700))
-            throw std::runtime_error("make diagnostic directory private");
+        if (mkdir(directory_.c_str(), 0700))
+            throw std::runtime_error("create diagnostic directory " + directory_.string() + ": " + std::strerror(errno));
     }
     FrameTrace(const FrameTrace&) = delete;
     // A claimed request always gets its summary and marker, even when the
     // worker stops or unwinds first; the client need not wait for a timeout.
     ~FrameTrace() {
-        if (finished_) return;
-        if (error_.empty()) error_ = "worker stopped before a traced frame completed";
-        finish("{}");
+        if (!finished_) finish("{}", error_.empty() ? "worker stopped before a traced frame completed" : nullptr);
     }
+    // After a failed stage, the frame's later stages are not written.
     void image(const std::string& name, const float* data, const Geometry& g, unsigned channels) noexcept {
         if (!error_.empty()) return;
         try {
-            const auto stats = trace_write_pfm(directory_ / (name + ".pfm"), data, g, channels);
-            stages_.push_back("{\"name\":" + trace_json_string(name) + ",\"file\":" +
-                trace_json_string(name + ".pfm") + ",\"stats\":" + stats.json() + "}");
+            trace_write_pfm(directory_ / (name + ".pfm"), data, g, channels);
+            stages_ += (stages_.empty() ? "{\"name\":" : ",{\"name\":") + trace_json_string(name) +
+                ",\"file\":" + trace_json_string(name + ".pfm") + "}";
         } catch (const std::exception& error) { error_ = error.what(); }
     }
-    void finish(const std::string& metadata) noexcept {
+    // A failure replaces any error a stage recorded.
+    void finish(const std::string& metadata, const char* failure = nullptr) noexcept {
         finished_ = true;
         try {
-            std::ostringstream out;
-            out << "{\"schema\":1,\"status\":" << trace_json_string(error_.empty() ? "complete" : "failed")
-                << ",\"encoding\":\"display-encoded network RGB; not linear light\",\"metadata\":"
-                << metadata << ",\"error\":" << trace_json_string(error_) << ",\"stages\":[";
-            for (std::size_t i = 0; i < stages_.size(); ++i) {
-                if (i) out << ',';
-                out << stages_[i];
-            }
-            out << "]}\n";
-            trace_write_text(directory_ / "summary.json", out.str());
+            if (failure) error_ = failure;
+            trace_write_text(directory_ / "summary.json", "{\"schema\":1,\"status\":" +
+                trace_json_string(error_.empty() ? "complete" : "failed") +
+                ",\"encoding\":\"display-encoded network RGB; not linear light\",\"metadata\":" + metadata +
+                ",\"error\":" + trace_json_string(error_) + ",\"stages\":[" + stages_ + "]}\n");
             // A watcher on the opt-in root sees this atomic marker even though
             // image/summary creation happens one directory below its watch.
             trace_write_text(directory_.parent_path() / (directory_.filename().string() + ".done"),
@@ -223,38 +172,28 @@ public:
             std::fprintf(stderr, "diagnostic trace incomplete: %s\n", error.what());
         }
     }
-    void fail(const std::string& error) { error_ = error; }
 };
 
 // Only constructed in explicit --trace-dir mode. A request file contains one
 // unique token. Atomic rename claims it once; summaries are committed last.
 class TraceRequests {
     std::filesystem::path directory_;
-    int lock_ = -1;
+    Descriptor lock_;
 public:
-    TraceRequests(const std::string& directory, const std::string& shm, unsigned version)
+    TraceRequests(const std::string& directory, const std::string& shm)
         : directory_(std::filesystem::absolute(directory)) {
         private_directory(directory_, "trace");
-        lock_ = open((directory_ / ".worker-lock").c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
-        if (lock_ < 0 || flock(lock_, LOCK_EX | LOCK_NB)) {
-            if (lock_ >= 0) close(lock_);
-            lock_ = -1;
+        lock_.fd = open((directory_ / ".worker-lock").c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+        if (lock_.fd < 0 || flock(lock_.fd, LOCK_EX | LOCK_NB))
             throw std::runtime_error("trace directory is unavailable or owned by another worker");
-        }
-        try {
-            trace_write_text(directory_ / "owner.json", "{\"pid\":" + std::to_string(getpid()) +
-                ",\"shm\":" + trace_json_string(std::filesystem::absolute(shm).string()) +
-                ",\"protocol_version\":" + std::to_string(version) +
-                ",\"trace_metadata_schema\":" + std::to_string(kTraceMetadataSchema) + "}\n");
-        } catch (...) { close(lock_); lock_ = -1; throw; }
+        trace_write_text(directory_ / "owner.json", "{\"pid\":" + std::to_string(getpid()) +
+            ",\"shm\":" + trace_json_string(std::filesystem::absolute(shm).string()) +
+            ",\"trace_metadata_schema\":" + std::to_string(kTraceMetadataSchema) + "}\n");
     }
     TraceRequests(const TraceRequests&) = delete;
     ~TraceRequests() {
-        if (lock_ >= 0) {
-            std::error_code ignored;
-            std::filesystem::remove(directory_ / "owner.json", ignored);
-            close(lock_);
-        }
+        std::error_code ignored;
+        std::filesystem::remove(directory_ / "owner.json", ignored);
     }
     std::unique_ptr<FrameTrace> take() {
         const auto claimed = directory_ / (".request-" + std::to_string(getpid()));
