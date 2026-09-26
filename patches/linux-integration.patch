@@ -2149,10 +2149,10 @@ index f4579c1..d4fba4b 100644
      X(vkGetPhysicalDeviceMemoryProperties2)                                                        \
      X(vkGetPhysicalDeviceProperties2)
 diff --git a/upstream-layer/tools/shmctl.cpp b/upstream-layer/tools/shmctl.cpp
-index 4e16702..a2ff9e3 100644
+index 4e16702..1e0b3bf 100644
 --- a/upstream-layer/tools/shmctl.cpp
 +++ b/upstream-layer/tools/shmctl.cpp
-@@ -1,168 +1,321 @@
+@@ -1,168 +1,312 @@
 -// dlssnr-shmctl — read and write the shared-memory header from shell.
 -//
 -// This exists because the helper CLI used to poke the header with
@@ -2177,7 +2177,6 @@ index 4e16702..a2ff9e3 100644
  #include <cstring>
  #include <fcntl.h>
 +#include <getopt.h>
-+#include <linux/input-event-codes.h>
 +#include <string>
  #include <sys/mman.h>
  #include <sys/stat.h>
@@ -2298,10 +2297,10 @@ index 4e16702..a2ff9e3 100644
 -    const int flags = create ? (O_RDWR | O_CREAT) : O_RDWR;
 -    const int fd = open(path, flags, 0600);
 -    if (fd < 0) return nullptr;
-+void Usage(FILE* stream) {
++void Usage() {
 +    ShmHeader defaults{};
 +    ShmInitNativeDefaults(&defaults);
-+    std::fprintf(stream,
++    std::printf(
 +        "Usage: dlsslopctl [OPTION]...\n"
 +        "       dlssnr-shmctl [OPTION]...\n"
 +        "\n"
@@ -2323,16 +2322,12 @@ index 4e16702..a2ff9e3 100644
 +        "  -A, --toggle NAME       Toggle a boolean setting once; repeat for different settings (default: none)\n"
 +        "  -h, --help              Print help without accessing the channel (default: off)\n"
 +        "\nSettings (all require a value):\n", DefaultPath().c_str(), kCapture.minimum, kCapture.maximum);
-+    for (const auto& s : kSettings) {
-+        std::fprintf(stream, "  -%c, --%-18s VALUE  %s\n"
-+                             "                                Range: %g..%g; default: %g",
-+                     s.shortName, s.name, s.help, s.minimum, s.maximum,
-+                     dlsslop_control::value(s, (defaults.*s.field).load()));
-+        if (s.field == &ShmHeader::compositionBypass)
-+            std::fprintf(stream, " (1 with worker --cpu-compose or --test-identity)");
-+        std::fputc('\n', stream);
-+    }
-+    std::fprintf(stream,
++    for (const auto& s : kSettings)
++        std::printf("  -%c, --%-18s VALUE  %s\n"
++                    "                                Range: %g..%g; default: %g\n",
++                    s.shortName, s.name, s.help, s.minimum, s.maximum,
++                    dlsslop_control::value(s, (defaults.*s.field).load()));
++    std::printf(
 +        "\n"
 +        "Actions run after parsing: reset, explicit settings, toggle, stop/resume, capture;\n"
 +        "requested status/settings are printed last. Repeated settings use the last value.\n"
@@ -2345,16 +2340,12 @@ index 4e16702..a2ff9e3 100644
 +        "frame's inference chain. Each added pass adds another network evaluation.\n"
 +        "Intensity, local tone/structure and sharpness are native residual/sharpening\n"
 +        "operations after each network pass, not NVIDIA NGX parameter implementations.\n"
-+        "The extracted network has one captured preset/style/mask configuration.\n"
-+        "--preset, --style, --auto-mask and --skin-structure accept only their defaults;\n"
-+        "other values fail before any channel changes. Alternate weights and mask\n"
-+        "parameter mappings are unavailable. These four options never silently succeed\n"
-+        "with an unsupported value. White-point controls require linear-light input.\n"
++        "The captured network fixes --preset, --style, --auto-mask and --skin-structure.\n"
++        "White-point controls require linear-light input.\n"
 +        "--hdr-mode changes proxy precision; forcing 16-bit does not reinterpret SDR as HDR.\n"
 +        "HDR normalization follows --color-mode even with an 8-bit proxy.\n"
 +        "Motion estimates come from the presented frames, not engine motion vectors.\n"
-+        "Neural resolution is set by\n"
-+        "dlsslopd --tier (worker default: %u), not by this tool.\n"
++        "Neural resolution is set by dlsslopd --tier (worker default: %u), not by this tool.\n"
 +        "Composition controls apply to the Vulkan composition path; --cpu-compose\n"
 +        "uses the worker's own composition. Layer environment overrides take precedence\n"
 +        "over --ratio-smooth (DLSSNR_RATIO_SMOOTH), --color-trust (DLSSNR_COLOUR_TRUST)\n"
@@ -2390,17 +2381,17 @@ index 4e16702..a2ff9e3 100644
      }
 +    return true;
 +}
- 
--    if ((size_t) st.st_size < ShmTotalBytes()) {
--        if (!create) {  // nothing has ever attached; there is nothing to talk to
--            close(fd);
--            return nullptr;
++
 +const Setting* FindSetting(const char* name) {
 +    for (const auto& setting : kSettings)
 +        if (!std::strcmp(name, setting.name)) return &setting;
 +    return nullptr;
 +}
-+
+ 
+-    if ((size_t) st.st_size < ShmTotalBytes()) {
+-        if (!create) {  // nothing has ever attached; there is nothing to talk to
+-            close(fd);
+-            return nullptr;
 +bool ParseOptions(int argc, char** argv, Options& options) {
 +    options.path = DefaultPath();
 +    std::vector<option> longOptions = {
@@ -2457,10 +2448,10 @@ index 4e16702..a2ff9e3 100644
 +            }
 +            options.captureSet = true;
 +            break;
-+        default: {
-+            const Setting* setting = nullptr;
-+            for (const auto& s : kSettings) if (code == s.shortName) setting = &s;
-+            if (!setting) return false;  // '?': getopt has named the bad argument
++        case '?': return false;  // getopt has named the bad argument
++        default: {  // any other code getopt returns is a setting's short name
++            const Setting* setting = kSettings;
++            while (setting->shortName != code) ++setting;
 +            uint32_t& value = options.values[setting - kSettings];
 +            if (!ParseValue(optarg, *setting, value)) {
 +                std::fprintf(stderr, "--%s: expected a finite %s in [%g, %g], got '%s'\n",
@@ -2540,8 +2531,9 @@ index 4e16702..a2ff9e3 100644
 -                                             "localtone", "localstructure", "skinstructure", "passes" };
 -        for (const char* k : kCreateTime) {
 -            if (std::strcmp(k, name) == 0) { h->tuningSeq.fetch_add(1); break; }
-+// Readers never create, resize, initialise or write the channel.
-+ShmHeader* MapHeader(const char* path, bool create, bool writable, void** base, int* fdOut) {
++// Readers never create, resize, initialise or write the channel. The mapping
++// outlives the descriptor.
++ShmHeader* MapHeader(const char* path, bool create, bool writable) {
 +    const int flags = (writable ? O_RDWR : O_RDONLY) | O_CLOEXEC | O_NOFOLLOW | (create ? O_CREAT : 0);
 +    const int fd = open(path, flags, 0600);
 +    if (fd < 0) return nullptr;
@@ -2569,8 +2561,7 @@ index 4e16702..a2ff9e3 100644
 +    }
 +    void* mapping = mmap(nullptr, kHeaderBytes, PROT_READ | (writable ? PROT_WRITE : 0), MAP_SHARED, fd, 0);
 +    if (mapping == MAP_FAILED) return fail(errno);
-+    *base = mapping;
-+    *fdOut = fd;
++    close(fd);
 +    return static_cast<ShmHeader*>(mapping);
 +}
 +
@@ -2606,7 +2597,7 @@ index 4e16702..a2ff9e3 100644
  }
  
  void PrintStatus(const ShmHeader* h) {
-@@ -171,11 +324,20 @@ void PrintStatus(const ShmHeader* h) {
+@@ -171,11 +315,20 @@ void PrintStatus(const ShmHeader* h) {
      if (!Initialised(h)) return;
      std::printf("seq_req=%u\nseq_resp=%u\n", h->seq_req.load(), h->seq_resp.load());
      std::printf("width=%u\nheight=%u\n", h->width.load(), h->height.load());
@@ -2629,7 +2620,7 @@ index 4e16702..a2ff9e3 100644
      std::printf("layer_pid=%u\nlayer_composition_up=%u\nlayer_frames=%llu\nlayer_ms=%.2f\n",
                  h->layerPid.load(),
                  h->layerCompositionUp.load(),
-@@ -189,99 +351,70 @@ void PrintStatus(const ShmHeader* h) {
+@@ -189,99 +342,62 @@ void PrintStatus(const ShmHeader* h) {
      if (!reason.empty()) std::printf("helper_reason=%s\n", reason.c_str());
  }
  
@@ -2652,8 +2643,11 @@ index 4e16702..a2ff9e3 100644
 -                        std::strcmp(cmd, "set") == 0 || std::strcmp(cmd, "capture") == 0 ||
 -                        std::strcmp(cmd, "toggle") == 0;
 -
+-    void* base = nullptr;
+-    int fd = -1;
+-    ShmHeader* h = MapHeader(path, create, &base, &fd);
 +    if (options.help) {
-+        Usage(stdout);
++        Usage();
 +        return 0;
 +    }
 +    const bool writable = options.changesHeader();
@@ -2662,10 +2656,7 @@ index 4e16702..a2ff9e3 100644
 +        std::fprintf(stderr, "cannot create private channel directory: %s\n", std::strerror(errno));
 +        return 1;
 +    }
-     void* base = nullptr;
-     int fd = -1;
--    ShmHeader* h = MapHeader(path, create, &base, &fd);
-+    ShmHeader* h = MapHeader(options.path.c_str(), create, writable, &base, &fd);
++    ShmHeader* h = MapHeader(options.path.c_str(), create, writable);
      if (!h) {
 -        // No mapping and none wanted: for 'quit' that means nothing is running, which is success.
 -        return std::strcmp(cmd, "quit") == 0 ? 0 : 1;
@@ -2677,7 +2668,34 @@ index 4e16702..a2ff9e3 100644
 -
 -    int rc = 0;
 -    if (std::strcmp(cmd, "status") == 0) {
--        PrintStatus(h);
++    if (!Attach(h, create, options.path.c_str())) return 1;
++    // Store each setting once: readers never wait on controlSeq, so a second
++    // store would show them a value nobody asked for. Reset copies controls
++    // only and never memsets a live transport header.
++    ShmHeader defaults{};
++    if (options.reset) ShmInitNativeDefaults(&defaults, dlsslop_control::workerBypass(h));
++    bool tuningChanged = options.reset;
++    for (std::size_t i = 0; i < kCount; ++i) {
++        const uint64_t bit = uint64_t(1) << i;
++        const uint32_t flip = (options.toggled & bit) != 0;
++        const Setting& s = kSettings[i];
++        auto& field = h->*s.field;
++        if (options.assigned & bit) {  // never also toggled
++            field.store(options.values[i]);
++            tuningChanged |= s.tuning;
++        } else if (options.reset) field.store((defaults.*s.field).load() ^ flip);
++        else if (flip) for (uint32_t value = field.load(); !field.compare_exchange_weak(value, !value);) {}
++    }
++    if (tuningChanged) h->tuningSeq.fetch_add(1);
++    if (options.quit) h->quit.store(1);
++    if (options.resume) h->quit.store(0);
++    // Every change, a capture included, publishes a new control generation.
++    const uint32_t publishedControl = writable ? h->controlSeq.fetch_add(1) + 1u : 0u;
++    // Publish capture only after its settings and generation are visible.
++    // The layer records this generation with the matched frame pair.
++    if (options.captureSet) h->captureRequest.store(options.capture, std::memory_order_release);
++    if (options.status) {
+         PrintStatus(h);
 -    } else if (std::strcmp(cmd, "quit") == 0) {
 -        if (Initialised(h)) {
 -            h->quit.store(1);
@@ -2738,48 +2756,17 @@ index 4e16702..a2ff9e3 100644
 -                std::fprintf(stderr, "unknown setting: %s\n", argv[3]);
 -                rc = 2;
 -            }
-+    int result = Attach(h, create, options.path.c_str()) ? 0 : 1;
-+    if (!result) {
-+        // Store each setting once: readers never wait on controlSeq, so a second
-+        // store would show them a value nobody asked for. Reset copies controls
-+        // only and never memsets a live transport header.
-+        ShmHeader defaults{};
-+        if (options.reset) ShmInitNativeDefaults(&defaults, dlsslop_control::workerBypass(h));
-+        bool tuningChanged = options.reset;
-+        for (std::size_t i = 0; i < kCount; ++i) {
-+            const uint64_t bit = uint64_t(1) << i;
-+            const uint32_t flip = (options.toggled & bit) != 0;
-+            const Setting& s = kSettings[i];
-+            auto& field = h->*s.field;
-+            if (options.assigned & bit) {  // never also toggled
-+                field.store(options.values[i]);
-+                tuningChanged |= s.tuning;
-+            } else if (options.reset) field.store((defaults.*s.field).load() ^ flip);
-+            else if (flip) for (uint32_t value = field.load(); !field.compare_exchange_weak(value, !value);) {}
-         }
+-        }
 -    } else {
 -        Usage();
 -        rc = 2;
-+        if (tuningChanged) h->tuningSeq.fetch_add(1);
-+        if (options.quit) h->quit.store(1);
-+        if (options.resume) h->quit.store(0);
-+        const uint32_t publishedControl = writable ? h->controlSeq.fetch_add(1) + 1u : h->controlSeq.load();
-+        // Publish capture only after its settings and generation are visible.
-+        // The layer records this generation with the matched frame pair.
-+        if (options.captureSet) h->captureRequest.store(options.capture, std::memory_order_release);
-+        if (options.status) PrintStatus(h);
-+        if (options.status && options.captureSet)
-+            std::printf("capture_control_seq=%u\n", publishedControl);
-+        if (options.settings) PrintSettings(h);
-+    }
-+    if (writable && msync(base, kHeaderBytes, MS_SYNC)) {
-+        std::fprintf(stderr, "cannot sync channel '%s': %s\n", options.path.c_str(), std::strerror(errno));
-+        result = 1;
++        if (options.captureSet) std::printf("capture_control_seq=%u\n", publishedControl);
      }
 -
 -    msync(base, kHeaderBytes, MS_SYNC);
-     munmap(base, kHeaderBytes);
-     close(fd);
+-    munmap(base, kHeaderBytes);
+-    close(fd);
 -    return rc;
-+    return result;
++    if (options.settings) PrintSettings(h);
++    return 0;
  }

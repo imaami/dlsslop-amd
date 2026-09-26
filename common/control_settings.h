@@ -49,7 +49,7 @@ inline constexpr Setting kSettings[] = {
     {"color", &ShmHeader::colourStrengthBits, 0, 4, "Color contribution of the edit", 'C', true, kComposition, false},
     {"guard", &ShmHeader::maxRatioBits, 1, 30, "Maximum per-pixel gain or reciprocal gain", 'g', true, kComposition, false},
     {"transfer", &ShmHeader::transfer, 0, 2, "0 classic, 1 matched residual, 2 native frame + edit", 't', false, kComposition, false, "Classic ratio|Matched residual|Native frame + edit"},
-    {"bypass", &ShmHeader::compositionBypass, 0, 1, "0 compose the edit, 1 present the raw model result", 'b', false, kComposition, false},
+    {"bypass", &ShmHeader::compositionBypass, 0, 1, "0 compose the edit, 1 present the raw model result; default 1 with dlsslopd --cpu-compose or --test-identity", 'b', false, kComposition, false},
     {"ratio-smooth", &ShmHeader::ratioSmoothPercent, 0, 100, "Neighbourhood contribution to relighting ratio (%)", 'a', false, kComposition, false},
     {"color-trust", &ShmHeader::colourTrustPercent, 0, 800, "Allowed color displacement, in hundredths", 'u', false, kComposition, false},
     {"debug-view", &ShmHeader::debugView, 0, 5, "0 off, 1 proxy, 2 model, 3 edit, 4/5 color-bound views", 'v', false, kInspect, false, "Off|Input proxy|Model output|Edit|Color bound 1|Color bound 2"},

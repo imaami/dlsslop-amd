@@ -44,7 +44,8 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     assert 'and --toggle-key (DLSSNR_TOGGLE_KEY).' in helptext
     assert '-c, --capture N         Request 0..64 matched before/after frames;' in helptext
     assert 'effective default: ' + str(channel) in helptext
-    assert '1 with worker --cpu-compose or --test-identity' in helptext
+    assert re.search(r'--bypass\s+VALUE [^\n]*; default 1 with dlsslopd --cpu-compose or --test-identity\n',
+                     helptext)
     shared_header = Path(__file__).resolve().parent.parent / 'upstream-layer/common/shm_protocol.h'
     tier = re.search(r'kNativeDefaultTier\s*=\s*(\d+)', shared_header.read_text())[1]
     max_passes = int(re.search(r'kMaxPasses\s*=\s*(\d+)', shared_header.read_text())[1])
@@ -78,7 +79,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     for name, (_, default) in values.items():
         block = re.search(r'--' + re.escape(name) + r'\s+VALUE[^\n]*\n([^\n]*)', helptext)
         assert block, name
-        advertised = re.search(r'default: ([^ (]+)', block[1])
+        advertised = re.search(r'default: ([^ ]+)', block[1])
         assert advertised and float(advertised[1]) == default, (name, block[1], default)
 
     original = header()
