@@ -20,17 +20,18 @@ static_assert(sizeof(Geometry) == 40 && offsetof(Geometry, fit_height) == 36 &&
 
 class GpuCodec {
     using HostRegister = int (*)(void*, std::size_t, unsigned);
-    using HostUnregister = int (*)(void*);
+    using HostRelease = int (*)(void*);
     hip_probe::Api& api_;
     hip_probe::Handle stream_{};
     hip_probe::Handle module_{}, encode_{}, encode16_{}, feedback_{}, decode_{}, decode16_{};
     void* source_ = nullptr;
     void* output_ = nullptr;
-    void* invalid_ = nullptr;
+    std::uint32_t* invalid_ = nullptr; // Pinned host status word; kernels only ever store 1.
     std::size_t capacity_ = 0;
     // Resolved here so the vendored loader stays as upstream adapted it.
     HostRegister host_register_ = reinterpret_cast<HostRegister>(dlsym(api_.dll, "hipHostRegister"));
-    HostUnregister host_unregister_ = reinterpret_cast<HostUnregister>(dlsym(api_.dll, "hipHostUnregister"));
+    HostRelease host_unregister_ = reinterpret_cast<HostRelease>(dlsym(api_.dll, "hipHostUnregister"));
+    HostRelease host_free_ = reinterpret_cast<HostRelease>(dlsym(api_.dll, "hipHostFree"));
     std::uint8_t* pinned_[2]{};
     std::size_t pinned_bytes_ = 0;
     Geometry uploaded_{};
@@ -70,7 +71,7 @@ class GpuCodec {
         unpin();
         if (source_) api_.hipFree(source_);
         if (output_) api_.hipFree(output_);
-        if (invalid_) api_.hipFree(invalid_);
+        if (invalid_) host_free_(invalid_);
         if (module_) api_.hipModuleUnload(module_);
         source_ = output_ = invalid_ = nullptr;
         module_ = nullptr;
@@ -87,7 +88,8 @@ public:
             api_.Check(api_.hipModuleGetFunction(&feedback_, module_, "dlsslop_feedback_rgb"), "find feedback kernel");
             api_.Check(api_.hipModuleGetFunction(&decode_, module_, "dlsslop_decode_rgba8"), "find decode kernel");
             api_.Check(api_.hipModuleGetFunction(&decode16_, module_, "dlsslop_decode_rgba16f"), "find FP16 decode kernel");
-            api_.Check(api_.hipMalloc(&invalid_, sizeof(std::uint32_t)), "allocate codec status");
+            if (!host_free_) throw std::runtime_error("missing HIP export hipHostFree");
+            api_.Check(api_.hipHostMalloc(reinterpret_cast<void**>(&invalid_), sizeof *invalid_, 0), "allocate codec status");
         } catch (...) {
             release();
             throw;
@@ -119,9 +121,10 @@ public:
         std::fprintf(stderr, "shared-memory pinning unavailable; using staged HIP transfers\n");
     }
 
-    // The caller keeps the HIP device current and the network's stream alive.
-    // Upload and encode are queued on the inference stream; input must stay
-    // unchanged until the stream reaches them (pageable input is staged).
+    // The caller keeps the HIP device current and the network's stream alive
+    // and idle here: a frame ends before encode or after finish(). Upload and
+    // encode are queued on the inference stream; input must stay unchanged
+    // until the stream reaches them (pageable input is staged).
     void encode(const std::uint8_t* input, const Geometry& g, void* device_rgba, bool fp16 = false)
     {
         const auto expected = geometry(g.source_width, g.source_height, g.valid_height);
@@ -130,7 +133,7 @@ public:
         const std::size_t bytes = std::size_t(g.source_width) * g.source_height * (fp16 ? 8 : 4);
         reserve(bytes);
         api_.Check(api_.hipMemcpyAsync(source_, input, bytes, 1, stream_), "upload codec proxy");
-        api_.Check(api_.hipMemsetAsync(invalid_, 0, sizeof(std::uint32_t), stream_), "reset codec status");
+        *invalid_ = 0;
         Geometry parameters = g;
         void* args[] = {&source_, &device_rgba, &invalid_, &parameters};
         api_.Check(api_.hipModuleLaunchKernel(fp16 ? encode16_ : encode_, (g.width * g.height + 255u) / 256u,
@@ -174,9 +177,7 @@ public:
     void finish()
     {
         api_.Check(api_.hipStreamSynchronize(stream_), "codec decode completion");
-        std::uint32_t invalid = 0;
-        api_.Check(api_.hipMemcpy(&invalid, invalid_, sizeof invalid, 2), "read codec status");
-        if (invalid)
+        if (*invalid_)
             throw std::range_error("proxy input, neural feedback or output contains nonfinite or FP16-overflow samples");
     }
 };
