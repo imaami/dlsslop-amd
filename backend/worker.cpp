@@ -96,7 +96,6 @@ struct ProcessingSettings {
     bool motion = false;
     unsigned motion_quality = kMVecBalanced;
     unsigned motion_grid = kMVecPixels4;
-    unsigned motion_units = kMVecPixels;
 };
 
 dlsslop::NativeTuning read_tuning(const ShmHeader* h)
@@ -526,8 +525,7 @@ public:
             previous_passes_ = 0; // Until the frame completes: a rejected one leaves no history.
             // Until end(), throw no std::range_error: the worker would serve on with the
             // history still pending, and the next begin() would fail.
-            temporal_->begin(device_input_, g, settings.motion_quality, settings.motion_grid,
-                             settings.motion_units, passes, reset);
+            temporal_->begin(device_input_, g, settings.motion_quality, settings.motion_grid, passes, reset);
         } else {
             temporal_->reset();
         }
@@ -839,7 +837,6 @@ void run_worker(const Options& o)
                 settings.motion = h->mvecEnabled.load() != 0;
                 settings.motion_quality = ShmMVecQuality(h);
                 settings.motion_grid = ShmMVecPixelSize(h);
-                settings.motion_units = ShmMVecScaleMode(h);
                 settings.tuning = read_tuning(h);
                 settings.color_preserve = BitsToFloat(h->colorPreserveBits.load());
                 if (!w || !height || w > kMaxW || height > kMaxH || h->format.load() != 1)

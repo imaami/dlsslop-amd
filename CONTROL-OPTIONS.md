@@ -2,7 +2,7 @@
 
 `dlsslopctl --help` is the canonical option, range and default reference.
 `--settings` prints current values alongside reset defaults. Omitted options leave
-current settings unchanged. There are 41 settings: 40 of the 41 inherited controls
+current settings unchanged. There are 40 settings: 39 of the 41 inherited controls
 mapped below, plus native per-pass color preservation described at the end.
 
 “Native equivalent” means an implemented AMD-side operation, not an implementation
@@ -34,7 +34,7 @@ opening or modifying the control channel.
 | `colourtrust` | `-u`, `--color-trust` | Bounds color displacement in composition. |
 | `mvec` | `-V`, `--mvec` | **Native equivalent:** HIP optical-flow estimation and reprojection into the network's temporal input. |
 | `mvecquality` | `-Q`, `--mvec-quality` | Sets native flow-pyramid depth and search effort. |
-| `mvecunits` | `-U`, `--mvec-units` | Chooses the flow-field representation; reprojection converts it back consistently. |
+| `mvecunits` | None | **Not applicable:** the flow never leaves the worker, which estimates and reprojects it in pixels. |
 | `mvecpixels` | `-F`, `--mvec-pixels` | Sets native flow-grid spacing. |
 | `debugview` | `-v`, `--debug-view` | Selects proxy, model, residual or color-bound inspection views. |
 | `debugscale` | `-D`, `--debug-scale` | Multiplies the debug-view signal. |
@@ -68,9 +68,7 @@ binary16 transport also does not disable normalization of actual HDR input.
 The SDR feedback precision option does not reduce HDR between-pass feedback,
 which always retains binary16 precision.
 Motion is estimated from consecutive presented frames; it is not supplied by the
-game engine. Each neural pass retains its own temporal history. Changing vector
-units alone should preserve the intended motion because encoding and reprojection
-agree on the selected representation.
+game engine. Each neural pass retains its own temporal history.
 
 The general actions are `--status`, `--settings`, `--reset`, `--quit`, `--resume`,
 `--capture`, `--toggle`, `--toggle-enabled`, `--shm`, and `--help`; all have short
@@ -91,6 +89,6 @@ dlsslopctl --hold 0
 
 `-L`, `--color-preserve 0..1` (default **0**) anchors broad chroma changes to
 the original encoded input after each pass, before history/feedback. It is the
-41st setting and appears in the Qt controller's Neural passes section.
+40th setting and appears in the Qt controller's Neural passes section.
 It runs on the GPU without correction-related host transfers.
 Unlike `--color`, it operates before feedback. See COLOR-PRESERVATION.md.

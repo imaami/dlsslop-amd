@@ -21,7 +21,7 @@ class GpuTemporal {
     std::vector<void*> history_;
     void *warped_ = nullptr, *scene_cut_ = nullptr;
     Geometry geometry_{};
-    unsigned quality_ = 0, grid_ = 0, units_ = 0, passes_ = 0, completed_ = 0;
+    unsigned quality_ = 0, grid_ = 0, passes_ = 0, completed_ = 0;
     bool configured_ = false, valid_ = false, pending_ = false;
 
     void allocate(void*& ptr, std::size_t bytes, const char* what)
@@ -40,20 +40,19 @@ class GpuTemporal {
         warped_ = scene_cut_ = nullptr;
         configured_ = valid_ = pending_ = false;
     }
-    void configure(const Geometry& g, unsigned quality, unsigned grid, unsigned units, unsigned passes)
+    void configure(const Geometry& g, unsigned quality, unsigned grid, unsigned passes)
     {
         if (!passes || passes > 30 ||
             !g.width || !g.valid_height || g.valid_height > g.height ||
             g.height > 2 * g.valid_height - 2)
             throw std::invalid_argument("invalid temporal settings or geometry");
-        // Buffer sizes do not depend on the source size, the picture's
-        // placement or the vector units; only a new placement invalidates the
-        // history. Flow is derived anew every frame, so units carry no state.
+        // Buffer sizes do not depend on the source size or the picture's
+        // placement; only a new placement invalidates the history.
         const bool same_size = configured_ && g.width == geometry_.width && g.height == geometry_.height &&
             g.valid_height == geometry_.valid_height && quality == quality_ && grid == grid_ && passes == passes_;
         const bool moved = g.x != geometry_.x || g.y != geometry_.y || g.fit_width != geometry_.fit_width ||
             g.fit_height != geometry_.fit_height;
-        geometry_ = g; units_ = units;
+        geometry_ = g;
         if (same_size) {
             valid_ = valid_ && !moved;
             return;
@@ -84,7 +83,7 @@ class GpuTemporal {
     dlsslop_temporal::Warp warp_geometry() const
     {
         return {{geometry_.width, geometry_.valid_height}, levels_[0].grid,
-                geometry_.height, 1u << grid_, units_, geometry_.x, geometry_.y,
+                geometry_.height, 1u << grid_, geometry_.x, geometry_.y,
                 geometry_.fit_width, geometry_.fit_height};
     }
 public:
@@ -107,11 +106,11 @@ public:
     // Inputs are float4 raster data in the same encoding as the network. Commands
     // remain on its HIP stream; begin reads rgba there before multi-pass feedback.
     // Motion settings are in the ranges the protocol's ShmMVec* readers return.
-    void begin(void* rgba, const Geometry& g, unsigned quality, unsigned grid,
-               unsigned units, unsigned passes, bool reset_history = false)
+    void begin(void* rgba, const Geometry& g, unsigned quality, unsigned grid, unsigned passes,
+               bool reset_history = false)
     {
         if (!rgba || pending_) throw std::logic_error("temporal begin without previous end or input");
-        configure(g, quality, grid, units, passes);
+        configure(g, quality, grid, passes);
         if (reset_history) reset();
         pending_ = true; completed_ = 0;
         unsigned count = g.width * g.valid_height;
@@ -129,7 +128,7 @@ public:
             void* coarse_flow = coarse ? levels_[i + 1].flow : level.flow;
             dlsslop_temporal::Search search{level.image, level.grid,
                 coarse ? levels_[i + 1].grid : level.grid, 1u << grid_, quality_ + 1,
-                quality_ == 2 ? 2u : 1u, units_, unsigned(coarse), unsigned(i == 0)};
+                quality_ == 2 ? 2u : 1u, unsigned(coarse), unsigned(i == 0)};
             void* flow_args[] = {&level.current, &level.previous, &coarse_flow, &level.flow, &search};
             kernels_.launch(kTemporalFlow, level.grid.width * level.grid.height, flow_args);
         }

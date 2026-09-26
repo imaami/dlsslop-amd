@@ -154,14 +154,14 @@ inline void check_temporal(const NativeKernels& kernels)
     void* results[] = {device_first.pointer, device_second.pointer};
     GpuTemporal temporal(kernels);
 
-    temporal.begin(device_input.pointer, g, 2, 2, 1, 2);
+    temporal.begin(device_input.pointer, g, 2, 2, 2);
     for (unsigned pass = 0; pass < 2; ++pass) {
         require(!temporal.history(pass, device_fallback.pointer), "GPU temporal first frame returned uninitialized history");
         api.Check(api.hipMemcpyAsync(temporal.target(pass), results[pass], pixels * 12, 3, stream),
                    "store GPU temporal self-test history");
     }
     temporal.end();
-    temporal.begin(device_input.pointer, g, 2, 2, 1, 2);
+    temporal.begin(device_input.pointer, g, 2, 2, 2);
     for (unsigned pass = 0; pass < 2; ++pass) {
         const auto warped = Buffer::read_pointer(api, stream, temporal.history(pass, device_fallback.pointer), pixels * 4);
         std::vector<float> expected(pixels * 4);
@@ -176,7 +176,7 @@ inline void check_temporal(const NativeKernels& kernels)
     temporal.end();
 
     device_input.upload(shifted);
-    temporal.begin(device_input.pointer, g, 2, 2, 1, 2);
+    temporal.begin(device_input.pointer, g, 2, 2, 2);
     require(!temporal.cut_rejected(), "GPU temporal rejected the known translated frame as a cut");
     for (unsigned pass = 0; pass < 2; ++pass) {
         const auto warped = Buffer::read_pointer(api, stream, temporal.history(pass, device_fallback.pointer), pixels * 4);
@@ -202,7 +202,7 @@ inline void check_temporal(const NativeKernels& kernels)
     // An unrelated frame is a scene cut: every pixel falls back to the pass
     // input (here the frame itself, as in the first pass): the no-history input.
     device_input.upload(unrelated);
-    temporal.begin(device_input.pointer, g, 2, 2, 1, 2);
+    temporal.begin(device_input.pointer, g, 2, 2, 2);
     require(temporal.cut_rejected(), "GPU temporal missed a scene cut");
     for (unsigned pass = 0; pass < 2; ++pass) {
         compare(Buffer::read_pointer(api, stream, temporal.history(pass, device_input.pointer), pixels * 4),
@@ -213,7 +213,7 @@ inline void check_temporal(const NativeKernels& kernels)
     temporal.end();
     std::printf("GPU control self-test: temporal scene cut rejects all history\n");
 
-    // A new source size or new vector units keep the buffers and the history;
+    // A new source size keeps the buffers and the history;
     // a new placement of the picture in the network raster drops the history;
     // a new quality, grid or pass count reallocates and drops it too. Each
     // reallocation is followed by a frame that runs with the new sizes.
@@ -225,23 +225,22 @@ inline void check_temporal(const NativeKernels& kernels)
     moved.fit_width -= 16;
     const struct {
         const Geometry& geometry;
-        unsigned quality, grid, units, passes;
+        unsigned quality, grid, passes;
         bool history;
         const char* failure;
     } steps[] = {
-        {resized, 2, 2, 1, 2, true, "GPU temporal dropped history for a new source size"},
-        {resized, 2, 2, 0, 2, true, "GPU temporal dropped history for new vector units"},
-        {moved, 2, 2, 0, 2, false, "GPU temporal kept history for a moved picture"},
-        {moved, 2, 2, 0, 2, true, "GPU temporal dropped history for a steady moved picture"},
-        {moved, 1, 2, 0, 2, false, "GPU temporal kept history across a new quality"},
-        {moved, 1, 2, 0, 2, true, "GPU temporal dropped history after a new quality"},
-        {moved, 1, 1, 0, 2, false, "GPU temporal kept history across a new grid"},
-        {moved, 1, 1, 0, 2, true, "GPU temporal dropped history after a new grid"},
-        {moved, 1, 1, 0, 1, false, "GPU temporal kept history across a new pass count"},
-        {moved, 1, 1, 0, 1, true, "GPU temporal dropped history after a new pass count"},
+        {resized, 2, 2, 2, true, "GPU temporal dropped history for a new source size"},
+        {moved, 2, 2, 2, false, "GPU temporal kept history for a moved picture"},
+        {moved, 2, 2, 2, true, "GPU temporal dropped history for a steady moved picture"},
+        {moved, 1, 2, 2, false, "GPU temporal kept history across a new quality"},
+        {moved, 1, 2, 2, true, "GPU temporal dropped history after a new quality"},
+        {moved, 1, 1, 2, false, "GPU temporal kept history across a new grid"},
+        {moved, 1, 1, 2, true, "GPU temporal dropped history after a new grid"},
+        {moved, 1, 1, 1, false, "GPU temporal kept history across a new pass count"},
+        {moved, 1, 1, 1, true, "GPU temporal dropped history after a new pass count"},
     };
     for (const auto& step : steps) {
-        temporal.begin(device_input.pointer, step.geometry, step.quality, step.grid, step.units, step.passes);
+        temporal.begin(device_input.pointer, step.geometry, step.quality, step.grid, step.passes);
         for (unsigned pass = 0; pass < step.passes; ++pass) {
             require((temporal.history(pass, device_input.pointer) != nullptr) == step.history, step.failure);
             temporal.target(pass);
@@ -249,7 +248,7 @@ inline void check_temporal(const NativeKernels& kernels)
         temporal.end();
     }
     api.Check(api.hipStreamSynchronize(stream), "complete GPU temporal reconfiguration frames");
-    std::printf("GPU control self-test: temporal history survives a new source size and new units; "
+    std::printf("GPU control self-test: temporal history survives a new source size; "
                 "a moved picture, quality, grid or pass count drops it\n");
     std::fflush(stdout);
 }

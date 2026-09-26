@@ -10,11 +10,11 @@ struct Flow { float x, y, error; };
 struct Extent { unsigned width, height; };
 struct Search {
     Extent image, grid, coarse_grid;
-    unsigned step, radius, patch, units, has_coarse, final_level;
+    unsigned step, radius, patch, has_coarse, final_level;
 };
 struct Warp {
     Extent image, grid;
-    unsigned padded_height, step, units, x, y, fit_width, fit_height;
+    unsigned padded_height, step, x, y, fit_width, fit_height;
 };
 DLSSLOP_INLINE float absolute(float v) { return v < 0 ? -v : v; }
 DLSSLOP_INLINE float clamp(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -127,10 +127,6 @@ DLSSLOP_INLINE Flow estimate_patch(const float* current, const float* previous,
             vy = best.y + (hy > .000001f ? clamp(.5f * (around[2] - around[3]) / hy, -.5f, .5f) : 0);
         }
     }
-    if (s.final_level && s.units != 1) {
-        const float numerator = s.units == 0 ? 2.0f : 1.0f;
-        best.x *= numerator / float(s.image.width); best.y *= numerator / float(s.image.height);
-    }
     return best;
 }
 // The patch radius is 1 or 2 (quality 2); each is a static instance.
@@ -151,12 +147,8 @@ DLSSLOP_INLINE void warp(const float* __restrict__ current_luma, const float* __
     const unsigned x = index % w.image.width, padded_y = index / w.image.width;
     const unsigned y = padded_y < w.image.height ? padded_y : 2 * w.image.height - 2 - padded_y;
     const unsigned pixel = y * w.image.width + x;
-    Flow f = sample_flow(flow, w.grid, (float(x) + .5f) / float(w.step) - .5f,
-                         (float(y) + .5f) / float(w.step) - .5f);
-    if (w.units != 1) {
-        const float denominator = w.units == 0 ? 2.0f : 1.0f;
-        f.x *= float(w.image.width) / denominator; f.y *= float(w.image.height) / denominator;
-    }
+    const Flow f = sample_flow(flow, w.grid, (float(x) + .5f) / float(w.step) - .5f,
+                               (float(y) + .5f) / float(w.step) - .5f);
     const float px = float(x) + f.x, py = float(y) + f.y;
     // Both samples weight only the fitted picture; the bars' history is the network's answer for
     // black. Validity below already requires px >= w.x and py >= w.y.

@@ -35,7 +35,7 @@ std::vector<Plane> pyramid(Plane original, unsigned quality)
     }
     return result;
 }
-Field optical_flow(const Plane& current, const Plane& previous, unsigned quality, unsigned grid, unsigned units)
+Field optical_flow(const Plane& current, const Plane& previous, unsigned quality, unsigned grid)
 {
     const auto a = pyramid(current, quality), b = pyramid(previous, quality);
     const unsigned step = 1u << grid;
@@ -45,7 +45,7 @@ Field optical_flow(const Plane& current, const Plane& previous, unsigned quality
         Field field{{(e.width + step - 1) / step, (e.height + step - 1) / step}, {}};
         field.pixels.resize(field.size.width * field.size.height);
         dlsslop_temporal::Search s{e, field.size, coarse.size, step, quality + 1,
-            quality == 2 ? 2u : 1u, units, unsigned(!coarse.pixels.empty()), unsigned(!level)};
+            quality == 2 ? 2u : 1u, unsigned(!coarse.pixels.empty()), unsigned(!level)};
         for (unsigned p = 0; p < field.pixels.size(); ++p)
             field.pixels[p] = dlsslop_temporal::estimate(a[level].pixels.data(), b[level].pixels.data(), coarse.pixels.data(), s, p);
         coarse = std::move(field);
@@ -108,13 +108,9 @@ dlsslop_temporal::Flow reference_estimate(const float* current, const float* pre
         const float cost = reference_cost(current, previous, s.image, x, y, best.x + dx, best.y + dy, s.patch);
         if (cost < best.error) best = {best.x + dx, best.y + dy, cost};
     }
-    if (s.final_level && s.units != 1) {
-        const float numerator = s.units == 0 ? 2.0f : 1.0f;
-        best.x *= numerator / float(s.image.width); best.y *= numerator / float(s.image.height);
-    }
     return best;
 }
-// Random pictures, some translated, some static, at every quality, grid, unit, coarse start and
+// Random pictures, some translated, some static, at every quality, grid, coarse start and
 // level: the search must return exactly what resampling every candidate returns.
 void search_equivalence()
 {
@@ -133,23 +129,22 @@ void search_equivalence()
         if (trial % 10 == 0) current = previous;
         for (unsigned quality = 0; quality < 3; ++quality)
             for (unsigned grid = 0; grid < 4; ++grid)
-                for (unsigned units = 0; units < 3; ++units)
-                    for (unsigned has_coarse = 0; has_coarse < 2; ++has_coarse)
-                        for (unsigned final_level = 0; final_level < 2; ++final_level) {
-                            const unsigned step = 1u << grid;
-                            const dlsslop_temporal::Extent e{w, h}, g{(w + step - 1) / step, (h + step - 1) / step};
-                            const dlsslop_temporal::Extent cg{(g.width + 1) / 2, (g.height + 1) / 2};
-                            std::vector<dlsslop_temporal::Flow> coarse(cg.width * cg.height);
-                            for (auto& f : coarse)
-                                f = {float(int(rng() % 9) - 4) * .5f, float(int(rng() % 9) - 4) * .5f, 0};
-                            const dlsslop_temporal::Search s{e, g, cg, step, quality + 1, quality == 2 ? 2u : 1u,
-                                                             units, has_coarse, final_level};
-                            for (unsigned i = 0; i < g.width * g.height; ++i, ++vectors) {
-                                const auto a = reference_estimate(current.data(), previous.data(), coarse.data(), s, i);
-                                const auto b = dlsslop_temporal::estimate(current.data(), previous.data(), coarse.data(), s, i);
-                                require(!std::memcmp(&a, &b, sizeof a), "flow search differs from resampling every candidate");
-                            }
+                for (unsigned has_coarse = 0; has_coarse < 2; ++has_coarse)
+                    for (unsigned final_level = 0; final_level < 2; ++final_level) {
+                        const unsigned step = 1u << grid;
+                        const dlsslop_temporal::Extent e{w, h}, g{(w + step - 1) / step, (h + step - 1) / step};
+                        const dlsslop_temporal::Extent cg{(g.width + 1) / 2, (g.height + 1) / 2};
+                        std::vector<dlsslop_temporal::Flow> coarse(cg.width * cg.height);
+                        for (auto& f : coarse)
+                            f = {float(int(rng() % 9) - 4) * .5f, float(int(rng() % 9) - 4) * .5f, 0};
+                        const dlsslop_temporal::Search s{e, g, cg, step, quality + 1, quality == 2 ? 2u : 1u,
+                                                         has_coarse, final_level};
+                        for (unsigned i = 0; i < g.width * g.height; ++i, ++vectors) {
+                            const auto a = reference_estimate(current.data(), previous.data(), coarse.data(), s, i);
+                            const auto b = dlsslop_temporal::estimate(current.data(), previous.data(), coarse.data(), s, i);
+                            require(!std::memcmp(&a, &b, sizeof a), "flow search differs from resampling every candidate");
                         }
+                    }
     }
     std::printf("flow search: %llu vectors bit-identical to resampling every candidate\n", vectors);
 }
@@ -173,7 +168,7 @@ void letterbox()
     for (unsigned y = top; y <= bottom; ++y)
         for (unsigned x = left; x <= right; ++x)
             for (unsigned c = 0; c < 3; ++c) history[(y * width + x) * 3 + c] = inside(x, y);
-    const dlsslop_temporal::Warp w{{width, height}, {width, height}, height, 1, 1, left, top, fit_width, fit_height};
+    const dlsslop_temporal::Warp w{{width, height}, {width, height}, height, 1, left, top, fit_width, fit_height};
     struct Case { float dx, dy; unsigned x, y; float expected; const char* message; };
     const Case cases[] = {
         {.75f, 0, right, 3, inside(right, 3), "rightward sub-pixel motion did not return the edge history"},
@@ -202,13 +197,13 @@ void run()
         for (unsigned x = 0; x < width; ++x)
             previous.pixels[y * width + x] = random(x / 8, y / 8) * .3f + random(x / 2, y / 2) * .5f + random(x, y) * .2f;
     for (unsigned quality = 0; quality < 3; ++quality) {
-        auto still = optical_flow(previous, previous, quality, 2, 1);
+        auto still = optical_flow(previous, previous, quality, 2);
         for (const auto f : still.pixels) require(f.x == 0 && f.y == 0 && f.error == 0, "static image manufactured motion");
     }
     for (unsigned y = 0; y < height; ++y)
         for (unsigned x = 0; x < width; ++x)
             current.pixels[y * width + x] = dlsslop_temporal::sample(previous.pixels.data(), previous.size, float(x) - 6, float(y) + 3);
-    auto pixels = optical_flow(current, previous, 2, 2, 1);
+    auto pixels = optical_flow(current, previous, 2, 2);
     unsigned good = 0, tested = 0;
     for (unsigned y = 4; y + 4 < pixels.size.height; ++y) {
         for (unsigned x = 4; x + 4 < pixels.size.width; ++x) {
@@ -219,16 +214,6 @@ void run()
     }
     std::printf("known translation: %u/%u interior vectors within 0.5 pixels\n", good, tested);
     require(good * 10 > tested * 8, "translation direction or magnitude wrong");
-    for (unsigned units : {0u, 2u}) {
-        auto converted = optical_flow(current, previous, 2, 2, units);
-        const float denominator = units == 0 ? 2.0f : 1.0f;
-        for (std::size_t i = 0; i < pixels.pixels.size(); ++i) {
-            require(std::fabs(converted.pixels[i].x * float(width) / denominator - pixels.pixels[i].x) < .00001f,
-                    "motion X units changed physical displacement");
-            require(std::fabs(converted.pixels[i].y * float(height) / denominator - pixels.pixels[i].y) < .00001f,
-                    "motion Y units changed physical displacement");
-        }
-    }
     // Warp a known affine RGB image using a known displacement; independently
     // verify bilinear coordinates, sign, fallback and reflected bottom padding.
     std::vector<float> rgba(width * height * 4), history(width * height * 3), fallback(rgba.size(), .125f);
@@ -245,7 +230,7 @@ void run()
     }
     const std::vector<float> current_luma = luma(rgba);
     std::fill(pixels.pixels.begin(), pixels.pixels.end(), dlsslop_temporal::Flow{-6, 3, 0});
-    dlsslop_temporal::Warp w{{width, height}, pixels.size, height + 8, 4, 1, 0, 0, width, height};
+    dlsslop_temporal::Warp w{{width, height}, pixels.size, height + 8, 4, 0, 0, width, height};
     for (unsigned p = 0; p < width * (height + 8); ++p)
         dlsslop_temporal::warp(current_luma.data(), previous.pixels.data(), history.data(), fallback.data(), pixels.pixels.data(), output.data(), w, p);
     const unsigned x = 60, y = 40;

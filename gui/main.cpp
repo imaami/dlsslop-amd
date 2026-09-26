@@ -43,7 +43,6 @@ QStringList choices(const QString& name)
 {
     if (name == "hdr-mode") return {"Automatic", "8-bit proxy", "16-bit proxy"};
     if (name == "mvec-quality") return {"Fast", "Balanced", "Quality"};
-    if (name == "mvec-units") return {"Normalized", "Pixels", "UV"};
     if (name == "mvec-pixels") return {"1 px", "2 px", "4 px", "8 px"};
     if (name == "white-point-source") return {"Manual", "Measured"};
     if (name == "color-mode") return {"Automatic", "Display-referred", "Linear HDR"};

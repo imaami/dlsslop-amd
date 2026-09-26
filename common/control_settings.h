@@ -31,7 +31,6 @@ inline constexpr Setting kSettings[] = {
     {"sharpness", 'n', &ShmHeader::sharpnessBits, true, 0, 1, "Native per-pass sharpening strength"},
     {"mvec", 'V', &ShmHeader::mvecEnabled, false, 0, 1, "Estimate motion and reproject previous neural output (0/1)"},
     {"mvec-quality", 'Q', &ShmHeader::mvecQuality, false, 0, 2, "Motion search quality: 0 fast, 1 balanced, 2 quality"},
-    {"mvec-units", 'U', &ShmHeader::mvecScaleMode, false, 0, 2, "Motion field units: 0 normalized, 1 pixels, 2 UV"},
     {"mvec-pixels", 'F', &ShmHeader::mvecPixelSize, false, 0, 3, "Motion grid spacing: 0=1px, 1=2px, 2=4px, 3=8px"},
     {"white-point", 'W', &ShmHeader::whitePointBits, true, 0.0001, 2000, "Manual paper white for linear-light input"},
     {"white-point-scale", 'G', &ShmHeader::whitePointScaleBits, true, 0.01, 100, "Multiplier on manual or measured white point"},

@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     assert values['sdr16-multipass'] == (1, 1)
     assert values['hdr-mode'] == (1, 1)
     assert values['mvec'] == (0, 0)
-    assert len(values) == 41, values.keys()
+    assert len(values) == 40, values.keys()
     assert channel.stat().st_mode & 0o777 == 0o600
 
     # Every supported setting advertises the same default as --settings.
@@ -101,7 +101,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
         ('--debug-view', '6'), ('--downscaler', '0'),
         ('--enabled',), ('--unknown',),
         ('--color-preserve', '1.001'), ('--color-preserve', '-0.1'), ('--intensity', '4.001'), ('--local-tone', '-0.1'), ('--sharpness', '1.01'),
-        ('--hdr-mode', '3'), ('--mvec-quality', '3'), ('--mvec-units', '3'),
+        ('--hdr-mode', '3'), ('--mvec-quality', '3'), ('--mvec-units', '1'), ('-U', '1'),
         ('--mvec-pixels', '4'), ('--white-point', '0.00009'), ('--reversible', '5'),
         ('--debug-scale', '0.0099999995'),
         ('--preset', '1'), ('--style', '1'), ('--auto-mask', '0'), ('--skin-structure', '0'),
@@ -156,7 +156,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
         'intensity': ('i', 0.75), 'local-tone': ('o', 1.25),
         'local-structure': ('j', 0.5), 'skin-structure': ('K', -1),
         'color-preserve': ('L', 0.75), 'sharpness': ('n', 0.5),
-        'mvec': ('V', 1), 'mvec-quality': ('Q', 2), 'mvec-units': ('U', 2),
+        'mvec': ('V', 1), 'mvec-quality': ('Q', 2),
         'mvec-pixels': ('F', 3), 'white-point': ('W', 100),
         'white-point-scale': ('G', 2), 'white-point-source': ('O', 1),
         'white-point-trim': ('I', 0.5), 'color-mode': ('Y', 2), 'reversible': ('Z', 4),
