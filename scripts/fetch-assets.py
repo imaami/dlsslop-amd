@@ -20,6 +20,9 @@ import sys
 import tempfile
 import zipfile
 
+# The last block of each network stage and the stage's channel width.
+STAGES = ((4, 32), (8, 64), (14, 128), (22, 256), (47, 512), (55, 256), (61, 128), (65, 64), (69, 32))
+
 
 def weight_manifest():
     """Map runtime base names to element counts (Network::WeightElements)."""
@@ -27,9 +30,7 @@ def weight_manifest():
               "post70-scales": 64, "post70-head": 96,
               "post70-ffn": 8736, "post70-attention": 8225}
     for block in list(range(31)) + list(range(40, 70)):
-        c = (32 if block <= 4 else 64 if block <= 8 else 128 if block <= 14
-             else 256 if block <= 22 else 512 if block <= 47 else 256 if block <= 55
-             else 128 if block <= 61 else 64 if block <= 65 else 32)
+        c = next(width for last, width in STAGES if block <= last)
         if c == 512:
             result[f"block{block}-ffwd"] = 524288
             result[f"block{block}-ffwd-projection"] = 262656
@@ -39,10 +40,11 @@ def weight_manifest():
     for block in range(31, 39):
         for part, count in [("expand", 4194304), ("contract", 4195328), ("qkv", 3145760), ("projection", 1049600)]:
             result[f"block{block}-{part}"] = count
-    for block, c in [(4, 32), (8, 64), (14, 128), (22, 256)]:
+    # "-ds" ends each stage before the widest one; "-weights" starts each after it.
+    for block, c in STAGES[:4]:
         result[f"block{block}-ds"] = 2 * c * c
-    for block, c in [(48, 256), (56, 128), (62, 64), (66, 32)]:
-        result[f"block{block}-weights"] = 2 * c * c + c
+    for (last, _), (_, c) in zip(STAGES[4:], STAGES[5:]):
+        result[f"block{last + 1}-weights"] = 2 * c * c + c
     return dict(sorted(result.items()))
 
 
@@ -115,18 +117,16 @@ def import_assets(args):
         else:
             with zipfile.ZipFile(source) as archive:
                 for member in archive.infolist():
-                    name = PurePosixPath(member.filename.replace("\\", "/")).name
-                    if name not in wanted or member.is_dir():
-                        continue
+                    path = PurePosixPath(member.filename.replace("\\", "/"))
                     # Ignore non-runtime diagnostics and old bundled backups.
-                    parts = PurePosixPath(member.filename.replace("\\", "/")).parts
-                    if "native-game-tiled-assets" not in parts and len(parts) != 1:
+                    if (path.name not in wanted or member.is_dir()
+                            or ("native-game-tiled-assets" not in path.parts and len(path.parts) != 1)):
                         continue
                     if member.file_size > 4195328 * 4:
                         raise ValueError(f"oversize weight: {member.filename}")
-                    target = stage / name
+                    target = stage / path.name
                     if target.exists():
-                        raise ValueError(f"ambiguous duplicate weight in archive: {name}")
+                        raise ValueError(f"ambiguous duplicate weight in archive: {path.name}")
                     with archive.open(member) as src, target.open("wb") as dst:
                         shutil.copyfileobj(src, dst)
         records = validate_asset_dir(stage)
