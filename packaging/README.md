@@ -67,16 +67,34 @@ terms are separate from the software licenses.
 
 ## Start a game
 
-Check the device, run inference on a sample image, and start the worker:
+Check the device and run inference on a sample image:
 
 ```bash
 dlsslopd --diagnose
 dlsslopd --tier 720 --self-test --output neural-test.ppm
-dlsslopd --tier 720
 ```
 
-Wait for `worker ready`. With Proton GE selected, put this in the game's Steam
-launch options, replacing the home-directory placeholder:
+Then let systemd start the worker whenever a game needs it:
+
+```bash
+systemctl --user daemon-reload
+systemctl --user enable --now dlsslop.socket
+```
+
+The socket listens beside the worker's channel; nothing else runs. When no worker
+serves, `dlsslop-run` connects there, which starts `dlsslop.service`, and waits
+until the worker serves. The worker stops after ten seconds without a frame, and
+the layer starts it again if a game is still running. Its log is in
+`journalctl --user -u dlsslop`.
+
+For every user, extract into `/usr/local` and run
+`sudo systemctl --global enable dlsslop.socket`: each user's own systemd
+instance starts the socket at their next login. With `/opt/dlsslop-amd`, first
+link both units from its `share/systemd/user` with `systemctl --user link`. Without
+systemd, run `dlsslopd --tier 1080` in a host terminal and wait for `worker ready`.
+
+With Proton GE selected, put this in the game's Steam launch options, replacing
+the home-directory placeholder:
 
 ```text
 /home/YOUR_USER/.local/bin/dlsslop-run -- %command%
@@ -97,6 +115,10 @@ dlsslopctl --enabled 0
 dlsslopctl --enabled 1
 dlsslopctl --quit
 ```
+
+With the socket unit enabled, `--quit` only stops the current worker: the layer of
+a running game starts it again. `systemctl --user stop dlsslop.socket dlsslop.service`
+stops both until the next login.
 
 Start a fresh worker after `--quit`. Every command has `--help`; `dlsslopctl
 --settings` lists the current settings and reset values. `--tier` selects a
@@ -125,7 +147,7 @@ directory; earlier batches are kept.
 For per-pass color checks, restart the worker with tracing and keep a game running:
 
 ```bash
-dlsslopd --tier 720 --trace-dir "$HOME/.local/state/dlsslop-amd/color-trace"
+dlsslopd --tier 1080 --trace-dir "$HOME/.local/state/dlsslop-amd/color-trace"
 ```
 
 From another terminal:

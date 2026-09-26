@@ -21,7 +21,7 @@ fail() {
 usage() {
     cat <<HELP
 ${usage_line}
-Run a game with the native AMD presentation layer and an existing worker.
+Run a game with the native AMD presentation layer and a native worker.
 
 Options:
   -s, --shm PATH   Worker channel (default: ${channel_default}).
@@ -40,7 +40,9 @@ It prepends the installation's layer manifests to VK_ADD_IMPLICIT_LAYER_PATH
 (${layers:-none: no share/vulkan/implicit_layer.d beside this launcher}).
 It unsets DLSSNR_DISABLE and VKLayer_DLSS5. Other environment is inherited.
 COMMAND and its arguments are passed unchanged; its exit status is preserved.
-Start dlsslopd separately before launching the game.
+Start dlsslopd first, or let systemd start it: with no worker serving the
+channel, the launcher connects to the socket beside it (dlsslop.socket) and
+waits up to 60 s for the worker it starts.
 HELP
 }
 
@@ -62,11 +64,34 @@ done
 [[ $channel == /* ]] || channel=$PWD/$channel
 log=${log:-${channel%/*}/layer.log}
 [[ $log == /* ]] || log=$PWD/$log
-[[ -f $channel ]] || fail 1 "Start dlsslopd on the host first (missing $channel)."
 command -v flock >/dev/null 2>&1 || fail 1 'dlsslop-run requires flock (Debian package util-linux).'
-flock --nonblock --conflict-exit-code 73 "$channel" true
-case $? in
+# 73: a worker holds the channel's lock; 0: nobody does; 1: no channel yet.
+serving() {
+    [[ -f $channel ]] || return 1
+    flock --nonblock --conflict-exit-code 73 "$channel" true
+}
+serving
+status=$?
+if (( status != 73 )) && [[ -S $channel.sock ]]; then
+    # Connecting starts a socket-activated worker; it closes the connection
+    # once it serves, so EOF means ready.
+    python3 - "$channel.sock" <<'PROBE'
+import socket, sys
+probe = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+probe.settimeout(60)
+try:
+    probe.connect(sys.argv[1])
+    probe.shutdown(socket.SHUT_WR)
+    probe.recv(1)
+except OSError:
+    sys.exit(1)
+PROBE
+    serving
+    status=$?
+fi
+case $status in
     73) ;;
+    1) fail 1 "Start dlsslopd on the host first (missing $channel)." ;;
     0) fail 1 'No live native worker owns this channel; start dlsslopd first.' ;;
     *) fail 1 'Could not inspect the native worker channel.' ;;
 esac

@@ -46,6 +46,8 @@ LICENSE_SOURCES = {
     "licenses/THIRD-PARTY.txt": "packaging/THIRD-PARTY.txt",
 }
 DOCUMENT_SOURCES = {"README.md": "packaging/README.md", **LICENSE_SOURCES}
+# systemd finds user units here under ~/.local and /usr/local.
+UNIT_SOURCES = {f"share/systemd/user/{name}": f"packaging/{name}" for name in ("dlsslop.socket", "dlsslop.service")}
 
 
 def require_file(path):
@@ -147,9 +149,10 @@ def layer_manifest():
 def tree(root, build, source_notice):
     """Every installed file relative to the prefix, as (content, mode); all inputs validated first."""
     files = runtime_files(root, build)
-    for source in DOCUMENT_SOURCES.values():
+    for source in (*DOCUMENT_SOURCES.values(), *UNIT_SOURCES.values()):
         require_file(root / source)
     files.update((f"{DOC_DIRECTORY}/{name}", (root / source, 0o644)) for name, source in DOCUMENT_SOURCES.items())
+    files.update((name, (root / source, 0o644)) for name, source in UNIT_SOURCES.items())
     entries = {name: (path.read_bytes(), mode) for name, (path, mode) in files.items()}
     entries[f"{DOC_DIRECTORY}/licenses/SOURCES"] = (source_notice.encode(), 0o644)
     entries[LAYER_MANIFEST] = (layer_manifest().encode(), 0o644)

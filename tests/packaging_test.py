@@ -37,7 +37,7 @@ def run(arguments, env, expected=0):
 
 def fixture(root):
     root.mkdir()
-    paths = {"install.py", *INSTALLER.DOCUMENT_SOURCES.values(),
+    paths = {"install.py", *INSTALLER.DOCUMENT_SOURCES.values(), *INSTALLER.UNIT_SOURCES.values(),
              *(source for source, *_ in INSTALLER.SCRIPT_SOURCES.values())}
     for name in paths:
         target = root / name
@@ -190,6 +190,13 @@ def main():
         assert source_url in (release / INSTALLER.DOC_DIRECTORY / "licenses/SOURCES").read_text()
         for name in ("install.py", "build", "scripts", "assets"):
             assert not (release / name).exists(), name
+        units = [release / name for name in INSTALLER.UNIT_SOURCES]
+        assert all(unit.read_bytes() == (source / INSTALLER.UNIT_SOURCES[name]).read_bytes()
+                   for name, unit in zip(INSTALLER.UNIT_SOURCES, units))
+        if shutil.which("systemd-analyze"):
+            verified = subprocess.run(["systemd-analyze", "--user", "verify", *map(str, units)],
+                                      env=env, capture_output=True, text=True)
+            assert verified.returncode == 0, verified.stderr
         # Without SOURCE_DATE_EPOCH the entries carry the packaging time.
         with patch.dict(os.environ, {}, clear=True):
             before = int(time.time())

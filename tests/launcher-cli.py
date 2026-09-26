@@ -5,7 +5,9 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import socket
 import sys
+import threading
 import tempfile
 
 
@@ -157,6 +159,31 @@ def main():
             assert json.loads(result.stdout)["env"]["VK_ADD_IMPLICIT_LAYER_PATH"] == layers
             result = run([BASH, str(LAUNCHER), "missing-dlsslop-amd-command"], expected=127, env=env)
             assert "could not execute" in result.stderr
+
+        # A socket unit listens beside the channel: the launcher connects, and
+        # the worker that starts locks the channel and closes the connection
+        # once it serves. A stale socket nobody listens on changes nothing.
+        socket_path = str(channel) + ".sock"
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+        listener.bind(socket_path)
+        listener.listen(1)
+        held = {}
+
+        def activated():
+            connection, _ = listener.accept()
+            held["lock"] = channel.open("rb")
+            fcntl.flock(held["lock"], fcntl.LOCK_EX | fcntl.LOCK_NB)
+            connection.close()
+
+        worker = threading.Thread(target=activated)
+        worker.start()
+        result = run([BASH, str(LAUNCHER), str(recorder)], expected=37, env=launch_env)
+        worker.join(timeout=10)
+        assert "lock" in held and json.loads(result.stdout)["argv"] == []
+        held["lock"].close()
+        listener.close()
+        result = run([BASH, str(LAUNCHER), "/usr/bin/true"], expected=1, env=env)
+        assert "No live native worker" in result.stderr
 
     print("PASS: launcher channel checks, argv/exit forwarding and upstream environment contracts")
 

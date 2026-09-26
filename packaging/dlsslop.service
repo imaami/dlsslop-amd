@@ -1,0 +1,10 @@
+[Unit]
+Description=dlsslop-amd native HIP worker
+Requires=dlsslop.socket
+After=dlsslop.socket
+
+[Service]
+# Started by dlsslop.socket; stops after 10s without a frame. dlsslopd is
+# looked up in the usual prefixes.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/opt/dlsslop-amd/bin:/usr/bin
+ExecStart=/usr/bin/env dlsslopd --idle-exit 10 --tier 1080

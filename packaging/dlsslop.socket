@@ -1,0 +1,14 @@
+[Unit]
+Description=dlsslop-amd worker, started on demand
+
+[Socket]
+# The worker's transport socket beside its default channel. A
+# connection, from dlsslop-run or from the layer of a running
+# game, starts dlsslop.service, which stops again once it has
+# been idle for a while.
+ListenSequentialPacket=/tmp/dlsslop-amd-%U/shm.bin.sock
+SocketMode=0600
+DirectoryMode=0700
+
+[Install]
+WantedBy=sockets.target
