@@ -34,7 +34,7 @@ int main(int argc, char** argv)
     if (!made) return 1;
     const std::filesystem::path directory(made);
     try {
-        dlsslop::Geometry g{2, 2, 4, 4, 4, 4, 1, 1, 2, 2};
+        dlsslop::Geometry g{2, 2, 4, 4, 4, 1, 1, 2, 2};
         std::vector<float> rgba(4 * 4 * 4, 99.0f);
         for (unsigned y = 1; y <= 2; ++y) for (unsigned x = 1; x <= 2; ++x) {
             const unsigned p = (y * 4 + x) * 4;

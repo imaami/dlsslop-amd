@@ -7,7 +7,7 @@ static unsigned __builtin_amdgcn_workitem_id_x() { return item_id; }
 #include "../backend/color_gpu.hip"
 int main()
 {
-    const dlsslop::Geometry g{37,19,37,19,37,19,2,1,32,17};
+    const dlsslop::Geometry g{37,19,37,19,19,2,1,32,17};
     const unsigned pixels=g.width*g.height;
     std::vector<float> original(pixels*4), raw(pixels*3), actual(pixels*3+8,12345), expected;
     for(unsigned p=0;p<pixels;++p) {

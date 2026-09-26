@@ -9,7 +9,7 @@ static float luma(const float* rgb) { return .2126f*rgb[0]+.7152f*rgb[1]+.0722f*
 // Corrects a uniform frame of one original and one model colour; returns the centre pixel.
 static std::array<float,3> uniform(const float* original_rgb, const float* model_rgb, float strength)
 {
-    const dlsslop::Geometry g{8,8,8,8,8,8,1,1,6,6};
+    const dlsslop::Geometry g{8,8,8,8,8,1,1,6,6};
     std::vector<float> original(8*8*4, 1), raw(8*8*3), result;
     for (unsigned p=0; p<64; ++p) for (unsigned c=0; c<3; ++c) {
         original[p*4+c]=original_rgb[c];
@@ -21,7 +21,7 @@ static std::array<float,3> uniform(const float* original_rgb, const float* model
 int main()
 {
     try {
-        dlsslop::Geometry g{8,8,8,8,8,8,1,1,6,6};
+        dlsslop::Geometry g{8,8,8,8,8,1,1,6,6};
         std::vector<float> original(8*8*4, .4f), raw(8*8*3), result, half;
         for (unsigned p=0; p<64; ++p) {
             raw[p*3]=.6f; raw[p*3+1]=.4f; raw[p*3+2]=.2f;

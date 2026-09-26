@@ -24,7 +24,7 @@ void close(float actual, float expected, const char* message)
 int main()
 {
     try {
-        dlsslop::Geometry g{5, 5, 5, 5, 5, 5, 0, 0, 5, 5};
+        dlsslop::Geometry g{5, 5, 5, 5, 5, 0, 0, 5, 5};
         std::vector<float> input(25 * 4, 0.25f), model(25 * 3, 0.5f), output;
         for (unsigned p = 0; p < 25; ++p) input[p * 4 + 3] = 1.0f;
         dlsslop::NativeTuning t;

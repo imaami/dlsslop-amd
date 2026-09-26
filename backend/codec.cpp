@@ -202,8 +202,7 @@ void validate(const Geometry& g)
 {
     const Geometry expected = geometry(g.source_width, g.source_height, g.valid_height);
     if (g.width != expected.width || g.height != expected.height ||
-        g.valid_width != expected.valid_width || g.valid_height != expected.valid_height ||
-        g.x != expected.x ||
+        g.valid_height != expected.valid_height || g.x != expected.x ||
         g.y != expected.y || g.fit_width != expected.fit_width ||
         g.fit_height != expected.fit_height)
         throw std::invalid_argument("inconsistent codec geometry");
@@ -282,17 +281,16 @@ Geometry geometry(unsigned source_width, unsigned source_height, unsigned tier_h
     case 1080: g.width = 1920; g.height = 1152; break;
     default: throw std::invalid_argument("network height must be 0, 720, 900 or 1080");
     }
-    g.valid_width = g.width;
     g.valid_height = tier_height;
-    g.fit_width = g.valid_width;
+    g.fit_width = g.width;
     g.fit_height = g.valid_height;
-    if (std::uint64_t(source_width) * g.valid_height >= std::uint64_t(source_height) * g.valid_width)
-        g.fit_height = unsigned((std::uint64_t(source_height) * g.valid_width + source_width / 2) / source_width);
+    if (std::uint64_t(source_width) * g.valid_height >= std::uint64_t(source_height) * g.width)
+        g.fit_height = unsigned((std::uint64_t(source_height) * g.width + source_width / 2) / source_width);
     else
         g.fit_width = unsigned((std::uint64_t(source_width) * g.valid_height + source_height / 2) / source_height);
     g.fit_width = std::max(g.fit_width, 1u);
     g.fit_height = std::max(g.fit_height, 1u);
-    g.x = (g.valid_width - g.fit_width) / 2;
+    g.x = (g.width - g.fit_width) / 2;
     g.y = (g.valid_height - g.fit_height) / 2;
     return g;
 }
@@ -310,7 +308,7 @@ void encode_proxy(const std::uint8_t* source, const Geometry& g, bool fp16,
         throw std::invalid_argument("null source image");
     rgba.resize(std::size_t(g.width) * g.height * 4);
     for (unsigned y = 0; y < g.valid_height; ++y) {
-        for (unsigned x = 0; x < g.valid_width; ++x) {
+        for (unsigned x = 0; x < g.width; ++x) {
             Vec3 c{};
             if (x >= g.x && x < g.x + g.fit_width && y >= g.y && y < g.y + g.fit_height) {
                 const float sx = (float(x) + 0.5f - float(g.x)) * float(g.source_width) / float(g.fit_width) - 0.5f;
@@ -342,7 +340,7 @@ void feedback_neural_rgb(const float* neural_rgb, const Geometry& g,
         throw std::invalid_argument("null neural feedback image");
     rgba.resize(std::size_t(g.width) * g.height * 4);
     for (unsigned y = 0; y < g.valid_height; ++y) {
-        for (unsigned x = 0; x < g.valid_width; ++x) {
+        for (unsigned x = 0; x < g.width; ++x) {
             Vec3 c{};
             if (x >= g.x && x < g.x + g.fit_width && y >= g.y && y < g.y + g.fit_height) {
                 const float* p = neural_rgb + (std::size_t(y) * g.width + x) * 3;

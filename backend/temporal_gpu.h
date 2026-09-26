@@ -44,7 +44,7 @@ class GpuTemporal {
     {
         if (!passes || passes > 30 ||
             !g.width || !g.valid_height || g.valid_height > g.height ||
-            g.height > 2 * g.valid_height - 2 || g.valid_width != g.width)
+            g.height > 2 * g.valid_height - 2)
             throw std::invalid_argument("invalid temporal settings or geometry");
         // Buffer sizes do not depend on the source size, the picture's
         // placement or the vector units; only a new placement invalidates the

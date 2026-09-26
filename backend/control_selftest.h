@@ -81,7 +81,7 @@ inline void compare(const std::vector<float>& actual, const std::vector<float>& 
 
 inline void check_tuning(hip_probe::Api& api, hip_probe::Handle stream, const std::string& modules)
 {
-    const Geometry g{7, 5, 7, 5, 7, 5, 0, 0, 7, 5};
+    const Geometry g{7, 5, 7, 5, 5, 0, 0, 7, 5};
     const std::size_t pixels = g.width * g.height;
     std::vector<float> input(pixels * 4), model(pixels * 3), reference;
     for (unsigned p = 0; p < pixels; ++p) {
@@ -117,7 +117,7 @@ inline float texture(unsigned x, unsigned y)
 inline void check_temporal(hip_probe::Api& api, hip_probe::Handle stream, const std::string& modules)
 {
     constexpr unsigned width = 128, height = 96, padded_height = 104;
-    const Geometry g{width, height, width, padded_height, width, height, 0, 0, width, height};
+    const Geometry g{width, height, width, padded_height, height, 0, 0, width, height};
     const std::size_t pixels = width * padded_height;
     std::vector<float> original(pixels * 4), shifted(pixels * 4), unrelated(pixels * 4), fallback(pixels * 4, .125f);
     std::vector<float> previous_gray(width * height), histories[2];

@@ -13,8 +13,8 @@ namespace dlsslop {
 
 struct Geometry {
     unsigned source_width{}, source_height{};
-    unsigned width{}, height{};             // Padded neural processing extent.
-    unsigned valid_width{}, valid_height{}; // Unpadded, fixed 16:9 viewport.
+    unsigned width{}, height{}; // Padded neural processing extent.
+    unsigned valid_height{};    // The fixed 16:9 viewport: full width, unpadded height.
     unsigned x{}, y{}, fit_width{}, fit_height{};
 };
 
