@@ -160,6 +160,17 @@ void run()
     std::fill(pixels.pixels.begin(), pixels.pixels.end(), dlsslop_temporal::Flow{-6, 3, .5f});
     dlsslop_temporal::warp(current_luma.data(), previous.pixels.data(), history.data(), fallback.data(), pixels.pixels.data(), output.data(), w, y * width + x);
     require(output[(y * width + x) * 4] == .125f, "rejected motion contaminated history");
+    // A scene cut rejects even valid motion everywhere: every pixel, padding included,
+    // is the current pass input's reflected pixel, opaque.
+    std::vector<float> input(rgba.size());
+    for (std::size_t i = 0; i < input.size(); ++i) input[i] = float(i % 1021) / 1021;
+    std::fill(pixels.pixels.begin(), pixels.pixels.end(), dlsslop_temporal::Flow{-6, 3, 0});
+    for (unsigned p = 0; p < width * (height + 8); ++p) {
+        dlsslop_temporal::warp(current_luma.data(), previous.pixels.data(), history.data(), input.data(), pixels.pixels.data(), output.data(), w, p, true);
+        const unsigned row = p / width, source = (row < height ? row : 2 * height - 2 - row) * width + p % width;
+        for (unsigned c = 0; c < 3; ++c) require(output[p * 4 + c] == input[source * 4 + c], "a scene cut kept warped history");
+        require(output[p * 4 + 3] == 1, "scene cut fallback is not opaque");
+    }
     letterbox();
     std::puts("temporal tests passed");
 }

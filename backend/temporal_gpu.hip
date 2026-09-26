@@ -31,20 +31,17 @@ KERNEL void dlsslop_temporal_flow(const float* current, const float* previous, c
 KERNEL void dlsslop_temporal_warp(const float* __restrict__ current_luma, const float* __restrict__ previous_gray,
                                const float* __restrict__ history, const float* __restrict__ fallback,
                                const dlsslop_temporal::Flow* __restrict__ flow, float* __restrict__ output,
-                               dlsslop_temporal::Warp geometry)
+                               const unsigned* __restrict__ cut, dlsslop_temporal::Warp geometry)
 {
     const unsigned i = temporal_index();
     if (i < geometry.image.width * geometry.padded_height)
-        dlsslop_temporal::warp(current_luma, previous_gray, history, fallback, flow, output, geometry, i);
+        dlsslop_temporal::warp(current_luma, previous_gray, history, fallback, flow, output, geometry, i, *cut);
 }
 
-// A small readback detects cuts with broadly failed matches. Local disocclusions
-// are still rejected independently in the warp, at every processing pixel.
-KERNEL void dlsslop_temporal_cut(const float* current, const float* previous,
-                              const dlsslop_temporal::Flow* flow, float* errors, dlsslop_temporal::Warp w)
+// Whether one of 8x8 samples over the fitted picture fails its match.
+DEV bool cut_sample(const float* current, const float* previous,
+                    const dlsslop_temporal::Flow* flow, const dlsslop_temporal::Warp& w, unsigned i)
 {
-    const unsigned i = temporal_index();
-    if (i >= 64) return;
     const float x = float(w.x) + (float(i % 8) + .5f) * float(w.fit_width) / 8 - .5f;
     const float y = float(w.y) + (float(i / 8) + .5f) * float(w.fit_height) / 8 - .5f;
     dlsslop_temporal::Flow f = dlsslop_temporal::sample_flow(flow, w.grid,
@@ -54,5 +51,19 @@ KERNEL void dlsslop_temporal_cut(const float* current, const float* previous,
         f.x *= float(w.image.width) / denominator;
         f.y *= float(w.image.height) / denominator;
     }
-    errors[i] = dlsslop_temporal::patch_cost(current, previous, w.image, x, y, f.x, f.y, 1);
+    return !(dlsslop_temporal::patch_cost(current, previous, w.image, x, y, f.x, f.y, 1) < .1f);
+}
+// A scene cut, where at least 48 of the 64 samples fail, makes the warp reject
+// every pixel; the decision stays on the stream. Local disocclusions are still
+// rejected independently in the warp, at every processing pixel. One wave32
+// counts the samples: lane i takes samples i and i + 32.
+KERNEL void dlsslop_temporal_cut(const float* current, const float* previous,
+                              const dlsslop_temporal::Flow* flow, unsigned* cut, dlsslop_temporal::Warp w)
+{
+    const unsigned i = temporal_index();
+    if (i >= 32) return;
+    const unsigned failed =
+        __builtin_popcount(__builtin_amdgcn_ballot_w32(cut_sample(current, previous, flow, w, i))) +
+        __builtin_popcount(__builtin_amdgcn_ballot_w32(cut_sample(current, previous, flow, w, i + 32)));
+    if (!i) *cut = failed >= 48;
 }

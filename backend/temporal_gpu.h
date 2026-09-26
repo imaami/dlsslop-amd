@@ -3,7 +3,6 @@
 #include "codec.h"
 #include "temporal_math.h"
 #include "vendor/hip_api.h"
-#include <array>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -21,10 +20,10 @@ class GpuTemporal {
     hip_probe::Handle stream_{}, module_{}, luma_{}, reduce_{}, flow_{}, warp_{}, cut_{};
     std::vector<Level> levels_;
     std::vector<void*> history_;
-    void *warped_ = nullptr, *errors_ = nullptr;
+    void *warped_ = nullptr, *scene_cut_ = nullptr;
     Geometry geometry_{};
     unsigned quality_ = 0, grid_ = 0, units_ = 0, passes_ = 0, completed_ = 0;
-    bool configured_ = false, valid_ = false, pending_ = false, cut_rejected_ = false;
+    bool configured_ = false, valid_ = false, pending_ = false;
 
     void allocate(void*& ptr, std::size_t bytes, const char* what)
     {
@@ -37,9 +36,9 @@ class GpuTemporal {
             for (void* ptr : {level.current, level.previous, level.flow})
                 if (ptr) api_.hipFree(ptr);
         for (void* ptr : history_) if (ptr) api_.hipFree(ptr);
-        for (void* ptr : {warped_, errors_}) if (ptr) api_.hipFree(ptr);
+        for (void* ptr : {warped_, scene_cut_}) if (ptr) api_.hipFree(ptr);
         levels_.clear(); history_.clear();
-        warped_ = errors_ = nullptr;
+        warped_ = scene_cut_ = nullptr;
         configured_ = valid_ = pending_ = false;
     }
     void configure(const Geometry& g, unsigned quality, unsigned grid, unsigned units, unsigned passes)
@@ -55,7 +54,7 @@ class GpuTemporal {
         try {
             const std::size_t pixels = std::size_t(g.width) * g.height;
             allocate(warped_, pixels * 16, "allocate warped temporal history");
-            allocate(errors_, 64 * sizeof(float), "allocate temporal cut samples");
+            allocate(scene_cut_, sizeof(unsigned), "allocate temporal scene cut flag");
             history_.resize(passes, nullptr);
             for (auto& ptr : history_) allocate(ptr, pixels * 12, "allocate per-pass neural history");
             unsigned width = g.width, height = g.valid_height;
@@ -101,7 +100,16 @@ public:
     GpuTemporal& operator=(const GpuTemporal&) = delete;
     ~GpuTemporal() { release_buffers(); if (module_) api_.hipModuleUnload(module_); }
     void reset() noexcept { valid_ = false; pending_ = false; completed_ = 0; }
-    bool cut_rejected() const noexcept { return cut_rejected_; }
+    // Self-test only, as it waits for the stream: whether the latest begin()
+    // found a scene cut.
+    bool cut_rejected()
+    {
+        if (!valid_) return false;
+        unsigned cut = 0;
+        api_.Check(api_.hipStreamSynchronize(stream_), "complete temporal scene cut");
+        api_.Check(api_.hipMemcpy(&cut, scene_cut_, sizeof cut, 2), "read temporal scene cut");
+        return cut;
+    }
 
     // Inputs are float4 raster data in the same encoding as the network. Commands
     // remain on its HIP stream; begin reads rgba there before multi-pass feedback.
@@ -112,7 +120,7 @@ public:
         if (!rgba || pending_) throw std::logic_error("temporal begin without previous end or input");
         configure(g, quality, grid, units, passes);
         if (reset_history) reset();
-        pending_ = true; completed_ = 0; cut_rejected_ = false;
+        pending_ = true; completed_ = 0;
         unsigned count = g.width * g.valid_height;
         void* args[] = {&rgba, &levels_[0].current, &count};
         launch(luma_, count, args, "build temporal luma");
@@ -133,14 +141,8 @@ public:
             launch(flow_, level.grid.width * level.grid.height, flow_args, "estimate pyramidal optical flow");
         }
         auto w = warp_geometry();
-        void* cut_args[] = {&levels_[0].current, &levels_[0].previous, &levels_[0].flow, &errors_, &w};
-        launch(cut_, 64, cut_args, "measure temporal scene cut");
-        api_.Check(api_.hipStreamSynchronize(stream_), "complete temporal flow");
-        std::array<float, 64> errors{};
-        api_.Check(api_.hipMemcpy(errors.data(), errors_, sizeof errors, 2), "read temporal cut samples");
-        unsigned rejected = 0;
-        for (float error : errors) rejected += !(error < .1f);
-        if (rejected >= 48) { valid_ = false; cut_rejected_ = true; }
+        void* cut_args[] = {&levels_[0].current, &levels_[0].previous, &levels_[0].flow, &scene_cut_, &w};
+        launch(cut_, 32, cut_args, "detect temporal scene cut");
     }
     // Call immediately before Enqueue for this pass. The returned image lives
     // until history() is called again; both it and inference share one stream.
@@ -151,7 +153,7 @@ public:
         if (!valid_) return nullptr;
         auto w = warp_geometry();
         void* args[] = {&levels_[0].current, &levels_[0].previous, &history_[pass], &current_pass_rgba,
-                        &levels_[0].flow, &warped_, &w};
+                        &levels_[0].flow, &warped_, &scene_cut_, &w};
         launch(warp_, geometry_.width * geometry_.height, args, "warp same-pass neural history");
         return warped_;
     }

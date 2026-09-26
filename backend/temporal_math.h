@@ -105,10 +105,12 @@ DLSSLOP_TEMPORAL_INLINE Flow estimate(const float* current, const float* previou
     return best;
 }
 // current_luma is the finest pyramid level, the luma of the frame's original input, which feedback
-// in later passes does not change; fallback is the current pass's input.
+// in later passes does not change; fallback is the current pass's input. A scene cut rejects every
+// pixel, which gives the network exactly the input of its no-history path.
 DLSSLOP_TEMPORAL_INLINE void warp(const float* __restrict__ current_luma, const float* __restrict__ previous_gray,
                                const float* __restrict__ history, const float* __restrict__ fallback,
-                               const Flow* __restrict__ flow, float* __restrict__ output, Warp w, unsigned index)
+                               const Flow* __restrict__ flow, float* __restrict__ output, Warp w, unsigned index,
+                               bool cut = false)
 {
     const unsigned x = index % w.image.width, padded_y = index / w.image.width;
     const unsigned y = padded_y < w.image.height ? padded_y : 2 * w.image.height - 2 - padded_y;
@@ -125,7 +127,7 @@ DLSSLOP_TEMPORAL_INLINE void warp(const float* __restrict__ current_luma, const 
     const float right = float(w.x + w.fit_width - 1), bottom = float(w.y + w.fit_height - 1);
     const float sx = px < right ? px : right, sy = py < bottom ? py : bottom;
     const float error = absolute(current_luma[pixel] - sample(previous_gray, w.image, sx, sy));
-    const bool valid = x >= w.x && y >= w.y && x < w.x + w.fit_width && y < w.y + w.fit_height &&
+    const bool valid = !cut && x >= w.x && y >= w.y && x < w.x + w.fit_width && y < w.y + w.fit_height &&
                        px >= float(w.x) && py >= float(w.y) && px < float(w.x + w.fit_width) &&
                        py < float(w.y + w.fit_height) && f.error < .075f && error < .1f;
     float o[4] = {0, 0, 0, 1};

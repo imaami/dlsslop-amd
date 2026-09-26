@@ -119,7 +119,7 @@ inline void check_temporal(hip_probe::Api& api, hip_probe::Handle stream, const 
     constexpr unsigned width = 128, height = 96, padded_height = 104;
     const Geometry g{width, height, width, padded_height, width, height, 0, 0, width, height};
     const std::size_t pixels = width * padded_height;
-    std::vector<float> original(pixels * 4), shifted(pixels * 4), fallback(pixels * 4, .125f);
+    std::vector<float> original(pixels * 4), shifted(pixels * 4), unrelated(pixels * 4), fallback(pixels * 4, .125f);
     std::vector<float> previous_gray(width * height), histories[2];
     for (unsigned y = 0; y < height; ++y)
         for (unsigned x = 0; x < width; ++x)
@@ -135,8 +135,9 @@ inline void check_temporal(hip_probe::Api& api, hip_probe::Handle stream, const 
             for (unsigned c = 0; c < 3; ++c) {
                 original[p * 4 + c] = previous_gray[y * width + x];
                 shifted[p * 4 + c] = current;
+                unrelated[p * 4 + c] = texture(x + 4096, y + 4096);
             }
-            original[p * 4 + 3] = shifted[p * 4 + 3] = fallback[p * 4 + 3] = 1;
+            original[p * 4 + 3] = shifted[p * 4 + 3] = unrelated[p * 4 + 3] = fallback[p * 4 + 3] = 1;
             for (unsigned pass = 0; pass < 2; ++pass) {
                 histories[pass][p * 3] = float(x) / 128.0f;
                 histories[pass][p * 3 + 1] = float(y) / 128.0f;
@@ -197,6 +198,21 @@ inline void check_temporal(hip_probe::Api& api, hip_probe::Handle stream, const 
                    "store GPU temporal self-test history");
     }
     temporal.end();
+
+    // An unrelated frame is a scene cut: every pixel falls back to the pass
+    // input (here the frame itself, as in the first pass): the no-history input.
+    device_input.upload(unrelated);
+    temporal.begin(device_input.pointer, g, 2, 2, 1, 2);
+    require(temporal.cut_rejected(), "GPU temporal missed a scene cut");
+    for (unsigned pass = 0; pass < 2; ++pass) {
+        compare(Buffer::read_pointer(api, stream, temporal.history(pass, device_input.pointer), pixels * 4),
+                unrelated, "GPU temporal scene cut fallback");
+        api.Check(api.hipMemcpyAsync(temporal.target(pass), results[pass], pixels * 12, 3, stream),
+                   "store GPU temporal self-test history");
+    }
+    temporal.end();
+    std::printf("GPU control self-test: temporal scene cut rejects all history\n");
+    std::fflush(stdout);
 }
 
 inline float half_value(std::uint16_t value)
