@@ -11,24 +11,9 @@ import numpy as np
 from PIL import Image
 
 
-_FORMATS = {
-    37: ("R8G8B8A8_UNORM", 4, "normalized_codes_transfer_unspecified"),
-    44: ("B8G8R8A8_UNORM", 4, "normalized_codes_transfer_unspecified"),
-    51: ("A8B8G8R8_UNORM_PACK32", 4, "normalized_codes_transfer_unspecified"),
-    58: ("A2R10G10B10_UNORM_PACK32", 4, "normalized_codes_transfer_unspecified"),
-    64: ("A2B10G10R10_UNORM_PACK32", 4, "normalized_codes_transfer_unspecified"),
-    97: ("R16G16B16A16_SFLOAT", 8, "native_float_transfer_unspecified"),
-}
-
-
-def format_info(vk_format):
-    """A VkFormat identifies storage, not its swapchain color space."""
-    try:
-        name, size, domain = _FORMATS[int(vk_format)]
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError(f"unsupported Vulkan format: {vk_format}") from error
-    return {"name": name, "bytes_per_pixel": size, "numeric_domain": domain,
-            "transfer_function": "unknown_without_color_space_metadata"}
+# R8G8B8A8, B8G8R8A8, A8B8G8R8, A2R10G10B10 and A2B10G10R10 UNORM, and
+# R16G16B16A16_SFLOAT. A VkFormat identifies storage, not its color space.
+_BYTES_PER_PIXEL = {37: 4, 44: 4, 51: 4, 58: 4, 64: 4, 97: 8}
 
 
 def load_capture(path, vk_format, width, height, encoding=None):
@@ -38,8 +23,9 @@ def load_capture(path, vk_format, width, height, encoding=None):
     encoding argument describes the file container (png/raw), not gamma/PQ.
     """
     path = Path(path)
-    info = format_info(vk_format)
     width, height, vk_format = int(width), int(height), int(vk_format)
+    if vk_format not in _BYTES_PER_PIXEL:
+        raise ValueError(f"unsupported Vulkan format: {vk_format}")
     if width <= 0 or height <= 0:
         raise ValueError("capture dimensions must be positive")
     encoding = (encoding or path.suffix.lstrip(".")).lower()
@@ -53,7 +39,7 @@ def load_capture(path, vk_format, width, height, encoding=None):
     if encoding != "raw":
         raise ValueError(f"unsupported capture encoding: {encoding}")
     data = path.read_bytes()
-    expected = width * height * info["bytes_per_pixel"]
+    expected = width * height * _BYTES_PER_PIXEL[vk_format]
     if len(data) != expected:
         raise ValueError(f"raw capture size {len(data)} differs from expected {expected}")
     if vk_format == 97:

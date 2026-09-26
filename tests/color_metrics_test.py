@@ -49,7 +49,6 @@ class ColorMetricsTest(unittest.TestCase):
             path = self.raw("capture.raw", int(packed).to_bytes(4, "little"))
             np.testing.assert_array_equal(metrics.load_capture(path, vk_format, 1, 1),
                                           np.array([[[red, green, blue]]]) / 1023)
-            self.assertIn("unknown", metrics.format_info(vk_format)["transfer_function"])
 
     def test_fp16_preserves_hdr_and_negative_values(self):
         rgba = np.array([[[-0.25, 2, 7.5, 1]]], dtype="<f2")
@@ -62,6 +61,8 @@ class ColorMetricsTest(unittest.TestCase):
             metrics.load_capture(path, 37, 1, 1)
         with self.assertRaises(ValueError):
             metrics.load_capture(path, 37, -1, 1)
+        with self.assertRaisesRegex(ValueError, "unsupported Vulkan format: 99"):
+            metrics.load_capture(path, 99, 1, 1)
 
     def test_pfm_endianness_orientation_and_scale(self):
         expected = np.arange(12).reshape(2, 2, 3).astype(float)

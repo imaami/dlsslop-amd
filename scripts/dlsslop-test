@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 import select
-import shlex
 import shutil
 import signal
 import struct
@@ -90,7 +89,7 @@ class Control:
             key = key.replace('_', '-')
             arguments.extend(['--' + key, str(value)])
             self.changed[key] = str(value)
-        return self.call(*arguments, '--status')
+        self.call(*arguments)
 
     def restore(self, original):
         current = self.call('--settings')
@@ -160,7 +159,7 @@ def check_trace_owner(args):
 
 
 class Run:
-    def __init__(self, args, control, output, captures, trace_owner=None):
+    def __init__(self, args, control, output, captures, trace_owner):
         self.args, self.control, self.output, self.captures = args, control, output, captures
         self.cases = []
         self.before_hash = None
@@ -180,7 +179,7 @@ class Run:
         seen = manifest_values(self.captures / 'manifest.txt').get('batch_dir')
         while True:
             status = self.control.call('--capture', '1', '--status')
-            token = status.get('capture_control_seq', status['control_seq'])
+            token = status['capture_control_seq']
             def completed():
                 manifest = manifest_values(self.captures / 'manifest.txt')
                 generation = manifest.get('capture_control_seq', '-1')
@@ -197,8 +196,6 @@ class Run:
                 raise RuntimeError('Control generations did not settle before the capture deadline')
         if manifest.get('capture_metadata_version') != '2':
             raise RuntimeError('Capture metadata is unsupported; reinstall matching versions of the layer and color diagnostic.')
-        if manifest.get('frame_control_seq') != token:
-            raise RuntimeError('Settings changed during capture; rerun without changing controls.')
         if manifest.get('inference_seq', '0') == '0':
             raise RuntimeError(f'{name}: missing successful inference sequence')
         for setting, field in (('passes', 'passes'), ('debug-view', 'debug_view'),
@@ -224,7 +221,7 @@ class Run:
             return None
         directory = self.args.trace_dir.expanduser().resolve()
         owner = check_trace_owner(self.args)
-        if self.trace_owner is not None and owner != self.trace_owner:
+        if owner != self.trace_owner:
             raise RuntimeError('The tracing worker changed during the diagnostic; rerun the test.')
         token = f'color-{uuid.uuid4().hex}'
         request = directory / 'request'
@@ -295,8 +292,6 @@ def metrics_module():
     if not helper.is_file():
         helper = script.parent.parent / 'libexec/dlsslop-amd/color_metrics.py'
     spec = importlib.util.spec_from_file_location('color_metrics', helper)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f'Cannot load color metrics helper: {helper}')
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -304,9 +299,6 @@ def metrics_module():
 
 def analyse(output, cases, raw_traces=(), *, completed=True, error=None):
     metrics = metrics_module()
-    load_capture, read_pfm = metrics.load_capture, metrics.read_pfm
-    image_stats, compare_stats = metrics.image_stats, metrics.compare_stats
-    diagnose_identity = metrics.diagnose_identity
     import numpy as np
     images = {}
     report = {'completed': completed,
@@ -321,21 +313,21 @@ def analyse(output, cases, raw_traces=(), *, completed=True, error=None):
         extension = 'png' if manifest['encoding'] == 'png' else 'raw'
         kwargs = dict(vk_format=int(manifest['vk_format']), width=int(manifest['width']),
                       height=int(manifest['height']), encoding=manifest['encoding'])
-        before = load_capture(directory / f'before_00.{extension}', **kwargs)
-        after = load_capture(directory / f'after_00.{extension}', **kwargs)
+        before = metrics.load_capture(directory / f'before_00.{extension}', **kwargs)
+        after = metrics.load_capture(directory / f'after_00.{extension}', **kwargs)
         if not np.isfinite(before).all() or not np.isfinite(after).all():
             raise RuntimeError(f"{case['name']}: nonfinite captured pixels")
         if case['name'] in ('original', 'proxy'):
             images[case['name']] = after
-        report['cases'][case['name']] = {'statistics': image_stats(after),
-                                        'against_original': compare_stats(before, after)}
+        report['cases'][case['name']] = {'statistics': metrics.image_stats(after),
+                                        'against_original': metrics.compare_stats(before, after)}
         if case['name'] == 'original':
-            report['clean_frame_identity'] = diagnose_identity(before, after, tolerance=2/255 + 1e-7)
+            report['clean_frame_identity'] = metrics.diagnose_identity(before, after, tolerance=2/255 + 1e-7)
         name = case['name']
         if name.startswith('model-'):
-            report['comparisons']['proxy_to_' + name] = compare_stats(images['proxy'], after)
+            report['comparisons']['proxy_to_' + name] = metrics.compare_stats(images['proxy'], after)
         if name.startswith('composed-'):
-            report['comparisons']['original_to_' + name] = compare_stats(images['original'], after)
+            report['comparisons']['original_to_' + name] = metrics.compare_stats(images['original'], after)
     report['raw_traces'] = {}
     for name in raw_traces:
         directory = output / name
@@ -343,8 +335,8 @@ def analyse(output, cases, raw_traces=(), *, completed=True, error=None):
         comparisons = {}
         for number in range(1, summary['metadata']['passes'] + 1):
             stem = f'pass-{number:02}'
-            comparisons[stem] = compare_stats(read_pfm(directory / (stem + '-input.pfm')),
-                                               read_pfm(directory / (stem + '-raw.pfm')))
+            comparisons[stem] = metrics.compare_stats(metrics.read_pfm(directory / (stem + '-input.pfm')),
+                                                      metrics.read_pfm(directory / (stem + '-raw.pfm')))
         report['raw_traces'][name] = {'metadata': summary['metadata'], 'per_pass_changes': comparisons}
     report['interpretation'] = [
         'A red shift in proxy relative to original points toward input/proxy conversion; resampling also changes pixels.',

@@ -139,6 +139,8 @@ for request in requests:
     else:
         print('initialised=1\nmodel_up=1\nlayer_composition_up=1\nhelper_reason=NATIVE')
         print('control_seq=%s' % status_seq)
+        if capture:
+            print('capture_control_seq=%s' % status_seq)
 '''
 
 
