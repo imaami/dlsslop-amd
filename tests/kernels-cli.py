@@ -93,6 +93,19 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
     only_23 = compilers('only-23', {'clang++-23': 'Debian clang version 23.1.2'})
     assert build(only_23) == 'Debian clang version 23.1.2', 'clang++-23 alone was not selected'
 
+    # A single-module build keeps the existing manifest's other current modules
+    # and drops the ones the build no longer lists.
+    stale = compilers('stale', {'clang++-22': 'Debian clang version 22.1.8'})
+    (root / 'stale-out').mkdir()
+    (root / 'stale-out/modules.json').write_text(json.dumps(
+        [{'module': 'c32_wmma', 'compiler': 'old', 'sha256': '1' * 64},
+         {'module': 'linux_color', 'compiler': 'old', 'sha256': '0' * 64}]))
+    build(stale)
+    rows = json.loads((root / 'stale-out/modules.json').read_text())
+    assert [row['module'] for row in rows] == ['linux_codec', 'linux_color'], rows
+    sums = (root / 'stale-out/SHA256SUMS').read_text()
+    assert 'c32_wmma' not in sums and f'{"0" * 64}  linux_color.hsaco\n' in sums, sums
+
     # An explicit compiler, from the option or HIP_CLANG, is used whatever its version.
     assert build(mixed, '--compiler', 'clang++') == 'clang version 20.1.8'
     assert build(mixed, HIP_CLANG='amdclang++') == old

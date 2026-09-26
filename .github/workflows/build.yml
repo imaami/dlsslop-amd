@@ -41,7 +41,7 @@ jobs:
             exit 1
           fi
           "$dxc_root/bin/dxc" --version || exit $?
-      - name: Compile all 28 gfx1201 HIP modules including color preservation
+      - name: Compile the gfx1201 HIP modules including color preservation
         run: python3 scripts/build-kernels.py --compiler clang++-22 --linker /usr/bin/ld.lld-22
       - name: Configure worker, layer, CLI, Qt Widgets GUI and tests
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDXC="$RUNNER_TEMP/dxc/bin/dxc" -DDLSSLOP_BUILD_GUI=ON -DBUILD_TESTING=ON -DPython3_EXECUTABLE=/usr/bin/python3

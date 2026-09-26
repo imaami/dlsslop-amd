@@ -643,11 +643,6 @@
       "source": "hip/c32_fast_attention.hip",
       "sha256": "516fdd90f22b8549aa1258949f04415544b9ea2a9ce7c5924bfbc25c5b06645a"
     },
-    "kernels/c32_fused_attention_packed.hip": {
-      "repository": "amd",
-      "source": "hip/c32_fused_attention_packed.hip",
-      "sha256": "4c4347888e6c8c11a5a5522b23687def54daafc1a85632c6530cb929f68ad090"
-    },
     "kernels/c32_fused_ffn_attention.hip": {
       "repository": "amd",
       "source": "hip/c32_fused_ffn_attention.hip",
@@ -658,16 +653,6 @@
       "source": "hip/c32_reference.hip",
       "sha256": "6c6c3078a9b7893e58dd8b9732dbe74b01e23edb275ba0a43761acf8bad4fcc9"
     },
-    "kernels/c32_tiled.hip": {
-      "repository": "amd",
-      "source": "hip/c32_tiled.hip",
-      "sha256": "2f3c57727cde458a7c643f12f5f41c8f8d6eb046da9ea06cf5c68e12c84ff6c2"
-    },
-    "kernels/c32_wmma.hip": {
-      "repository": "amd",
-      "source": "hip/c32_wmma.hip",
-      "sha256": "7b580fb2327970def7e698dfe70b14c7093d99863acedd21f3d7d40c296f91e3"
-    },
     "kernels/deep_fast.hip": {
       "repository": "amd",
       "source": "hip/deep_fast.hip",
@@ -677,16 +662,6 @@
       "repository": "amd",
       "source": "hip/deep_reference.hip",
       "sha256": "0be0b196fe90eeed4c6acd3214898a79ff79c8f3ee51bcda9ae6fb31363bdc85"
-    },
-    "kernels/deep_wmma.hip": {
-      "repository": "amd",
-      "source": "hip/deep_wmma.hip",
-      "sha256": "e181ecb24036a467ac5891d774eafd3df811aff5f8460e530394d08a86d656f5"
-    },
-    "kernels/multihead_fast.hip": {
-      "repository": "amd",
-      "source": "hip/multihead_fast.hip",
-      "sha256": "bd8a97795212c6aad6c3eceb79905fdbcb34b2318642ea4ea8c4758d46f7f595"
     },
     "kernels/multihead_fast_padded.hip": {
       "repository": "amd",
@@ -703,16 +678,6 @@
       "source": "hip/multihead_reference.hip",
       "sha256": "cdc6e06f5e23231a3c73ccd6affc3612bc22f49b4c3f427aed7b2d8fb7561a27"
     },
-    "kernels/multihead_tiled.hip": {
-      "repository": "amd",
-      "source": "hip/multihead_tiled.hip",
-      "sha256": "a6ec115d90f99e9e8cc52d48259cdc71e31f38cf989b74c1ff75a1a6d347060e"
-    },
-    "kernels/multihead_wmma.hip": {
-      "repository": "amd",
-      "source": "hip/multihead_wmma.hip",
-      "sha256": "913732b3b307ce1b336cac5099397b0d2f8c3652240d7b19d742446a522eb06a"
-    },
     "kernels/prefix_fast.hip": {
       "repository": "amd",
       "source": "hip/prefix_fast.hip",
@@ -722,11 +687,6 @@
       "repository": "amd",
       "source": "hip/prefix_reference.hip",
       "sha256": "59985f984c43ac0d1d7d247776448f7a719bba761e8065ca25d8d3ad0c6de0ac"
-    },
-    "kernels/wave_pointwise.hip": {
-      "repository": "amd",
-      "source": "hip/wave_pointwise.hip",
-      "sha256": "ec8a3cf001bfe3f43352732e0ef58aefa54a9344695ae47d36e6dbe915223d17"
     },
     "backend/vendor/LICENSE.lmxxf": {
       "repository": "amd",

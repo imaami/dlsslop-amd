@@ -80,7 +80,7 @@ cmake --build build --parallel 2
 QT_QPA_PLATFORM=offscreen ctest --test-dir build --output-on-failure
 ```
 
-This compiles and validates ten Vulkan shaders, compiles 28 `gfx1201` HIP modules
+This compiles and validates ten Vulkan shaders, compiles the `gfx1201` HIP modules
 (including `linux_color`), and builds the worker, layer, CLI, Qt GUI and tests.
 CMake builds the shaders from their prepared sources; `-DDXC` defaults to `dxc`
 on `PATH`.

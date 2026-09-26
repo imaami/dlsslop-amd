@@ -89,7 +89,7 @@ def package(root, build, output, source_url):
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
-    print(f"Packaged 4 native binaries, 28 GPU modules and runtime tools: {output}")
+    print(f"Packaged 4 native binaries, {len(installer.MODULE_NAMES)} GPU modules and runtime tools: {output}")
     return output
 
 

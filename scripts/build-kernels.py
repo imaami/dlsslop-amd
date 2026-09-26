@@ -18,31 +18,20 @@ import subprocess
 import sys
 
 
-# Kept in the order and with the exact selections of upstream hip/build-modules.ps1.
+# Upstream hip/build-modules.ps1's selections in its order, less the twelve the
+# production network never loads, then the Linux kernels.
 MODULES = [
     ("c32_prefix_reference", [], ["c32_reference.hip", "prefix_reference.hip"]),
     ("multihead-reference", [], ["multihead_reference.hip"]),
     ("deep_reference", [], ["deep_reference.hip"]),
     ("boundary_reference", [], ["boundary_reference.hip"]),
-    ("c32_wmma", [], ["c32_wmma.hip"]),
-    ("multihead-wmma", [], ["multihead_wmma.hip"]),
-    ("deep_wmma", [], ["deep_wmma.hip"]),
-    ("wave-pointwise", [], ["c32_reference.hip", "wave_pointwise.hip"]),
-    ("c32_tiled", [], ["c32_tiled.hip"]),
-    ("multihead-tiled", [], ["multihead_tiled.hip"]),
     ("c32_fast", [], ["c32_fast.hip"]),
     ("c32_fast_attention", [], ["c32_fast_attention.hip"]),
     ("boundary-fast", [], ["c32_fast_attention.hip", "boundary_fast.hip"]),
-    ("c32_fused_attention", [], ["c32_fused_attention_packed.hip"]),
-    ("c32_fused_ffn_attention", [], ["c32_fused_ffn_attention.hip"]),
     ("c32_fused_ffn_attention-packed", ["HIP_C32_DIAG_WEIGHTS 1"], ["c32_fused_ffn_attention.hip"]),
     ("prefix_fast", [], ["prefix_fast.hip"]),
-    ("multihead-fast", [], ["multihead_fast.hip"]),
-    ("multihead-fast-padded-wave", [], ["multihead_fast_padded.hip"]),
     ("multihead_fused_attention", ["HIP_MH_RTZ_ISA 1"], ["multihead_fused_attention.hip"]),
-    ("deep_fast", [], ["deep_fast.hip"]),
     ("deep_fast-packed", ["HIP_BRANCHLESS_F 1"], ["deep_fast.hip"]),
-    ("multihead-fast-packed", [], ["multihead_fast.hip"]),
     ("multihead-fast-padded-wave-packed", ["HIP_FFN_HOIST_RES 2"], ["multihead_fast_padded.hip"]),
     ("linux_codec", [], ["codec_gpu.hip"]),
     ("linux_tuning", [], ["tuning_gpu.hip"]),
@@ -159,11 +148,11 @@ def build(args):
                          "code_object_version": args.code_object_version})
         if not args.keep_generated:
             generated.unlink()
-    # Single-module builds update the existing manifest instead of dropping it.
+    # Single-module builds keep the existing manifest's other current modules.
     if args.only and (root / "modules.json").exists():
         old = json.loads((root / "modules.json").read_text())
-        names = {entry["module"] for entry in manifest}
-        manifest += [entry for entry in old if entry["module"] not in names]
+        keep = {row[0] for row in MODULES} - {args.only}
+        manifest += [entry for entry in old if entry["module"] in keep]
     manifest.sort(key=lambda entry: entry["module"])
     (root / "modules.json").write_text(json.dumps(manifest, indent=2) + "\n")
     (root / "SHA256SUMS").write_text("".join(f'{entry["sha256"]}  {entry["module"]}.hsaco\n' for entry in manifest))

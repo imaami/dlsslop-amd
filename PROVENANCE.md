@@ -49,7 +49,9 @@ worker clears the production options' block-skip set unless `--performance`
 restores upstream's skipped blocks 42, 43 and 46. Like upstream's shipped HIP
 configurations (`scripts/hip-*-flags.txt`), it also enables the bit-exact byte
 residual stream, byte features and their diagonal projections, byte decoder
-output and C256 FFN fragments.
+output and C256 FFN fragments. It also clears the WMMA, tiled, wave and
+fused-C32 flags: production launches nothing from their modules, so the build
+ships only the 12 of upstream's 24 modules that the network loads.
 
 Preserve `upstream-layer/ATTRIBUTION.md` and all inherited notices. The layer's
 shader/dispatch lineage includes OptiScaler and Dagherbou/OptiScaler_DLSSNR,

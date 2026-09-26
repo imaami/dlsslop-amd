@@ -14,11 +14,8 @@ import tempfile
 
 MODULE_NAMES = (
     "c32_prefix_reference", "multihead-reference", "deep_reference", "boundary_reference",
-    "c32_wmma", "multihead-wmma", "deep_wmma", "wave-pointwise", "c32_tiled",
-    "multihead-tiled", "c32_fast", "c32_fast_attention", "boundary-fast",
-    "c32_fused_attention", "c32_fused_ffn_attention", "c32_fused_ffn_attention-packed",
-    "prefix_fast", "multihead-fast", "multihead-fast-padded-wave",
-    "multihead_fused_attention", "deep_fast", "deep_fast-packed", "multihead-fast-packed",
+    "c32_fast", "c32_fast_attention", "boundary-fast", "c32_fused_ffn_attention-packed",
+    "prefix_fast", "multihead_fused_attention", "deep_fast-packed",
     "multihead-fast-padded-wave-packed", "linux_codec", "linux_tuning", "linux_color",
     "linux_temporal",
 )
@@ -93,11 +90,11 @@ def validate_modules(directory):
     if not isinstance(entries, list) or any(not isinstance(row, dict) for row in entries):
         raise ValueError("GPU module manifest must be a list of module records")
     if len(entries) != len(MODULE_NAMES) or {row.get("module") for row in entries} != set(MODULE_NAMES):
-        raise ValueError("GPU module manifest must contain all 28 modules exactly once")
+        raise ValueError(f"GPU module manifest must contain all {len(MODULE_NAMES)} modules exactly once")
     checksums = checksum_records(directory / "SHA256SUMS")
     expected = {name + ".hsaco" for name in MODULE_NAMES}
     if set(checksums) != expected:
-        raise ValueError("GPU checksum inventory must contain all 28 modules exactly once")
+        raise ValueError(f"GPU checksum inventory must contain all {len(MODULE_NAMES)} modules exactly once")
     for row in entries:
         name = row["module"] + ".hsaco"
         path = directory / name
