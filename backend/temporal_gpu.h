@@ -21,7 +21,7 @@ class GpuTemporal {
     hip_probe::Handle stream_{}, module_{}, luma_{}, reduce_{}, flow_{}, warp_{}, cut_{};
     std::vector<Level> levels_;
     std::vector<void*> history_;
-    void *original_ = nullptr, *warped_ = nullptr, *errors_ = nullptr;
+    void *warped_ = nullptr, *errors_ = nullptr;
     Geometry geometry_{};
     unsigned quality_ = 0, grid_ = 0, units_ = 0, passes_ = 0, completed_ = 0;
     bool configured_ = false, valid_ = false, pending_ = false, cut_rejected_ = false;
@@ -37,9 +37,9 @@ class GpuTemporal {
             for (void* ptr : {level.current, level.previous, level.flow})
                 if (ptr) api_.hipFree(ptr);
         for (void* ptr : history_) if (ptr) api_.hipFree(ptr);
-        for (void* ptr : {original_, warped_, errors_}) if (ptr) api_.hipFree(ptr);
+        for (void* ptr : {warped_, errors_}) if (ptr) api_.hipFree(ptr);
         levels_.clear(); history_.clear();
-        original_ = warped_ = errors_ = nullptr;
+        warped_ = errors_ = nullptr;
         configured_ = valid_ = pending_ = false;
     }
     void configure(const Geometry& g, unsigned quality, unsigned grid, unsigned units, unsigned passes)
@@ -54,7 +54,6 @@ class GpuTemporal {
         geometry_ = g; quality_ = quality; grid_ = grid; units_ = units; passes_ = passes;
         try {
             const std::size_t pixels = std::size_t(g.width) * g.height;
-            allocate(original_, pixels * 16, "allocate temporal original input");
             allocate(warped_, pixels * 16, "allocate warped temporal history");
             allocate(errors_, 64 * sizeof(float), "allocate temporal cut samples");
             history_.resize(passes, nullptr);
@@ -105,7 +104,7 @@ public:
     bool cut_rejected() const noexcept { return cut_rejected_; }
 
     // Inputs are float4 raster data in the same encoding as the network. Commands
-    // remain on its HIP stream; begin owns a copy before multi-pass feedback.
+    // remain on its HIP stream; begin reads rgba there before multi-pass feedback.
     // Motion settings are in the ranges the protocol's ShmMVec* readers return.
     void begin(void* rgba, const Geometry& g, unsigned quality, unsigned grid,
                unsigned units, unsigned passes, bool reset_history = false)
@@ -114,9 +113,8 @@ public:
         configure(g, quality, grid, units, passes);
         if (reset_history) reset();
         pending_ = true; completed_ = 0; cut_rejected_ = false;
-        api_.Check(api_.hipMemcpyAsync(original_, rgba, std::size_t(g.width) * g.height * 16, 3, stream_), "retain original temporal input");
         unsigned count = g.width * g.valid_height;
-        void* args[] = {&original_, &levels_[0].current, &count};
+        void* args[] = {&rgba, &levels_[0].current, &count};
         launch(luma_, count, args, "build temporal luma");
         for (std::size_t i = 1; i < levels_.size(); ++i) {
             auto& source = levels_[i - 1]; auto& target = levels_[i];
@@ -152,7 +150,7 @@ public:
             throw std::logic_error("temporal history pass order");
         if (!valid_) return nullptr;
         auto w = warp_geometry();
-        void* args[] = {&original_, &levels_[0].previous, &history_[pass], &current_pass_rgba,
+        void* args[] = {&levels_[0].current, &levels_[0].previous, &history_[pass], &current_pass_rgba,
                         &levels_[0].flow, &warped_, &w};
         launch(warp_, geometry_.width * geometry_.height, args, "warp same-pass neural history");
         return warped_;

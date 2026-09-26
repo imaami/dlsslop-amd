@@ -104,18 +104,11 @@ DLSSLOP_TEMPORAL_INLINE Flow estimate(const float* current, const float* previou
     }
     return best;
 }
-DLSSLOP_TEMPORAL_INLINE float sample_rgb(const float* rgb, Extent e, float x, float y, unsigned channel)
-{
-    x = clamp(x, 0, float(e.width - 1)); y = clamp(y, 0, float(e.height - 1));
-    const unsigned ix = unsigned(x), iy = unsigned(y);
-    const unsigned hx = min_u(ix + 1, e.width - 1), hy = min_u(iy + 1, e.height - 1);
-    const float fx = x - float(ix), fy = y - float(iy);
-    const float a = rgb[(iy * e.width + ix) * 3 + channel], b = rgb[(iy * e.width + hx) * 3 + channel];
-    const float c = rgb[(hy * e.width + ix) * 3 + channel], d = rgb[(hy * e.width + hx) * 3 + channel];
-    return (a + (b - a) * fx) * (1 - fy) + (c + (d - c) * fx) * fy;
-}
-DLSSLOP_TEMPORAL_INLINE void warp(const float* current, const float* previous_gray,
-                               const float* history, const float* fallback, const Flow* flow, float* output, Warp w, unsigned index)
+// current_luma is the finest pyramid level, the luma of the frame's original input, which feedback
+// in later passes does not change; fallback is the current pass's input.
+DLSSLOP_TEMPORAL_INLINE void warp(const float* __restrict__ current_luma, const float* __restrict__ previous_gray,
+                               const float* __restrict__ history, const float* __restrict__ fallback,
+                               const Flow* __restrict__ flow, float* __restrict__ output, Warp w, unsigned index)
 {
     const unsigned x = index % w.image.width, padded_y = index / w.image.width;
     const unsigned y = padded_y < w.image.height ? padded_y : 2 * w.image.height - 2 - padded_y;
@@ -131,14 +124,26 @@ DLSSLOP_TEMPORAL_INLINE void warp(const float* current, const float* previous_gr
     // black. Validity below already requires px >= w.x and py >= w.y.
     const float right = float(w.x + w.fit_width - 1), bottom = float(w.y + w.fit_height - 1);
     const float sx = px < right ? px : right, sy = py < bottom ? py : bottom;
-    const float luma = current[pixel * 4] * .2126f + current[pixel * 4 + 1] * .7152f + current[pixel * 4 + 2] * .0722f;
-    const float error = absolute(luma - sample(previous_gray, w.image, sx, sy));
+    const float error = absolute(current_luma[pixel] - sample(previous_gray, w.image, sx, sy));
     const bool valid = x >= w.x && y >= w.y && x < w.x + w.fit_width && y < w.y + w.fit_height &&
                        px >= float(w.x) && py >= float(w.y) && px < float(w.x + w.fit_width) &&
                        py < float(w.y + w.fit_height) && f.error < .075f && error < .1f;
-    for (unsigned channel = 0; channel < 3; ++channel)
-        output[index * 4 + channel] = valid ? sample_rgb(history, w.image, sx, sy, channel) : fallback[pixel * 4 + channel];
-    output[index * 4 + 3] = 1;
+    float o[4] = {0, 0, 0, 1};
+    if (valid) {
+        const float cx = clamp(sx, 0, float(w.image.width - 1)), cy = clamp(sy, 0, float(w.image.height - 1));
+        const unsigned ix = unsigned(cx), iy = unsigned(cy);
+        const unsigned hx = min_u(ix + 1, w.image.width - 1), hy = min_u(iy + 1, w.image.height - 1);
+        const float fx = cx - float(ix), fy = cy - float(iy);
+        const unsigned top = iy * w.image.width, low = hy * w.image.width;
+        const float *a = history + (top + ix) * 3, *b = history + (top + hx) * 3;
+        const float *c = history + (low + ix) * 3, *d = history + (low + hx) * 3;
+        for (unsigned channel = 0; channel < 3; ++channel)
+            o[channel] = (a[channel] + (b[channel] - a[channel]) * fx) * (1 - fy) +
+                         (c[channel] + (d[channel] - c[channel]) * fx) * fy;
+    } else {
+        for (unsigned channel = 0; channel < 3; ++channel) o[channel] = fallback[pixel * 4 + channel];
+    }
+    for (unsigned channel = 0; channel < 4; ++channel) output[index * 4 + channel] = o[channel];
 }
 } // namespace dlsslop_temporal
 #undef DLSSLOP_TEMPORAL_INLINE

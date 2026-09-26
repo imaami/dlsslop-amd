@@ -10,6 +10,14 @@ namespace {
 struct Plane { dlsslop_temporal::Extent size; std::vector<float> pixels; };
 struct Field { dlsslop_temporal::Extent size; std::vector<dlsslop_temporal::Flow> pixels; };
 void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
+// The finest luma level, as dlsslop_temporal_luma builds it from the frame's original input.
+std::vector<float> luma(const std::vector<float>& rgba)
+{
+    std::vector<float> result(rgba.size() / 4);
+    for (std::size_t i = 0; i < result.size(); ++i)
+        result[i] = rgba[i * 4] * .2126f + rgba[i * 4 + 1] * .7152f + rgba[i * 4 + 2] * .0722f;
+    return result;
+}
 std::vector<Plane> pyramid(Plane original, unsigned quality)
 {
     std::vector<Plane> result{std::move(original)};
@@ -57,6 +65,7 @@ void letterbox()
     constexpr unsigned right = left + fit_width - 1, bottom = top + fit_height - 1;
     constexpr float sentinel = 1000, fallback_value = .125f;
     std::vector<float> rgba(width * height * 4, .5f), gray(width * height, .5f);
+    const std::vector<float> current = luma(rgba);
     std::vector<float> history(width * height * 3, sentinel), fallback(rgba.size(), fallback_value);
     std::vector<float> output(rgba.size());
     std::vector<dlsslop_temporal::Flow> flow(width * height);
@@ -82,8 +91,9 @@ void letterbox()
     for (const Case& t : cases) {
         std::fill(flow.begin(), flow.end(), dlsslop_temporal::Flow{t.dx, t.dy, 0});
         const unsigned index = t.y * width + t.x;
-        dlsslop_temporal::warp(rgba.data(), gray.data(), history.data(), fallback.data(), flow.data(), output.data(), w, index);
+        dlsslop_temporal::warp(current.data(), gray.data(), history.data(), fallback.data(), flow.data(), output.data(), w, index);
         for (unsigned c = 0; c < 3; ++c) require(output[index * 4 + c] == t.expected, t.message);
+        require(output[index * 4 + 3] == 1, "warped history is not opaque");
     }
 }
 void run()
@@ -136,10 +146,11 @@ void run()
             rgba[p * 4 + 3] = 1;
         }
     }
+    const std::vector<float> current_luma = luma(rgba);
     std::fill(pixels.pixels.begin(), pixels.pixels.end(), dlsslop_temporal::Flow{-6, 3, 0});
     dlsslop_temporal::Warp w{{width, height}, pixels.size, height + 8, 4, 1, 0, 0, width, height};
     for (unsigned p = 0; p < width * (height + 8); ++p)
-        dlsslop_temporal::warp(rgba.data(), previous.pixels.data(), history.data(), fallback.data(), pixels.pixels.data(), output.data(), w, p);
+        dlsslop_temporal::warp(current_luma.data(), previous.pixels.data(), history.data(), fallback.data(), pixels.pixels.data(), output.data(), w, p);
     const unsigned x = 60, y = 40;
     const float expected = float(x - 6) / float(width) + float(y + 3) / float(height);
     require(std::fabs(output[(y * width + x) * 4] - expected) < .00001f, "history warp coordinate wrong");
@@ -147,7 +158,7 @@ void run()
     const unsigned mirrored = 2 * height - 2 - (height + 7);
     require(output[((height + 7) * width + x) * 4] == output[(mirrored * width + x) * 4], "history padding is not reflected");
     std::fill(pixels.pixels.begin(), pixels.pixels.end(), dlsslop_temporal::Flow{-6, 3, .5f});
-    dlsslop_temporal::warp(rgba.data(), previous.pixels.data(), history.data(), fallback.data(), pixels.pixels.data(), output.data(), w, y * width + x);
+    dlsslop_temporal::warp(current_luma.data(), previous.pixels.data(), history.data(), fallback.data(), pixels.pixels.data(), output.data(), w, y * width + x);
     require(output[(y * width + x) * 4] == .125f, "rejected motion contaminated history");
     letterbox();
     std::puts("temporal tests passed");

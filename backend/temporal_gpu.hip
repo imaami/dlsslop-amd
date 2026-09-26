@@ -28,12 +28,14 @@ KERNEL void dlsslop_temporal_flow(const float* current, const float* previous, c
     const unsigned i = temporal_index();
     if (i < search.grid.width * search.grid.height) flow[i] = dlsslop_temporal::estimate(current, previous, coarse, search, i);
 }
-KERNEL void dlsslop_temporal_warp(const float* current, const float* previous_gray, const float* history,
-                               const float* fallback, const dlsslop_temporal::Flow* flow, float* output, dlsslop_temporal::Warp geometry)
+KERNEL void dlsslop_temporal_warp(const float* __restrict__ current_luma, const float* __restrict__ previous_gray,
+                               const float* __restrict__ history, const float* __restrict__ fallback,
+                               const dlsslop_temporal::Flow* __restrict__ flow, float* __restrict__ output,
+                               dlsslop_temporal::Warp geometry)
 {
     const unsigned i = temporal_index();
     if (i < geometry.image.width * geometry.padded_height)
-        dlsslop_temporal::warp(current, previous_gray, history, fallback, flow, output, geometry, i);
+        dlsslop_temporal::warp(current_luma, previous_gray, history, fallback, flow, output, geometry, i);
 }
 
 // A small readback detects cuts with broadly failed matches. Local disocclusions
