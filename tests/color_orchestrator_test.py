@@ -92,9 +92,8 @@ if capture:
     seq = str(state['seq'])
     meta = {'frames': '1', 'width': '2', 'height': '2', 'vk_format': '37',
             'encoding': 'png', 'row_pitch': '8', 'bytes_per_pixel': '4',
-            'capture_metadata_version': '1', 'capture_control_seq': seq,
-            'frame_control_seq': seq, 'request_seq': str(number),
-            'response_seq': str(number), 'ok_seq': str(number),
+            'capture_metadata_version': '2', 'capture_control_seq': seq,
+            'frame_control_seq': seq, 'inference_seq': str(number),
             'before_hash': 'same-held-input', 'batch_dir': batch.name}
     for key in ('passes', 'debug-view', 'apply-model', 'bypass', 'hold', 'detail', 'color'):
         meta[key.replace('-', '_')] = settings[key]
@@ -104,7 +103,7 @@ if capture:
         elif state['mode'] == 'changed-input':
             meta['before_hash'] = 'another-frame'
         elif state['mode'] == 'failed-response':
-            meta['ok_seq'] = '0'
+            meta['inference_seq'] = '0'
         elif state['mode'] == 'generation-bump':
             # Another control generation raced the requested capture token. The
             # settings are unchanged; a second capture must use this generation.
@@ -326,7 +325,7 @@ class ColorOrchestratorTest(unittest.TestCase):
         # The public manifest survives the channel, whose generations restart.
         (self.captures / "earlier-batch").mkdir()
         (self.captures / "manifest.txt").write_text(
-            f"capture_metadata_version 1\ncapture_control_seq {sequence}\n"
+            f"capture_metadata_version 2\ncapture_control_seq {sequence}\n"
             f"frame_control_seq {sequence}\nbatch_dir earlier-batch\n")
         result = self.invoke("delayed")
         self.assertEqual(result.returncode, 0, result.stderr)

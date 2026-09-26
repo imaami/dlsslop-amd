@@ -216,7 +216,7 @@ index fd7c1cd..4ec527a 100644
      (void)h;
      return kMaxPasses;
 diff --git a/upstream-layer/layer_linux/src/capture.cpp b/upstream-layer/layer_linux/src/capture.cpp
-index 75b2a3f..d0d0abc 100644
+index 75b2a3f..55f39c4 100644
 --- a/upstream-layer/layer_linux/src/capture.cpp
 +++ b/upstream-layer/layer_linux/src/capture.cpp
 @@ -12,9 +12,9 @@
@@ -252,7 +252,7 @@ index 75b2a3f..d0d0abc 100644
  // True when the format is four 8-bit channels, which is the only shape PNG can hold here.
  bool IsEightBitRgba(uint32_t f) {
      switch (f) {
-@@ -62,24 +47,69 @@ size_t BytesPerPixel(uint32_t f) {
+@@ -62,24 +47,67 @@ size_t BytesPerPixel(uint32_t f) {
      return f == VK_FORMAT_R16G16B16A16_SFLOAT ? 8u : 4u;
  }
  
@@ -305,9 +305,7 @@ index 75b2a3f..d0d0abc 100644
 +#define CAPTURE_F(name, field) std::fprintf(f, "%s" name " %.9g\n", prefix.c_str(), double(m.field))
 +    CAPTURE_U("frame_control_seq", frameControlSeq);
 +    CAPTURE_U("tuning_seq", tuningSeq);
-+    CAPTURE_U("request_seq", requestSeq);
-+    CAPTURE_U("response_seq", responseSeq);
-+    CAPTURE_U("ok_seq", okSeq);
++    CAPTURE_U("inference_seq", inferenceSeq);
 +    CAPTURE_U("passes", passes);
 +    CAPTURE_U("debug_view", debugView);
 +    CAPTURE_U("apply_model", applyModel);
@@ -329,7 +327,7 @@ index 75b2a3f..d0d0abc 100644
  }
  
  }  // namespace
-@@ -92,65 +122,102 @@ std::string CaptureWriter::Directory() {
+@@ -92,65 +120,102 @@ std::string CaptureWriter::Directory() {
      return "/tmp/dlssnr-captures";
  }
  
@@ -415,7 +413,7 @@ index 75b2a3f..d0d0abc 100644
      FILE* f = fopen(path.c_str(), "wt");
 -    if (!f) return;
 +    if (!f) return false;
-+    std::fprintf(f, "capture_metadata_version 1\n");
++    std::fprintf(f, "capture_metadata_version 2\n");
 +    std::fprintf(f, "capture_control_seq %u\n", _controlSeq);
 +    const std::string batch = _batchDir.substr(Directory().size() + 1);
 +    std::fprintf(f, "batch_dir %s\n", batch.c_str());
@@ -450,10 +448,10 @@ index 75b2a3f..d0d0abc 100644
  
  }  // namespace dlssnr
 diff --git a/upstream-layer/layer_linux/src/capture.h b/upstream-layer/layer_linux/src/capture.h
-index db0dc5d..0c88a64 100644
+index db0dc5d..97f8b61 100644
 --- a/upstream-layer/layer_linux/src/capture.h
 +++ b/upstream-layer/layer_linux/src/capture.h
-@@ -14,30 +14,45 @@
+@@ -14,30 +14,44 @@
  // with a manifest saying how to read it. The manifest is written either way.
  #include <cstdint>
  #include <string>
@@ -461,12 +459,11 @@ index db0dc5d..0c88a64 100644
  
  namespace dlssnr {
  
-+// Renderer settings come from the frame snapshot. Sequence echoes describe the
-+// completed worker request; passes is the layer's observed requested count.
++// Renderer settings come from the frame snapshot. inferenceSeq is the worker
++// request that answered the frame; passes is the layer's observed requested count.
 +struct CaptureMetadata {
 +    uint32_t frameControlSeq = 0, tuningSeq = 0;
-+    uint32_t requestSeq = 0, responseSeq = 0, okSeq = 0;
-+    uint32_t passes = 0, debugView = 0, applyModel = 0, bypass = 0, hold = 0;
++    uint32_t inferenceSeq = 0, passes = 0, debugView = 0, applyModel = 0, bypass = 0, hold = 0;
 +    uint32_t compare = 0, transfer = 0;
 +    uint32_t modelWidth = 0, modelHeight = 0, hdrProxy = 0, linearHdr = 0, hdrTransfer = 0;
 +    float detail = 0, color = 0, debugScale = 1;
@@ -905,7 +902,7 @@ index dc344c4..1a84da8 100644
  
  
 diff --git a/upstream-layer/layer_linux/src/composition.h b/upstream-layer/layer_linux/src/composition.h
-index 757303b..155f188 100644
+index 757303b..904806a 100644
 --- a/upstream-layer/layer_linux/src/composition.h
 +++ b/upstream-layer/layer_linux/src/composition.h
 @@ -5,8 +5,9 @@
@@ -956,24 +953,20 @@ index 757303b..155f188 100644
  
      // Point the transport buffers at the shared-memory pixel regions so the GPU reads and writes
      // them directly, with no host copy in between. Null pointers fall back to private host-visible
-@@ -198,8 +205,15 @@ class Composition {
+@@ -198,8 +205,11 @@ class Composition {
      void MarkModelFrame() { _haveModel = true; }
  
      // Write this many matched before/after pairs, starting with the next composed frame.
 -    void RequestCapture(uint32_t frames) { _capture.Begin(frames); }
 +    void RequestCapture(uint32_t frames, uint32_t controlSeq = 0) { _capture.Begin(frames, controlSeq); }
-+    void SetCaptureInference(uint32_t request, uint32_t response, uint32_t ok) {
-+        _captureMetadata.requestSeq = request;
-+        _captureMetadata.responseSeq = response;
-+        _captureMetadata.okSeq = ok;
-+    }
++    void SetCaptureInference(uint32_t seq) { _captureMetadata.inferenceSeq = seq; }
      bool CaptureActive() const { return _capture.Active(); }
 +    // This frame's compose recorded a pair; an active capture without its host buffer records none.
 +    bool CaptureRecorded() const { return _captureRecorded; }
  
      // Called after leg 2's fence, when the readback the compose recorded has landed.
      void WriteCapturedFrame();
-@@ -270,13 +284,12 @@ class Composition {
+@@ -270,13 +280,12 @@ class Composition {
      VkFormat _swapchainFormat = VK_FORMAT_UNDEFINED;
      VkFormat _workFormat = VK_FORMAT_UNDEFINED;  // usually the swapchain's UNORM twin; see Prepare
      bool _blitSwapchain = false;                 // set when _workFormat is not the swapchain's twin
@@ -988,7 +981,7 @@ index 757303b..155f188 100644
  
      // Supersampling: the model works above the frame, so the proxy is enlarged on the way in and the
      // answer averaged back on the way out. _modelNative holds that average; without it the resolve
-@@ -287,7 +300,7 @@ class Composition {
+@@ -287,7 +296,7 @@ class Composition {
      bool _superSample = false;
      uint32_t _scalerFilter = kScalerLanczos3;
  
@@ -997,7 +990,7 @@ index 757303b..155f188 100644
      // percentile taken across it -- on the GPU. The reduce pass keeps the percentile, the history
      // and the resolved value in a device-local state buffer; the resolve reads the resolved value
      // through a four-byte copy into its own constant block, so no tensor crosses to the host. The
-@@ -322,10 +335,11 @@ class Composition {
+@@ -322,10 +331,11 @@ class Composition {
      bool _answerViaFd = false;
  
      CaptureWriter _capture;
@@ -1393,7 +1386,7 @@ index 0941c93..b544124 100644
      // present only because Vulkan will not accept an unwritten binding.
      VkImage _dummyImage = VK_NULL_HANDLE;
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..453bf6c 100644
+index 4b37520..0deae27 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -1974,13 +1967,11 @@ index 4b37520..453bf6c 100644
          dc->vkEndCommandBuffer(cb);
          return false;
      }
-@@ -1595,20 +1770,33 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1595,20 +1770,31 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          return false;
      }
      sc.comp->MarkModelFrame();
-+    if (dc->shm.hdr)
-+        sc.comp->SetCaptureInference(dc->shm.hdr->seq_req.load(), dc->shm.hdr->seq_resp.load(),
-+                                     dc->shm.hdr->seq_ok.load());
++    sc.comp->SetCaptureInference(dc->shm.hdr->seq_req.load());
      const double tHelper = time ? NowMs() : 0.0;
  
      // ---- leg 2: the answer, composed back ----
@@ -2013,7 +2004,7 @@ index 4b37520..453bf6c 100644
  
      if (dc->shm.hdr) {
          ShmStore64(dc->shm.hdr->layerFramesLo, dc->shm.hdr->layerFramesHi, ++dc->framesComposed);
-@@ -1650,11 +1838,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1650,11 +1836,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
      dc->lastPresentMs.store(NowMs(), std::memory_order_relaxed);
  
      // Whether this call's wait semaphores have already been consumed by a submit of ours. They are
@@ -2028,7 +2019,7 @@ index 4b37520..453bf6c 100644
  
      // Held from here to the present at the end, alongside Hook_QueueSubmit{,2}. Vulkan requires
      // external synchronization for every operation on a queue; the repaint uses the application's
-@@ -1679,6 +1869,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1679,6 +1867,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
                  if (k < 3) Log("[layer] present: swapchain %p is not primary", (void*)pPresentInfo->pSwapchains[i]);
                  continue;
              }
@@ -2038,7 +2029,7 @@ index 4b37520..453bf6c 100644
              sc.queue = queue;
              if (!sc.ready && !dc->shm.dead) {
                  if (!CreateResources(dc, sc, family)) {
-@@ -1700,11 +1893,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1700,11 +1891,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
              }
              const uint32_t waitCount = waitsConsumed ? 0u : pPresentInfo->waitSemaphoreCount;
              bool submittedWaits = false;
@@ -2053,7 +2044,7 @@ index 4b37520..453bf6c 100644
              if (VerboseEnabled()) {
                  Log("[present] swapchain=%p image=%u seq=%u composed=%d",
                      (void*)pPresentInfo->pSwapchains[i], pPresentInfo->pImageIndices[i],
-@@ -1723,13 +1917,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1723,13 +1915,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
          }
      }
  
@@ -2070,7 +2061,7 @@ index 4b37520..453bf6c 100644
      return dc->vkQueuePresentKHR(queue, &pi);
  }
  
-@@ -1793,11 +1987,12 @@ static PFN_vkVoidFunction LookupHook(const char* n) {
+@@ -1793,11 +1985,12 @@ static PFN_vkVoidFunction LookupHook(const char* n) {
      if (!std::strcmp(n, "vkGetDeviceQueue2")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue2;
      if (!std::strcmp(n, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)Hook_CreateSwapchainKHR;
      if (!std::strcmp(n, "vkDestroySwapchainKHR")) return (PFN_vkVoidFunction)Hook_DestroySwapchainKHR;
@@ -2084,7 +2075,7 @@ index 4b37520..453bf6c 100644
      return nullptr;
  }
  
-@@ -1807,11 +2002,12 @@ static PFN_vkVoidFunction LookupDeviceHook(const char* n) {
+@@ -1807,11 +2000,12 @@ static PFN_vkVoidFunction LookupDeviceHook(const char* n) {
      if (!std::strcmp(n, "vkGetDeviceQueue2")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue2;
      if (!std::strcmp(n, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)Hook_CreateSwapchainKHR;
      if (!std::strcmp(n, "vkDestroySwapchainKHR")) return (PFN_vkVoidFunction)Hook_DestroySwapchainKHR;
@@ -2098,7 +2089,7 @@ index 4b37520..453bf6c 100644
      return nullptr;
  }
  
-@@ -1851,7 +2047,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
+@@ -1851,7 +2045,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
      if (*pCount < 1) { *pCount = 1; return VK_INCOMPLETE; }
      std::memset(pProperties, 0, sizeof(*pProperties));
      std::strncpy(pProperties->layerName, VK_LAYER_NAME, VK_MAX_EXTENSION_NAME_SIZE - 1);

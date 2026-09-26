@@ -104,7 +104,7 @@ int main() {
         dlssnr::CaptureWriter writer;
         dlssnr::CaptureMetadata metadata;
         metadata.frameControlSeq = 123;
-        metadata.requestSeq = metadata.responseSeq = metadata.okSeq = 55;
+        metadata.inferenceSeq = 55;
         metadata.hold = 1;
         metadata.passes = 1;
         metadata.debugView = 2;
@@ -118,10 +118,10 @@ int main() {
         writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
         require(!writer.Active(), "completed batch remains active");
         const auto first = read(root / "manifest.txt");
-        require(field(first, "capture_metadata_version") == "1", "wrong metadata version");
+        require(field(first, "capture_metadata_version") == "2", "wrong metadata version");
         require(field(first, "capture_control_seq") == "123", "wrong capture token");
         require(field(first, "frame_1_before_hash") == "c2de31fd48ac5f39", "wrong input hash");
-        require(field(first, "frame_1_request_seq") == "55", "wrong request provenance");
+        require(field(first, "frame_1_inference_seq") == "55", "wrong inference provenance");
         require(field(first, "debug_view") == "2", "wrong renderer view");
         require(field(first, "color") == "0.25", "wrong renderer color");
         const auto batch = root / field(first, "batch_dir");

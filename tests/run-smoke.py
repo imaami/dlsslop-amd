@@ -135,8 +135,8 @@ def main():
                     captures = state / "dlssnr/captures"
                     manifest = dict(line.split(None, 1) for line in (captures / 'manifest.txt').read_text().splitlines()
                                     if line and not line.startswith('#') and len(line.split(None, 1)) == 2)
-                    if manifest.get('capture_metadata_version') != '1':
-                        raise RuntimeError('Capture completion lacks metadata version 1')
+                    if manifest.get('capture_metadata_version') != '2':
+                        raise RuntimeError('Capture completion lacks metadata version 2')
                     captures = captures / manifest['batch_dir']
                     for index in range(4):
                         before = Image.open(captures / f"before_{index:02}.png").convert("RGBA")

@@ -195,15 +195,12 @@ class Run:
                 raise RuntimeError('Settings changed concurrently during capture; rerun without adjusting controls.')
             if time.monotonic() >= deadline:
                 raise RuntimeError('Control generations did not settle before the capture deadline')
-        if manifest.get('capture_metadata_version') != '1':
+        if manifest.get('capture_metadata_version') != '2':
             raise RuntimeError('Capture metadata is unsupported; reinstall matching versions of the layer and color diagnostic.')
         if manifest.get('frame_control_seq') != token:
             raise RuntimeError('Settings changed during capture; rerun without changing controls.')
-        for key in ('request_seq', 'response_seq', 'ok_seq'):
-            if not manifest.get(key) or manifest[key] == '0':
-                raise RuntimeError(f'{name}: missing successful inference sequence')
-        if len({manifest[k] for k in ('request_seq', 'response_seq', 'ok_seq')}) != 1:
-            raise RuntimeError(f'{name}: capture was not paired with a successful inference response')
+        if manifest.get('inference_seq', '0') == '0':
+            raise RuntimeError(f'{name}: missing successful inference sequence')
         for setting, field in (('passes', 'passes'), ('debug-view', 'debug_view'),
                                ('apply-model', 'apply_model'), ('bypass', 'bypass'),
                                ('hold', 'hold'), ('detail', 'detail'), ('color', 'color')):
