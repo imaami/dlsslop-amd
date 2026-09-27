@@ -251,6 +251,16 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
         result.stderr
     assert not channel.exists(), 'a missing Vulkan model created a channel'
 
+    # Only the HIP network serves the CPU composition, the CPU codec and traces:
+    # the Vulkan backend refuses them, and auto takes HIP for them.
+    for options, name in ((('-c',), '--cpu-compose'), (('--cpu-codec',), '--cpu-codec'),
+                          (('--trace-dir', str(cwd / 'traces')), '--trace-dir')):
+        result = run(binary, '-b', 'vulkan', *options, env=env, cwd=cwd, expected=1)
+        assert result.stderr == f'dlsslopd: {name} requires --backend hip\n', result.stderr
+    result = run(binary, '--cpu-compose', '-D', env=dict(fake, HIP_FAKE_ARCHS='gfx1201'), cwd=cwd, expected=0)
+    assert result.stderr.startswith('--cpu-compose needs the HIP network; using HIP\n'), result.stderr
+    assert result.stderr.endswith('selected device 0\n'), result.stderr
+
     # The worker's own config file sets settable long options by name, reports
     # errors by line and yields to options; parsing fails before HIP or the
     # channel is touched. An explicit file must exist; a default one need not.

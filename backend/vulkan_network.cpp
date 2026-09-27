@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -126,6 +127,7 @@ struct VulkanNetwork::Impl {
     VkDevice device = VK_NULL_HANDLE;
     VkQueue queue = VK_NULL_HANDLE;
     uint32_t family = 0;
+    unsigned index = 0;
     std::string name;
     VkPhysicalDeviceMemoryProperties memory{};
     float timestamp_ns = 0;
@@ -137,7 +139,7 @@ struct VulkanNetwork::Impl {
     Image colour, half;       // the network's frame; with FP16 requests, the FP16 staging image
     Shape shape;
     std::unique_ptr<nr::Runtime> runtime;
-    bool fresh = true;  // no history yet
+    std::optional<VulkanFrame> last;  // the history's frame; none since a build
     // Device-local frames the layer exported, one per producer generation, the oldest replaced first.
     struct Imported {
         uint32_t generation = 0;
@@ -255,6 +257,7 @@ VulkanNetwork::VulkanNetwork(const VulkanPaths& paths, int device) : impl_(std::
         const std::string why = unsuitable(devices[i], layout, s.family);
         if (why.empty()) {
             s.physical = devices[i];
+            s.index = i;
             s.name = p.deviceName;
         } else {
             reasons += "\n  Vulkan device " + std::to_string(i) + " (" + p.deviceName + "): " + why;
@@ -312,6 +315,7 @@ VulkanNetwork::VulkanNetwork(const VulkanPaths& paths, int device) : impl_(std::
 VulkanNetwork::~VulkanNetwork() = default;
 
 const std::string& VulkanNetwork::device_name() const { return impl_->name; }
+unsigned VulkanNetwork::device_index() const { return impl_->index; }
 
 bool VulkanNetwork::shape_differs(const VulkanFrame& frame) const
 {
@@ -357,7 +361,7 @@ bool VulkanNetwork::shape(const VulkanFrame& frame)
     temporal.enable = frame.motion;
     s.runtime = std::make_unique<nr::Runtime>(host, config, nr::ControlMaskConfig{}, temporal);
     s.shape = want;
-    s.fresh = true;
+    s.last.reset();
     return true;
 }
 
@@ -531,8 +535,11 @@ void VulkanNetwork::infer(const VulkanFrame& frame, uint32_t generation, const u
     controls.local_tone = frame.local_tone;
     controls.local_structure = frame.local_structure;
     if (frame.motion) {
+        const auto settings = [](const VulkanFrame& f) {
+            return std::tie(f.passes, f.intensity, f.local_tone, f.local_structure);
+        };
         nr::TemporalFrame temporal;
-        temporal.reset = frame.reset || s.fresh;
+        temporal.reset = !s.last || settings(*s.last) != settings(frame);
         s.runtime->record_temporal(cmd, colour, controls, temporal);
     } else {
         s.runtime->record(cmd, colour, controls);
@@ -575,7 +582,7 @@ void VulkanNetwork::infer(const VulkanFrame& frame, uint32_t generation, const u
     check(vkQueueSubmit(s.queue, 1, &submit, s.fence), "submit frame");
     // A healthy frame takes milliseconds; ten seconds means the device is gone.
     check(vkWaitForFences(s.device, 1, &s.fence, VK_TRUE, 10'000'000'000ull), "wait for the frame");
-    s.fresh = false;
+    s.last = frame;
     uint64_t stamps[4] = {};
     if (vkGetQueryPoolResults(s.device, s.queries, 0, 4, sizeof stamps, stamps, sizeof stamps[0],
                               VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {

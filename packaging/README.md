@@ -237,7 +237,8 @@ matched before/after frames under `$XDG_STATE_HOME/dlssnr/captures`, or
 `~/.local/state/dlssnr/captures` by default. Each request writes a new batch
 directory; earlier batches are kept.
 
-For per-pass color checks, restart the daemon with tracing and keep a game running:
+For per-pass color checks, restart the daemon with tracing and keep a game running.
+Only the HIP network traces, so with `--trace-dir` the daemon runs HIP:
 
 ```bash
 dlsslopd --trace-dir "$HOME/.local/state/dlsslop-amd/color-trace"

@@ -27,6 +27,7 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 #include <fcntl.h>
 #include <linux/futex.h>
@@ -114,6 +115,18 @@ struct Options {
     bool diagnose = false, test_identity = false, once = false, self_test = false;
     bool cpu_compose = false, cpu_codec = false, performance = false;
 };
+
+// The first option set that only the HIP network serves, or null: auto takes HIP
+// for it and the Vulkan backend refuses it.
+const char* hip_only(const Options& o)
+{
+    // --cpu-compose sets cpu_codec too, so it goes first.
+    const std::pair<bool, const char*> options[] = {
+        {o.cpu_compose, "--cpu-compose"}, {o.cpu_codec, "--cpu-codec"}, {!o.trace_dir.empty(), "--trace-dir"}};
+    for (const auto& [set, name] : options)
+        if (set) return name;
+    return nullptr;
+}
 
 Options default_options()
 {
@@ -241,10 +254,12 @@ void usage(FILE* out)
         "  -b, --backend NAME      Where the network runs: vulkan, hip or auto\n"
         "                          Default: %s; auto takes Vulkan when its model is\n"
         "                          installed and a device supports it, else HIP.\n"
-        "                          Vulkan evaluates NVIDIA's own intensity, local\n"
-        "                          tone and local structure controls, sizes itself\n"
-        "                          to each frame, ignores sharpness and color\n"
-        "                          preservation and cannot trace. Its SPIR-V is in\n"
+        "                          Only HIP serves --cpu-compose, --cpu-codec and\n"
+        "                          --trace-dir: auto takes HIP for them, vulkan\n"
+        "                          refuses them. Vulkan evaluates NVIDIA's own\n"
+        "                          intensity, local tone and local structure\n"
+        "                          controls, sizes itself to each frame and ignores\n"
+        "                          sharpness and color preservation. Its SPIR-V is in\n"
         "                          %s\n"
         "  -M, --vulkan-model FILE The Vulkan network's model (dlssnr.bin)\n"
         "                          Default: %s\n"
@@ -276,7 +291,8 @@ void usage(FILE* out)
         "  -d, --device INDEX      HIP device, or with Vulkan physical device, index\n"
         "                          Default: auto, the first device that can run\n"
         "                          the network (HIP: gfx1201)\n"
-        "  -D, --diagnose          Enumerate HIP devices, report the selection, exit\n"
+        "  -D, --diagnose          Open the backend serving would use, report its\n"
+        "                          device and exit; HIP also lists its devices\n"
         "                          Default: off; exit status 1 if none is usable\n"
         "  -S, --self-test         Real model test on a deterministic gradient\n"
         "                          Also checks tuning, motion history and FP16 codec\n"
@@ -296,7 +312,7 @@ void usage(FILE* out)
         "                          Default: off; Vulkan layer composes the result\n"
         "  -C, --cpu-codec         Slow CPU codec for numerical comparison\n"
         "                          Default: off; use the GPU codec\n"
-        "  -p, --performance       Skip blocks 42,43,46, matching upstream preset\n"
+        "  -p, --performance       HIP: skip blocks 42,43,46, matching upstream preset\n"
         "                          Default: off; evaluate all 71 blocks\n"
         "  -1, --once              Answer one shared-memory request and exit,\n"
         "                          with status 1 when that request failed\n"
@@ -432,6 +448,8 @@ Options parse(int argc, char** argv)
     // A configured idle exit is for serving; only an explicit one is an error.
     if (on_command_line('x') && o.idle_exit && (o.self_test || !o.input.empty() || o.diagnose))
         throw std::runtime_error("--idle-exit requires serving shared-memory requests");
+    if (const char* hip = hip_only(o); hip && o.backend == "vulkan")
+        throw std::runtime_error(std::string(hip) + " requires --backend hip");
     return o;
 }
 
@@ -519,6 +537,8 @@ public:
         uint32_t generation = 0;
     };
     virtual const char* name() const = 0;
+    // The device it runs on, as --device names it, for --diagnose.
+    virtual std::string device() const = 0;
     virtual unsigned tier() const = 0;
     // What the network runs at, for the log.
     virtual std::string processing() const = 0;
@@ -541,8 +561,13 @@ public:
     // w * h RGBA8 frames, or RGBA16F with settings.fp16.
     virtual void infer(const Frames& io, unsigned w, unsigned h, unsigned passes,
                        const ProcessingSettings& settings = {}, dlsslop::FrameTrace* trace = nullptr) = 0;
+    virtual void self_test(const Options& o) = 0;
     float upload_ms = 0, inference_ms = 0, readback_ms = 0;
 };
+
+class Engine;
+void run_self_test(const Options& o, Engine& engine);
+void run_vulkan_self_test(const Options& o, Backend& engine);
 
 class Engine : public Backend {
     Options options_;
@@ -590,6 +615,7 @@ class Engine : public Backend {
 public:
     Engine(Options o, unsigned tier) : options_(std::move(o)), tier_(tier) {}
     const char* name() const override { return "HIP"; }
+    std::string device() const override { return "device " + std::to_string(options_.device); }
     unsigned tier() const override { return tier_; }
     std::string processing() const override
     {
@@ -697,6 +723,7 @@ public:
     {
         infer(io.proxy, w, h, io.answer, passes, settings, trace);
     }
+    void self_test(const Options& o) override { run_self_test(o, *this); }
     // Input and output are w * h RGBA8, or RGBA16F with settings.fp16. verify
     // checks the GPU codec against the CPU reference inside the timed frame.
     void infer(const uint8_t* input, unsigned w, unsigned h, uint8_t* output, unsigned passes,
@@ -883,6 +910,10 @@ public:
     VulkanEngine(std::unique_ptr<dlsslop::VulkanNetwork> network, unsigned tier)
         : network_(std::move(network)), tier_(tier) {}
     const char* name() const override { return "Vulkan"; }
+    std::string device() const override
+    {
+        return "Vulkan device " + std::to_string(network_->device_index()) + " (" + network_->device_name() + ")";
+    }
     unsigned tier() const override { return tier_; }
     std::string processing() const override { return "Vulkan on " + network_->device_name() + " at each frame's extent"; }
     // The network sizes itself to each frame: a tier only changes the raster the layer targets.
@@ -917,14 +948,14 @@ public:
     {
         return network_->holds(generation, bytes) ? Frames{nullptr, nullptr, generation} : Frames{};
     }
+    // Only HIP traces (hip_only).
     void read_back(void*, const void*, size_t) override
     {
-        throw std::runtime_error("the Vulkan network cannot trace; use --backend hip");
+        throw std::logic_error("the Vulkan network cannot trace");
     }
     void infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
-               dlsslop::FrameTrace* trace = nullptr) override
+               dlsslop::FrameTrace* = nullptr) override
     {
-        if (trace) throw std::runtime_error("the Vulkan network cannot trace; use --backend hip");
         // Said once each: the HIP backend's own stages, which this network does not have.
         if (settings.tuning.sharpness != 0 && !std::exchange(warned_sharpness_, true))
             std::fprintf(stderr, "the Vulkan network ignores sharpness\n");
@@ -935,6 +966,7 @@ public:
         inference_ms = network_->inference_ms;
         readback_ms = network_->readback_ms;
     }
+    void self_test(const Options& o) override { run_vulkan_self_test(o, *this); }
 };
 
 // Where the Vulkan network loads from; the pipeline cache is a convenience.
@@ -948,10 +980,13 @@ dlsslop::VulkanPaths vulkan_paths(const Options& o)
 }
 
 // The backend --backend selects. auto takes the Vulkan network when its model is
-// there and a device can run it, and says why not before taking HIP.
+// there, a device can run it and no option needs HIP, and says why not before
+// taking HIP.
 std::unique_ptr<Backend> open_backend(Options& o, unsigned tier)
 {
-    if (!o.test_identity && o.backend != "hip") {
+    if (const char* hip = hip_only(o); hip && o.backend == "auto")
+        std::fprintf(stderr, "%s needs the HIP network; using HIP\n", hip);
+    else if (!o.test_identity && o.backend != "hip") {
         try {
             std::error_code error;
             if (!std::filesystem::is_regular_file(o.vulkan_model, error))
@@ -1294,8 +1329,6 @@ void run_worker(Options o)
         mapping.reason(o.test_identity ? "IDENTITY TEST: inference disabled" : "initializing the network");
         const TransportListener transport(o.shm, !o.test_identity && !o.cpu_codec);
         std::unique_ptr<Backend> engine = open_backend(o, tier);
-        if (traces && dynamic_cast<VulkanEngine*>(engine.get()))
-            throw std::runtime_error("--trace-dir requires --backend hip");
         engine->prepare();
         // Only serving stops gracefully, from the ready announcement on.
         // Before it, and in every other mode, SIGINT and SIGTERM terminate.
@@ -1483,8 +1516,7 @@ int main(int argc, char** argv)
         Options o = parse(argc, argv);
         const unsigned tier = o.tier.value_or(kNativeDefaultTier);
         if (o.diagnose) {
-            const auto engine = open_backend(o, tier);
-            if (!dynamic_cast<VulkanEngine*>(engine.get())) std::fprintf(stderr, "selected device %d\n", o.device);
+            std::fprintf(stderr, "selected %s\n", open_backend(o, tier)->device().c_str());
             return 0;
         }
         if (o.test_identity)
@@ -1492,9 +1524,8 @@ int main(int argc, char** argv)
         if (o.self_test || !o.input.empty()) {
             const auto engine = open_backend(o, tier);
             engine->prepare();
-            if (!o.self_test) run_offline(o, *engine);
-            else if (auto* hip = dynamic_cast<Engine*>(engine.get())) run_self_test(o, *hip);
-            else run_vulkan_self_test(o, *engine);
+            if (o.self_test) engine->self_test(o);
+            else run_offline(o, *engine);
         } else {
             run_worker(o);
         }

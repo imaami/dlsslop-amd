@@ -24,8 +24,9 @@ struct VulkanFrame {
     // LocalStructureStrength), not the HIP backend's residual filters.
     unsigned passes = 1;
     float intensity = 1, local_tone = 1, local_structure = 1;
-    bool motion = false;  // the network's history, fed by the runtime's motion estimate
-    bool reset = false;   // no history for this frame
+    // The network's history, fed by the runtime's motion estimate. It starts over
+    // whenever the frame's shape, pass count or controls change.
+    bool motion = false;
 };
 
 class VulkanNetwork {
@@ -38,6 +39,7 @@ public:
     VulkanNetwork& operator=(const VulkanNetwork&) = delete;
 
     const std::string& device_name() const;
+    unsigned device_index() const;
     // Builds the network for a frame's shape now, rather than on its first request:
     // seconds of work, all of it while the caller still reports itself starting.
     // True when that took a build.
