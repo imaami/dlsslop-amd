@@ -1,7 +1,7 @@
 # Per-pass color preservation
 
 `-L`, `--color-preserve 0..1` defaults to **0 (off)**. The Qt controller exposes
-it under **Neural passes**. All components must use shared-memory protocol 26.
+it under **Neural passes**. All components must use shared-memory protocol 27.
 After building and installing the matching worker, layer and controls:
 
 ```bash

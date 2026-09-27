@@ -80,7 +80,7 @@ index eee312c..78542b8 100644
  };
  }
 diff --git a/upstream-layer/common/shm_protocol.h b/upstream-layer/common/shm_protocol.h
-index fd7c1cd..3094f86 100644
+index fd7c1cd..e289a13 100644
 --- a/upstream-layer/common/shm_protocol.h
 +++ b/upstream-layer/common/shm_protocol.h
 @@ -14,11 +14,11 @@
@@ -100,7 +100,7 @@ index fd7c1cd..3094f86 100644
  #include <atomic>
  #include <cstdint>
  #include <cstdlib>
-@@ -37,7 +37,11 @@ static constexpr uint32_t kShmMagic = 0x32524E47;
+@@ -37,7 +37,12 @@ static constexpr uint32_t kShmMagic = 0x32524E47;
  // 64 KiB because VK_EXT_external_memory_host demands the imported pointer meet
  // minImportedHostPointerAlignment and NVIDIA answers 64 KiB, and the dma-buf exchange and HDR
  // and round-trip attribution. A stale mapping of either lineage must be re-created, not half-read.
@@ -109,11 +109,12 @@ index fd7c1cd..3094f86 100644
 +// v24: native device-local transport generations.
 +// v25: live native tier requests.
 +// v26: offers are answered on their own connection; transportAck is retired.
-+static constexpr uint32_t kShmVersion = 26;
++// v27: offers carry their buffers' sizes.
++static constexpr uint32_t kShmVersion = 27;
  
  
  static constexpr uint32_t kMaxW = 7680, kMaxH = 4320;
-@@ -46,6 +50,12 @@ static constexpr uint32_t kMaxW = 7680, kMaxH = 4320;
+@@ -46,6 +51,12 @@ static constexpr uint32_t kMaxW = 7680, kMaxH = 4320;
  // (Xid 109, CTX SWITCH TIMEOUT), taking the game down with it. 300x300 is known good; nothing below
  // this is a frame worth composing anyway.
  static constexpr uint32_t kMinW = 64, kMinH = 64;
@@ -126,7 +127,7 @@ index fd7c1cd..3094f86 100644
  // Eight bytes a pixel: the float16 proxy needs them, and the 8-bit path simply uses the first half of
  // each region. The mapping is file-backed and sparse, so an SDR session never commits the second half.
  static constexpr size_t kMaxFrame = size_t(kMaxW) * kMaxH * 8;
-@@ -139,11 +149,12 @@ enum HelperState : uint32_t {
+@@ -139,11 +150,12 @@ enum HelperState : uint32_t {
  };
  
  // How the motion field the helper hands the model is scaled. From bmitch87's motion-vector work.
@@ -142,7 +143,7 @@ index fd7c1cd..3094f86 100644
      kHdrForce = 2,  // float16 proxy even for an SDR swapchain (an A/B tool, not a preference)
  };
  
-@@ -203,6 +214,20 @@ inline std::string ShmRuntimeDir() {
+@@ -203,6 +215,20 @@ inline std::string ShmRuntimeDir() {
  
  inline std::string ShmDefaultPath() { return ShmRuntimeDir() + "/shm.bin"; }
  
@@ -163,7 +164,7 @@ index fd7c1cd..3094f86 100644
  inline size_t ShmTotalBytes() { return kHeaderBytes + kMaxFrame * 2; }
  
  // One pass's overrides. Every field is present; `overrideMask` says which of them mean anything.
-@@ -316,7 +341,7 @@ struct ShmHeader {
+@@ -316,7 +342,7 @@ struct ShmHeader {
      // Only useful where the layer can read the keyboard at all: an X11 or XWayland session, inside
      // gamescope, or anywhere the user is in the 'input' group. A game presenting through winewayland
      // is a Wayland client whose keys never reach this process, and keyboards get no uaccess ACL, so
@@ -172,7 +173,7 @@ index fd7c1cd..3094f86 100644
      std::atomic<uint32_t> toggleKey;
  
      // Which proxy the model is shown, and whether its answer is composed or substituted. See
-@@ -457,10 +482,9 @@ struct ShmHeader {
+@@ -457,10 +483,9 @@ struct ShmHeader {
      std::atomic<uint32_t> hdrActive;
      std::atomic<uint32_t> proxyFormat;
      // What the proxy bytes in the shared region actually are for the request being made: the layer
@@ -186,7 +187,7 @@ index fd7c1cd..3094f86 100644
      std::atomic<uint32_t> hdrEncode;
  
      // trip, which is what it has always been; N takes an answer up only on a frame whose count is a
-@@ -533,6 +557,29 @@ struct ShmHeader {
+@@ -533,6 +558,29 @@ struct ShmHeader {
      std::atomic<uint32_t> sdr16Multipass;
      std::atomic<uint32_t> mvecPixelSize;
  
@@ -216,7 +217,7 @@ index fd7c1cd..3094f86 100644
  };
  
  static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region");
-@@ -548,7 +595,7 @@ static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region")
+@@ -548,7 +596,7 @@ static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region")
  // The version check already existed to prevent exactly that; what was missing was anything to make
  // someone remember to use it. If these fire, the layout changed: bump kShmVersion in the same commit,
  // then update these numbers.
@@ -225,7 +226,7 @@ index fd7c1cd..3094f86 100644
  
  static_assert(offsetof(ShmHeader, enabled) == 44, "layout changed -- bump kShmVersion");
  static_assert(offsetof(ShmHeader, transferStrengthBits) == 88, "layout changed -- bump kShmVersion");
-@@ -556,6 +603,17 @@ static_assert(offsetof(ShmHeader, helperState) == 176, "layout changed -- bump k
+@@ -556,6 +604,22 @@ static_assert(offsetof(ShmHeader, helperState) == 176, "layout changed -- bump k
  static_assert(offsetof(ShmHeader, pass) == 780, "layout changed -- bump kShmVersion");
  static_assert(offsetof(ShmHeader, mvecEnabled) == 1860, "layout changed -- bump kShmVersion");
  
@@ -233,17 +234,22 @@ index fd7c1cd..3094f86 100644
 +// two SCM_RIGHTS descriptors are the exported proxy and answer memory, in that order. The daemon
 +// answers on the same connection with one byte, nonzero when it imported the pair. A connection
 +// it closes unanswered was never taken: the daemon stopped first.
++//
++// Each memory is a dedicated allocation of one buffer: exportable as an opaque fd, exclusive, for
++// transfers both ways, of the offered size. A Vulkan importer binds it to a buffer created exactly
++// so, as dedicated imports require.
 +struct ShmTransportOffer {
 +    uint32_t magic;          // kShmMagic
 +    uint32_t generation;     // nonzero; what requests name in transportGen
-+    uint64_t allocation[2];  // the proxy and answer memory sizes; frames up to the smaller fit
++    uint64_t allocation[2];  // the proxy and answer memory sizes
++    uint64_t size[2];        // their buffers' sizes; frames up to the smaller fit
 +};
 +inline std::string ShmTransportPath(const std::string& channel) { return channel + ".sock"; }
 +
  inline uint32_t FloatToBits(float f) {
      uint32_t u = 0;
      std::memcpy(&u, &f, sizeof(u));
-@@ -733,6 +791,27 @@ inline void ShmInitDefaults(ShmHeader* h) {
+@@ -733,6 +797,27 @@ inline void ShmInitDefaults(ShmHeader* h) {
      }
  }
  
@@ -556,7 +562,7 @@ index db0dc5d..b8983f0 100644
  
  }  // namespace dlssnr
 diff --git a/upstream-layer/layer_linux/src/composition.cpp b/upstream-layer/layer_linux/src/composition.cpp
-index dc344c4..f0947eb 100644
+index dc344c4..b98944e 100644
 --- a/upstream-layer/layer_linux/src/composition.cpp
 +++ b/upstream-layer/layer_linux/src/composition.cpp
 @@ -7,6 +7,7 @@
@@ -609,13 +615,14 @@ index dc344c4..f0947eb 100644
      _superUp.reset();
      _superDown.reset();
      _superSample = false;
-@@ -456,6 +468,106 @@ bool Composition::MakeTransportBuffer(HostBuffer& buf, size_t bytes, VkBufferUsa
+@@ -456,6 +468,108 @@ bool Composition::MakeTransportBuffer(HostBuffer& buf, size_t bytes, VkBufferUsa
      return true;
  }
  
-+// Native HIP transport: device-local memory exported as an opaque fd the worker imports with
-+// hipImportExternalMemory, so neither side copies the frame through host memory.
-+bool Composition::MakeExportBuffer(HostBuffer& buf, size_t bytes, VkBufferUsageFlags usage) {
++// Native transport: device-local memory exported as an opaque fd the daemon imports, so neither
++// side copies the frame through host memory. Both buffers are made as ShmTransportOffer states, for
++// a Vulkan importer to repeat.
++bool Composition::MakeExportBuffer(HostBuffer& buf, size_t bytes) {
 +    DropHostBuffer(buf);
 +    VkExternalMemoryBufferCreateInfo ext{};
 +    ext.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
@@ -624,7 +631,7 @@ index dc344c4..f0947eb 100644
 +    bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 +    bci.pNext = &ext;
 +    bci.size = bytes;
-+    bci.usage = usage;
++    bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 +    bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 +    if (_vk->vkCreateBuffer(_device, &bci, nullptr, &buf.buffer) != VK_SUCCESS) return false;
 +
@@ -659,7 +666,7 @@ index dc344c4..f0947eb 100644
 +    return true;
 +}
 +
-+bool Composition::ExportTransport(int fds[2], uint64_t allocation[2], uint32_t& generation) {
++bool Composition::ExportTransport(int fds[2], ShmTransportOffer& offer) {
 +    const HostBuffer* pair[2] = { &_download, &_upload };
 +    for (int i = 0; i < 2; ++i) {
 +        VkMemoryGetFdInfoKHR info{};
@@ -670,7 +677,8 @@ index dc344c4..f0947eb 100644
 +            if (i) close(fds[0]);
 +            return false;
 +        }
-+        allocation[i] = pair[i]->allocation;
++        offer.allocation[i] = pair[i]->allocation;
++        offer.size[i] = pair[i]->size;
 +    }
 +    // A fresh number per offer: a restarted worker's acknowledgement can never be an old one.
 +    // No random source means no offer; the low bit keeps the number nonzero (zero is the host
@@ -680,7 +688,7 @@ index dc344c4..f0947eb 100644
 +        close(fds[1]);
 +        return false;
 +    }
-+    generation = _transportGen |= 1u;
++    offer.generation = _transportGen |= 1u;
 +    return true;
 +}
 +
@@ -716,7 +724,7 @@ index dc344c4..f0947eb 100644
  // Build the transport pair against whatever mapping is currently set: imported when the shared
  // memory covers the frame, private host-visible staging otherwise. Called from Prepare (which
  // knows the model size) and from SetTransport (which knows the mapping), so a resize and a remap
-@@ -467,8 +579,17 @@ void Composition::EnsureTransport() {
+@@ -467,8 +581,16 @@ void Composition::EnsureTransport() {
          _upload.buffer && _upload.hostPtr == _transportOut && _upload.size >= bytes)
          return;
  
@@ -725,8 +733,7 @@ index dc344c4..f0947eb 100644
      bool imported = false;
 -    if (_transportIn && _transportOut && _transportBytes >= bytes) {
 +    if (_export) {
-+        imported = MakeExportBuffer(_download, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT) &&
-+                   MakeExportBuffer(_upload, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
++        imported = MakeExportBuffer(_download, bytes) && MakeExportBuffer(_upload, bytes);
 +        if (!imported) {
 +            DropHostBuffer(_download);
 +            DropHostBuffer(_upload);
@@ -735,7 +742,7 @@ index dc344c4..f0947eb 100644
          imported =
              MakeTransportBuffer(_download, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, _transportIn) &&
              MakeTransportBuffer(_upload, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, _transportOut);
-@@ -498,6 +619,7 @@ void Composition::SetTransport(void* inRegion, void* outRegion, size_t bytes) {
+@@ -498,6 +620,7 @@ void Composition::SetTransport(void* inRegion, void* outRegion, size_t bytes) {
  // and the descriptor's image binding follow the meter image.
  bool Composition::BuildMeterPipeline() {
      if (_meterPipeline) return true;
@@ -743,7 +750,7 @@ index dc344c4..f0947eb 100644
      if (!_vk->vkCreateShaderModule || !_vk->vkCmdPushConstants || !_vk->vkCmdFillBuffer) return false;
  
      VkShaderModuleCreateInfo smci{};
-@@ -553,12 +675,13 @@ bool Composition::BuildMeterPipeline() {
+@@ -553,12 +676,13 @@ bool Composition::BuildMeterPipeline() {
          return false;
      }
  
@@ -760,7 +767,7 @@ index dc344c4..f0947eb 100644
      if (_vk->vkCreateDescriptorPool(_device, &dpci, nullptr, &_meterDescriptorPool) != VK_SUCCESS) {
          _vk->vkDestroyShaderModule(_device, module, nullptr);
          return false;
-@@ -623,7 +746,8 @@ bool Composition::MakeMeterState() {
+@@ -623,7 +747,8 @@ bool Composition::MakeMeterState() {
      VkBufferCreateInfo bci{};
      bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
      bci.size = kMeterStateBytes;
@@ -770,7 +777,7 @@ index dc344c4..f0947eb 100644
      bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
      if (_vk->vkCreateBuffer(_device, &bci, nullptr, &_meterState) != VK_SUCCESS) return false;
      VkMemoryRequirements req{};
-@@ -686,6 +810,17 @@ void Composition::DropMeterState() {
+@@ -686,6 +811,17 @@ void Composition::DropMeterState() {
  // pathologically small window from producing a degenerate raster.
  void Composition::ModelExtent(uint32_t width, uint32_t height, const FrameSettings& s,
                                uint32_t& modelW, uint32_t& modelH) {
@@ -788,7 +795,7 @@ index dc344c4..f0947eb 100644
      const auto scaled = [&](uint32_t v) {
          if (s.workingScale == 1.0f) return v;
          return std::max<uint32_t>(64, uint32_t(std::lround(double(v) * double(s.workingScale))));
-@@ -733,25 +868,9 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -733,25 +869,9 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
          }
      }
  
@@ -817,7 +824,7 @@ index dc344c4..f0947eb 100644
      uint32_t modelW = 0, modelH = 0;
      ModelExtent(width, height, s, modelW, modelH);
      const bool superSample = modelW > width || modelH > height;
-@@ -767,7 +886,6 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -767,7 +887,6 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
          if ((fp16.optimalTilingFeatures & need) != need) {
              if (!_hdrProxy) Log("[comp] float16 proxy requested but not supported here; staying 8-bit");
              hdrProxy = false;
@@ -825,7 +832,7 @@ index dc344c4..f0947eb 100644
          }
      }
  
-@@ -820,12 +938,13 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -820,12 +939,13 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
      _blitSwapchain = blit;
      _linearHdr = linearHdr;
      _hdrProxy = hdrProxy;
@@ -843,7 +850,7 @@ index dc344c4..f0947eb 100644
  
      const VkImageUsageFlags sampled = VK_IMAGE_USAGE_SAMPLED_BIT;
      const VkImageUsageFlags storage = VK_IMAGE_USAGE_STORAGE_BIT;
-@@ -833,9 +952,8 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -833,9 +953,8 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
      const VkImageUsageFlags dst = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
  
      const bool ok =
@@ -855,7 +862,7 @@ index dc344c4..f0947eb 100644
          MakeImage(_model, modelW, modelH, proxyFormat, sampled | src | dst) &&
          MakeImage(_composed, width, height, work, storage | src);
  
-@@ -858,7 +976,7 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
+@@ -858,7 +977,7 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
                     VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT) &&
           MakeMeterState());
  
@@ -864,7 +871,7 @@ index dc344c4..f0947eb 100644
      const bool okWork = !needWork || MakeImage(_work, modelW, modelH, proxyFormat,
                                                 sampled | storage | src);
  
-@@ -1088,20 +1206,18 @@ void Composition::TransitionSwapchain(VkCommandBuffer cb, VkImage image, VkImage
+@@ -1088,20 +1207,18 @@ void Composition::TransitionSwapchain(VkCommandBuffer cb, VkImage image, VkImage
      b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
      b.image = image;
      b.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
@@ -897,7 +904,7 @@ index dc344c4..f0947eb 100644
                                nullptr, 0, nullptr, 1, &b);
  }
  
-@@ -1146,7 +1262,7 @@ float Composition::ResolvedWhitePoint(const FrameSettings& s) const {
+@@ -1146,7 +1263,7 @@ float Composition::ResolvedWhitePoint(const FrameSettings& s) const {
  DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
      DlssNrConstants c{};
  
@@ -906,7 +913,7 @@ index dc344c4..f0947eb 100644
      c.TransferStrength = s.transferStrength;
      c.ColourStrength = s.colourStrength;
      c.MaxRatio = s.maxRatio;
-@@ -1178,7 +1294,7 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
+@@ -1178,7 +1295,7 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
              c.ReversibleMode = s.reversibleMode >= 3 ? 4u : 2u;
          } else {
              c.DebugView = 2;
@@ -915,7 +922,7 @@ index dc344c4..f0947eb 100644
          }
      }
  
-@@ -1194,8 +1310,9 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
+@@ -1194,8 +1311,9 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
      c.GuideHeight = _height;
      c.UseGameExposure = 0;
      c.ExposurePreMul = 1.0f;
@@ -927,7 +934,7 @@ index dc344c4..f0947eb 100644
      c.ColourTrust = s.colourTrust;
      c.RatioSmooth = s.ratioSmooth;
      return c;
-@@ -1237,7 +1354,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1237,7 +1355,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
      // While held the frame is not re-read, but everything downstream of it still runs: the encode
      // re-encodes, the model re-evaluates and the resolve re-composes, so a setting changed now is
      // answered on the same picture. Freezing the proxy instead would be wrong -- settings must still
@@ -936,7 +943,7 @@ index dc344c4..f0947eb 100644
      const bool freeze = _holding && _frameCaptured;
  
      if (!freeze) {
-@@ -1255,18 +1372,21 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1255,18 +1373,21 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
      }
  
      Transition(cb, _frame, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -969,7 +976,7 @@ index dc344c4..f0947eb 100644
      // distinction is the whole reason it is safe: an earlier white point meter upstream read its own
      // output and chased it, walking one session from 0.010 to 97.910. There is no path from what this
      // pass writes back into what this reads.
-@@ -1276,24 +1396,28 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1276,24 +1397,28 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
      // a four-byte copy into its own constant block (RecordCompose). The 128-byte mirror the transfer
      // copies at the end is for the CPU's frame-hold snapshot and status field only.
      if (_meter.image && _meterGpu) {
@@ -1001,7 +1008,7 @@ index dc344c4..f0947eb 100644
              pc.source = s.whitePointSource;
              pc.hold = _holding && _frameCaptured ? 1u : 0u;
              _vk->vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, _meterPipeline);
-@@ -1319,18 +1443,16 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1319,18 +1444,16 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
              const VkBufferCopy mirror{ 0, 0, kMeterStateBytes };
              _vk->vkCmdCopyBuffer(cb, _meterState, _meterMirror.buffer, 1, &mirror);
          }
@@ -1022,7 +1029,7 @@ index dc344c4..f0947eb 100644
                  return false;
          } else {
              // Reduce, with the module's own area filter -- the model then works on fewer pixels and
-@@ -1339,7 +1461,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1339,7 +1462,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
              down.Mode = DlssNrMode_Downsample;
              down.Width = _modelW;
              down.Height = _modelH;
@@ -1031,7 +1038,7 @@ index dc344c4..f0947eb 100644
                                   VK_NULL_HANDLE, _work.view, VK_NULL_HANDLE))
                  return false;
          }
-@@ -1399,8 +1521,10 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1399,8 +1522,10 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
          return true;
      }
  
@@ -1042,7 +1049,7 @@ index dc344c4..f0947eb 100644
      return true;
  }
  
-@@ -1444,8 +1568,10 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1444,8 +1569,10 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
          VkBufferImageCopy region{};
          region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
          region.imageExtent = { _modelW, _modelH, 1 };
@@ -1053,7 +1060,7 @@ index dc344c4..f0947eb 100644
          Transition(cb, _model, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
      }
  
-@@ -1485,11 +1611,11 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1485,11 +1612,11 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
              return false;
          Transition(cb, _modelNative, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
          answer = &_modelNative;
@@ -1067,7 +1074,7 @@ index dc344c4..f0947eb 100644
      Transition(cb, _composed, VK_IMAGE_LAYOUT_GENERAL);
  
      DlssNrConstants res = BaseConstants(s);
-@@ -1520,7 +1646,7 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1520,7 +1647,7 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
                                    0, 0, nullptr, 1, &b, 0, nullptr);
      }
  
@@ -1076,7 +1083,7 @@ index dc344c4..f0947eb 100644
                           _composed.view, VK_NULL_HANDLE))
          return false;
  
-@@ -1552,6 +1678,23 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1552,6 +1679,23 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
      // presented it and the frame the model edited, for the same frame.
      _captureRecorded = false;
      if (_capture.Active()) {
@@ -1100,7 +1107,7 @@ index dc344c4..f0947eb 100644
          const size_t bytes = size_t(_width) * _height * (_workFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 4);
          if (_captureBuf.buffer || MakeHostBuffer(_captureBuf, bytes * 2, VK_BUFFER_USAGE_TRANSFER_DST_BIT)) {
              Transition(cb, _frame, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-@@ -1567,9 +1710,6 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
+@@ -1567,9 +1711,6 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
              _captureRecorded = true;
          }
      }
@@ -1110,7 +1117,7 @@ index dc344c4..f0947eb 100644
      return true;
  }
  
-@@ -1578,7 +1718,7 @@ void Composition::WriteCapturedFrame() {
+@@ -1578,7 +1719,7 @@ void Composition::WriteCapturedFrame() {
      _captureRecorded = false;
      const size_t bytes = size_t(_width) * _height * (_workFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 4);
      const uint8_t* base = (const uint8_t*) _captureBuf.mapped;
@@ -1120,7 +1127,7 @@ index dc344c4..f0947eb 100644
  
  
 diff --git a/upstream-layer/layer_linux/src/composition.h b/upstream-layer/layer_linux/src/composition.h
-index 757303b..f26153c 100644
+index 757303b..9f47dd3 100644
 --- a/upstream-layer/layer_linux/src/composition.h
 +++ b/upstream-layer/layer_linux/src/composition.h
 @@ -5,8 +5,9 @@
@@ -1182,9 +1189,9 @@ index 757303b..f26153c 100644
 +    // True when the daemon imported the pair; false when it holds none, so the pair is offered
 +    // again. Either ends an outstanding offer.
 +    void SetTransportReady(bool ready) { _transportReady = ready; WithdrawOffer(); }
-+    // Two new descriptors for the proxy and answer memory, which the caller owns, under a fresh
-+    // generation number.
-+    bool ExportTransport(int fds[2], uint64_t allocation[2], uint32_t& generation);
++    // Two new descriptors for the proxy and answer memory, which the caller owns, and the rest of
++    // their offer, under a fresh generation number.
++    bool ExportTransport(int fds[2], ShmTransportOffer& offer);
 +    // The worker cannot import the pair: carry frames through host staging from now on.
 +    void DisableExport();
 +
@@ -1217,7 +1224,7 @@ index 757303b..f26153c 100644
      bool ImportFdMemory(int fd, VkImage image, const VkMemoryRequirements& req, VkDeviceMemory* out);
      bool MakeHostBuffer(HostBuffer& buf, size_t bytes, VkBufferUsageFlags usage);
      bool MakeTransportBuffer(HostBuffer& buf, size_t bytes, VkBufferUsageFlags usage, void* hostPtr);
-+    bool MakeExportBuffer(HostBuffer& buf, size_t bytes, VkBufferUsageFlags usage);
++    bool MakeExportBuffer(HostBuffer& buf, size_t bytes);
 +    void ExternalOwnership(VkCommandBuffer cb, const HostBuffer& buf, uint32_t from, uint32_t to,
 +                           VkAccessFlags access);
      void DropHostBuffer(HostBuffer& buf);
@@ -1650,7 +1657,7 @@ index 0941c93..b544124 100644
      // present only because Vulkan will not accept an unwritten binding.
      VkImage _dummyImage = VK_NULL_HANDLE;
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..40f218a 100644
+index 4b37520..131d393 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -1906,7 +1913,7 @@ index 4b37520..40f218a 100644
 +    ShmTransportOffer offer{};
 +    offer.magic = kShmMagic;
 +    int fds[2];
-+    if (!comp.ExportTransport(fds, offer.allocation, offer.generation)) return -1;
++    if (!comp.ExportTransport(fds, offer)) return -1;
 +    alignas(cmsghdr) char control[CMSG_SPACE(sizeof fds)]{};
 +    iovec data{&offer, sizeof offer};
 +    msghdr message{};

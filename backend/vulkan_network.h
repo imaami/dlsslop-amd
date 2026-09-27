@@ -44,9 +44,10 @@ public:
     bool shape(const VulkanFrame& frame);
     // True when shape() would build.
     bool shape_differs(const VulkanFrame& frame) const;
-    // Imports an offered proxy/answer pair (ShmTransportOffer). Takes ownership of
-    // each descriptor it imports and sets it to -1; the caller closes the rest.
-    bool import(uint32_t generation, const uint64_t allocation[2], int fds[2]);
+    // Imports an offered proxy/answer pair (ShmTransportOffer): memory of allocation
+    // bytes, each bound to a buffer of size bytes. Takes ownership of each descriptor it
+    // imports and sets it to -1; the caller closes the rest.
+    bool import(uint32_t generation, const uint64_t allocation[2], const uint64_t size[2], int fds[2]);
     bool holds(uint32_t generation, size_t bytes) const;
     // Generation 0: the frame and answer are host memory at input and output.
     // Otherwise they are the imported pair of that generation (holds() first).

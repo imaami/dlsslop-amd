@@ -361,17 +361,18 @@ bool VulkanNetwork::shape(const VulkanFrame& frame)
     return true;
 }
 
-bool VulkanNetwork::import(uint32_t generation, const uint64_t allocation[2], int fds[2])
+bool VulkanNetwork::import(uint32_t generation, const uint64_t allocation[2], const uint64_t size[2], int fds[2])
 {
     auto& s = *impl_;
     if (!generation) return false;
-    Impl::Imported next{generation, size_t(std::min(allocation[0], allocation[1]))};
+    Impl::Imported next{generation, size_t(std::min(size[0], size[1]))};
     for (unsigned i = 0; i < 2; ++i) {
         Buffer& b = next.frame[i];
         VkExternalMemoryBufferCreateInfo external{VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO};
         external.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+        // The layer's buffer, repeated: a dedicated import must name an identical one.
         VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, &external};
-        info.size = allocation[i];
+        info.size = size[i];
         info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
         VkMemoryRequirements req{};
         uint32_t type = s.memory.memoryTypeCount;
@@ -384,7 +385,6 @@ bool VulkanNetwork::import(uint32_t generation, const uint64_t allocation[2], in
             } catch (const std::exception&) {
             }
         }
-        // The layer's allocation is dedicated, so the import must be too.
         VkMemoryDedicatedAllocateInfo dedicated{VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO};
         dedicated.buffer = b.buffer;
         VkImportMemoryFdInfoKHR fd{VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR, &dedicated};
@@ -393,7 +393,7 @@ bool VulkanNetwork::import(uint32_t generation, const uint64_t allocation[2], in
         VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, &fd};
         alloc.allocationSize = allocation[i];
         alloc.memoryTypeIndex = type;
-        if (!b.buffer || type == s.memory.memoryTypeCount || req.size > allocation[i] ||
+        if (!b.buffer || type == s.memory.memoryTypeCount || req.size != allocation[i] ||
             vkAllocateMemory(s.device, &alloc, nullptr, &b.memory) != VK_SUCCESS) {
             s.release(next);
             return false;
@@ -403,7 +403,7 @@ bool VulkanNetwork::import(uint32_t generation, const uint64_t allocation[2], in
             s.release(next);
             return false;
         }
-        b.size = allocation[i];
+        b.size = size[i];
     }
     Impl::Imported* slot = nullptr;
     for (auto& imported : s.imported)
@@ -463,21 +463,34 @@ void VulkanNetwork::infer(const VulkanFrame& frame, uint32_t generation, const u
         b.subresourceRange = range;
         vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, nullptr, 0, nullptr, 1, &b);
     };
-    // The layer's buffers change hands at every frame: acquired before the copy reads the
-    // proxy, released after the copy writes the answer.
-    auto own = [&](VkBuffer buffer, bool acquire) {
-        VkBufferMemoryBarrier b{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
-        b.srcAccessMask = acquire ? 0 : VK_ACCESS_TRANSFER_WRITE_BIT;
-        b.dstAccessMask = acquire ? VK_ACCESS_TRANSFER_READ_BIT : 0;
-        b.srcQueueFamilyIndex = acquire ? VK_QUEUE_FAMILY_EXTERNAL : s.family;
-        b.dstQueueFamilyIndex = acquire ? s.family : VK_QUEUE_FAMILY_EXTERNAL;
-        b.buffer = buffer;
-        b.size = VK_WHOLE_SIZE;
-        vkCmdPipelineBarrier(cmd, acquire ? VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT : VK_PIPELINE_STAGE_TRANSFER_BIT,
-                             acquire ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
-                             nullptr, 1, &b, 0, nullptr);
+    // The layer's buffers change hands at every frame: both are acquired from the layer before
+    // the copies, the proxy read and the answer written, and released back to it after them.
+    auto own = [&](bool acquire) {
+        const VkBuffer buffers[2] = {source, target};
+        const VkAccessFlags2 access[2] = {VK_ACCESS_2_TRANSFER_READ_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT};
+        VkBufferMemoryBarrier2 b[2]{};
+        for (unsigned i = 0; i < 2; ++i) {
+            b[i].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
+            if (acquire) {
+                b[i].dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+                b[i].dstAccessMask = access[i];
+                b[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
+                b[i].dstQueueFamilyIndex = s.family;
+            } else {
+                b[i].srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+                b[i].srcAccessMask = access[i];
+                b[i].srcQueueFamilyIndex = s.family;
+                b[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
+            }
+            b[i].buffer = buffers[i];
+            b[i].size = VK_WHOLE_SIZE;
+        }
+        VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+        dependency.bufferMemoryBarrierCount = 2;
+        dependency.pBufferMemoryBarriers = b;
+        vkCmdPipelineBarrier2(cmd, &dependency);
     };
-    if (generation) own(source, true);
+    if (generation) own(true);
     VkBufferImageCopy region{};
     region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.imageExtent = {frame.width, frame.height, 1};
@@ -542,7 +555,7 @@ void VulkanNetwork::infer(const VulkanFrame& frame, uint32_t generation, const u
     }
     vkCmdCopyImageToBuffer(cmd, answer, answer_layout, target, 1, &region);
     if (generation) {
-        own(target, false);
+        own(false);
     } else {
         VkBufferMemoryBarrier b{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
         b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;

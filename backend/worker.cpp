@@ -654,7 +654,7 @@ public:
     {
         if (!gpu_codec_ || !offer.generation) return false;
         auto& api = network_->Runtime();
-        Imported next{offer.generation, size_t(std::min(offer.allocation[0], offer.allocation[1]))};
+        Imported next{offer.generation, size_t(std::min(offer.size[0], offer.size[1]))};
         for (unsigned i = 0; i < 2; ++i) {
             hip_probe::MemoryDesc memory{};
             memory.type = 1; // hipExternalMemoryHandleTypeOpaqueFd
@@ -908,7 +908,7 @@ public:
     bool import(const ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2]) override
     {
         int raw[2] = {fds[0].fd, fds[1].fd};
-        const bool imported = network_->import(offer.generation, offer.allocation, raw);
+        const bool imported = network_->import(offer.generation, offer.allocation, offer.size, raw);
         fds[0].fd = raw[0];
         fds[1].fd = raw[1];
         return imported;
