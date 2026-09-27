@@ -1021,6 +1021,17 @@ bool follow_tier(std::optional<Engine>& engine, const Options& o, Mapping& mappi
     return true;
 }
 
+// Idle exit: stop taking requests before leaving. A layer that reads Stopped
+// from now on sends none, and one whose request got in first is served: true
+// when none did.
+bool retire(ShmHeader* h, uint32_t request)
+{
+    h->helperState.store(kHelperStopped);
+    if (h->seq_req.load() == request) return true;
+    h->helperState.store(kHelperRunning, std::memory_order_release);
+    return false;
+}
+
 void run_worker(const Options& o)
 {
     Mapping mapping(o.shm);
@@ -1095,7 +1106,8 @@ void run_worker(const Options& o)
                         request, &timeout, nullptr, 0);
                 // A request that arrived during the wait is served, however late.
                 if (o.idle_exit && h->seq_req.load(std::memory_order_acquire) == request &&
-                    std::chrono::steady_clock::now() - active >= std::chrono::seconds(o.idle_exit)) {
+                    std::chrono::steady_clock::now() - active >= std::chrono::seconds(o.idle_exit) &&
+                    retire(h, request)) {
                     std::fprintf(stderr, "no request for %u s; stopping\n", o.idle_exit);
                     break;
                 }
