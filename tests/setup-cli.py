@@ -82,6 +82,14 @@ with tempfile.TemporaryDirectory(prefix='dlsslop-setup-cli-') as directory:
     result = run('--dll', model / (both + '.f32'), '--vulkan-model', vulkan, expected=1)
     assert 'Cannot read nvngx_dlssnr weights' in result.stderr, result.stderr
     assert not vulkan.exists() and not any(vulkan.parent.iterdir()), 'a failed extraction left files'
+    # The model never replaces the DLL it would come from, by any name.
+    dll = root / 'nvngx_dlssnr.dll'
+    dll.write_bytes(b'MZ')
+    (root / 'dll link').symlink_to(dll)
+    for target in (dll, root / 'dll link', root / '.' / 'nvngx_dlssnr.dll'):
+        result = run('--dll', dll, '--vulkan-model', target, expected=1)
+        assert '--dll and --vulkan-model must be different files' in result.stderr, result.stderr
+        assert dll.read_bytes() == b'MZ' and not any(p.name.startswith('.dlssnr.bin.') for p in root.iterdir())
 
 print('setup CLI: sparse import, FP32 precedence, recorded hashes, unrecorded and corrupted weights, '
       'refused DLLs passed')

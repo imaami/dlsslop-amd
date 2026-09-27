@@ -94,6 +94,8 @@ def extract_vulkan_model(dll, output):
     tools = model_tools()
     if not dll.is_file():
         raise ValueError(f"no such file: {dll}")
+    if output == dll:
+        raise ValueError("--dll and --vulkan-model must be different files")
     output.parent.mkdir(parents=True, exist_ok=True)
     descriptor, temporary = tempfile.mkstemp(prefix=".dlssnr.bin.", dir=output.parent)
     os.close(descriptor)
