@@ -256,7 +256,21 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
         result = run(binary, '--config', str(config), '-T', env=env, cwd=cwd, expected=1)
         assert f'{config}{message}' in result.stderr, (text, result.stderr)
     result = run(binary, '-f', str(cwd / 'missing.conf'), '-T', env=env, cwd=cwd, expected=1)
-    assert f'cannot read config file {cwd / "missing.conf"}' in result.stderr, result.stderr
+    assert f'cannot read config file {cwd / "missing.conf"}: No such file or directory' in result.stderr, result.stderr
+    result = run(binary, '--config', str(cwd), '-T', env=env, cwd=cwd, expected=1)
+    assert f'cannot read config file {cwd}: Is a directory' in result.stderr, result.stderr
+    # A default file that exists but cannot be inspected is reported, not skipped.
+    locked = root / 'locked config'
+    (locked / 'dlsslop-amd').mkdir(parents=True)
+    (locked / 'dlsslop-amd/dlsslopd.conf').write_text('tier = 900\n')
+    if os.geteuid():  # root reads it regardless
+        (locked / 'dlsslop-amd').chmod(0)
+        try:
+            result = run(binary, '-T', env=dict(env, XDG_CONFIG_HOME=str(locked)), cwd=cwd, expected=1)
+        finally:
+            (locked / 'dlsslop-amd').chmod(0o700)
+        assert f"cannot read config file {locked / 'dlsslop-amd/dlsslopd.conf'}: Permission denied" in result.stderr, \
+            result.stderr
     assert not channel.exists(), 'a rejected config file created a channel'
     configured = dict(env, XDG_CONFIG_HOME=str(xdg))
     (xdg / 'dlsslop-amd').mkdir(parents=True)

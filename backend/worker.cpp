@@ -312,14 +312,13 @@ void apply_setting(Options& o, const std::string& text)
     spec->apply(o, (spec->kind == Spec::kPath ? config_path(value) : value).c_str());
 }
 
-// Settings, one per line; # starts a comment line. A missing default file is
-// no error.
+// Settings, one per line; # starts a comment line. A default file that is
+// missing is skipped; one that cannot be inspected or read is an error.
 void read_config(Options& o, const std::string& path, bool given)
 {
     std::error_code error;
-    if (!given && (path.empty() || !std::filesystem::exists(path, error))) return;
+    if (!given && (path.empty() || (!std::filesystem::exists(path, error) && !error))) return;
     std::ifstream file(path);
-    if (!file) throw std::runtime_error("cannot read config file " + path);
     std::string line;
     for (unsigned line_number = 1; std::getline(file, line); ++line_number) {
         const std::string text = trim(line);
@@ -330,6 +329,9 @@ void read_config(Options& o, const std::string& path, bool given)
             throw std::runtime_error(path + ":" + std::to_string(line_number) + ": " + e.what());
         }
     }
+    // Only a complete read ends at EOF: opening fails for a missing file, and
+    // reading fails for a directory or on a disk error.
+    if (!file.eof()) throw std::runtime_error("cannot read config file " + path + ": " + std::strerror(errno));
 }
 
 Options parse(int argc, char** argv)
