@@ -986,15 +986,16 @@ void publish_raster(const Options& o, ShmHeader* h, unsigned tier)
 // that differs from the active one. The layer presents its own frames while
 // helperState reads Starting, then offers its device-local frames to the new
 // engine. An unusable tier is overwritten with the active one. A failed
-// rebuild ends the worker, leaving the active tier for the next one.
-void follow_tier(std::optional<Engine>& engine, const Options& o, Mapping& mapping, const char* ready)
+// rebuild ends the worker, leaving the active tier for the next one. True
+// after a rebuild.
+bool follow_tier(std::optional<Engine>& engine, const Options& o, Mapping& mapping, const char* ready)
 {
     auto* h = mapping.h;
     const unsigned wanted = h->nativeTier.load(), active = engine->tier();
-    if (wanted == active) return;
+    if (wanted == active) return false;
     if (!known_tier(wanted)) {
         h->nativeTier.store(active);
-        return;
+        return false;
     }
     h->helperState.store(kHelperStarting);
     h->modelUp.store(0);
@@ -1013,6 +1014,7 @@ void follow_tier(std::optional<Engine>& engine, const Options& o, Mapping& mappi
     mapping.reason(ready);
     h->modelUp.store(o.test_identity ? 0 : 1);
     h->helperState.store(kHelperRunning, std::memory_order_release);
+    return true;
 }
 
 void run_worker(const Options& o)
@@ -1068,7 +1070,8 @@ void run_worker(const Options& o)
         uint64_t frames = 0;
         unsigned previous_passes = 0;
         uint32_t last = h->seq_resp.load(std::memory_order_acquire);
-        auto active = std::chrono::steady_clock::now(); // The latest request, or readiness.
+        // When the latest work ended: an answer, a rebuild, or readiness.
+        auto active = std::chrono::steady_clock::now();
         std::string failure;
         while (!stopping && !h->quit.load(std::memory_order_relaxed)) {
             accept_offers(transport, *engine, h);
@@ -1082,11 +1085,13 @@ void run_worker(const Options& o)
             }
             const uint32_t request = h->seq_req.load(std::memory_order_acquire);
             if (request == last) {
-                follow_tier(engine, o, mapping, ready);
+                if (follow_tier(engine, o, mapping, ready)) active = std::chrono::steady_clock::now();
                 const timespec timeout{0, 100000000};
                 syscall(SYS_futex, reinterpret_cast<uint32_t*>(&h->seq_req), FUTEX_WAIT,
                         request, &timeout, nullptr, 0);
-                if (o.idle_exit && std::chrono::steady_clock::now() - active >= std::chrono::seconds(o.idle_exit)) {
+                // A request that arrived during the wait is served, however late.
+                if (o.idle_exit && h->seq_req.load(std::memory_order_acquire) == request &&
+                    std::chrono::steady_clock::now() - active >= std::chrono::seconds(o.idle_exit)) {
                     std::fprintf(stderr, "no request for %u s; stopping\n", o.idle_exit);
                     break;
                 }
@@ -1101,7 +1106,6 @@ void run_worker(const Options& o)
             const uint32_t held_input = pending_trace ? h->holdFrame.load() : 0;
             const unsigned w = h->width.load(), height = h->height.load();
             last = request;
-            active = std::chrono::steady_clock::now();
             try {
                 ProcessingSettings settings;
                 settings.fp16 = h->hdrEncode.load() != 0;
@@ -1206,6 +1210,7 @@ void run_worker(const Options& o)
                 // fault is never silently replaced by fake output.
                 if (o.once || !dynamic_cast<const std::range_error*>(&e)) throw;
             }
+            active = std::chrono::steady_clock::now();
         }
     } catch (const std::exception& e) {
         mapping.reason(e.what());
