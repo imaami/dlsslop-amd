@@ -97,6 +97,18 @@ another prefix, copy `dlsslop.service` into `~/.config/systemd/user/` and point 
 `ExecStart` at that prefix's `bin/dlsslopd`. Without
 systemd, run `dlsslopd --tier 1080` in a host terminal and wait for `worker ready`.
 
+However it starts, the worker reads its settings from
+`~/.config/dlsslop-amd/dlsslopd.conf`, or from `dlsslop-amd/dlsslopd.conf` under
+`$XDG_CONFIG_HOME` when that is set; `--config FILE` names another file. An
+option on its command line overrides the file. `dlsslopd --help` lists the
+settings:
+
+```ini
+# ~/.config/dlsslop-amd/dlsslopd.conf
+tier = 1080
+passes = 2
+```
+
 With Proton GE selected, put this in the game's Steam launch options, replacing
 the home-directory placeholder:
 

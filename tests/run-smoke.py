@@ -50,7 +50,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="dlsslop-amd-smoke-") as directory:
         root = Path(directory)
         env = dict(os.environ)
-        env.update(DISPLAY=args.display, XDG_DATA_HOME=str(root / "share"),
+        env.update(DISPLAY=args.display, XDG_DATA_HOME=str(root / "share"), XDG_CONFIG_HOME=str(root / "config"),
                    XDG_RUNTIME_DIR=str(root), DLSSNR_SHM=str(root / "shm.bin"),
                    DLSSLOP_AMD_ENABLE="1", DLSSNR_ENABLE="1", DLSSNR_IDLE_REPAINT="0",
                    DLSSNR_LOG=str(logs / "layer.log"), VK_KHRONOS_VALIDATION_VALIDATE_SYNC="true")

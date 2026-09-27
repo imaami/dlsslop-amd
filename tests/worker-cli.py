@@ -75,13 +75,14 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     cwd = root / 'unrelated working directory'
     cwd.mkdir()
     env = {key: value for key, value in os.environ.items()
-           if not key.startswith(('DLSSLOP_', 'DLSSNR_')) and key != 'XDG_DATA_HOME'}
+           if not key.startswith(('DLSSLOP_', 'DLSSNR_')) and key not in ('XDG_DATA_HOME', 'XDG_CONFIG_HOME')}
     env['HOME'] = str(home)
     channel = root / 'channel with spaces.bin'
     env['DLSSNR_SHM'] = str(channel)
     helptext = run(binary, '--help', env=env, cwd=cwd).stdout
     assert helptext.startswith('Usage: dlsslopd [OPTIONS]\n')
     assert default(helptext, 'assets') == str(home / '.local/share/dlsslop-amd/model')
+    assert default(helptext, 'config') == str(home / '.config/dlsslop-amd/dlsslopd.conf')
     assert default(helptext, 'modules') == str(installed_modules)
     assert default(helptext, 'shm') == str(channel)
     assert 'DLSSNR_SHM' in helptext and 'DLSSLOP_MODULES' in helptext
@@ -103,6 +104,8 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
 
     helptext = run(binary, '--help', env=dict(env, XDG_DATA_HOME=str(xdg)), cwd=cwd).stdout
     assert default(helptext, 'assets') == str(xdg / 'dlsslop-amd/model')
+    helptext = run(binary, '--help', env=dict(env, XDG_CONFIG_HOME=str(xdg)), cwd=cwd).stdout
+    assert default(helptext, 'config') == str(xdg / 'dlsslop-amd/dlsslopd.conf')
     helptext = run(binary, '--help', env=dict(env, XDG_DATA_HOME=''), cwd=cwd).stdout
     assert default(helptext, 'assets') == str(home / '.local/share/dlsslop-amd/model')
     no_home = dict(env)
@@ -237,6 +240,39 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
         result = run(binary, *options, env=env, cwd=cwd, expected=1)
         assert '--idle-exit requires serving shared-memory requests' in result.stderr, result.stderr
 
+    # The worker's own config file sets settable long options by name, reports
+    # errors by line and yields to options; parsing fails before HIP or the
+    # channel is touched. An explicit file must exist; a default one need not.
+    config = cwd / 'custom.conf'
+    for text, message in (
+            ('tier = 900\nbogus\n', ':2: expected NAME = VALUE'),
+            ('# comment\n\n  tier = 1000\n', ':3: tier must be 720, 900, or 1080'),
+            ('passes = 0\n', ':1: --passes must be 1..'),
+            ('performance = yes\n', ':1: expected true or false'),
+            ('assets = model\n', ':1: a path must be absolute or start with ~/'),
+            ('shm = /tmp/channel\n', ":1: 'shm' is not a config setting"),
+            ('once = true\n', ":1: 'once' is not a config setting")):
+        config.write_text(text)
+        result = run(binary, '--config', str(config), '-T', env=env, cwd=cwd, expected=1)
+        assert f'{config}{message}' in result.stderr, (text, result.stderr)
+    result = run(binary, '-f', str(cwd / 'missing.conf'), '-T', env=env, cwd=cwd, expected=1)
+    assert f'cannot read config file {cwd / "missing.conf"}' in result.stderr, result.stderr
+    assert not channel.exists(), 'a rejected config file created a channel'
+    configured = dict(env, XDG_CONFIG_HOME=str(xdg))
+    (xdg / 'dlsslop-amd').mkdir(parents=True)
+    (xdg / 'dlsslop-amd/dlsslopd.conf').write_text(
+        'assets = ~/model\nmodules = /modules\nperformance = false\nidle-exit = 1\n')
+    served = cwd / 'configured'
+    for options, seconds in ((), 1), (('-x', '2'), 2):
+        result = run(binary, '-T', '-s', str(served / 'shm.bin'), *options, env=configured, cwd=cwd)
+        assert f'no request for {seconds} s; stopping' in result.stderr, (options, result.stderr)
+    # A configured idle exit only applies when serving; an explicit one is checked.
+    result = run(binary, '-D', env=dict(configured, DLSSLOP_HIP_LIBRARY='missing HIP runtime'), cwd=cwd, expected=1)
+    assert '--idle-exit' not in result.stderr, result.stderr
+    config.write_text('assets = /model\n')
+    result = run(binary, '-f', str(config), '-a', '', env=env, cwd=cwd, expected=1)
+    assert '--assets and --modules are required for inference' in result.stderr, result.stderr
+
     # Socket activation, as systemd's socket unit does it: a connection to the
     # socket beside the channel starts the worker, which adopts the socket as
     # fd 3, answers the probe with EOF only once it serves, stops after its idle
@@ -268,4 +304,4 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     assert (private / 'shm.bin.sock').exists(), 'the worker removed the socket systemd owns'
 
 print('worker CLI: native relocation, model/module defaults, environment contracts, trace-dir parsing, '
-      'HIP loader errors, device selection, signals, identity mode, idle exit and socket activation passed')
+      'HIP loader errors, device selection, signals, identity mode, idle exit, config file and socket activation passed')

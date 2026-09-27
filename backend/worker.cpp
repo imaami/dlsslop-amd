@@ -45,18 +45,26 @@ namespace selftest = dlsslop::control_selftest;
 volatile sig_atomic_t stopping;
 void stop_handler(int) { stopping = 1; }
 
-std::string default_assets()
+std::string home_directory()
 {
-    if (const char* data = std::getenv("XDG_DATA_HOME"); data && *data)
-        return (std::filesystem::path(data) / "dlsslop-amd/model").string();
     const char* home = std::getenv("HOME");
     if (!home || !*home) {
         const struct passwd* user = getpwuid(getuid());
         home = user ? user->pw_dir : nullptr;
     }
-    return home && *home ? (std::filesystem::path(home) / ".local/share/dlsslop-amd/model").string()
-                         : std::string();
+    return home ? home : "";
 }
+
+// XDG_BASE (nonempty) or ~/FALLBACK, then NAME; empty without a home.
+std::string xdg_path(const char* base, const char* fallback, const char* name)
+{
+    if (const char* root = std::getenv(base); root && *root) return (std::filesystem::path(root) / name).string();
+    const std::string home = home_directory();
+    return home.empty() ? home : (std::filesystem::path(home) / fallback / name).string();
+}
+
+std::string default_assets() { return xdg_path("XDG_DATA_HOME", ".local/share", "dlsslop-amd/model"); }
+std::string default_config() { return xdg_path("XDG_CONFIG_HOME", ".config", "dlsslop-amd/dlsslopd.conf"); }
 
 std::string default_modules()
 {
@@ -125,11 +133,83 @@ unsigned number(const char* text, const char* name)
     return static_cast<unsigned>(n);
 }
 
+bool flag(const char* value)
+{
+    if (!std::strcmp(value, "true")) return true;
+    if (!std::strcmp(value, "false")) return false;
+    throw std::runtime_error("expected true or false");
+}
+
+unsigned tier(const char* value)
+{
+    const unsigned t = number(value, "tier");
+    if (t != 720 && t != 900 && t != 1080) throw std::runtime_error("tier must be 720, 900, or 1080");
+    return t;
+}
+
+// Every option once: its getopt spelling, whether the config file may set it
+// (and whether that value is a path), and where a value lands. A flag gets
+// "true" from the command line, or true or false from the config file.
+struct Spec {
+    const char* name;
+    char letter;
+    enum Kind : uint8_t { kFlag, kValue, kPath } kind;
+    bool config;
+    void (*apply)(Options&, const char*);
+};
+
+const Spec kSpecs[] = {
+    {"config", 'f', Spec::kPath, false, nullptr}, // Read before the others apply.
+    {"assets", 'a', Spec::kPath, true, [](Options& o, const char* v) { o.assets = v; }},
+    {"modules", 'm', Spec::kPath, true, [](Options& o, const char* v) { o.modules = v; }},
+    // The channel pairs the worker with its launcher and socket unit.
+    {"shm", 's', Spec::kPath, false, [](Options& o, const char* v) { o.shm = v; }},
+    {"tier", 't', Spec::kValue, true, [](Options& o, const char* v) { o.tier = tier(v); }},
+    {"passes", 'P', Spec::kValue, true, [](Options& o, const char* v) {
+        o.passes = number(v, "passes");
+        if (!*o.passes || *o.passes > kMaxPasses)
+            throw std::runtime_error("--passes must be 1.." + std::to_string(kMaxPasses));
+    }},
+    {"device", 'd', Spec::kValue, true, [](Options& o, const char* v) { o.device = static_cast<int>(number(v, "device")); }},
+    {"diagnose", 'D', Spec::kFlag, false, [](Options& o, const char*) { o.diagnose = true; }},
+    {"self-test", 'S', Spec::kFlag, false, [](Options& o, const char*) { o.self_test = true; }},
+    {"self-test-runs", 'r', Spec::kValue, false, [](Options& o, const char* v) { o.self_test_runs = number(v, "self-test runs"); }},
+    {"input", 'i', Spec::kValue, false, [](Options& o, const char* v) { o.input = v; }},
+    {"output", 'o', Spec::kValue, false, [](Options& o, const char* v) { o.output = v; }},
+    {"width", 'W', Spec::kValue, false, [](Options& o, const char* v) { o.width = number(v, "width"); }},
+    {"height", 'H', Spec::kValue, false, [](Options& o, const char* v) { o.height = number(v, "height"); }},
+    {"cpu-compose", 'c', Spec::kFlag, false, [](Options& o, const char*) { o.cpu_compose = o.cpu_codec = true; }},
+    {"cpu-codec", 'C', Spec::kFlag, false, [](Options& o, const char*) { o.cpu_codec = true; }},
+    {"performance", 'p', Spec::kFlag, true, [](Options& o, const char* v) { o.performance = flag(v); }},
+    {"once", '1', Spec::kFlag, false, [](Options& o, const char*) { o.once = true; }},
+    {"idle-exit", 'x', Spec::kValue, true, [](Options& o, const char* v) { o.idle_exit = number(v, "idle-exit seconds"); }},
+    {"trace-dir", 'R', Spec::kValue, false, [](Options& o, const char* v) {
+        if (!*v) throw std::runtime_error("--trace-dir requires a nonempty directory");
+        o.trace_dir = v;
+    }},
+    {"test-identity", 'T', Spec::kFlag, false, [](Options& o, const char*) { o.test_identity = true; }},
+    {"help", 'h', Spec::kFlag, false, nullptr},
+};
+
 void usage(FILE* out)
 {
     const Options defaults = default_options();
+    const std::string config = default_config();
+    std::string settable;
+    for (const Spec& spec : kSpecs)
+        if (spec.config) settable += (settable.empty() ? "" : ", ") + std::string(spec.name);
     std::fprintf(out,
         "Usage: dlsslopd [OPTIONS]\n"
+        "  -f, --config FILE       Settings file of NAME = VALUE lines\n"
+        "                          Default: %s\n"
+        "                          Uses nonempty XDG_CONFIG_HOME/dlsslop-amd/dlsslopd.conf,\n"
+        "                          otherwise ~/.config/dlsslop-amd/dlsslopd.conf;\n"
+        "                          a missing default file is skipped. NAME is one of\n"
+        "                          %s\n"
+        "                          (performance = true or false); # starts a\n"
+        "                          comment line; paths are absolute or start with\n"
+        "                          ~/. Settings replace the defaults below and\n"
+        "                          options override them\n"
         "  -a, --assets DIR        Model weights (.f16/.f32)\n"
         "                          Default: %s\n"
         "                          Uses nonempty XDG_DATA_HOME/dlsslop-amd/model,\n"
@@ -146,8 +226,8 @@ void usage(FILE* out)
         "                          Default: %u; game/display resolution unchanged\n"
         "  -P, --passes N          Chained neural evaluations per frame (1..%u)\n"
         "                          Default: %u on a new channel; each pass consumes\n"
-        "                          the previous output. Unset, a starting worker\n"
-        "                          keeps the channel's live count\n"
+        "                          the previous output. Unset here and in FILE, a\n"
+        "                          starting worker keeps the channel's live count\n"
         "  -d, --device INDEX      HIP device index\n"
         "                          Default: auto, first visible gfx1201 device\n"
         "  -D, --diagnose          Enumerate HIP devices, report the selection, exit\n"
@@ -190,6 +270,7 @@ void usage(FILE* out)
         "  -T, --test-identity     DIAGNOSTIC ONLY: copy frames without inference\n"
         "                          Default: off; evaluate the real HIP network\n"
         "  -h, --help              Show this help and exit (default: off)\n",
+        config.empty() ? "unset; no home directory" : config.c_str(), settable.c_str(),
         defaults.assets.empty() ? "unset; required for inference" : defaults.assets.c_str(),
         defaults.modules.empty() ? "unset; required for inference" : defaults.modules.c_str(),
         defaults.shm.c_str(), ShmNativeDefaultPath().c_str(), defaults.tier,
@@ -197,71 +278,96 @@ void usage(FILE* out)
         defaults.width, defaults.height, defaults.idle_exit);
 }
 
-Options parse(int argc, char** argv)
+std::string trim(const std::string& text)
 {
-    Options o = default_options();
-    bool self_test_runs_set = false;
-    static const option opts[] = {
-        {"assets", required_argument, nullptr, 'a'},
-        {"modules", required_argument, nullptr, 'm'},
-        {"shm", required_argument, nullptr, 's'},
-        {"tier", required_argument, nullptr, 't'},
-        {"passes", required_argument, nullptr, 'P'},
-        {"device", required_argument, nullptr, 'd'},
-        {"diagnose", no_argument, nullptr, 'D'},
-        {"self-test", no_argument, nullptr, 'S'},
-        {"self-test-runs", required_argument, nullptr, 'r'},
-        {"input", required_argument, nullptr, 'i'},
-        {"output", required_argument, nullptr, 'o'},
-        {"width", required_argument, nullptr, 'W'},
-        {"height", required_argument, nullptr, 'H'},
-        {"cpu-compose", no_argument, nullptr, 'c'},
-        {"cpu-codec", no_argument, nullptr, 'C'},
-        {"performance", no_argument, nullptr, 'p'},
-        {"once", no_argument, nullptr, '1'},
-        {"idle-exit", required_argument, nullptr, 'x'},
-        {"trace-dir", required_argument, nullptr, 'R'},
-        {"test-identity", no_argument, nullptr, 'T'},
-        {"help", no_argument, nullptr, 'h'},
-        {nullptr, 0, nullptr, 0}
-    };
-    for (int c; (c = getopt_long(argc, argv, "a:m:s:t:P:d:DSr:i:o:W:H:cCp1x:R:Th", opts, nullptr)) != -1;) {
-        switch (c) {
-        case 'a': o.assets = optarg; break;
-        case 'm': o.modules = optarg; break;
-        case 's': o.shm = optarg; break;
-        case 't': o.tier = number(optarg, "tier"); break;
-        case 'P': o.passes = number(optarg, "passes"); break;
-        case 'd': o.device = static_cast<int>(number(optarg, "device")); break;
-        case 'D': o.diagnose = true; break;
-        case 'S': o.self_test = true; break;
-        case 'r': o.self_test_runs = number(optarg, "self-test runs"); self_test_runs_set = true; break;
-        case 'i': o.input = optarg; break;
-        case 'o': o.output = optarg; break;
-        case 'W': o.width = number(optarg, "width"); break;
-        case 'H': o.height = number(optarg, "height"); break;
-        case 'c': o.cpu_compose = o.cpu_codec = true; break;
-        case 'C': o.cpu_codec = true; break;
-        case 'p': o.performance = true; break;
-        case '1': o.once = true; break;
-        case 'x': o.idle_exit = number(optarg, "idle-exit seconds"); break;
-        case 'R':
-            if (!*optarg) throw std::runtime_error("--trace-dir requires a nonempty directory");
-            o.trace_dir = optarg;
-            break;
-        case 'T': o.test_identity = true; break;
-        case 'h': usage(stdout); std::exit(0);
-        default: usage(stderr); throw std::runtime_error("invalid arguments");
+    const auto first = text.find_first_not_of(" \t");
+    return first == std::string::npos ? std::string() : text.substr(first, text.find_last_not_of(" \t") - first + 1);
+}
+
+// A config file's path is absolute or starts with ~/, never relative to
+// wherever the worker was started.
+std::string config_path(const std::string& value)
+{
+    if (value[0] == '/') return value;
+    const std::string home = value.compare(0, 2, "~/") ? std::string() : home_directory();
+    if (home.empty()) throw std::runtime_error("a path must be absolute or start with ~/");
+    return home + value.substr(1);
+}
+
+// One NAME = VALUE line, NAME a config-settable long option.
+void apply_setting(Options& o, const std::string& text)
+{
+    const auto equals = text.find('=');
+    if (equals == std::string::npos) throw std::runtime_error("expected NAME = VALUE");
+    const std::string name = trim(text.substr(0, equals));
+    const auto spec = std::find_if(std::begin(kSpecs), std::end(kSpecs),
+                                   [&name](const Spec& s) { return s.config && name == s.name; });
+    if (spec == std::end(kSpecs)) throw std::runtime_error("'" + name + "' is not a config setting");
+    const std::string value = trim(text.substr(equals + 1));
+    spec->apply(o, (spec->kind == Spec::kPath ? config_path(value) : value).c_str());
+}
+
+// Settings, one per line; # starts a comment line. A missing default file is
+// no error.
+void read_config(Options& o, const std::string& path, bool given)
+{
+    std::error_code error;
+    if (!given && (path.empty() || !std::filesystem::exists(path, error))) return;
+    std::ifstream file(path);
+    if (!file) throw std::runtime_error("cannot read config file " + path);
+    std::string line;
+    for (unsigned line_number = 1; std::getline(file, line); ++line_number) {
+        const std::string text = trim(line);
+        if (text.empty() || text[0] == '#') continue;
+        try {
+            apply_setting(o, text);
+        } catch (const std::exception& e) {
+            throw std::runtime_error(path + ":" + std::to_string(line_number) + ": " + e.what());
         }
     }
+}
+
+Options parse(int argc, char** argv)
+{
+    std::string letters;
+    std::vector<option> options;
+    for (const Spec& spec : kSpecs) {
+        letters += spec.letter;
+        if (spec.kind != Spec::kFlag) letters += ':';
+        options.push_back({spec.name, spec.kind == Spec::kFlag ? no_argument : required_argument, nullptr, spec.letter});
+    }
+    options.push_back({});
+    // Options override the config file, which one of them may name.
+    std::vector<std::pair<const Spec*, const char*>> given;
+    std::string config = default_config();
+    bool config_given = false;
+    for (int c; (c = getopt_long(argc, argv, letters.c_str(), options.data(), nullptr)) != -1;) {
+        const auto spec = std::find_if(std::begin(kSpecs), std::end(kSpecs), [c](const Spec& s) { return s.letter == c; });
+        if (spec == std::end(kSpecs)) {
+            usage(stderr);
+            throw std::runtime_error("invalid arguments");
+        }
+        if (c == 'h') {
+            usage(stdout);
+            std::exit(0);
+        }
+        if (c == 'f') {
+            config = optarg;
+            config_given = true;
+            continue;
+        }
+        given.emplace_back(spec, optarg ? optarg : "true");
+    }
     if (optind != argc) throw std::runtime_error("unexpected positional argument");
-    if (o.tier != 720 && o.tier != 900 && o.tier != 1080)
-        throw std::runtime_error("tier must be 720, 900, or 1080");
-    if (o.passes && (!*o.passes || *o.passes > kMaxPasses))
-        throw std::runtime_error("--passes must be 1.." + std::to_string(kMaxPasses));
+    Options o = default_options();
+    read_config(o, config, config_given);
+    for (const auto& [spec, value] : given) spec->apply(o, value);
+    const auto on_command_line = [&given](char letter) {
+        return std::any_of(given.begin(), given.end(), [letter](const auto& g) { return g.first->letter == letter; });
+    };
     if (o.self_test_runs < 2 || o.self_test_runs > 1000)
         throw std::runtime_error("--self-test-runs must be 2..1000");
-    if (self_test_runs_set && !o.self_test)
+    if (on_command_line('r') && !o.self_test)
         throw std::runtime_error("--self-test-runs requires --self-test");
     if (!o.diagnose && !o.test_identity && (o.assets.empty() || o.modules.empty()))
         throw std::runtime_error("--assets and --modules are required for inference");
@@ -273,7 +379,8 @@ Options parse(int argc, char** argv)
         throw std::runtime_error("offline dimensions must be 1..7680 by 1..4320");
     if (!o.trace_dir.empty() && (o.self_test || !o.input.empty() || o.test_identity || o.diagnose))
         throw std::runtime_error("--trace-dir requires serving real shared-memory inference");
-    if (o.idle_exit && (o.self_test || !o.input.empty() || o.diagnose))
+    // A configured idle exit is for serving; only an explicit one is an error.
+    if (on_command_line('x') && o.idle_exit && (o.self_test || !o.input.empty() || o.diagnose))
         throw std::runtime_error("--idle-exit requires serving shared-memory requests");
     return o;
 }

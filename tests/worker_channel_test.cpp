@@ -258,10 +258,25 @@ void live_settings(const char* executable, const std::filesystem::path& director
         require(channel.h->passes.load() == 3, "a restarted worker reset the live pass count");
         require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
     }
+    {
+        Worker worker(executable, channel, log, false, "--passes", "2");
+        require(channel.h->passes.load() == 2, "--passes did not replace the live pass count");
+        require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
+    }
+    // main points XDG_CONFIG_HOME at the test directory.
+    const auto config = directory / "dlsslop-amd/dlsslopd.conf";
+    std::filesystem::create_directories(config.parent_path());
+    std::ofstream(config) << "# live settings\npasses = 4\n";
+    {
+        Worker worker(executable, channel, log);
+        require(channel.h->passes.load() == 4, "the config file did not set the pass count");
+        require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
+    }
     Worker worker(executable, channel, log, false, "--passes", "2");
-    require(channel.h->passes.load() == 2, "--passes did not replace the live pass count");
+    std::filesystem::remove(config);
+    require(channel.h->passes.load() == 2, "--passes did not override the config file");
     require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
-    std::printf("PASS: a restarted worker kept the live pass count; --passes replaced it\n");
+    std::printf("PASS: a restarted worker kept the live pass count; the config file and --passes replaced it\n");
 }
 
 // --once exits after its one answer, with status 1 when that answer failed.
@@ -295,6 +310,8 @@ int main(int argc, char** argv)
         return 1;
     }
     const std::filesystem::path directory = buffer;
+    // Workers read no config file but the test's own.
+    setenv("XDG_CONFIG_HOME", buffer.c_str(), 1);
     int result = 0;
     try {
         restart(argv[1], directory);
