@@ -8,12 +8,13 @@ Model weights are separate.
 
 ## Runtime requirements
 
-On Debian Sid - or any other reasonably up-to-date Linux system - keep your
+On Debian Sid, or any other reasonably up-to-date Linux system, keep your
 existing Mesa RADV installation and the normal `amdgpu` kernel driver. Install
 compatible HIP userspace separately; `dlsslopd` needs `libamdhip64.so`, and
 access to `/dev/kfd` and the GPU's render device. HIP userspace must support
-`gfx1201`. Run the daemon in a host terminal outside Steam's runtime. If its
-loader cannot find your HIP installation, select the library explicitly:
+`gfx1201`. The daemon runs on the host, under systemd or in a terminal, never
+inside Steam's runtime. If its loader cannot find your HIP installation, select
+the library explicitly:
 
 ```bash
 export DLSSLOP_HIP_LIBRARY=/path/to/libamdhip64.so
@@ -28,13 +29,14 @@ Pillow. `dlsslopd` and the Vulkan layer both run independently of the GUI.
 
 The release archive's directory structure is that of an install prefix,
 and installing it simply means extracting the archive at the destination and
-running a couple of `systemctl` commands.
+running a couple of `systemctl` commands. To update, follow the same steps with
+the new archive.
 
 1. Stop `dlsslopd` and any programs using it.
 
    ```bash
    systemctl --user stop 'dlsslop.s*'
-   pkill dlsslopd
+   pkill -x dlsslopd
    ```
 
 2. Extract the archive to the install prefix.
@@ -50,6 +52,32 @@ running a couple of `systemctl` commands.
    (cd ~/.local && sha256sum --check share/doc/dlsslop-amd/SHA256SUMS)
    ```
 
+4. Make the systemd units findable, unless the prefix is `~/.local` or
+   `/usr/local`, where systemd already looks. For `/opt/dlsslop-amd`, link both:
+
+   ```bash
+   systemctl --user link /opt/dlsslop-amd/share/systemd/user/dlsslop.{socket,service}
+   ```
+
+   For any other prefix, link `dlsslop.socket` the same way, then copy
+   `dlsslop.service` into `~/.config/systemd/user/` and point its `ExecStart` at
+   that prefix's `bin/dlsslopd`: the service looks for `dlsslopd` only under
+   `~/.local`, `/usr/local` and `/opt/dlsslop-amd`.
+
+5. Load the units and enable the socket, so that systemd starts the daemon
+   whenever a game needs it:
+
+   ```bash
+   systemctl --user daemon-reload
+   systemctl --user enable --now dlsslop.socket
+   ```
+
+   Run `systemctl --user daemon-reload` again after any later edit to a copied
+   `dlsslop.service`: systemd otherwise keeps a service it already loaded as it
+   was. To enable the socket for every user of a `/usr/local` install, run
+   `sudo systemctl --global enable dlsslop.socket` instead: each user's own
+   systemd instance starts the socket at their next login.
+
 Add the prefix's `bin/` to your usual shell's `PATH` if needed. `~/.local`
 suits one user; for everyone, extract into `/usr/local`, or into a directory
 of its own such as `/opt/dlsslop-amd`. The daemon finds its GPU modules, and
@@ -59,9 +87,21 @@ activates only through `dlsslop-run`. Steam's runtime container, which runs
 Proton games, reads layer manifests only from the Vulkan loader's standard
 directories: for those games, extract into `~/.local` or `/usr/local`. The
 archive holds no directories of its own, so extracting to `~/.local` changes
-nothing but these files. To update, extract a new archive over the old one;
-to uninstall, delete the files `share/doc/dlsslop-amd/SHA256SUMS` lists, then
-delete that `SHA256SUMS` file itself.
+nothing but these files.
+
+To uninstall, stop the units, then disable them, which also removes the links
+step 4 made:
+
+```bash
+systemctl --user stop dlsslop.socket dlsslop.service
+systemctl --user disable dlsslop.socket dlsslop.service
+```
+
+Delete a `dlsslop.service` you copied into `~/.config/systemd/user/`, and for a
+`/usr/local` install enabled for every user, run
+`sudo systemctl --global disable dlsslop.socket`. Then delete the files
+`share/doc/dlsslop-amd/SHA256SUMS` lists, and finally that `SHA256SUMS` file
+itself.
 
 ## Set up the model
 
@@ -92,32 +132,13 @@ dlsslopd --diagnose
 dlsslopd --tier 720 --self-test --output neural-test.ppm
 ```
 
-Then let systemd start the daemon whenever a game needs it:
-
-```bash
-systemctl --user daemon-reload
-systemctl --user enable --now dlsslop.socket
-```
-
-The socket listens beside the default channel, `/tmp/dlsslop-amd-UID/shm.bin`;
-nothing else runs. When no daemon serves, `dlsslop-run` connects there, which
+The socket enabled in step 5 of the installation listens beside the default
+channel, `/tmp/dlsslop-amd-UID/shm.bin`; nothing else runs. When no daemon serves, `dlsslop-run` connects there, which
 starts `dlsslop.service`, and waits until the daemon serves. The daemon stops
 after ten seconds without a frame, and the layer starts it again if a game is
 still running. Its log is in `journalctl --user -u dlsslop`. A channel chosen
 with `DLSSNR_SHM` or `--shm` is not started on demand: start its daemon by hand.
-
-For every user, extract into `/usr/local` and run
-`sudo systemctl --global enable dlsslop.socket`: each user's own systemd
-instance starts the socket at their next login. With `/opt/dlsslop-amd`, first
-link both units from its `share/systemd/user` with `systemctl --user link`. With
-any other prefix, first link `dlsslop.socket` the same way, then copy
-`dlsslop.service` into `~/.config/systemd/user/` and point its `ExecStart` at that
-prefix's `bin/dlsslopd`: the service looks for `dlsslopd` only under `~/.local`,
-`/usr/local` and `/opt/dlsslop-amd`. After linking or copying, and after any
-later edit to the copied service, run `systemctl --user daemon-reload` before
-enabling or starting the socket; systemd otherwise keeps a service it already
-loaded as it was. Without systemd, run `dlsslopd` in a host terminal and wait
-for `worker ready`.
+Without systemd, run `dlsslopd` in a host terminal and wait for `worker ready`.
 
 However it starts, the daemon reads its settings from
 `~/.config/dlsslop-amd/dlsslopd.conf`, or from `dlsslop-amd/dlsslopd.conf` under
@@ -169,9 +190,9 @@ keeps the tier unless its command line or config file sets one. An extra pass
 consumes its predecessor's output, uses more compute and adds latency without
 guaranteeing better quality. Motion estimation is optional and off by default.
 
-In-game menus and HUDs receive no special treatment because dlsslop-amd cannot
-see game engines' internal state vectors. No input pixel is exempt from neural
-processing.
+In-game menus and HUDs receive no special treatment: dlsslop-amd sees only
+finished frames, so it cannot tell which pixels belong to them. No input pixel
+is exempt from neural processing.
 
 Capture, transport and inference are synchronous, so the daemon adds latency
 and competes with the game for GPU time. When a game renders on the daemon's
