@@ -98,7 +98,7 @@ artifact. Its root is an installation prefix (`bin/`, `lib/`, `libexec/`,
 `share/`) holding the compiled binaries and HIP modules, runtime Python tools,
 the Vulkan layer manifest and required notices, stamped with the packaging time;
 it contains no source tree or model weights. `share/doc/dlsslop-amd/SHA256SUMS`
-lists every file relative to that root, and `share/doc/dlsslop-amd/licenses/SOURCES`
+lists every other file relative to that root, and `share/doc/dlsslop-amd/licenses/SOURCES`
 identifies the corresponding source revision. Pull-request runs check the package
 without uploading it: their merge commit is temporary.
 

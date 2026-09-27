@@ -43,7 +43,7 @@ manifests only from the Vulkan loader's standard directories: for those games,
 extract into `~/.local` or `/usr/local`. The archive holds no directories of its own, so extracting over
 `~/.local` changes nothing but these files. To update, extract a new archive over
 the old one; to uninstall, delete the files `share/doc/dlsslop-amd/SHA256SUMS`
-lists.
+lists, then that list itself.
 
 ## Set up the model
 
@@ -91,10 +91,11 @@ with `DLSSNR_SHM` or `--shm` is not started on demand: start its worker by hand.
 For every user, extract into `/usr/local` and run
 `sudo systemctl --global enable dlsslop.socket`: each user's own systemd
 instance starts the socket at their next login. With `/opt/dlsslop-amd`, first
-link both units from its `share/systemd/user` with `systemctl --user link`. The
-service finds `dlsslopd` under `~/.local`, `/usr/local` or `/opt/dlsslop-amd`; for
-another prefix, copy `dlsslop.service` into `~/.config/systemd/user/` and point its
-`ExecStart` at that prefix's `bin/dlsslopd`. Without
+link both units from its `share/systemd/user` with `systemctl --user link`. With
+any other prefix, first link `dlsslop.socket` the same way, then copy
+`dlsslop.service` into `~/.config/systemd/user/` and point its `ExecStart` at that
+prefix's `bin/dlsslopd`: the service looks for `dlsslopd` only under `~/.local`,
+`/usr/local` and `/opt/dlsslop-amd`. Without
 systemd, run `dlsslopd` in a host terminal and wait for `worker ready`.
 
 However it starts, the worker reads its settings from
