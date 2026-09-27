@@ -1228,6 +1228,10 @@ void run_worker(const Options& o)
             }
             active = std::chrono::steady_clock::now();
         }
+        // Stopped before the teardown, which can take a while and unlinks a
+        // socket this daemon bound: a layer that offers or presents from now on
+        // leaves its frames for the next daemon instead of waiting on this one.
+        h->helperState.store(kHelperStopped);
     } catch (const std::exception& e) {
         mapping.reason(e.what());
         h->helperState.store(kHelperModelFailed);
