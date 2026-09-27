@@ -999,7 +999,6 @@ bool follow_tier(std::optional<Engine>& engine, const Options& o, Mapping& mappi
     }
     h->helperState.store(kHelperStarting);
     h->modelUp.store(0);
-    h->transportAck.store(0);
     std::fprintf(stderr, "neural tier %u -> %u: rebuilding\n", active, wanted);
     mapping.reason("rebuilding for neural tier " + std::to_string(wanted));
     engine.reset(); // The old network's memory goes first.
@@ -1011,6 +1010,11 @@ bool follow_tier(std::optional<Engine>& engine, const Options& o, Mapping& mappi
         throw;
     }
     publish_raster(o, h, wanted);
+    // The new engine holds no imports. Clear the acknowledgement only now: a
+    // layer that was still waiting for it when the rebuild began has read it
+    // or given up (after 250 ms) long before, and a request naming the old
+    // imports gets transportMiss, so the layer offers them again.
+    h->transportAck.store(0);
     mapping.reason(ready);
     h->modelUp.store(o.test_identity ? 0 : 1);
     h->helperState.store(kHelperRunning, std::memory_order_release);
