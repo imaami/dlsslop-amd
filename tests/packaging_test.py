@@ -75,6 +75,7 @@ def installed(prefix, runtime, env):
         target = prefix / name
         assert target.read_bytes() == source.read_bytes(), name
         assert target.stat().st_mode & 0o777 == mode, name
+    assert (prefix / INSTALLER.LAYER_LIBRARY).stat().st_mode & 0o777 == 0o644, "the layer library is executable"
     for name in ("dlsslopd", "dlsslopctl", "dlsslop-gui"):
         assert (prefix / "bin" / name).read_bytes().startswith(b"\x7fELF")
         run([prefix / "bin" / name], env)
@@ -179,6 +180,7 @@ def main():
                        and member.mtime == 1790000000 for member in members)
             modes = {member.name: member.mode for member in members}
             assert all(modes[name] == mode for name, (_, mode) in tree.items())
+            assert modes[INSTALLER.LAYER_LIBRARY] == 0o644, "the archived layer library is executable"
         release = base / "extracted prefix"
         release.mkdir()
         with tarfile.open(output) as archive:

@@ -113,8 +113,10 @@ def runtime_files(root, build):
     files = {}
     for destination, source in NATIVE_SOURCES.items():
         path = build / source
-        check_elf(path, shared=destination == LAYER_LIBRARY)
-        files[destination] = (path, 0o755)
+        library = destination == LAYER_LIBRARY
+        check_elf(path, shared=library)
+        # The Vulkan loader maps the layer; nothing executes it.
+        files[destination] = (path, 0o644 if library else 0o755)
     for destination, (source, first_line, mode) in SCRIPT_SOURCES.items():
         path = root / source
         require_file(path)
