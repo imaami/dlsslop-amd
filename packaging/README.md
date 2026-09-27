@@ -26,7 +26,7 @@ Pillow. `dlsslopd` and the Vulkan layer both run independently of the GUI.
 
 ## Install
 
-The distribution archive's directory structure is that of an install prefix,
+The release archive's directory structure is that of an install prefix,
 and installing it simply means extracting the archive at the destination and
 running a couple of `systemctl` commands.
 
@@ -101,7 +101,7 @@ systemctl --user enable --now dlsslop.socket
 
 The socket listens beside the default channel, `/tmp/dlsslop-amd-UID/shm.bin`;
 nothing else runs. When no daemon serves, `dlsslop-run` connects there, which
-starts `dlsslop.service`, and waits until the  serves. The daemon stops
+starts `dlsslop.service`, and waits until the daemon serves. The daemon stops
 after ten seconds without a frame, and the layer starts it again if a game is
 still running. Its log is in `journalctl --user -u dlsslop`. A channel chosen
 with `DLSSNR_SHM` or `--shm` is not started on demand: start its daemon by hand.
