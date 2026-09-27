@@ -81,16 +81,20 @@ systemctl --user daemon-reload
 systemctl --user enable --now dlsslop.socket
 ```
 
-The socket listens beside the worker's channel; nothing else runs. When no worker
-serves, `dlsslop-run` connects there, which starts `dlsslop.service`, and waits
-until the worker serves. The worker stops after ten seconds without a frame, and
-the layer starts it again if a game is still running. Its log is in
-`journalctl --user -u dlsslop`.
+The socket listens beside the default channel, `/tmp/dlsslop-amd-UID/shm.bin`;
+nothing else runs. When no worker serves, `dlsslop-run` connects there, which
+starts `dlsslop.service`, and waits until the worker serves. The worker stops
+after ten seconds without a frame, and the layer starts it again if a game is
+still running. Its log is in `journalctl --user -u dlsslop`. A channel chosen
+with `DLSSNR_SHM` or `--shm` is not started on demand: start its worker by hand.
 
 For every user, extract into `/usr/local` and run
 `sudo systemctl --global enable dlsslop.socket`: each user's own systemd
 instance starts the socket at their next login. With `/opt/dlsslop-amd`, first
-link both units from its `share/systemd/user` with `systemctl --user link`. Without
+link both units from its `share/systemd/user` with `systemctl --user link`. The
+service finds `dlsslopd` under `~/.local`, `/usr/local` or `/opt/dlsslop-amd`; for
+another prefix, copy `dlsslop.service` into `~/.config/systemd/user/` and point its
+`ExecStart` at that prefix's `bin/dlsslopd`. Without
 systemd, run `dlsslopd --tier 1080` in a host terminal and wait for `worker ready`.
 
 With Proton GE selected, put this in the game's Steam launch options, replacing
@@ -116,11 +120,12 @@ dlsslopctl --enabled 1
 dlsslopctl --quit
 ```
 
-With the socket unit enabled, `--quit` only stops the current worker: the layer of
-a running game starts it again. `systemctl --user stop dlsslop.socket dlsslop.service`
-stops both until the next login.
+`--quit` stops the worker, and a running game presents its own frames until a
+worker starts again: at the next launch through `dlsslop-run`, with
+`systemctl --user start dlsslop.service`, or by hand. `systemctl --user stop
+dlsslop.socket dlsslop.service` also ends on-demand starts until the next login.
 
-Start a fresh worker after `--quit`. Every command has `--help`; `dlsslopctl
+Every command has `--help`; `dlsslopctl
 --settings` lists the current settings and reset values. `--tier` selects a
 1280×720, 1600×900 or 1920×1080 neural raster, independently of the game's
 resolution; the edit is composed against the native frame. Each extra pass
