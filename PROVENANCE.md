@@ -29,11 +29,12 @@ integration patches and local source, not complete upstream copies.
 | Component | Upstream | Pinned commit | License |
 |---|---|---|---|
 | Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) | `117c9530834d37ef8dc7b371e36cc3fb507e6b6b` | AGPL-3.0; embedded dependencies keep their notices |
+| Vulkan network runtime, SPIR-V sources and model extractor | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) | `4f663b5d0262efedbfb87394ad59665664c2dd7b` | MIT |
 | AMD neural scheduler and HIP kernels | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) | `7ef24e7c1498bce59738277e174249866608c4ed` | MIT |
 | Eight scaling shader sources | [optiscaler/OptiScaler](https://github.com/optiscaler/OptiScaler) | `6ded74bfa4fbb932fda7184c1263fc45380d5b1d` | GPL-3.0; individual files retain additional notices |
 
 `prepare-sources.py` verifies selected originals against their recorded hashes,
-projects them into `upstream-layer/`, `kernels/` and `backend/vendor/`, and
+projects them into `upstream-layer/`, `kernels/`, `backend/vendor/` and `vulkan-nr/`, and
 applies `patches/linux-integration.patch`. The patch adapts Linux loading and
 transport and extends controls and composition. It leaves the upstream working
 trees and HIP kernels unchanged; `scripts/build-kernels.py` wraps the bare

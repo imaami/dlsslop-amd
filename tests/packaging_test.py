@@ -38,7 +38,9 @@ def run(arguments, env, expected=0):
 def fixture(root):
     root.mkdir()
     paths = {"install.py", *INSTALLER.DOCUMENT_SOURCES.values(), *INSTALLER.UNIT_SOURCES.values(),
-             *(source for source, *_ in INSTALLER.SCRIPT_SOURCES.values())}
+             *(source for source, *_ in INSTALLER.SCRIPT_SOURCES.values()),
+             "vulkan-nr/build/build_network.py", "vulkan-nr/shaders/rdna4/pipelines.json",
+             *(f"vulkan-nr/package/model-tools/{name}" for name in INSTALLER.MODEL_TOOLS)}
     for name in paths:
         target = root / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -49,6 +51,10 @@ def fixture(root):
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile("/usr/bin/true", target)
         target.chmod(0o755)
+    for name in INSTALLER.vulkan_shader_names(root):
+        target = build / "vulkan-nr/network" / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(name.encode())
     modules = root / "assets/HIP/gfx1201"
     modules.mkdir(parents=True)
     entries = []

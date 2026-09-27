@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Install a complete dlsslop-amd source build into a prefix, laid out like the binary release."""
 import argparse
+import ast
 import hashlib
 import json
 import os
@@ -23,6 +24,13 @@ LAYER_LIBRARY = "lib/dlsslop-amd/libVkLayer_DLSSLOP_amd.so"
 # launcher adds this directory to the loader's search for any other prefix.
 LAYER_MANIFEST = "share/vulkan/implicit_layer.d/VK_LAYER_LOCAL_dlsslop_amd.json"
 DOC_DIRECTORY = "share/doc/dlsslop-amd"
+# The Vulkan network's SPIR-V, as vulkan-nr/build/build_network.py writes it into
+# the build tree, and the extractor dlsslop-setup --dll runs.
+VULKAN_DIRECTORY = "share/dlsslop-amd/vulkan"
+MODEL_TOOLS_DIRECTORY = "libexec/dlsslop-amd/model-tools"
+MODEL_TOOLS = ("descriptor.json", "extract_model.sh", "inspect_nr.py", "model-files.sha256", "model-files.txt",
+               "pack_model.py", "unpack_postblock.py", "unpack_preblock.py", "unpack_splitswin.py",
+               "unpack_swin_family.py", "unpack_vit.py")
 # Every other installed file's digest; the README checks and uninstalls by it.
 INVENTORY = f"{DOC_DIRECTORY}/SHA256SUMS"
 NATIVE_SOURCES = {
@@ -44,6 +52,7 @@ LICENSE_SOURCES = {
     "licenses/Apache-2.0.txt": "packaging/Apache-2.0.txt",
     "licenses/MIT-integration.txt": "LICENSE.integration",
     "licenses/MIT-amd.txt": "kernels/LICENSE",
+    "licenses/MIT-DLSSNR-AMD.txt": "vulkan-nr/LICENSE",
     "licenses/RenoDX.txt": "upstream-layer/third_party/optiscaler/RenoDX_ATTRIBUTION.txt",
     "licenses/THIRD-PARTY.txt": "packaging/THIRD-PARTY.txt",
 }
@@ -110,6 +119,19 @@ def validate_modules(directory):
             raise ValueError(f"GPU module metadata or checksum mismatch: {path}")
 
 
+def vulkan_shader_names(root):
+    """The SPIR-V and markers the network's shader build writes, named as it names them."""
+    # Its RUNTIME and MOTION lists, read rather than imported: nothing runs, nothing is cached.
+    script = ast.parse((root / "vulkan-nr/build/build_network.py").read_text(encoding="utf-8"))
+    lists = {node.targets[0].id: ast.literal_eval(node.value) for node in script.body
+             if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
+             and node.targets[0].id in ("RUNTIME", "MOTION")}
+    table = json.loads((root / "vulkan-nr/shaders/rdna4/pipelines.json").read_text(encoding="utf-8"))
+    return ([f"g_{name}.spv" for name in table["pipelines"]] + list(table["markers"]) +
+            [f"temporal/{name}.spv" for name in [*table["variants"], *lists["MOTION"]]] +
+            ["temporal/shader-constants.txt"] + [f"runtime/{name}.spv" for name in lists["RUNTIME"]])
+
+
 def runtime_files(root, build):
     """Return the exact installed runtime allowlist and validate every input."""
     files = {}
@@ -125,6 +147,14 @@ def runtime_files(root, build):
         if not path.read_bytes().startswith(first_line):
             raise ValueError(f"incorrect executable interpreter: {path}")
         files[destination] = (path, mode)
+    for name in vulkan_shader_names(root):
+        path = build / "vulkan-nr/network" / name
+        require_file(path)
+        files[f"{VULKAN_DIRECTORY}/{name}"] = (path, 0o644)
+    for name in MODEL_TOOLS:
+        path = root / "vulkan-nr/package/model-tools" / name
+        require_file(path)
+        files[f"{MODEL_TOOLS_DIRECTORY}/{name}"] = (path, 0o644)
     module_source = root / "assets/HIP/gfx1201"
     validate_modules(module_source)
     for name in (*[name + ".hsaco" for name in MODULE_NAMES], "modules.json", "SHA256SUMS"):

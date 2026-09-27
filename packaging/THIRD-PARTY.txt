@@ -6,6 +6,9 @@ DLSS Linux Open Proxy for AMD integrates and adapts these components:
 * DLSS5VKLayer by bmitch87 and contributors, including Thomas Eric: Vulkan
   presentation layer and shared-memory protocol (AGPL-3.0.txt).
   https://github.com/bmitch87/DLSS5VKLayer
+* DLSSNR-AMD by mochizuki0323: the Vulkan network runtime, its SPIR-V and
+  the model extractor (MIT-DLSSNR-AMD.txt).
+  https://github.com/mochizuki0323/DLSSNR-AMD
 * AMD neural scheduler and HIP kernels by Kien / lmxxf (MIT-amd.txt).
   https://github.com/lmxxf/dlss5-on-amd-9070xt-porting
 * OptiScaler shader lineage and Dagherbou/OptiScaler_DLSSNR snapshot

@@ -9,7 +9,7 @@ import subprocess
 import threading
 
 ROOT = Path(__file__).resolve().parents[1]
-PREPARED = ('upstream-layer', 'kernels', 'backend/vendor')
+PREPARED = ('upstream-layer', 'kernels', 'backend/vendor', 'vulkan-nr')
 # The staging repository must not inherit Git configuration, attributes or
 # GIT_* variables: diff.noprefix, color, core.autocrlf, apply.whitespace, hooks,
 # signing, eol attributes or a calling hook's GIT_DIR or GIT_INDEX_FILE would

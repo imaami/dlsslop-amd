@@ -16,6 +16,7 @@ from pathlib import Path, PurePosixPath
 import os
 import pwd
 import shutil
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -79,7 +80,42 @@ def validate_asset_dir(path):
     return found
 
 
+def model_tools():
+    """The Vulkan model extractor: installed beside this program, or in the prepared source tree."""
+    here = Path(__file__).resolve().parent
+    for tools in (here.parent / "libexec/dlsslop-amd/model-tools", here.parent / "vulkan-nr/package/model-tools"):
+        if (tools / "extract_model.sh").is_file():
+            return tools
+    raise ValueError("the Vulkan model extractor is not installed (libexec/dlsslop-amd/model-tools)")
+
+
+def extract_vulkan_model(dll, output):
+    """dlssnr.bin from the user's own nvngx_dlssnr.dll 310.8.0, replacing output only when complete."""
+    tools = model_tools()
+    if not dll.is_file():
+        raise ValueError(f"no such file: {dll}")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix=".dlssnr.bin.", dir=output.parent)
+    os.close(descriptor)
+    try:
+        # The extractor reads the DLL's weight data without running it and checks every
+        # entry against the hashes of the model the network was built for.
+        result = subprocess.run(["bash", str(tools / "extract_model.sh"), str(dll), temporary],
+                                capture_output=True, text=True, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        if result.returncode:
+            raise ValueError(result.stderr.strip() or "extracting the Vulkan model failed")
+        os.chmod(temporary, 0o644)
+        os.replace(temporary, output)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    print(f"Extracted the Vulkan network's model into {output}")
+
+
 def import_assets(args):
+    if args.dll:
+        extract_vulkan_model(args.dll.resolve(), args.vulkan_model.resolve())
+        return
     if args.print_manifest:
         print(json.dumps(weight_manifest(), indent=2))
         return
@@ -92,7 +128,7 @@ def import_assets(args):
         print(f"Complete model: {len(records)} weights; {sum(x['bytes'] for x in records):,} bytes")
         return
     if not args.source:
-        raise ValueError("provide --source ZIP_OR_DIRECTORY, or --check ASSET_DIRECTORY")
+        raise ValueError("provide --source ZIP_OR_DIRECTORY, --dll DLL_OR_ZIP, or --check ASSET_DIRECTORY")
     source = args.source.resolve()
     output = args.output.resolve()
     if source == output:
@@ -156,6 +192,12 @@ def main():
     parser.add_argument("-c", "--check", type=Path,
                         help="validate a model's weight sizes and, when its WEIGHTS-SHA256SUMS exists, the recorded "
                              "hashes, without importing files (default: unset; import --source)")
+    parser.add_argument("-d", "--dll", type=Path,
+                        help="your own nvngx_dlssnr.dll 310.8.0, or a ZIP holding it: extract the Vulkan network's "
+                             "model into --vulkan-model, checking every entry (default: unset)")
+    parser.add_argument("-M", "--vulkan-model", type=Path, default=data_home / "dlsslop-amd/dlssnr.bin",
+                        help="where --dll writes the Vulkan network's model; dlsslopd reads it from the same "
+                             "default (default: %(default)s, from XDG_DATA_HOME or ~/.local/share)")
     parser.add_argument("-p", "--print-manifest", action="store_true",
                         help="print required weight names and element counts without importing files (default: off)")
     parser.add_argument("-h", "--help", action="help", help="show this help and exit (default: off)")

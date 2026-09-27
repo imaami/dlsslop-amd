@@ -74,4 +74,14 @@ with tempfile.TemporaryDirectory(prefix='dlsslop-setup-cli-') as directory:
     assert f'{sums}: recorded hashes do not match the weights' in result.stderr, result.stderr
     assert not result.stdout, result.stdout
 
-print('setup CLI: sparse import, FP32 precedence, recorded hashes, unrecorded and corrupted weights passed')
+    # The Vulkan model comes only from the exact DLL: anything else fails and
+    # leaves no model file behind.
+    vulkan = root / 'vulkan model/dlssnr.bin'
+    result = run('--dll', root / 'missing.dll', '--vulkan-model', vulkan, expected=1)
+    assert 'no such file' in result.stderr, result.stderr
+    result = run('--dll', model / (both + '.f32'), '--vulkan-model', vulkan, expected=1)
+    assert 'Cannot read nvngx_dlssnr weights' in result.stderr, result.stderr
+    assert not vulkan.exists() and not any(vulkan.parent.iterdir()), 'a failed extraction left files'
+
+print('setup CLI: sparse import, FP32 precedence, recorded hashes, unrecorded and corrupted weights, '
+      'refused DLLs passed')

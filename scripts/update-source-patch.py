@@ -21,6 +21,9 @@ def main():
         git('add','-f','.')
         git('-c','user.name=Source snapshot','-c','user.email=snapshot@localhost','commit','-qm','Pinned originals')
         for folder in PREPARED:
+            # A folder no pinned file maps into is absent on both sides.
+            if not (ROOT/folder).exists() and not (stage/folder).exists():
+                continue
             for path in (ROOT/folder, *(ROOT/folder).rglob('*')):
                 if path.is_symlink():
                     raise RuntimeError('symlink in prepared source: '+str(path))

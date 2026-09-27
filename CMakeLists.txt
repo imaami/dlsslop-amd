@@ -93,6 +93,34 @@ add_neural_layer(VkLayer_DLSSLOP_amd)
 add_executable(dlssnr-shmctl ${LAYER_ROOT}/tools/shmctl.cpp)
 target_link_options(dlssnr-shmctl PRIVATE -static-libstdc++ -static-libgcc)
 
+# The Vulkan network, prepared into vulkan-nr/ from DLSSNR-AMD: its SPIR-V and
+# the host library dlsslopd runs it with. The host must be compiled with the
+# constants its shaders were built with, which vulkan-nr/build/arch/rdna4.sh
+# lists; the runtime refuses shaders whose markers disagree.
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+find_program(GLSLANG glslang REQUIRED)
+set(VKNR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/vulkan-nr")
+file(STRINGS "${VKNR_ROOT}/build/arch/rdna4.sh" VKNR_ARCH REGEX "^ +-DNR_")
+string(REGEX MATCHALL "NR_[A-Z0-9_]+=[0-9]+" VKNR_DEFINES "${VKNR_ARCH}")
+if(NOT VKNR_DEFINES)
+    message(FATAL_ERROR "no NR_ constants in ${VKNR_ROOT}/build/arch/rdna4.sh")
+endif()
+set(VKNR_SHADERS "${CMAKE_CURRENT_BINARY_DIR}/vulkan-nr/network")
+file(GLOB_RECURSE VKNR_SHADER_SOURCES CONFIGURE_DEPENDS "${VKNR_ROOT}/shaders/*")
+add_custom_command(OUTPUT "${VKNR_SHADERS}/shader-constants.txt"
+    COMMAND ${Python3_EXECUTABLE} "${VKNR_ROOT}/build/build_network.py" rdna4
+        --out "${VKNR_SHADERS}" --glslang "${GLSLANG}"
+    DEPENDS ${VKNR_SHADER_SOURCES} "${VKNR_ROOT}/build/build_network.py"
+    COMMENT "Building the Vulkan network's SPIR-V" VERBATIM)
+add_custom_target(vulkan-nr-shaders ALL DEPENDS "${VKNR_SHADERS}/shader-constants.txt")
+add_library(dlsslop-vknr STATIC "${VKNR_ROOT}/src/core/nr_runtime.cpp" "${VKNR_ROOT}/src/core/nr_native_plan.cpp")
+set_target_properties(dlsslop-vknr PROPERTIES CXX_STANDARD 20)
+target_compile_definitions(dlsslop-vknr PUBLIC ${VKNR_DEFINES})
+# Upstream code: its own warnings are not this project's to fix.
+target_compile_options(dlsslop-vknr PRIVATE -w)
+target_include_directories(dlsslop-vknr PUBLIC "${VKNR_ROOT}/src/core")
+target_link_libraries(dlsslop-vknr PUBLIC vulkan Threads::Threads)
+
 add_library(dlsslop-codec OBJECT backend/codec.cpp)
 # The worker uses a small, versioned HIP ABI loaded with dlopen. The build itself
 # deliberately does not require ROCm headers or a GPU; real inference does.
@@ -102,7 +130,6 @@ target_link_libraries(dlsslopd PRIVATE dlsslop-codec Threads::Threads ${CMAKE_DL
 target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 
 if(BUILD_TESTING)
-    find_package(Python3 COMPONENTS Interpreter REQUIRED)
     add_test(NAME control-cli COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/control-cli.py $<TARGET_FILE:dlssnr-shmctl>)
     add_test(NAME launcher-cli COMMAND ${Python3_EXECUTABLE}

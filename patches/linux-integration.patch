@@ -3227,3 +3227,139 @@ index 4e16702..5271ee0 100644
 +    if (options.settings) PrintSettings(h);
 +    return 0;
  }
+diff --git a/vulkan-nr/build/build_network.py b/vulkan-nr/build/build_network.py
+index 5efa65c..00937c4 100644
+--- a/vulkan-nr/build/build_network.py
++++ b/vulkan-nr/build/build_network.py
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env python3
+ """Build the Linux network for one GPU architecture from linux/shaders/<arch>/pipelines.json.
+ 
+-    build_network.py <arch> [--out DIR] [--check DIR]
++    build_network.py <arch> [--out DIR] [--check DIR] [--glslang PATH]
+ 
+ Writes (default build/linux/<arch>/network):
+     g_<name>.spv + the four marker files   the network, what --spv-dir points at
+@@ -19,14 +19,15 @@ import subprocess
+ import sys
+ from pathlib import Path
+ 
+-R = Path(__file__).resolve().parents[2]
++R = Path(__file__).resolve().parents[1]  # dlsslop-amd: the prepared vulkan-nr/ tree
++GLSLANG = [shutil.which('glslang') or 'glslang']
+ RUNTIME = ['runtime_alpha', 'runtime_encode', 'runtime_transfer', 'runtime_depth', 'cascade_lograt', 'cascade_blur', 'cascade_feed']
+ MOTION = ['motion_luma', 'motion_estimate']
+ 
+ 
+ def glslang(arch, src, defines, out):
+-    cmd = [str(R / 'toolchain/glslang/bin/glslang'), '-V', '--target-env', 'vulkan1.3',
+-           '-I' + str(R / 'linux/shaders' / arch / 'include')]
++    cmd = [GLSLANG[0], '-V', '--target-env', 'vulkan1.3',
++           '-I' + str(R / 'shaders' / arch / 'include')]
+     cmd += ['-D' + d for d in defines] + [str(src), '-o', str(out)]
+     r = subprocess.run(cmd, capture_output=True, text=True)
+     if r.returncode:
+@@ -38,9 +39,12 @@ def main():
+     ap.add_argument('arch')
+     ap.add_argument('--out', type=Path)
+     ap.add_argument('--check', type=Path)
++    ap.add_argument('--glslang', help='glslang executable (default: glslang on PATH)')
+     a = ap.parse_args()
+-    table = json.loads((R / 'linux/shaders' / a.arch / 'pipelines.json').read_text())
+-    out = a.out or R / 'build/linux' / a.arch / 'network'
++    if a.glslang:
++        GLSLANG[0] = a.glslang
++    table = json.loads((R / 'shaders' / a.arch / 'pipelines.json').read_text())
++    out = a.out or R / 'build' / a.arch / 'network'
+     if out.exists():
+         shutil.rmtree(out)
+     (out / 'runtime').mkdir(parents=True)
+@@ -48,18 +52,18 @@ def main():
+ 
+     pipelines = table['pipelines']
+     for name, e in pipelines.items():
+-        glslang(a.arch, R / 'linux/shaders' / a.arch / e['source'], e['defines'], out / f'g_{name}.spv')
++        glslang(a.arch, R / 'shaders' / a.arch / e['source'], e['defines'], out / f'g_{name}.spv')
+     for name, text in table['markers'].items():
+         (out / name).write_text('\n'.join(text) + '\n' if isinstance(text, list) else text + '\n')
+     for name, v in table['variants'].items():
+         base = pipelines[v['base']]
+-        glslang(a.arch, R / 'linux/shaders' / a.arch / base['source'], base['defines'] + v['add'],
++        glslang(a.arch, R / 'shaders' / a.arch / base['source'], base['defines'] + v['add'],
+                 out / 'temporal' / f'{name}.spv')
+     for k in MOTION:
+-        glslang(a.arch, R / 'linux/shaders/passes' / f'{k}.comp', [], out / 'temporal' / f'{k}.spv')
++        glslang(a.arch, R / 'shaders/passes' / f'{k}.comp', [], out / 'temporal' / f'{k}.spv')
+     shutil.copy2(out / 'shader-constants.txt', out / 'temporal' / 'shader-constants.txt')
+     for k in RUNTIME:
+-        glslang(a.arch, R / 'linux/shaders/passes' / f'{k}.comp', [], out / 'runtime' / f'{k}.spv')
++        glslang(a.arch, R / 'shaders/passes' / f'{k}.comp', [], out / 'runtime' / f'{k}.spv')
+     print(f'{out}: {len(pipelines)} network pipelines, {len(table["variants"]) + len(MOTION)} temporal, '
+           f'{len(RUNTIME)} runtime')
+ 
+diff --git a/vulkan-nr/src/core/nr_runtime.cpp b/vulkan-nr/src/core/nr_runtime.cpp
+index b151242..d32b801 100644
+--- a/vulkan-nr/src/core/nr_runtime.cpp
++++ b/vulkan-nr/src/core/nr_runtime.cpp
+@@ -665,13 +665,16 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+     impl_->round_u8 = config.colour_format == VK_FORMAT_R8G8B8A8_UNORM || config.colour_format == VK_FORMAT_R8G8B8A8_SRGB ||
+                       config.colour_format == VK_FORMAT_B8G8R8A8_UNORM || config.colour_format == VK_FORMAT_B8G8R8A8_SRGB;
+     impl_->colour_format = config.colour_format;
+-    const auto root = std::filesystem::canonical(config.root);
++    // dlsslop-amd: explicit locations (RuntimeConfig::model_pack) stand in for
++    // an installed copy whose shaders are network_shaders.
++    const bool given = !config.model_pack.empty();
++    const auto root = std::filesystem::canonical(given ? config.network_shaders : config.root);
+     // An installed copy keeps everything it loads in dlssnr-amd/ beside the DLL:
+     // the model pack and shaders/ (network, runtime/ passes, temporal/). A
+     // development tree has build/ and artifacts/ at its root instead.
+-    const auto data = std::filesystem::is_directory(root / "dlssnr-amd") ? root / "dlssnr-amd" : root;
+-    const bool installed = data != root;
+-    const auto network_shaders = installed ? data / "shaders" : root / "build";
++    const auto data = !given && std::filesystem::is_directory(root / "dlssnr-amd") ? root / "dlssnr-amd" : root;
++    const bool installed = given || data != root;
++    const auto network_shaders = given ? root : installed ? data / "shaders" : root / "build";
+     if (!std::isfinite(config.model_scale) || config.model_scale <= 0.f || config.model_scale > 1.f)
+         throw std::invalid_argument("model_scale must be in (0, 1]");
+     if (config.max_passes < 1 || config.max_passes > 16)
+@@ -752,11 +755,12 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+         "--spv-dir", network_shaders.string(),
+         "--host-boundary", arena_reuse() ? "--reuse" : "--no-reuse", "--source-width", std::to_string(mw),
+         "--source-height", std::to_string(mh), "--accumulation", config.accumulation,
+-        "--pipeline-cache", (installed ? data / "pipeline.cache" : root / "dlssnr-amd.pipelinecache").string()};
++        "--pipeline-cache", given ? config.pipeline_cache
++                                  : (installed ? data / "pipeline.cache" : root / "dlssnr-amd.pipelinecache").string()};
+     // The weights as one file (linux/package/model-tools/pack_model.py); the names inside are
+     // the relative paths the graph asks for under --unpacked.
+     if (installed) {
+-        const auto pack = data / "dlssnr.bin";
++        const auto pack = given ? std::filesystem::path(config.model_pack) : data / "dlssnr.bin";
+         if (!std::filesystem::is_regular_file(pack))
+             throw std::runtime_error("missing " + pack.string() + " (run install.sh again)");
+         arguments.push_back("--model-pack"); arguments.push_back(pack.string());
+@@ -925,7 +929,8 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+     if (temporal_config.enable) {
+         auto& t = impl_->temporal;
+         const auto shaders = std::filesystem::canonical(temporal_config.shaders.empty()
+-            ? (installed ? data / "shaders/temporal" : root / "build/linux/rdna4/network/temporal")
++            ? (given ? network_shaders / "temporal" : installed ? data / "shaders/temporal"
++                                                              : root / "build/linux/rdna4/network/temporal")
+             : std::filesystem::path(temporal_config.shaders));
+         require_variant_profile(shaders);
+         const auto temporal_rel = shaders.lexically_relative(root);
+diff --git a/vulkan-nr/src/core/nr_runtime.hpp b/vulkan-nr/src/core/nr_runtime.hpp
+index bd29413..4ecb415 100644
+--- a/vulkan-nr/src/core/nr_runtime.hpp
++++ b/vulkan-nr/src/core/nr_runtime.hpp
+@@ -109,6 +109,11 @@ struct RuntimeConfig {
+     // pass, so `colour` and `model_scale` have no effect. What a host that does
+     // its own resolve afterwards (OptiScaler) must be given.
+     bool native_compose = false;
++    // dlsslop-amd: explicit locations instead of `root`'s layout. A nonempty
++    // model_pack selects them: the network's SPIR-V and markers in
++    // network_shaders, with runtime/ and temporal/ below it, and a writable
++    // pipeline cache (empty: none).
++    std::string model_pack, network_shaders, pipeline_cache;
+ };
+ 
+ // SDR encoded RGB, source-sized and upright. Accepts RGBA32F and 8-bit RGBA/BGRA
