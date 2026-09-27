@@ -783,13 +783,12 @@ void run_offline(const Options& o, Engine& engine)
 struct TransportListener {
     dlsslop::Descriptor socket;
     std::string path;
-    bool activated = false;
+    bool bound = false; // This worker created the pathname and removes it again.
     TransportListener(const std::string& channel, bool wanted) : path(ShmTransportPath(channel))
     {
         const char* pid = std::getenv("LISTEN_PID");
         const char* count = std::getenv("LISTEN_FDS");
         if (pid && count && std::strtol(pid, nullptr, 10) == getpid() && !std::strcmp(count, "1")) {
-            activated = true;
             socket.fd = 3; // SD_LISTEN_FDS_START
             fcntl(socket.fd, F_SETFL, fcntl(socket.fd, F_GETFL) | O_NONBLOCK);
             fcntl(socket.fd, F_SETFD, FD_CLOEXEC);
@@ -801,15 +800,19 @@ struct TransportListener {
         errno = ENAMETOOLONG;
         if (path.size() < sizeof address.sun_path) {
             std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
-            unlink(path.c_str());
             socket.fd = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
-            if (socket.fd >= 0 && !bind(socket.fd, reinterpret_cast<const sockaddr*>(&address), sizeof address) &&
-                !listen(socket.fd, 4))
+            bound = socket.fd >= 0 && !bind(socket.fd, reinterpret_cast<const sockaddr*>(&address), sizeof address);
+            // Never replace a socket someone else owns: systemd's, left listening by
+            // an idle dlsslop.socket, would be gone for good once this worker exits.
+            if (!bound && errno == EADDRINUSE)
+                throw std::runtime_error(path + " exists: stop dlsslop.socket before starting dlsslopd "
+                                         "by hand, or remove the file if nothing uses it");
+            if (bound && !listen(socket.fd, 4))
                 return;
         }
         std::fprintf(stderr, "device-local transport unavailable (%s): %s\n", path.c_str(), std::strerror(errno));
     }
-    ~TransportListener() { if (socket.fd >= 0 && !activated) unlink(path.c_str()); }
+    ~TransportListener() { if (bound) unlink(path.c_str()); }
 };
 
 // One offer: the layer sends it right after connecting.
@@ -888,9 +891,9 @@ void run_worker(const Options& o)
     } stop_heartbeat{heartbeat_stop, heartbeat};
     try {
         mapping.reason(o.test_identity ? "IDENTITY TEST: inference disabled" : "initializing native HIP model");
+        const TransportListener transport(o.shm, !o.test_identity && !o.cpu_codec);
         Engine engine(o);
         engine.prepare();
-        const TransportListener transport(o.shm, !o.test_identity && !o.cpu_codec);
         // Only serving stops gracefully, from the ready announcement on.
         // Before it, and in every other mode, SIGINT and SIGTERM terminate.
         std::signal(SIGINT, stop_handler);

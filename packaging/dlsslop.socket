@@ -9,6 +9,8 @@ Description=dlsslop-amd worker, started on demand
 ListenSequentialPacket=/tmp/dlsslop-amd-%U/shm.bin.sock
 SocketMode=0600
 DirectoryMode=0700
+# Stopping the unit frees the path for a worker started by hand.
+RemoveOnStop=yes
 
 [Install]
 WantedBy=sockets.target

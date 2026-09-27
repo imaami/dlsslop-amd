@@ -217,6 +217,21 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
         assert result.stderr.endswith(('dlsslopd: ' if status else '') + verdict + '\n'), (archs, options, result.stderr)
     assert not channel.exists(), '--diagnose created a channel'
 
+    # A worker started by hand never replaces a socket it did not create, such
+    # as an idle dlsslop.socket's: it stops before loading anything.
+    occupied = cwd / 'occupied'
+    occupied.mkdir(mode=0o700)
+    taken = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    taken.bind(str(occupied / 'shm.bin.sock'))
+    taken.listen(1)
+    result = run(binary, '-a', str(cwd / 'model'), '-m', str(cwd / 'modules'), '-s', str(occupied / 'shm.bin'),
+                 env=dict(fake, HIP_FAKE_ARCHS='gfx1201'), cwd=cwd, expected=1)
+    assert 'stop dlsslop.socket before starting dlsslopd by hand' in result.stderr, result.stderr
+    probe = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
+    probe.connect(str(occupied / 'shm.bin.sock'))
+    probe.close()
+    taken.close()
+
     # --idle-exit only applies to serving.
     for options in (('--self-test', '-x', '5'), ('--idle-exit', '5', '-D')):
         result = run(binary, *options, env=env, cwd=cwd, expected=1)
