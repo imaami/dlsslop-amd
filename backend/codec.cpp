@@ -23,10 +23,12 @@
 
 #include "codec.h"
 #include "codec_math.h"
+#include "../upstream-layer/common/shm_protocol.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <iterator>
 #include <stdexcept>
 
 namespace dlsslop {
@@ -215,19 +217,17 @@ Geometry geometry(unsigned source_width, unsigned source_height, unsigned tier_h
 {
     if (!source_width || !source_height || source_width > 16384 || source_height > 16384)
         throw std::invalid_argument("source extent must be in 1..16384");
-    if (!tier_height)
-        tier_height = source_width <= 1280 && source_height <= 720 ? 720 :
-                      source_width <= 1600 && source_height <= 900 ? 900 : 1080;
+    const auto holds = [=](const NativeTier& t) { return source_width <= t.width && source_height <= t.height; };
+    // The named tier, or the smallest that holds the source, else the largest.
+    const NativeTier* tier = tier_height ? ShmNativeTier(tier_height)
+        : std::min(std::find_if(std::begin(kNativeTiers), std::end(kNativeTiers), holds), std::end(kNativeTiers) - 1);
+    if (!tier) throw std::invalid_argument("network height must be 0, 720, 900 or 1080");
     Geometry g;
     g.source_width = source_width;
     g.source_height = source_height;
-    switch (tier_height) {
-    case 720: g.width = 1280; g.height = 768; break;
-    case 900: g.width = 1600; g.height = 960; break;
-    case 1080: g.width = 1920; g.height = 1152; break;
-    default: throw std::invalid_argument("network height must be 0, 720, 900 or 1080");
-    }
-    g.valid_height = tier_height;
+    g.width = tier->width;
+    g.height = tier->networkHeight;
+    g.valid_height = tier->height;
     g.fit_width = g.width;
     g.fit_height = g.valid_height;
     if (std::uint64_t(source_width) * g.valid_height >= std::uint64_t(source_height) * g.width)

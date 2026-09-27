@@ -2,6 +2,7 @@
 #pragma once
 #include "../upstream-layer/common/shm_protocol.h"
 #include <cmath>
+#include <iterator>
 #include <linux/input-event-codes.h>
 
 namespace dlsslop_control {
@@ -21,6 +22,9 @@ struct Setting {
     const char* choices = nullptr; // '|'-separated labels of minimum, minimum + step, ...
     double step = 1;               // integer settings: the values are minimum + k * step
 };
+
+// The tier setting's labels, one per kNativeTiers height (checked below).
+inline constexpr char kTierLabels[] = "720|900|1080";
 
 // All controls from the original interface. The captured network supports one
 // configuration, so the four kModel settings have a one-value range.
@@ -47,7 +51,8 @@ inline constexpr Setting kSettings[] = {
     {"color-mode", &ShmHeader::colourMode, 0, 2, "0 auto, 1 display-referred, 2 linear HDR", 'Y', false, kImage, false, "Automatic|Display-referred|Linear HDR"},
     {"reversible", &ShmHeader::reversibleMode, 0, 4, "Proxy: 0 knee, 1 Neutwo, 2 Neutwo replace, 3 hybrid, 4 hybrid replace", 'Z', false, kImage, false, "Knee|Neutwo|Neutwo replace|Hybrid|Hybrid replace"},
     {"passes", &ShmHeader::passes, 1, kMaxPasses, "Successive neural evaluations per frame; each consumes the previous result", 'P', false, kNeural, false},
-    {"tier", &ShmHeader::nativeTier, 720, 1080, "Neural raster height; a change rebuilds the worker's network between frames, during which the game presents its own frames; game resolution unchanged", 'T', false, kNeural, false, "720|900|1080", 180},
+    {"tier", &ShmHeader::nativeTier, kNativeTiers[0].height, std::end(kNativeTiers)[-1].height, "Neural raster height; a change rebuilds the worker's network between frames, during which the game presents its own frames; game resolution unchanged", 'T', false, kNeural, false, kTierLabels,
+     kNativeTiers[1].height - kNativeTiers[0].height},
     {"detail", &ShmHeader::transferStrengthBits, 0, 4, "Strength of the neural edit", 'd', true, kComposition, false},
     {"color", &ShmHeader::colourStrengthBits, 0, 4, "Color contribution of the edit", 'C', true, kComposition, false},
     {"guard", &ShmHeader::maxRatioBits, 1, 30, "Maximum per-pixel gain or reciprocal gain", 'g', true, kComposition, false},
@@ -67,6 +72,23 @@ inline constexpr Setting kSettings[] = {
     {"hold", &ShmHeader::holdFrame, 0, 1, "Freeze the input frame (0/1)", 'H', false, kNeural, false},
     {"toggle-key", &ShmHeader::toggleKey, 0, KEY_MAX, "Linux KEY_ code for the layer hotkey; 0 disables it", 'k', false, kInspect, false},
 };
+
+// True when labels spell the kNativeTiers heights in order, and the heights
+// step evenly, as the tier setting's values minimum + k * step assume.
+constexpr bool tierLabelsMatch(const char* labels)
+{
+    const uint32_t step = kNativeTiers[1].height - kNativeTiers[0].height;
+    uint32_t expected = kNativeTiers[0].height;
+    for (const NativeTier& tier : kNativeTiers) {
+        const char end = &tier == std::end(kNativeTiers) - 1 ? '\0' : '|';
+        uint32_t label = 0;
+        while (*labels >= '0' && *labels <= '9') label = label * 10 + uint32_t(*labels++ - '0');
+        if (tier.height != expected || label != expected || *labels++ != end) return false;
+        expected += step;
+    }
+    return true;
+}
+static_assert(tierLabelsMatch(kTierLabels), "the tier setting's labels and step must follow kNativeTiers");
 
 // Readers see float settings as binary32, which rounds some minimums below
 // themselves, so compare with the bounds as stored; integer bounds are exact

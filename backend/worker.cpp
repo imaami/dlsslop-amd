@@ -140,12 +140,10 @@ bool flag(const char* value)
     throw std::runtime_error("expected true or false");
 }
 
-bool known_tier(unsigned tier) { return tier == 720 || tier == 900 || tier == 1080; }
-
 unsigned tier(const char* value)
 {
     const unsigned t = number(value, "tier");
-    if (!known_tier(t)) throw std::runtime_error("tier must be 720, 900, or 1080");
+    if (!ShmNativeTier(t)) throw std::runtime_error("tier must be 720, 900, or 1080");
     return t;
 }
 
@@ -995,7 +993,7 @@ bool follow_tier(std::optional<Engine>& engine, const Options& o, Mapping& mappi
     auto* h = mapping.h;
     const unsigned wanted = h->nativeTier.load(), active = engine->tier();
     if (wanted == active) return false;
-    if (!known_tier(wanted)) {
+    if (!ShmNativeTier(wanted)) {
         h->nativeTier.store(active);
         return false;
     }
@@ -1033,7 +1031,7 @@ void run_worker(const Options& o)
     std::unique_ptr<dlsslop::FrameTrace> pending_trace;
     // An explicit tier replaces the channel's; otherwise a usable live one stays.
     const unsigned live = h->nativeTier.load();
-    const unsigned tier = o.tier.value_or(known_tier(live) ? live : kNativeDefaultTier);
+    const unsigned tier = o.tier.value_or(ShmNativeTier(live) ? live : kNativeDefaultTier);
     h->nativeTier.store(tier);
     if (o.passes) h->passes.store(*o.passes);
     h->compositionBypass.store(o.cpu_compose || o.test_identity ? 1 : 0);

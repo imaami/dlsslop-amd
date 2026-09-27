@@ -80,7 +80,7 @@ index eee312c..78542b8 100644
  };
  }
 diff --git a/upstream-layer/common/shm_protocol.h b/upstream-layer/common/shm_protocol.h
-index fd7c1cd..a0a90a4 100644
+index fd7c1cd..413033e 100644
 --- a/upstream-layer/common/shm_protocol.h
 +++ b/upstream-layer/common/shm_protocol.h
 @@ -14,11 +14,11 @@
@@ -112,16 +112,20 @@ index fd7c1cd..a0a90a4 100644
  
  
  static constexpr uint32_t kMaxW = 7680, kMaxH = 4320;
-@@ -46,6 +49,8 @@ static constexpr uint32_t kMaxW = 7680, kMaxH = 4320;
+@@ -46,6 +49,12 @@ static constexpr uint32_t kMaxW = 7680, kMaxH = 4320;
  // (Xid 109, CTX SWITCH TIMEOUT), taking the game down with it. 300x300 is known good; nothing below
  // this is a frame worth composing anyway.
  static constexpr uint32_t kMinW = 64, kMinH = 64;
++// The native neural rasters, smallest first. A tier is the height of the picture the network sees,
++// inside an input padded to networkHeight rows.
++struct NativeTier { uint32_t height, width, networkHeight; };
++inline constexpr NativeTier kNativeTiers[] = {{720, 1280, 768}, {900, 1600, 960}, {1080, 1920, 1152}};
 +static constexpr uint32_t kNativeDefaultTier = 720;
 +static constexpr uint32_t kNativeDefaultPasses = 1;
  // Eight bytes a pixel: the float16 proxy needs them, and the 8-bit path simply uses the first half of
  // each region. The mapping is file-backed and sparse, so an SDR session never commits the second half.
  static constexpr size_t kMaxFrame = size_t(kMaxW) * kMaxH * 8;
-@@ -139,11 +144,12 @@ enum HelperState : uint32_t {
+@@ -139,11 +148,12 @@ enum HelperState : uint32_t {
  };
  
  // How the motion field the helper hands the model is scaled. From bmitch87's motion-vector work.
@@ -137,7 +141,7 @@ index fd7c1cd..a0a90a4 100644
      kHdrForce = 2,  // float16 proxy even for an SDR swapchain (an A/B tool, not a preference)
  };
  
-@@ -203,6 +209,20 @@ inline std::string ShmRuntimeDir() {
+@@ -203,6 +213,20 @@ inline std::string ShmRuntimeDir() {
  
  inline std::string ShmDefaultPath() { return ShmRuntimeDir() + "/shm.bin"; }
  
@@ -158,7 +162,7 @@ index fd7c1cd..a0a90a4 100644
  inline size_t ShmTotalBytes() { return kHeaderBytes + kMaxFrame * 2; }
  
  // One pass's overrides. Every field is present; `overrideMask` says which of them mean anything.
-@@ -316,7 +336,7 @@ struct ShmHeader {
+@@ -316,7 +340,7 @@ struct ShmHeader {
      // Only useful where the layer can read the keyboard at all: an X11 or XWayland session, inside
      // gamescope, or anywhere the user is in the 'input' group. A game presenting through winewayland
      // is a Wayland client whose keys never reach this process, and keyboards get no uaccess ACL, so
@@ -167,7 +171,7 @@ index fd7c1cd..a0a90a4 100644
      std::atomic<uint32_t> toggleKey;
  
      // Which proxy the model is shown, and whether its answer is composed or substituted. See
-@@ -457,10 +477,9 @@ struct ShmHeader {
+@@ -457,10 +481,9 @@ struct ShmHeader {
      std::atomic<uint32_t> hdrActive;
      std::atomic<uint32_t> proxyFormat;
      // What the proxy bytes in the shared region actually are for the request being made: the layer
@@ -181,7 +185,7 @@ index fd7c1cd..a0a90a4 100644
      std::atomic<uint32_t> hdrEncode;
  
      // trip, which is what it has always been; N takes an answer up only on a frame whose count is a
-@@ -533,6 +552,27 @@ struct ShmHeader {
+@@ -533,6 +556,27 @@ struct ShmHeader {
      std::atomic<uint32_t> sdr16Multipass;
      std::atomic<uint32_t> mvecPixelSize;
  
@@ -209,7 +213,7 @@ index fd7c1cd..a0a90a4 100644
  };
  
  static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region");
-@@ -548,7 +588,7 @@ static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region")
+@@ -548,7 +592,7 @@ static_assert(sizeof(ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region")
  // The version check already existed to prevent exactly that; what was missing was anything to make
  // someone remember to use it. If these fire, the layout changed: bump kShmVersion in the same commit,
  // then update these numbers.
@@ -218,7 +222,7 @@ index fd7c1cd..a0a90a4 100644
  
  static_assert(offsetof(ShmHeader, enabled) == 44, "layout changed -- bump kShmVersion");
  static_assert(offsetof(ShmHeader, transferStrengthBits) == 88, "layout changed -- bump kShmVersion");
-@@ -556,6 +596,15 @@ static_assert(offsetof(ShmHeader, helperState) == 176, "layout changed -- bump k
+@@ -556,6 +600,15 @@ static_assert(offsetof(ShmHeader, helperState) == 176, "layout changed -- bump k
  static_assert(offsetof(ShmHeader, pass) == 780, "layout changed -- bump kShmVersion");
  static_assert(offsetof(ShmHeader, mvecEnabled) == 1860, "layout changed -- bump kShmVersion");
  
@@ -234,7 +238,7 @@ index fd7c1cd..a0a90a4 100644
  inline uint32_t FloatToBits(float f) {
      uint32_t u = 0;
      std::memcpy(&u, &f, sizeof(u));
-@@ -733,6 +782,20 @@ inline void ShmInitDefaults(ShmHeader* h) {
+@@ -733,6 +786,27 @@ inline void ShmInitDefaults(ShmHeader* h) {
      }
  }
  
@@ -250,6 +254,13 @@ index fd7c1cd..a0a90a4 100644
 +    h->nativeTier.store(kNativeDefaultTier);
 +    h->transfer.store(2);
 +    h->compositionBypass.store(bypass ? 1 : 0);
++}
++
++// The tier of that height, or null.
++inline const NativeTier* ShmNativeTier(uint32_t height) {
++    for (const NativeTier& tier : kNativeTiers)
++        if (tier.height == height) return &tier;
++    return nullptr;
 +}
 +
  inline uint32_t ShmPassCeiling(const ShmHeader* h) {
