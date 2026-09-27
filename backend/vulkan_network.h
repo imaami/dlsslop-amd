@@ -21,7 +21,8 @@ struct VulkanFrame {
     unsigned width = 0, height = 0;
     bool fp16 = false;
     // The network's own controls (NVIDIA's DLSSNR.Intensity, LocalToneStrength,
-    // LocalStructureStrength), not the HIP backend's residual filters.
+    // LocalStructureStrength), not the HIP backend's residual filters. The model
+    // takes each up to kMaxControl; more counts as kMaxControl.
     unsigned passes = 1;
     float intensity = 1, local_tone = 1, local_structure = 1;
     // The network's history, fed by the runtime's motion estimate. It starts over
@@ -32,6 +33,7 @@ struct VulkanFrame {
 class VulkanNetwork {
 public:
     static constexpr unsigned kMaxPasses = 16;
+    static constexpr float kMaxControl = 2;
     // device < 0: the first physical device the network can run on.
     VulkanNetwork(const VulkanPaths& paths, int device);
     ~VulkanNetwork();

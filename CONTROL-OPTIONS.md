@@ -20,8 +20,8 @@ opening or modifying the control channel.
 | `style` | `-y`, `--style` | **Fixed: 0.** Natural/cinematic model conditioning is unavailable. |
 | `automask` | `-M`, `--auto-mask` | **Fixed: 1.** There is no recovered switchable semantic-mask configuration. |
 | `intensity` | `-i`, `--intensity` | **HIP:** scales each pass's image residual. **Vulkan:** the model's own intensity control, used up to 2. |
-| `localtone` | `-o`, `--local-tone` | **HIP:** scales the low-frequency part of each pass's residual. **Vulkan:** the model's own local tone control. |
-| `localstructure` | `-j`, `--local-structure` | **HIP:** scales the high-frequency part of each pass's residual. **Vulkan:** the model's own local structure control. |
+| `localtone` | `-o`, `--local-tone` | **HIP:** scales the low-frequency part of each pass's residual. **Vulkan:** the model's own local tone control, used up to 2. |
+| `localstructure` | `-j`, `--local-structure` | **HIP:** scales the high-frequency part of each pass's residual. **Vulkan:** the model's own local structure control, used up to 2. |
 | `skinstructure` | `-K`, `--skin-structure` | **Fixed: -1.** Structure applies uniformly; separate skin-specific conditioning is unavailable. |
 | `sharpness` | `-n`, `--sharpness` | **HIP only:** adds unsharp-mask detail after each neural pass. |
 | `detail` | `-d`, `--detail` | Vulkan composition strength of the final neural edit. |

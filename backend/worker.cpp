@@ -956,6 +956,7 @@ public:
     void infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
                dlsslop::FrameTrace* = nullptr) override
     {
+        dlsslop::validate_native_tuning(settings.tuning);
         // Said once each: the HIP backend's own stages, which this network does not have.
         if (settings.tuning.sharpness != 0 && !std::exchange(warned_sharpness_, true))
             std::fprintf(stderr, "the Vulkan network ignores sharpness\n");

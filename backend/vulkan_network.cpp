@@ -531,9 +531,9 @@ void VulkanNetwork::infer(const VulkanFrame& frame, uint32_t generation, const u
                    VK_IMAGE_USAGE_STORAGE_BIT;
     nr::Controls controls;
     controls.passes = int(std::clamp(frame.passes, 1u, s.shape.passes));
-    controls.intensity = frame.intensity;
-    controls.local_tone = frame.local_tone;
-    controls.local_structure = frame.local_structure;
+    controls.intensity = std::min(frame.intensity, kMaxControl);
+    controls.local_tone = std::min(frame.local_tone, kMaxControl);
+    controls.local_structure = std::min(frame.local_structure, kMaxControl);
     if (frame.motion) {
         const auto settings = [](const VulkanFrame& f) {
             return std::tie(f.passes, f.intensity, f.local_tone, f.local_structure);
