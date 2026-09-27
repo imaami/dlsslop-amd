@@ -262,9 +262,8 @@ void usage(FILE* out)
         "                          --trace-dir: auto takes HIP for them, vulkan\n"
         "                          refuses them. Vulkan evaluates NVIDIA's own\n"
         "                          intensity, local tone, local structure, style,\n"
-        "                          skin structure and automatic mask controls, sizes\n"
-        "                          itself to each frame and ignores sharpness and\n"
-        "                          color preservation. Its SPIR-V is in\n"
+        "                          skin structure and automatic mask controls and\n"
+        "                          sizes itself to each frame. Its SPIR-V is in\n"
         "                          %s\n"
         "  -M, --vulkan-model FILE The Vulkan network's model (dlssnr.bin)\n"
         "                          Default: %s\n"
@@ -761,9 +760,6 @@ public:
         };
         if (settings.fp16 && options_.cpu_compose)
             throw std::range_error("FP16 proxy transport requires Vulkan composition; disable --cpu-compose");
-        if (!std::isfinite(settings.color_preserve) || settings.color_preserve < 0 || settings.color_preserve > 1)
-            throw std::range_error("invalid color preservation strength");
-        dlsslop::validate_native_tuning(settings.tuning);
         // Said once: the Vulkan model's conditioning, which this network does not have.
         if ((settings.style || !settings.auto_mask || settings.skin_structure != -1) &&
             !std::exchange(warned_conditioning_, true))
@@ -901,7 +897,6 @@ public:
 class VulkanEngine : public Backend {
     std::unique_ptr<dlsslop::VulkanNetwork> network_;
     unsigned tier_;
-    bool warned_sharpness_ = false, warned_color_ = false;
 
     static dlsslop::VulkanFrame frame(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings)
     {
@@ -916,6 +911,8 @@ class VulkanEngine : public Backend {
         f.style = settings.style;
         f.skin_structure = settings.skin_structure;
         f.auto_mask = settings.auto_mask;
+        f.sharpness = settings.tuning.sharpness;
+        f.color_preserve = settings.color_preserve;
         f.motion = settings.motion;
         return f;
     }
@@ -969,12 +966,6 @@ public:
     void infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
                dlsslop::FrameTrace* = nullptr) override
     {
-        dlsslop::validate_native_tuning(settings.tuning);
-        // Said once each: the HIP backend's own stages, which this network does not have.
-        if (settings.tuning.sharpness != 0 && !std::exchange(warned_sharpness_, true))
-            std::fprintf(stderr, "the Vulkan network ignores sharpness\n");
-        if (settings.color_preserve != 0 && !std::exchange(warned_color_, true))
-            std::fprintf(stderr, "the Vulkan network ignores color preservation\n");
         network_->infer(frame(w, h, passes, settings), io.generation, io.proxy, io.answer);
         upload_ms = network_->upload_ms;
         inference_ms = network_->inference_ms;
@@ -1415,10 +1406,13 @@ void run_worker(Options o)
                 const uint32_t mask = h->autoMask.load();
                 settings.auto_mask = mask != 0;
                 // Older/external clients must not enable an NVIDIA preset neither
-                // network has, nor conditioning outside the model's range.
+                // network has, nor controls outside their ranges.
                 if (h->preset.load() || settings.style > 2 || mask > 1 ||
                     !(settings.skin_structure >= -1 && settings.skin_structure <= 2))
                     throw std::range_error("the preset must be 0, style 0..2, auto-mask 0 or 1 and skin structure -1..2");
+                if (!(settings.color_preserve >= 0 && settings.color_preserve <= 1))
+                    throw std::range_error("invalid color preservation strength");
+                dlsslop::validate_native_tuning(settings.tuning);
                 const size_t bytes = size_t(w) * height * (settings.fp16 ? 8 : 4);
                 // A live control change takes effect on the next request;
                 // never shorten or extend a chain partway through a frame.

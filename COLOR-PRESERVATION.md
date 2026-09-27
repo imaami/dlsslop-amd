@@ -10,8 +10,9 @@ dlsslopctl --color-preserve 0
 ```
 
 The first command enables full correction; the second disables it. This setting
-operates after every neural pass, before temporal-history storage and feedback.
-`--color` is a separate final-composition control.
+operates after every neural pass, before feedback, and with the HIP network
+before temporal-history storage too. `--color` is a separate final-composition
+control.
 
 ## Algorithm
 
@@ -28,6 +29,16 @@ full strength, but high-frequency chroma changes can remain. When luma is in
 factor so that no channel leaves [0,1] or goes further outside it than the pass
 put it. Out-of-range luma takes the full correction and keeps its headroom for
 the existing codec. The filter can also remove intended relighting color.
+
+## Vulkan network
+
+The Vulkan network runs the same correction, after its sharpening, in its
+runtime's pass loop (`vulkan-nr/shaders/passes/pass_stages.comp`). The reference
+is the proxy the first pass saw, and the corrected answer feeds the next pass or
+becomes the frame's. The network's own history is its raw output, which the
+correction does not change. The first nonzero strength or sharpness rebuilds the
+network once, in about a second, with a model-sized RGBA32F scratch image
+(about 32 MiB at 1920×1080). From then on, strength zero skips the work.
 
 ## HIP module
 

@@ -54,6 +54,10 @@ residual stream, byte features and their diagonal projections, byte decoder
 output and C256 FFN fragments. It also clears the WMMA, tiled, wave and
 fused-C32 flags: production launches nothing from their modules, so the build
 ships only the 12 of upstream's 24 modules that the network loads.
+In `vulkan-nr/`, the patch lets the runtime load its model, SPIR-V and pipeline
+cache from explicit paths, lets the network build take its glslang, and adds
+dlsslop-amd's per-pass sharpening and color preservation
+(`shaders/passes/pass_stages.comp`); the network mathematics are unchanged.
 
 Preserve `upstream-layer/ATTRIBUTION.md` and all inherited notices of projected
 code. The layer's shader/dispatch lineage includes OptiScaler and

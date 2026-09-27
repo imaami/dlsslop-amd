@@ -29,7 +29,7 @@ inline constexpr char kTierLabels[] = "720|900|1080";
 // All controls from the original interface. Neither network has another preset,
 // so the kModel setting has a one-value range.
 inline constexpr Setting kSettings[] = {
-    {"color-preserve", &ShmHeader::colorPreserveBits, 0, 1, "Per-pass original-frame chroma anchoring (0 disables); HIP backend only", 'L', true, kNeural, false},
+    {"color-preserve", &ShmHeader::colorPreserveBits, 0, 1, "Per-pass original-frame chroma anchoring (0 disables)", 'L', true, kNeural, false},
     {"enabled", &ShmHeader::enabled, 0, 1, "Enable neural rendering (0/1)", 'e', false, kNeural, false},
     {"hdr-mode", &ShmHeader::hdrMode, 0, 2, "Proxy precision: 0 auto (16-bit for HDR), 1 force 8-bit, 2 force 16-bit", 'E', false, kImage, false, "Automatic|8-bit proxy|16-bit proxy"},
     {"sdr16-multipass", &ShmHeader::sdr16Multipass, 0, 1, "SDR between-pass precision: 0 quantized 8-bit, 1 binary16; HDR stays binary16", 'B', false, kImage, false},
@@ -40,7 +40,7 @@ inline constexpr Setting kSettings[] = {
     {"local-tone", &ShmHeader::localToneBits, 0, 4, "HIP: per-pass low-frequency residual strength; Vulkan: the model's local tone control, used up to 2", 'o', true, kNeural, true},
     {"local-structure", &ShmHeader::localStructureBits, 0, 4, "HIP: per-pass high-frequency residual strength; Vulkan: the model's local structure control, used up to 2", 'j', true, kNeural, true},
     {"skin-structure", &ShmHeader::skinStructureBits, -1, 2, "Vulkan: local structure on skin under the automatic mask; -1 follows local structure; HIP ignores it", 'K', true, kNeural, false},
-    {"sharpness", &ShmHeader::sharpnessBits, 0, 1, "Per-pass sharpening strength; HIP backend only", 'n', true, kNeural, true},
+    {"sharpness", &ShmHeader::sharpnessBits, 0, 1, "Per-pass sharpening strength", 'n', true, kNeural, true},
     {"mvec", &ShmHeader::mvecEnabled, 0, 1, "Estimate motion and reproject previous neural output (0/1)", 'V', false, kMotion, false},
     {"mvec-quality", &ShmHeader::mvecQuality, 0, 2, "Motion search quality: 0 fast, 1 balanced, 2 quality", 'Q', false, kMotion, false, "Fast|Balanced|Quality"},
     {"mvec-pixels", &ShmHeader::mvecPixelSize, 0, 3, "Motion grid spacing: 0=1px, 1=2px, 2=4px, 3=8px", 'F', false, kMotion, false, "1 px|2 px|4 px|8 px"},

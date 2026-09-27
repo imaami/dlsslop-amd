@@ -23,13 +23,13 @@ channel. The HIP network ignores the Vulkan-only settings and says so once.
 | `localtone` | `-o`, `--local-tone` | **HIP:** scales the low-frequency part of each pass's residual. **Vulkan:** the model's own local tone control, used up to 2. |
 | `localstructure` | `-j`, `--local-structure` | **HIP:** scales the high-frequency part of each pass's residual. **Vulkan:** the model's own local structure control, used up to 2. |
 | `skinstructure` | `-K`, `--skin-structure` | **Vulkan only:** local structure on skin under the automatic mask, 0..2; -1 follows local structure. |
-| `sharpness` | `-n`, `--sharpness` | **HIP only:** adds unsharp-mask detail after each neural pass. |
+| `sharpness` | `-n`, `--sharpness` | Adds unsharp-mask detail after each neural pass. |
 | `detail` | `-d`, `--detail` | Vulkan composition strength of the final neural edit. |
 | `colour` | `-C`, `--color` | Vulkan composition strength of the edit's color contribution. |
 | `guard` | `-g`, `--guard` | Bounds per-pixel relighting gain in ratio-based composition modes. |
 | `transfer` | `-t`, `--transfer` | Chooses classic ratio, matched residual, or native-frame-plus-edit composition. |
 | `bypass` | `-b`, `--bypass` | Presents the model result instead of composing its edit. |
-| `rebuildms` | None | **Not applicable:** native tuning rebuilds nothing; intensity, tone, structure and sharpness apply on the next request. |
+| `rebuildms` | None | **Not applicable:** native tuning rebuilds nothing; intensity, tone, structure and sharpness apply on the next request. The Vulkan network adds its sharpness and color preservation stages once, with a rebuild, when either is first set. |
 | `ratiosmooth` | `-a`, `--ratio-smooth` | Neighbourhood contribution to ratio-based relighting. |
 | `colourtrust` | `-u`, `--color-trust` | Bounds color displacement in composition. |
 | `mvec` | `-V`, `--mvec` | **Native equivalent:** HIP optical-flow estimation and reprojection into the network's temporal input. |
@@ -53,13 +53,15 @@ channel. The HIP network ignores the Vulkan-only settings and says so once.
 | `applymodel` | `-m`, `--apply-model` | Shows the clean frame or applies the computed edit; inference still runs. |
 | `hold` | `-H`, `--hold` | Freezes captured input while allowing settings to rerun processing. |
 | `togglekey` | `-k`, `--toggle-key` | Selects the Linux input key watched by the layer. |
-| None | `-L`, `--color-preserve` | **HIP only:** anchors each pass's broad chroma changes to the original input before history and feedback; see [COLOR-PRESERVATION.md](COLOR-PRESERVATION.md). |
+| None | `-L`, `--color-preserve` | Anchors each pass's broad chroma changes to the original input before feedback, and on HIP before history too; see [COLOR-PRESERVATION.md](COLOR-PRESERVATION.md). |
 
 The native residual controls operate after **each** evaluation and before its
 output feeds the next pass. The low-frequency component is a 3×3 binomial blur;
 structure scales the remaining residual. `--detail` and `--color` instead act
 once during final Vulkan composition. Default native tuning preserves the raw
-network result bit for bit.
+network result bit for bit. The Vulkan network sharpens each pass's answer with
+the same blur, and keeps its answer bit for bit at zero sharpness and color
+preservation.
 
 White-point and reversible encoding curves operate on linear-light input.
 The replacement choices (`--reversible 2` and `4`) also present the model result

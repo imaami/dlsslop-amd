@@ -30,6 +30,10 @@ struct VulkanFrame {
     unsigned style = 0;
     float skin_structure = -1;
     bool auto_mask = true;
+    // dlsslop-amd's own stages after every pass, 0..1 each, as on HIP: sharpening,
+    // and color preservation against the frame the first pass saw. Either builds
+    // them in, as a larger pass count does.
+    float sharpness = 0, color_preserve = 0;
     // The network's history, fed by the runtime's motion estimate. It starts over
     // whenever the frame's shape, pass count or controls change.
     bool motion = false;

@@ -115,8 +115,11 @@ struct Shape {
     unsigned width = 0, height = 0;
     bool fp16 = false, motion = false;
     unsigned passes = 0;  // the most it can run
+    bool stages = false;  // built with the pass stages
     auto tie() const { return std::tie(width, height, fp16, motion); }
 };
+
+bool uses_stages(const VulkanFrame& f) { return f.sharpness != 0 || f.color_preserve != 0; }
 
 }  // namespace
 
@@ -321,7 +324,8 @@ bool VulkanNetwork::shape_differs(const VulkanFrame& frame) const
 {
     const auto& s = *impl_;
     const Shape want{frame.width, frame.height, frame.fp16, frame.motion};
-    return !s.runtime || s.shape.tie() != want.tie() || s.shape.passes < std::clamp(frame.passes, 1u, kMaxPasses);
+    return !s.runtime || s.shape.tie() != want.tie() || s.shape.passes < std::clamp(frame.passes, 1u, kMaxPasses) ||
+           (uses_stages(frame) && !s.shape.stages);
 }
 
 bool VulkanNetwork::shape(const VulkanFrame& frame)
@@ -329,7 +333,7 @@ bool VulkanNetwork::shape(const VulkanFrame& frame)
     auto& s = *impl_;
     if (!shape_differs(frame)) return false;
     const unsigned passes = std::clamp(frame.passes, 1u, kMaxPasses);
-    const Shape want{frame.width, frame.height, frame.fp16, frame.motion, passes};
+    const Shape want{frame.width, frame.height, frame.fp16, frame.motion, passes, uses_stages(frame)};
     check(vkDeviceWaitIdle(s.device), "wait for the device");
     s.runtime.reset();
     s.drop(s.colour);
@@ -354,6 +358,7 @@ bool VulkanNetwork::shape(const VulkanFrame& frame)
     // The network's own answer, as NVIDIA's DLL returns it; the layer composes it.
     config.native_compose = true;
     config.max_passes = passes;
+    config.pass_stages = want.stages;
     config.model_pack = s.paths.model;
     config.network_shaders = s.paths.shaders;
     config.pipeline_cache = s.paths.cache;
@@ -537,6 +542,8 @@ void VulkanNetwork::infer(const VulkanFrame& frame, uint32_t generation, const u
     controls.style = int(frame.style);
     controls.skin_structure = frame.skin_structure;
     controls.automatic_mask = frame.auto_mask;
+    controls.sharpness = frame.sharpness;
+    controls.colour_preserve = frame.color_preserve;
     if (frame.motion) {
         const auto settings = [](const VulkanFrame& f) {
             return std::tie(f.passes, f.intensity, f.local_tone, f.local_structure, f.style, f.skin_structure,
