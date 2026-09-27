@@ -5,9 +5,10 @@ After=dlsslop.socket
 
 [Service]
 # Started by dlsslop.socket; stops after 10s without a frame. dlsslopd is
-# looked up in the usual prefixes.
+# looked up in the usual prefixes. Worker settings such as the tier belong in
+# its own config file, ~/.config/dlsslop-amd/dlsslopd.conf.
 Environment=PATH=%h/.local/bin:/usr/local/bin:/opt/dlsslop-amd/bin:/usr/bin
-ExecStart=/usr/bin/env dlsslopd --idle-exit 10 --tier 1080
+ExecStart=/usr/bin/env dlsslopd --idle-exit 10
 # A crashed worker never marks itself stopped, so a running game would wait on
 # it for good; start another. Idling out or --quit exits cleanly and does not.
 Restart=on-failure

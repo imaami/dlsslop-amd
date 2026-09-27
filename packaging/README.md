@@ -95,7 +95,7 @@ link both units from its `share/systemd/user` with `systemctl --user link`. The
 service finds `dlsslopd` under `~/.local`, `/usr/local` or `/opt/dlsslop-amd`; for
 another prefix, copy `dlsslop.service` into `~/.config/systemd/user/` and point its
 `ExecStart` at that prefix's `bin/dlsslopd`. Without
-systemd, run `dlsslopd --tier 1080` in a host terminal and wait for `worker ready`.
+systemd, run `dlsslopd` in a host terminal and wait for `worker ready`.
 
 However it starts, the worker reads its settings from
 `~/.config/dlsslop-amd/dlsslopd.conf`, or from `dlsslop-amd/dlsslopd.conf` under
@@ -168,7 +168,7 @@ directory; earlier batches are kept.
 For per-pass color checks, restart the worker with tracing and keep a game running:
 
 ```bash
-dlsslopd --tier 1080 --trace-dir "$HOME/.local/state/dlsslop-amd/color-trace"
+dlsslopd --trace-dir "$HOME/.local/state/dlsslop-amd/color-trace"
 ```
 
 From another terminal:
