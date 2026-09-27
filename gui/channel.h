@@ -2,7 +2,6 @@
 #pragma once
 #include "../common/control_settings.h"
 #include <cerrno>
-#include <cmath>
 #include <cstring>
 #include <fcntl.h>
 #include <map>
@@ -58,7 +57,7 @@ public:
             if (index >= std::size(dlsslop_control::kSettings))
                 throw std::invalid_argument("Unknown setting");
             const auto& s = dlsslop_control::kSettings[index];
-            if (!dlsslop_control::inRange(s, number) || (!s.isFloat && std::trunc(number) != number))
+            if (!dlsslop_control::inRange(s, number))
                 throw std::invalid_argument("Setting outside supported range");
         }
         bool tuningChanged = false;

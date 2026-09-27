@@ -51,7 +51,7 @@ int main()
                                  name == "sharpness"), "wrong native tuning settings");
             if (!s.choices) continue;
             const auto labels = 1 + std::count(s.choices, s.choices + std::strlen(s.choices), '|');
-            require(!s.isFloat && labels == s.maximum - s.minimum + 1, "choice labels do not match the range");
+            require(!s.isFloat && labels == (s.maximum - s.minimum) / s.step + 1, "choice labels do not match the range");
         }
         std::size_t intensity = 0, color = 0, preset = 0, colorPreserve = 0;
         for (std::size_t i = 0; i < std::size(dlsslop_control::kSettings); ++i) {

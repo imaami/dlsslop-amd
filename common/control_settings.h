@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "../upstream-layer/common/shm_protocol.h"
+#include <cmath>
 #include <linux/input-event-codes.h>
 
 namespace dlsslop_control {
@@ -17,7 +18,8 @@ struct Setting {
     bool isFloat;
     Section section;
     bool tuning;                   // a native tuning value: changing it bumps tuningSeq
-    const char* choices = nullptr; // '|'-separated labels of minimum, minimum + 1, ...
+    const char* choices = nullptr; // '|'-separated labels of minimum, minimum + step, ...
+    double step = 1;               // integer settings: the values are minimum + k * step
 };
 
 // All controls from the original interface. The captured network supports one
@@ -45,6 +47,7 @@ inline constexpr Setting kSettings[] = {
     {"color-mode", &ShmHeader::colourMode, 0, 2, "0 auto, 1 display-referred, 2 linear HDR", 'Y', false, kImage, false, "Automatic|Display-referred|Linear HDR"},
     {"reversible", &ShmHeader::reversibleMode, 0, 4, "Proxy: 0 knee, 1 Neutwo, 2 Neutwo replace, 3 hybrid, 4 hybrid replace", 'Z', false, kImage, false, "Knee|Neutwo|Neutwo replace|Hybrid|Hybrid replace"},
     {"passes", &ShmHeader::passes, 1, kMaxPasses, "Successive neural evaluations per frame; each consumes the previous result", 'P', false, kNeural, false},
+    {"tier", &ShmHeader::nativeTier, 720, 1080, "Neural raster height; a change rebuilds the worker's network between frames, during which the game presents its own frames; game resolution unchanged", 'T', false, kNeural, false, "720|900|1080", 180},
     {"detail", &ShmHeader::transferStrengthBits, 0, 4, "Strength of the neural edit", 'd', true, kComposition, false},
     {"color", &ShmHeader::colourStrengthBits, 0, 4, "Color contribution of the edit", 'C', true, kComposition, false},
     {"guard", &ShmHeader::maxRatioBits, 1, 30, "Maximum per-pixel gain or reciprocal gain", 'g', true, kComposition, false},
@@ -67,10 +70,12 @@ inline constexpr Setting kSettings[] = {
 
 // Readers see float settings as binary32, which rounds some minimums below
 // themselves, so compare with the bounds as stored; integer bounds are exact
-// there. NaN fails.
+// there. An integer setting also takes only its steps. NaN fails.
 inline bool inRange(const Setting& s, double v)
 {
-    return v >= static_cast<float>(s.minimum) && v <= static_cast<float>(s.maximum);
+    const double steps = (v - s.minimum) / s.step;
+    return v >= static_cast<float>(s.minimum) && v <= static_cast<float>(s.maximum) &&
+           (s.isFloat || steps == std::trunc(steps));
 }
 inline bool fixed(const Setting& s)
 {

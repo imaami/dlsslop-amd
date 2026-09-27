@@ -205,7 +205,7 @@ class Window final : public QWidget {
             const auto modes = QString(s.choices).split('|');
             e.combo = new QComboBox;
             e.combo->setMinimumWidth(190);
-            for (int i = 0; i < modes.size(); ++i) e.combo->addItem(modes[i], static_cast<int>(s.minimum) + i);
+            for (int i = 0; i < modes.size(); ++i) e.combo->addItem(modes[i], static_cast<int>(s.minimum + i * s.step));
             e.combo->setAccessibleName(title(s.name));
             wheelNeedsFocus(e.combo);
             row->addWidget(e.combo);

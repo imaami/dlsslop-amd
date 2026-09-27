@@ -127,6 +127,7 @@ Use the GUI or command line from another terminal:
 dlsslop-gui
 dlsslopctl --status
 dlsslopctl --passes 2 --color-preserve 1
+dlsslopctl --tier 1080
 dlsslopctl --enabled 0
 dlsslopctl --enabled 1
 dlsslopctl --quit
@@ -138,9 +139,12 @@ worker starts again: at the next launch through `dlsslop-run`, with
 dlsslop.socket dlsslop.service` also ends on-demand starts until the next login.
 
 Every command has `--help`; `dlsslopctl
---settings` lists the current settings and reset values. `--tier` selects a
-1280×720, 1600×900 or 1920×1080 neural raster, independently of the game's
-resolution; the edit is composed against the native frame. Each extra pass
+--settings` lists the current settings and reset values. `--tier` switches the
+running worker to a 1280×720, 1600×900 or 1920×1080 neural raster,
+independently of the game's resolution; the edit is composed against the native
+frame. The worker rebuilds its network, which takes a few seconds while the game
+presents its own frames. A restarted worker keeps the tier unless its command
+line or config file sets one. Each extra pass
 consumes the previous output and adds GPU work and latency without guaranteeing
 better quality. Motion estimation is optional and off by default. HUDs are part
 of the image and may change. Capture, transport and inference are

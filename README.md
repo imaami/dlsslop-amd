@@ -26,8 +26,8 @@ and [bmitch87](https://github.com/bmitch87)'s
 [Vulkan presentation layer](https://github.com/bmitch87/DLSS5VKLayer). A native
 HIP worker processes a proxy of the game frame; the Vulkan layer composes the
 neural edit at the original resolution. The standalone Qt 6 Widgets controller
-exposes all 40 settings. Worker, layer, CLI and GUI use shared-memory protocol
-**24**.
+exposes all 41 settings. Worker, layer, CLI and GUI use shared-memory protocol
+**25**.
 
 This repository contains source, patches and build tools. **No compiled binaries
 or model weights are included.** See [VALIDATION.md](VALIDATION.md) for automated

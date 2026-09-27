@@ -85,10 +85,10 @@ std::string default_modules()
 struct Options {
     std::string assets, modules, shm = ShmNativeChannelPath();
     std::string input, output, trace_dir;
-    unsigned tier = kNativeDefaultTier, width = 0, height = 0, self_test_runs = 10;
+    unsigned width = 0, height = 0, self_test_runs = 10;
     unsigned idle_exit = 0;
-    // Unset, a serving worker keeps the channel's live count across restarts.
-    std::optional<unsigned> passes;
+    // Unset, a serving worker keeps the channel's live values across restarts.
+    std::optional<unsigned> tier, passes;
     int device = -1;
     bool diagnose = false, test_identity = false, once = false, self_test = false;
     bool cpu_compose = false, cpu_codec = false, performance = false;
@@ -140,10 +140,12 @@ bool flag(const char* value)
     throw std::runtime_error("expected true or false");
 }
 
+bool known_tier(unsigned tier) { return tier == 720 || tier == 900 || tier == 1080; }
+
 unsigned tier(const char* value)
 {
     const unsigned t = number(value, "tier");
-    if (t != 720 && t != 900 && t != 1080) throw std::runtime_error("tier must be 720, 900, or 1080");
+    if (!known_tier(t)) throw std::runtime_error("tier must be 720, 900, or 1080");
     return t;
 }
 
@@ -223,7 +225,10 @@ void usage(FILE* out)
         "                          Default: %s\n"
         "                          From nonempty DLSSNR_SHM, otherwise %s\n"
         "  -t, --tier HEIGHT       Neural work raster: 720, 900, or 1080\n"
-        "                          Default: %u; game/display resolution unchanged\n"
+        "                          Default: %u on a new channel; game/display\n"
+        "                          resolution unchanged. Unset here and in FILE, a\n"
+        "                          starting worker keeps the channel's live tier,\n"
+        "                          which dlsslopctl --tier changes while it runs\n"
         "  -P, --passes N          Chained neural evaluations per frame (1..%u)\n"
         "                          Default: %u on a new channel; each pass consumes\n"
         "                          the previous output. Unset here and in FILE, a\n"
@@ -273,7 +278,7 @@ void usage(FILE* out)
         config.empty() ? "unset; no home directory" : config.c_str(), settable.c_str(),
         defaults.assets.empty() ? "unset; required for inference" : defaults.assets.c_str(),
         defaults.modules.empty() ? "unset; required for inference" : defaults.modules.c_str(),
-        defaults.shm.c_str(), ShmNativeDefaultPath().c_str(), defaults.tier,
+        defaults.shm.c_str(), ShmNativeDefaultPath().c_str(), kNativeDefaultTier,
         kMaxPasses, kNativeDefaultPasses, defaults.self_test_runs,
         defaults.width, defaults.height, defaults.idle_exit);
 }
@@ -460,6 +465,7 @@ public:
 
 class Engine {
     Options options_;
+    unsigned tier_;
     std::unique_ptr<hip_reference::Network> network_;
     std::optional<dlsslop::NativeKernels> kernels_;
     std::optional<dlsslop::GpuCodec> gpu_codec_;
@@ -502,7 +508,8 @@ class Engine {
     }
 public:
     float upload_ms = 0, inference_ms = 0, readback_ms = 0;
-    explicit Engine(Options o) : options_(std::move(o)) {}
+    Engine(Options o, unsigned tier) : options_(std::move(o)), tier_(tier) {}
+    unsigned tier() const { return tier_; }
     // The members go next, in reverse order: the helpers before the network whose runtime they use.
     ~Engine()
     {
@@ -517,7 +524,7 @@ public:
     void prepare()
     {
         if (options_.test_identity) return;
-        const auto raster = dlsslop::geometry(1, 1, options_.tier);
+        const auto raster = dlsslop::geometry(1, 1, tier_);
         auto opt = LmxxfProductionOptions(raster.width, raster.height, options_.modules, options_.assets);
         opt.device = static_cast<unsigned>(options_.device);
         if (!options_.performance) opt.skip_blocks.clear();
@@ -621,7 +628,7 @@ public:
             if (adaptive && std::strtoul(adaptive, nullptr, 10))
                 throw std::range_error("multi-pass/motion/self-test requires DLSS5_VIT_ADAPTIVE=0 (uncached inference)");
         }
-        const auto g = dlsslop::geometry(w, h, options_.tier);
+        const auto g = dlsslop::geometry(w, h, tier_);
         auto& api = network_->Runtime();
         const auto trace_image = [&](unsigned pass, const char* stage, const void* pointer, unsigned channels) {
             if (!trace) return;
@@ -780,7 +787,7 @@ void run_self_test(const Options& o, Engine& engine)
         input[p + 3] = 255;
     }
     const unsigned repeats = o.self_test_runs;
-    const auto g = dlsslop::geometry(w, h, o.tier);
+    const auto g = dlsslop::geometry(w, h, engine.tier());
     std::vector<float> first_raw;
     std::vector<uint8_t> first_output;
     // Only the first run checks the codec against the CPU reference, so the
@@ -865,7 +872,7 @@ void run_self_test(const Options& o, Engine& engine)
     std::printf("real-network self-test PASS: finite output; %u identical-input runs bit-exact; RGB range=%u..%u; changed_components=%zu; fnv1a64=%016llx\n",
                 repeats, low, high, changed, static_cast<unsigned long long>(hash));
     std::printf("tier=%u; passes=%u; blocks=%s; upload_ms=%.3f; network_ms=%.3f; readback_ms=%.3f\n",
-                o.tier, passes, o.performance ? "upstream performance preset" : "all 71",
+                engine.tier(), passes, o.performance ? "upstream performance preset" : "all 71",
                 engine.upload_ms, engine.inference_ms, engine.readback_ms);
 }
 
@@ -964,6 +971,50 @@ void accept_offers(const TransportListener& listener, Engine& engine, ShmHeader*
     }
 }
 
+// The layer must know the real neural raster before building its proxy.
+// Otherwise it mistakes a worker-upscaled answer for native-resolution output
+// and skips its detail-preserving composition branch. CPU composition and
+// identity publish none: the mapping may retain a preceding neural worker's.
+void publish_raster(const Options& o, ShmHeader* h, unsigned tier)
+{
+    const bool neural = !o.cpu_compose && !o.test_identity;
+    h->nativeModelMaxWidth.store(neural ? dlsslop::geometry(1, 1, tier).width : 0);
+    h->nativeModelMaxHeight.store(neural ? tier : 0);
+}
+
+// Between frames: rebuilds the network once for each tier a controller stores
+// that differs from the active one. The layer presents its own frames while
+// helperState reads Starting, then offers its device-local frames to the new
+// engine. An unusable tier is overwritten with the active one. A failed
+// rebuild ends the worker, leaving the active tier for the next one.
+void follow_tier(std::optional<Engine>& engine, const Options& o, Mapping& mapping, const char* ready)
+{
+    auto* h = mapping.h;
+    const unsigned wanted = h->nativeTier.load(), active = engine->tier();
+    if (wanted == active) return;
+    if (!known_tier(wanted)) {
+        h->nativeTier.store(active);
+        return;
+    }
+    h->helperState.store(kHelperStarting);
+    h->modelUp.store(0);
+    h->transportAck.store(0);
+    std::fprintf(stderr, "neural tier %u -> %u: rebuilding\n", active, wanted);
+    mapping.reason("rebuilding for neural tier " + std::to_string(wanted));
+    engine.reset(); // The old network's memory goes first.
+    try {
+        engine.emplace(o, wanted);
+        engine->prepare();
+    } catch (...) {
+        h->nativeTier.store(active);
+        throw;
+    }
+    publish_raster(o, h, wanted);
+    mapping.reason(ready);
+    h->modelUp.store(o.test_identity ? 0 : 1);
+    h->helperState.store(kHelperRunning, std::memory_order_release);
+}
+
 void run_worker(const Options& o)
 {
     Mapping mapping(o.shm);
@@ -972,20 +1023,13 @@ void run_worker(const Options& o)
     if (!o.trace_dir.empty())
         traces = std::make_unique<dlsslop::TraceRequests>(o.trace_dir, o.shm);
     std::unique_ptr<dlsslop::FrameTrace> pending_trace;
-    const auto raster = dlsslop::geometry(1, 1, o.tier);
+    // An explicit tier replaces the channel's; otherwise a usable live one stays.
+    const unsigned live = h->nativeTier.load();
+    const unsigned tier = o.tier.value_or(known_tier(live) ? live : kNativeDefaultTier);
+    h->nativeTier.store(tier);
     if (o.passes) h->passes.store(*o.passes);
     h->compositionBypass.store(o.cpu_compose || o.test_identity ? 1 : 0);
-    // The layer must know the real neural raster before building its proxy.
-    // Otherwise it mistakes a worker-upscaled answer for native-resolution
-    // output and skips its detail-preserving composition branch.
-    if (!o.cpu_compose && !o.test_identity) {
-        h->nativeModelMaxWidth.store(raster.width);
-        h->nativeModelMaxHeight.store(o.tier);
-    } else {
-        // The mapping may retain settings from a preceding neural worker.
-        h->nativeModelMaxWidth.store(0);
-        h->nativeModelMaxHeight.store(0);
-    }
+    publish_raster(o, h, tier);
     // Linux futex wake is emitted by the patched Vulkan layer. Timeout maintains liveness
     // with old clients and permits signals/quit; no GPU polling is involved.
     std::atomic<bool> heartbeat_stop{false};
@@ -1003,8 +1047,9 @@ void run_worker(const Options& o)
     try {
         mapping.reason(o.test_identity ? "IDENTITY TEST: inference disabled" : "initializing native HIP model");
         const TransportListener transport(o.shm, !o.test_identity && !o.cpu_codec);
-        Engine engine(o);
-        engine.prepare();
+        std::optional<Engine> engine;
+        engine.emplace(o, tier);
+        engine->prepare();
         // Only serving stops gracefully, from the ready announcement on.
         // Before it, and in every other mode, SIGINT and SIGTERM terminate.
         std::signal(SIGINT, stop_handler);
@@ -1015,9 +1060,10 @@ void run_worker(const Options& o)
                                                   : "native HIP ready; display-encoded RGBA8/FP16 proxy";
         mapping.reason(ready);
         std::fprintf(stderr, "worker ready: %s%s\n", o.shm.c_str(), o.test_identity ? " [IDENTITY TEST]" : "");
+        const auto raster = dlsslop::geometry(1, 1, tier);
         if (!o.test_identity)
             std::fprintf(stderr, "neural tier=%u; processing=%ux%u; %s; live controls enabled\n",
-                         o.tier, raster.width, raster.height,
+                         tier, raster.width, raster.height,
                          o.cpu_compose ? "CPU composition" : "native-resolution Vulkan composition");
         uint64_t frames = 0;
         unsigned previous_passes = 0;
@@ -1025,7 +1071,7 @@ void run_worker(const Options& o)
         auto active = std::chrono::steady_clock::now(); // The latest request, or readiness.
         std::string failure;
         while (!stopping && !h->quit.load(std::memory_order_relaxed)) {
-            accept_offers(transport, engine, h);
+            accept_offers(transport, *engine, h);
             if (traces && !pending_trace) {
                 try {
                     pending_trace = traces->take();
@@ -1036,6 +1082,7 @@ void run_worker(const Options& o)
             }
             const uint32_t request = h->seq_req.load(std::memory_order_acquire);
             if (request == last) {
+                follow_tier(engine, o, mapping, ready);
                 const timespec timeout{0, 100000000};
                 syscall(SYS_futex, reinterpret_cast<uint32_t*>(&h->seq_req), FUTEX_WAIT,
                         request, &timeout, nullptr, 0);
@@ -1083,15 +1130,15 @@ void run_worker(const Options& o)
                 // The request's frames: an imported device-local pair, or the channel's slots.
                 Engine::Frames io{mapping.input, mapping.output};
                 if (const uint32_t generation = h->transportGen.load()) {
-                    io = engine.frames(generation, bytes);
+                    io = engine->frames(generation, bytes);
                     if (!io.proxy) {
                         h->transportMiss.store(generation);
                         throw std::range_error("request names device-local frames this worker has not imported");
                     }
                 } else {
-                    engine.pin(mapping.input, mapping.output, bytes);
+                    engine->pin(mapping.input, mapping.output, bytes);
                 }
-                engine.infer(io.proxy, w, height, io.answer, passes, settings, pending_trace.get());
+                engine->infer(io.proxy, w, height, io.answer, passes, settings, pending_trace.get());
                 if (h->seq_req.load(std::memory_order_acquire) != request)
                     throw std::range_error("request changed during inference; old answer discarded");
                 std::string trace_metadata;
@@ -1105,12 +1152,12 @@ void run_worker(const Options& o)
                     metadata.held_input = held_input;
                     metadata.held_input_end = h->holdFrame.load();
                     std::vector<uint8_t> proxy(bytes);
-                    engine.read_back(proxy.data(), io.proxy, bytes);
+                    engine->read_back(proxy.data(), io.proxy, bytes);
                     metadata.source_proxy_hash = 14695981039346656037ull;
                     for (uint8_t byte : proxy)
                         metadata.source_proxy_hash = (metadata.source_proxy_hash ^ byte) * 1099511628211ull;
                     metadata.passes = passes;
-                    metadata.geometry = dlsslop::geometry(w, height, o.tier);
+                    metadata.geometry = dlsslop::geometry(w, height, engine->tier());
                     metadata.fp16_proxy = settings.fp16;
                     metadata.fp16_feedback = settings.precision16;
                     metadata.motion = settings.motion;
@@ -1127,9 +1174,9 @@ void run_worker(const Options& o)
                 }
                 h->answeredW.store(w);
                 h->answeredH.store(height);
-                h->helperEvalMsBits.store(FloatToBits(engine.inference_ms));
-                h->helperUploadMsBits.store(FloatToBits(engine.upload_ms));
-                h->helperReadbackMsBits.store(FloatToBits(engine.readback_ms));
+                h->helperEvalMsBits.store(FloatToBits(engine->inference_ms));
+                h->helperUploadMsBits.store(FloatToBits(engine->upload_ms));
+                h->helperReadbackMsBits.store(FloatToBits(engine->readback_ms));
                 ShmStore64(h->helperFramesLo, h->helperFramesHi, ++frames);
                 h->seq_ok.store(request);
                 h->seq_resp.store(request, std::memory_order_release);
@@ -1178,7 +1225,7 @@ int main(int argc, char** argv)
         else
             o.device = select_device(o.device);
         if (o.self_test || !o.input.empty()) {
-            Engine engine(o);
+            Engine engine(o, o.tier.value_or(kNativeDefaultTier));
             engine.prepare();
             if (o.self_test) run_self_test(o, engine);
             else run_offline(o, engine);

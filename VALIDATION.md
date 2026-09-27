@@ -102,6 +102,9 @@ model coefficients.
   temporal stability and transitions between scenes.
 - Measure latency and sustained frame times at each intended neural raster and
   pass count, including long sessions with the game's normal GPU load.
+- Switch tiers with `dlsslopctl --tier` during play. The game must keep
+  presenting its own frames through the rebuild, then show the edit at the new
+  raster, with `device-local transport ready` logged again.
 - Open the Qt controller in the desktop session and check rendering, input,
   connection, live controls and channel replacement behaviour.
 

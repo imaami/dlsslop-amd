@@ -279,6 +279,58 @@ void live_settings(const char* executable, const std::filesystem::path& director
     std::printf("PASS: a restarted worker kept the live pass count; the config file and --passes replaced it\n");
 }
 
+// Waits for what the worker does by itself.
+template <typename Condition>
+void await(Condition done, const Worker& worker, const std::string& failure)
+{
+    const auto deadline = Clock::now() + std::chrono::seconds(10);
+    while (!done()) {
+        require(Clock::now() < deadline, failure + ":\n" + worker.text());
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+}
+
+// A different tier rebuilds the worker once, between frames; the active tier
+// again rebuilds nothing, and an unusable one is overwritten with the active
+// one. A restarted worker keeps the live tier; only --tier replaces it.
+void tiers(const char* executable, const std::filesystem::path& directory)
+{
+    Channel channel((directory / "tiers.bin").string());
+    auto* h = channel.h;
+    const std::string log = (directory / "tiers.log").string();
+    {
+        Worker worker(executable, channel, log);
+        require(h->nativeTier.load() == kNativeDefaultTier, "a worker changed a new channel's tier");
+        const auto rebuilt = [&worker, h](size_t times) {
+            return count(worker.text(), "rebuilding") == times && h->helperState.load() == kHelperRunning;
+        };
+        h->nativeTier.store(900);
+        h->controlSeq.fetch_add(1);
+        await([&rebuilt] { return rebuilt(1); }, worker, "the worker did not switch to tier 900");
+        for (const uint32_t tier : {900u, 900u, 900u, 0u, 800u}) {
+            h->nativeTier.store(tier);
+            h->controlSeq.fetch_add(1);
+            await([h] { return h->nativeTier.load() == 900; }, worker, "an unusable tier was not replaced");
+        }
+        require(rebuilt(1), "storing the active tier rebuilt the worker:\n" + worker.text());
+        require(channel.answered(channel.publish(false, 13), false), "a request after a tier switch failed");
+        h->nativeTier.store(1080);
+        await([&rebuilt] { return rebuilt(2); }, worker, "the worker did not switch to tier 1080");
+        require(!h->nativeModelMaxWidth.load() && !h->nativeModelMaxHeight.load(),
+                "an identity worker published a neural raster");
+        require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
+    }
+    {
+        Worker worker(executable, channel, log);
+        require(h->nativeTier.load() == 1080, "a restarted worker reset the live tier");
+        require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
+    }
+    Worker worker(executable, channel, log, false, "--tier", "900");
+    require(h->nativeTier.load() == 900, "--tier did not replace the live tier");
+    require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
+    std::printf("PASS: each tier change rebuilt the worker once; repeats and unusable tiers did not\n");
+}
+
 // --once exits after its one answer, with status 1 when that answer failed.
 void once(const char* executable, const std::filesystem::path& directory)
 {
@@ -319,6 +371,7 @@ int main(int argc, char** argv)
         controls(argv[1], directory);
         once(argv[1], directory);
         live_settings(argv[1], directory);
+        tiers(argv[1], directory);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "worker channel: %s\n", e.what());
         result = 1;

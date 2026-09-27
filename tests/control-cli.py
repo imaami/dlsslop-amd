@@ -51,7 +51,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     max_passes = int(re.search(r'kMaxPasses\s*=\s*(\d+)', shared_header.read_text())[1])
     version = int(re.search(r'kShmVersion\s*=\s*(\d+)', shared_header.read_text())[1])
     magic = int(re.search(r'kShmMagic\s*=\s*(0x[0-9A-Fa-f]+)', shared_header.read_text())[1], 16)
-    assert f'worker default: {tier}' in helptext
+    assert re.search(r'--tier\s+VALUE [^\n]*\n\s+Range: 720\.\.1080; default: ' + tier + '; steps of 180\n', helptext)
     assert run('-h') == helptext
     run('--settings', expected=1)
     run('--status', expected=1)
@@ -72,14 +72,14 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     assert values['sdr16-multipass'] == (1, 1)
     assert values['hdr-mode'] == (1, 1)
     assert values['mvec'] == (0, 0)
-    assert len(values) == 40, values.keys()
+    assert len(values) == 41, values.keys()
     assert channel.stat().st_mode & 0o777 == 0o600
 
     # Every supported setting advertises the same default as --settings.
     for name, (_, default) in values.items():
         block = re.search(r'--' + re.escape(name) + r'\s+VALUE[^\n]*\n([^\n]*)', helptext)
         assert block, name
-        advertised = re.search(r'default: ([^ ]+)', block[1])
+        advertised = re.search(r'default: ([^ ;]+)', block[1])
         assert advertised and float(advertised[1]) == default, (name, block[1], default)
 
     original = header()
@@ -98,6 +98,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
         ('--enabled', '-1'), ('--enabled', '1.0'), ('--enabled', ''),
         ('--passes', '0'), ('--passes', str(max_passes + 1)), ('--passes', '-1'),
         ('--passes', '2.5'), ('--passes', '2x'), ('--passes',),
+        ('--tier', '800'), ('--tier', '540'), ('--tier', '1260'), ('--tier', '900.0'),
         ('--capture', '65'), ('--capture', '4294967296'), ('--capture', '2x'),
         ('--debug-view', '6'), ('--downscaler', '0'),
         ('--enabled',), ('--unknown',),
@@ -208,6 +209,9 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     assert f'passes={max_passes}\n' in status
     assert f'pass_ceiling={max_passes}\n' in status
     assert settings(run('--passes=3', '-P2', '-l'))['passes'] == (2, 1)
+    assert settings(run('--tier', '900', '-l'))['tier'] == (900, int(tier))
+    error = run('--tier', '800', expected=2, errors=True)
+    assert "--tier: expected a finite integer in [720, 1080]; steps of 180, got '800'\n" in error, error
     run('-q')
     assert 'quit=1\n' in run('-S')
     reset = settings(run('-r', '-l'))
