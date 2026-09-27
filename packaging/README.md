@@ -113,8 +113,11 @@ link both units from its `share/systemd/user` with `systemctl --user link`. With
 any other prefix, first link `dlsslop.socket` the same way, then copy
 `dlsslop.service` into `~/.config/systemd/user/` and point its `ExecStart` at that
 prefix's `bin/dlsslopd`: the service looks for `dlsslopd` only under `~/.local`,
-`/usr/local` and `/opt/dlsslop-amd`. Without
-systemd, run `dlsslopd` in a host terminal and wait for `worker ready`.
+`/usr/local` and `/opt/dlsslop-amd`. After linking or copying, and after any
+later edit to the copied service, run `systemctl --user daemon-reload` before
+enabling or starting the socket; systemd otherwise keeps a service it already
+loaded as it was. Without systemd, run `dlsslopd` in a host terminal and wait
+for `worker ready`.
 
 However it starts, the daemon reads its settings from
 `~/.config/dlsslop-amd/dlsslopd.conf`, or from `dlsslop-amd/dlsslopd.conf` under
