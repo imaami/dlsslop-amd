@@ -78,7 +78,9 @@ struct Options {
     std::string assets, modules, shm = ShmNativeChannelPath();
     std::string input, output, trace_dir;
     unsigned tier = kNativeDefaultTier, width = 0, height = 0, self_test_runs = 10;
-    unsigned passes = kNativeDefaultPasses, idle_exit = 0;
+    unsigned idle_exit = 0;
+    // Unset, a serving worker keeps the channel's live count across restarts.
+    std::optional<unsigned> passes;
     int device = -1;
     bool diagnose = false, test_identity = false, once = false, self_test = false;
     bool cpu_compose = false, cpu_codec = false, performance = false;
@@ -143,8 +145,9 @@ void usage(FILE* out)
         "  -t, --tier HEIGHT       Neural work raster: 720, 900, or 1080\n"
         "                          Default: %u; game/display resolution unchanged\n"
         "  -P, --passes N          Chained neural evaluations per frame (1..%u)\n"
-        "                          Default: %u; each pass consumes the previous output\n"
-        "                          Sets startup count; live control may change it\n"
+        "                          Default: %u on a new channel; each pass consumes\n"
+        "                          the previous output. Unset, a starting worker\n"
+        "                          keeps the channel's live count\n"
         "  -d, --device INDEX      HIP device index\n"
         "                          Default: auto, first visible gfx1201 device\n"
         "  -D, --diagnose          Enumerate HIP devices, report the selection, exit\n"
@@ -190,7 +193,7 @@ void usage(FILE* out)
         defaults.assets.empty() ? "unset; required for inference" : defaults.assets.c_str(),
         defaults.modules.empty() ? "unset; required for inference" : defaults.modules.c_str(),
         defaults.shm.c_str(), ShmNativeDefaultPath().c_str(), defaults.tier,
-        kMaxPasses, defaults.passes, defaults.self_test_runs,
+        kMaxPasses, kNativeDefaultPasses, defaults.self_test_runs,
         defaults.width, defaults.height, defaults.idle_exit);
 }
 
@@ -254,7 +257,7 @@ Options parse(int argc, char** argv)
     if (optind != argc) throw std::runtime_error("unexpected positional argument");
     if (o.tier != 720 && o.tier != 900 && o.tier != 1080)
         throw std::runtime_error("tier must be 720, 900, or 1080");
-    if (!o.passes || o.passes > kMaxPasses)
+    if (o.passes && (!*o.passes || *o.passes > kMaxPasses))
         throw std::runtime_error("--passes must be 1.." + std::to_string(kMaxPasses));
     if (o.self_test_runs < 2 || o.self_test_runs > 1000)
         throw std::runtime_error("--self-test-runs must be 2..1000");
@@ -659,6 +662,7 @@ public:
 
 void run_self_test(const Options& o, Engine& engine)
 {
+    const unsigned passes = o.passes.value_or(kNativeDefaultPasses);
     constexpr unsigned w = 640, h = 360;
     std::vector<uint8_t> input(size_t(w) * h * 4), output(input.size());
     for (unsigned y = 0; y < h; ++y) for (unsigned x = 0; x < w; ++x) {
@@ -675,7 +679,7 @@ void run_self_test(const Options& o, Engine& engine)
     // Only the first run checks the codec against the CPU reference, so the
     // later runs time the production path; each must reproduce the first.
     for (unsigned run = 0; run < repeats; ++run) {
-        engine.infer(input.data(), w, h, output.data(), o.passes, {}, nullptr, !run);
+        engine.infer(input.data(), w, h, output.data(), passes, {}, nullptr, !run);
         const auto& raw = engine.raw_result();
         if (!run) {
             first_raw = raw;
@@ -728,7 +732,7 @@ void run_self_test(const Options& o, Engine& engine)
             throw std::runtime_error("decoded output differs from the verified first run");
         }
         std::printf("network repeat %u/%u: %s; passes=%u upload_ms=%.3f network_ms=%.3f readback_ms=%.3f\n",
-                    run + 1, repeats, run ? "raw FP32 and output bit-identical" : "baseline", o.passes,
+                    run + 1, repeats, run ? "raw FP32 and output bit-identical" : "baseline", passes,
                     engine.upload_ms, engine.inference_ms, engine.readback_ms);
         std::fflush(stdout);
     }
@@ -754,12 +758,13 @@ void run_self_test(const Options& o, Engine& engine)
     std::printf("real-network self-test PASS: finite output; %u identical-input runs bit-exact; RGB range=%u..%u; changed_components=%zu; fnv1a64=%016llx\n",
                 repeats, low, high, changed, static_cast<unsigned long long>(hash));
     std::printf("tier=%u; passes=%u; blocks=%s; upload_ms=%.3f; network_ms=%.3f; readback_ms=%.3f\n",
-                o.tier, o.passes, o.performance ? "upstream performance preset" : "all 71",
+                o.tier, passes, o.performance ? "upstream performance preset" : "all 71",
                 engine.upload_ms, engine.inference_ms, engine.readback_ms);
 }
 
 void run_offline(const Options& o, Engine& engine)
 {
+    const unsigned passes = o.passes.value_or(kNativeDefaultPasses);
     const size_t bytes = size_t(o.width) * o.height * 4;
     std::ifstream in(o.input, std::ios::binary | std::ios::ate);
     if (!in || in.tellg() != static_cast<std::streamoff>(bytes))
@@ -768,12 +773,12 @@ void run_offline(const Options& o, Engine& engine)
     in.seekg(0);
     if (!in.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(bytes)))
         throw std::runtime_error("read offline input");
-    engine.infer(pixels.data(), o.width, o.height, result.data(), o.passes);
+    engine.infer(pixels.data(), o.width, o.height, result.data(), passes);
     std::ofstream out(o.output, std::ios::binary);
     if (!out.write(reinterpret_cast<const char*>(result.data()), static_cast<std::streamsize>(result.size())))
         throw std::runtime_error("write offline output");
     std::fprintf(stderr, "offline: passes=%u upload=%.2f ms, network=%.2f ms, readback=%.2f ms\n",
-                 o.passes, engine.upload_ms, engine.inference_ms, engine.readback_ms);
+                 passes, engine.upload_ms, engine.inference_ms, engine.readback_ms);
 }
 
 // The socket beside the channel file on which the layer offers its exported
@@ -861,7 +866,7 @@ void run_worker(const Options& o)
         traces = std::make_unique<dlsslop::TraceRequests>(o.trace_dir, o.shm);
     std::unique_ptr<dlsslop::FrameTrace> pending_trace;
     const auto raster = dlsslop::geometry(1, 1, o.tier);
-    h->passes.store(o.passes);
+    if (o.passes) h->passes.store(*o.passes);
     h->compositionBypass.store(o.cpu_compose || o.test_identity ? 1 : 0);
     // The layer must know the real neural raster before building its proxy.
     // Otherwise it mistakes a worker-upscaled answer for native-resolution
@@ -869,7 +874,6 @@ void run_worker(const Options& o)
     if (!o.cpu_compose && !o.test_identity) {
         h->nativeModelMaxWidth.store(raster.width);
         h->nativeModelMaxHeight.store(o.tier);
-        h->transfer.store(2); // Native frame plus the edit measured at model resolution.
     } else {
         // The mapping may retain settings from a preceding neural worker.
         h->nativeModelMaxWidth.store(0);

@@ -102,11 +102,12 @@ class Worker {
     pid_t pid_ = -1;
     const std::string log_;
 public:
-    Worker(const char* executable, const Channel& channel, std::string log, bool once = false)
+    Worker(const char* executable, const Channel& channel, std::string log, bool once = false,
+           const char* option = nullptr, const char* value = nullptr)
         : log_(std::move(log))
     {
         const char* args[] = {executable, "--test-identity", "--shm", channel.path.c_str(),
-                              once ? "--once" : nullptr, nullptr};
+                              once ? "--once" : option, once ? option : value, once ? value : nullptr, nullptr};
         pid_ = fork();
         require(pid_ >= 0, "fork worker");
         if (!pid_) {
@@ -241,6 +242,28 @@ void controls(const char* executable, const std::filesystem::path& directory)
     std::printf("PASS: the worker published no control generation after a tuning change\n");
 }
 
+// A restarted worker keeps the channel's live pass count; only --passes, when
+// given, replaces it.
+void live_settings(const char* executable, const std::filesystem::path& directory)
+{
+    Channel channel((directory / "live.bin").string());
+    const std::string log = (directory / "live.log").string();
+    {
+        Worker worker(executable, channel, log);
+        channel.h->passes.store(3);
+        require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
+    }
+    {
+        Worker worker(executable, channel, log);
+        require(channel.h->passes.load() == 3, "a restarted worker reset the live pass count");
+        require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
+    }
+    Worker worker(executable, channel, log, false, "--passes", "2");
+    require(channel.h->passes.load() == 2, "--passes did not replace the live pass count");
+    require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
+    std::printf("PASS: a restarted worker kept the live pass count; --passes replaced it\n");
+}
+
 // --once exits after its one answer, with status 1 when that answer failed.
 void once(const char* executable, const std::filesystem::path& directory)
 {
@@ -278,6 +301,7 @@ int main(int argc, char** argv)
         rejection(argv[1], directory);
         controls(argv[1], directory);
         once(argv[1], directory);
+        live_settings(argv[1], directory);
     } catch (const std::exception& e) {
         std::fprintf(stderr, "worker channel: %s\n", e.what());
         result = 1;
