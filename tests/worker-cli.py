@@ -246,12 +246,14 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
     listener.bind(str(private / 'shm.bin.sock'))
     listener.listen(4)
-    os.dup2(listener.fileno(), 3, inheritable=True)
+    # Only the child's fd 3 becomes the socket: this process's own fd 3, if
+    # any (ctest's, say), is neither replaced nor closed.
+    listening = listener.fileno()
     worker_process = subprocess.Popen(
         ['sh', '-c', 'LISTEN_PID=$$ LISTEN_FDS=1 exec "$@"', 'sh', str(binary), '--test-identity',
          '-s', str(private / 'shm.bin'), '--idle-exit', '1'],
-        env=env, cwd=cwd, pass_fds=(3,), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
-    os.close(3)
+        env=env, cwd=cwd, pass_fds=(3,), preexec_fn=lambda: os.dup2(listening, 3),
+        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
     listener.close()
     probe = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
     probe.connect(str(private / 'shm.bin.sock'))

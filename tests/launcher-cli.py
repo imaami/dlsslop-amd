@@ -167,6 +167,7 @@ def main():
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
         listener.bind(socket_path)
         listener.listen(1)
+        listener.settimeout(10)  # A launcher that never connects must not hang the test.
         held = {}
 
         def activated():
@@ -175,7 +176,7 @@ def main():
             fcntl.flock(held["lock"], fcntl.LOCK_EX | fcntl.LOCK_NB)
             connection.close()
 
-        worker = threading.Thread(target=activated)
+        worker = threading.Thread(target=activated, daemon=True)
         worker.start()
         result = run([BASH, str(LAUNCHER), str(recorder)], expected=37, env=launch_env)
         worker.join(timeout=10)
