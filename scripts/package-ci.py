@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Package freshly compiled runtime files, notices and installation instructions."""
 import argparse
-import hashlib
 import importlib.util
 import io
 import os
@@ -56,8 +55,6 @@ def package(root, build, output, source_url):
         "upstream URLs recorded in upstreams.lock.json at that revision. See\n"
         "THIRD-PARTY.txt and the accompanying licenses for component attribution.\n"
         "Model weights are a separate dependency and are not included.\n"))
-    entries[f"{installer.DOC_DIRECTORY}/SHA256SUMS"] = ("".join(
-        f"{hashlib.sha256(content).hexdigest()}  {name}\n" for name, (content, _) in sorted(entries.items())).encode(), 0o644)
     # The archive root is the installation prefix. It holds no directory
     # entries, so extracting over ~/.local never changes existing directories.
     stamp = int(os.environ.get("SOURCE_DATE_EPOCH") or time.time())

@@ -129,6 +129,10 @@ def main():
         prefix = base / "installed '$() ` with spaces"
         run([sys.executable, source / "install.py", "-b", build, "-p", prefix], env)
         installed(prefix, runtime, env)
+        # A source installation carries the same inventory as a release.
+        checked = subprocess.run(["sha256sum", "--check", INSTALLER.INVENTORY], cwd=prefix,
+                                 env=env, capture_output=True, text=True)
+        assert checked.returncode == 0, checked.stdout + checked.stderr
         assert (prefix / "share/doc/dlsslop-amd/README.md").read_bytes() == (source / "packaging/README.md").read_bytes()
         for name, source_name in INSTALLER.LICENSE_SOURCES.items():
             assert (prefix / "share/doc/dlsslop-amd" / name).read_bytes() == (source / source_name).read_bytes()
@@ -170,12 +174,12 @@ def main():
         with patch.dict(os.environ, {"SOURCE_DATE_EPOCH": "1790000000"}):
             PACKAGER.package(source, build, output, source_url)
         tree = INSTALLER.tree(source, build, "")
-        inventory = INSTALLER.DOC_DIRECTORY + "/SHA256SUMS"
+        inventory = INSTALLER.INVENTORY
         with tarfile.open(output) as archive:
             members = archive.getmembers()
             # The archive root is the prefix: regular files only (no directory
             # entries to retouch an existing ~/.local), stamped with the build time.
-            assert {member.name for member in members} == set(tree) | {inventory}
+            assert {member.name for member in members} == set(tree)
             assert all(member.isfile() and not member.name.startswith("/") and ".." not in Path(member.name).parts
                        and member.mtime == 1790000000 for member in members)
             modes = {member.name: member.mode for member in members}

@@ -23,6 +23,8 @@ LAYER_LIBRARY = "lib/dlsslop-amd/libVkLayer_DLSSLOP_amd.so"
 # launcher adds this directory to the loader's search for any other prefix.
 LAYER_MANIFEST = "share/vulkan/implicit_layer.d/VK_LAYER_LOCAL_dlsslop_amd.json"
 DOC_DIRECTORY = "share/doc/dlsslop-amd"
+# Every other installed file's digest; the README checks and uninstalls by it.
+INVENTORY = f"{DOC_DIRECTORY}/SHA256SUMS"
 NATIVE_SOURCES = {
     "bin/dlsslopd": "dlsslopd",
     "bin/dlsslopctl": "dlssnr-shmctl",
@@ -158,6 +160,8 @@ def tree(root, build, source_notice):
     entries = {name: (path.read_bytes(), mode) for name, (path, mode) in files.items()}
     entries[f"{DOC_DIRECTORY}/licenses/SOURCES"] = (source_notice.encode(), 0o644)
     entries[LAYER_MANIFEST] = (layer_manifest().encode(), 0o644)
+    entries[INVENTORY] = ("".join(f"{hashlib.sha256(content).hexdigest()}  {name}\n"
+                                  for name, (content, _) in sorted(entries.items())).encode(), 0o644)
     return entries
 
 
