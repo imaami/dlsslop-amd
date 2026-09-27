@@ -8,3 +8,7 @@ After=dlsslop.socket
 # looked up in the usual prefixes.
 Environment=PATH=%h/.local/bin:/usr/local/bin:/opt/dlsslop-amd/bin:/usr/bin
 ExecStart=/usr/bin/env dlsslopd --idle-exit 10 --tier 1080
+# A crashed worker never marks itself stopped, so a running game would wait on
+# it for good; start another. Idling out or --quit exits cleanly and does not.
+Restart=on-failure
+RestartSec=2s
