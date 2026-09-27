@@ -145,8 +145,9 @@ terms are separate from the software licenses.
 The two backends implement the same network separately, and their pictures
 differ noticeably; neither is NVIDIA's. The Vulkan network runs about two to
 three times faster. Its intensity, local tone and local structure settings are
-NVIDIA's own model controls, not the HIP backend's residual filters, and it has
-no sharpness or color preservation stage.
+NVIDIA's own model controls, not the HIP backend's residual filters. It also
+has the model's style, skin structure and automatic mask, which the HIP backend
+ignores, and it has no sharpness or color preservation stage.
 
 ## Start a game
 

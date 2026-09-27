@@ -205,20 +205,23 @@ void rejection(const char* executable, const std::filesystem::path& directory)
         require(channel.answered(channel.publish(fp16, 6), fp16), "the worker stopped serving after a rejection");
         require(channel.reason() == ready, "a served request left the rejection as the reason: " + channel.reason());
     }
+    // A preset neither network has, and conditioning outside the model's range.
     channel.h->preset.store(1);
-    for (const uint8_t seed : {7, 8})
-        require(!channel.answered(channel.publish(false, seed), false), "an unmapped preset was accepted");
-    reports("unmapped");
+    require(!channel.answered(channel.publish(false, 7), false), "an unmapped preset was accepted");
+    channel.h->preset.store(0);
+    channel.h->style.store(3);
+    require(!channel.answered(channel.publish(false, 8), false), "style 3 was accepted");
+    reports("the preset must be 0");
     require(!channel.answered(channel.publish(false, 9, 2), false), "a malformed request succeeded");
     reports("unsupported request");
-    channel.h->preset.store(0);
+    channel.h->style.store(0);
     require(channel.answered(channel.publish(false, 10), false), "the worker stopped serving after a rejection");
     require(channel.reason() == ready, "a served request left the rejection as the reason: " + channel.reason());
     require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
-    // Once per run of the same rejection: three malformed runs, the preset run
-    // and the malformed request that interrupted it.
+    // Once per run of the same rejection: three malformed runs, the preset and
+    // style run and the malformed request that interrupted it.
     const std::string log = worker.text();
-    require(count(log, " failed: unsupported request") == 4 && count(log, " failed: unmapped") == 1,
+    require(count(log, " failed: unsupported request") == 4 && count(log, " failed: the preset must be 0") == 1,
             "each run of a rejection must be logged once:\n" + log);
     std::printf("PASS: rejected requests were answered as failed while serving continued\n");
 }

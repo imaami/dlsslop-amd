@@ -139,6 +139,10 @@ Options default_options()
 
 struct ProcessingSettings {
     dlsslop::NativeTuning tuning;
+    // The Vulkan model's own conditioning; the HIP network has only the defaults.
+    unsigned style = 0;
+    float skin_structure = -1;
+    bool auto_mask = true;
     float color_preserve = 0;
     bool fp16 = false;
     bool precision16 = true;
@@ -257,9 +261,10 @@ void usage(FILE* out)
         "                          Only HIP serves --cpu-compose, --cpu-codec and\n"
         "                          --trace-dir: auto takes HIP for them, vulkan\n"
         "                          refuses them. Vulkan evaluates NVIDIA's own\n"
-        "                          intensity, local tone and local structure\n"
-        "                          controls, sizes itself to each frame and ignores\n"
-        "                          sharpness and color preservation. Its SPIR-V is in\n"
+        "                          intensity, local tone, local structure, style,\n"
+        "                          skin structure and automatic mask controls, sizes\n"
+        "                          itself to each frame and ignores sharpness and\n"
+        "                          color preservation. Its SPIR-V is in\n"
         "                          %s\n"
         "  -M, --vulkan-model FILE The Vulkan network's model (dlssnr.bin)\n"
         "                          Default: %s\n"
@@ -583,6 +588,7 @@ class Engine : public Backend {
     void* answer_ = nullptr; // The latest frame's final network answer.
     std::vector<float> encoded_, neural_, feedback_;
     ProcessingSettings previous_settings_;
+    bool warned_conditioning_ = false;
     // Stream events: frame start, uploaded, evaluated, answered. Timing never
     // stalls the stream; the intervals are read once the answer is complete.
     hip_probe::Handle marks_[4]{};
@@ -758,6 +764,10 @@ public:
         if (!std::isfinite(settings.color_preserve) || settings.color_preserve < 0 || settings.color_preserve > 1)
             throw std::range_error("invalid color preservation strength");
         dlsslop::validate_native_tuning(settings.tuning);
+        // Said once: the Vulkan model's conditioning, which this network does not have.
+        if ((settings.style || !settings.auto_mask || settings.skin_structure != -1) &&
+            !std::exchange(warned_conditioning_, true))
+            std::fprintf(stderr, "the HIP network ignores style, skin structure and the automatic mask\n");
         const bool tuned = !dlsslop::native_tuning_is_default(settings.tuning);
         const bool colored = settings.color_preserve > 0;
         if ((tuned || colored) && !device_scratch_)
@@ -903,6 +913,9 @@ class VulkanEngine : public Backend {
         f.intensity = settings.tuning.intensity;
         f.local_tone = settings.tuning.tone;
         f.local_structure = settings.tuning.structure;
+        f.style = settings.style;
+        f.skin_structure = settings.skin_structure;
+        f.auto_mask = settings.auto_mask;
         f.motion = settings.motion;
         return f;
     }
@@ -1397,11 +1410,15 @@ void run_worker(Options o)
                 settings.color_preserve = BitsToFloat(h->colorPreserveBits.load());
                 if (!w || !height || w > kMaxW || height > kMaxH || h->format.load() != 1)
                     throw std::range_error("unsupported request dimensions or proxy format");
-                // Older/external clients must not silently enable unmapped
-                // NVIDIA model controls that this fixed graph cannot honor.
-                if (h->preset.load() || h->style.load() || h->autoMask.load() != 1 ||
-                    BitsToFloat(h->skinStructureBits.load()) != -1.0f)
-                    throw std::range_error("unmapped neural preset/style/skin-mask controls require their captured defaults");
+                settings.style = h->style.load();
+                settings.skin_structure = BitsToFloat(h->skinStructureBits.load());
+                const uint32_t mask = h->autoMask.load();
+                settings.auto_mask = mask != 0;
+                // Older/external clients must not enable an NVIDIA preset neither
+                // network has, nor conditioning outside the model's range.
+                if (h->preset.load() || settings.style > 2 || mask > 1 ||
+                    !(settings.skin_structure >= -1 && settings.skin_structure <= 2))
+                    throw std::range_error("the preset must be 0, style 0..2, auto-mask 0 or 1 and skin structure -1..2");
                 const size_t bytes = size_t(w) * height * (settings.fp16 ? 8 : 4);
                 // A live control change takes effect on the next request;
                 // never shorten or extend a chain partway through a frame.

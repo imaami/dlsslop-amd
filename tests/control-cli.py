@@ -106,9 +106,10 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
         ('--hdr-mode', '3'), ('--mvec-quality', '3'), ('--mvec-units', '1'), ('-U', '1'),
         ('--mvec-pixels', '4'), ('--white-point', '0.00009'), ('--reversible', '5'),
         ('--debug-scale', '0.0099999995'),
-        ('--preset', '1'), ('--style', '1'), ('--auto-mask', '0'), ('--skin-structure', '0'),
+        ('--preset', '1'), ('--style', '3'), ('--style', '1.5'), ('--auto-mask', '2'),
+        ('--skin-structure', '-1.001'), ('--skin-structure', '2.001'),
         ('--intensity', '0.5', '--preset', '1'), ('--rebuild-ms', '0'), ('-J', '0'),
-        ('--toggle', 'auto-mask'), ('--toggle', 'intensity'), ('--toggle', 'hdr-mode'),
+        ('--toggle', 'preset'), ('--toggle', 'intensity'), ('--toggle', 'hdr-mode'),
         ('--toggle', 'unknown'), ('--toggle',), ('--toggle', 'hold', '--hold', '1'),
         ('set', 'workingscale', '1'), ('toggle', 'enabled'), ('status',),
         ('--quit', '--resume'), ('-A', 'enabled', '--enabled', '1'),
@@ -149,12 +150,12 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     run('--reset')
 
     # Each option below has a working short form and is read back by name.
-    # Captured configuration fields accept only the one real configuration.
+    # The preset accepts only the one real configuration.
     restored = {
         'hdr-mode': ('E', 2), 'sdr16-multipass': ('B', 0),
-        'preset': ('N', 0), 'style': ('y', 0), 'auto-mask': ('M', 1),
+        'preset': ('N', 0), 'style': ('y', 2), 'auto-mask': ('M', 0),
         'intensity': ('i', 0.75), 'local-tone': ('o', 1.25),
-        'local-structure': ('j', 0.5), 'skin-structure': ('K', -1),
+        'local-structure': ('j', 0.5), 'skin-structure': ('K', 0.5),
         'color-preserve': ('L', 0.75), 'sharpness': ('n', 0.5),
         'mvec': ('V', 1), 'mvec-quality': ('Q', 2),
         'mvec-pixels': ('F', 3), 'white-point': ('W', 100),

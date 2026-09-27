@@ -6,9 +6,9 @@ current settings unchanged. There are 40 settings: 39 of the 41 inherited contro
 and native per-pass color preservation, all mapped below.
 
 “Native equivalent” means an implemented AMD-side operation, not an implementation
-of NVIDIA's proprietary parameter mapping. “Fixed” means the extracted network
-supports only the stated configuration; requesting another value fails before
-opening or modifying the control channel.
+of NVIDIA's proprietary parameter mapping. “Fixed” means neither network supports
+another value; requesting one fails before opening or modifying the control
+channel. The HIP network ignores the Vulkan-only settings and says so once.
 
 | Original setting | Current option | Implementation |
 |---|---|---|
@@ -17,12 +17,12 @@ opening or modifying the control channel.
 | `sdr16multipass` | `-B`, `--sdr16-multipass` | Selects binary16 or quantized 8-bit SDR feedback between neural passes. |
 | `passes` | `-P`, `--passes` | Runs successive neural evaluations; each consumes the preceding result. |
 | `preset` | `-N`, `--preset` | **Fixed: 0.** Alternate model presets and their weight/parameter mappings are unavailable. |
-| `style` | `-y`, `--style` | **Fixed: 0.** Natural/cinematic model conditioning is unavailable. |
-| `automask` | `-M`, `--auto-mask` | **Fixed: 1.** There is no recovered switchable semantic-mask configuration. |
+| `style` | `-y`, `--style` | **Vulkan only:** the model's own style conditioning, 0..2. |
+| `automask` | `-M`, `--auto-mask` | **Vulkan only:** the model's automatic skin mask; with it, skin takes its own local structure. |
 | `intensity` | `-i`, `--intensity` | **HIP:** scales each pass's image residual. **Vulkan:** the model's own intensity control, used up to 2. |
 | `localtone` | `-o`, `--local-tone` | **HIP:** scales the low-frequency part of each pass's residual. **Vulkan:** the model's own local tone control, used up to 2. |
 | `localstructure` | `-j`, `--local-structure` | **HIP:** scales the high-frequency part of each pass's residual. **Vulkan:** the model's own local structure control, used up to 2. |
-| `skinstructure` | `-K`, `--skin-structure` | **Fixed: -1.** Structure applies uniformly; separate skin-specific conditioning is unavailable. |
+| `skinstructure` | `-K`, `--skin-structure` | **Vulkan only:** local structure on skin under the automatic mask, 0..2; -1 follows local structure. |
 | `sharpness` | `-n`, `--sharpness` | **HIP only:** adds unsharp-mask detail after each neural pass. |
 | `detail` | `-d`, `--detail` | Vulkan composition strength of the final neural edit. |
 | `colour` | `-C`, `--color` | Vulkan composition strength of the edit's color contribution. |
@@ -83,5 +83,5 @@ dlsslopctl --hold 0
 ```
 
 `--toggle` accepts only writable boolean settings. In particular,
-`--passes 2 --toggle auto-mask` fails without changing passes or any other field.
+`--passes 2 --toggle intensity` fails without changing passes or any other field.
 `--reset` restores settings while preserving transport status and stop state.

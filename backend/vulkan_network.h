@@ -25,6 +25,11 @@ struct VulkanFrame {
     // takes each up to kMaxControl; more counts as kMaxControl.
     unsigned passes = 1;
     float intensity = 1, local_tone = 1, local_structure = 1;
+    // DLSSNR.Style, 0..2, and the automatic mask, under which skin takes its own
+    // local structure; a negative one follows local_structure.
+    unsigned style = 0;
+    float skin_structure = -1;
+    bool auto_mask = true;
     // The network's history, fed by the runtime's motion estimate. It starts over
     // whenever the frame's shape, pass count or controls change.
     bool motion = false;

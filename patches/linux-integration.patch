@@ -2612,10 +2612,10 @@ index f4579c1..d4fba4b 100644
      X(vkGetPhysicalDeviceMemoryProperties2)                                                        \
      X(vkGetPhysicalDeviceProperties2)
 diff --git a/upstream-layer/tools/shmctl.cpp b/upstream-layer/tools/shmctl.cpp
-index 4e16702..5271ee0 100644
+index 4e16702..4312e4f 100644
 --- a/upstream-layer/tools/shmctl.cpp
 +++ b/upstream-layer/tools/shmctl.cpp
-@@ -1,168 +1,313 @@
+@@ -1,168 +1,314 @@
 -// dlssnr-shmctl — read and write the shared-memory header from shell.
 -//
 -// This exists because the helper CLI used to poke the header with
@@ -2794,11 +2794,12 @@ index 4e16702..5271ee0 100644
 +        "directory is created automatically. Settings persist in the shared-memory\n"
 +        "channel, not a configuration file; worker startup may reapply its own settings.\n"
 +        "\n"
-+        "Native HIP supports SDR, HDR and successive neural passes; --passes changes the next\n"
++        "dlsslopd supports SDR, HDR and successive neural passes; --passes changes the next\n"
 +        "frame's inference chain. Each added pass adds another network evaluation.\n"
-+        "Intensity, local tone/structure and sharpness are native residual/sharpening\n"
-+        "operations after each network pass, not NVIDIA NGX parameter implementations.\n"
-+        "The captured network fixes --preset, --style, --auto-mask and --skin-structure.\n"
++        "On Vulkan, intensity, local tone/structure, style, skin structure and the automatic\n"
++        "mask are the model's own controls. On HIP, intensity, local tone/structure and\n"
++        "sharpness are residual/sharpening operations after each network pass, and style,\n"
++        "skin structure and the automatic mask keep their defaults. --preset is fixed.\n"
 +        "White-point controls require linear-light input.\n"
 +        "--hdr-mode changes proxy precision; forcing 16-bit does not reinterpret SDR as HDR.\n"
 +        "HDR normalization follows --color-mode even with an 8-bit proxy.\n"
@@ -3061,7 +3062,7 @@ index 4e16702..5271ee0 100644
  }
  
  void PrintStatus(const ShmHeader* h) {
-@@ -171,11 +316,20 @@ void PrintStatus(const ShmHeader* h) {
+@@ -171,11 +317,20 @@ void PrintStatus(const ShmHeader* h) {
      if (!Initialised(h)) return;
      std::printf("seq_req=%u\nseq_resp=%u\n", h->seq_req.load(), h->seq_resp.load());
      std::printf("width=%u\nheight=%u\n", h->width.load(), h->height.load());
@@ -3084,7 +3085,7 @@ index 4e16702..5271ee0 100644
      std::printf("layer_pid=%u\nlayer_composition_up=%u\nlayer_frames=%llu\nlayer_ms=%.2f\n",
                  h->layerPid.load(),
                  h->layerCompositionUp.load(),
-@@ -189,99 +343,62 @@ void PrintStatus(const ShmHeader* h) {
+@@ -189,99 +344,62 @@ void PrintStatus(const ShmHeader* h) {
      if (!reason.empty()) std::printf("helper_reason=%s\n", reason.c_str());
  }
  

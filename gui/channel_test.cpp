@@ -42,8 +42,7 @@ int main()
             const std::string name = s.name;
             const double initial = dlsslop_control::value(s, (header->*s.field).load());
             require(dlsslop_control::inRange(s, initial), "a default is outside its range");
-            require(dlsslop_control::fixed(s) == (name == "preset" || name == "style" || name == "auto-mask" ||
-                                                   name == "skin-structure"), "wrong fixed settings");
+            require(dlsslop_control::fixed(s) == (name == "preset"), "wrong fixed settings");
             require(!dlsslop_control::fixed(s) || (s.minimum == initial && s.maximum == initial),
                     "a fixed setting admits another value");
             require(dlsslop_control::fixed(s) == (s.minimum == s.maximum), "a one-value range is not fixed");

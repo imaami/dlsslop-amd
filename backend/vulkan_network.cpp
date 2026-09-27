@@ -534,9 +534,13 @@ void VulkanNetwork::infer(const VulkanFrame& frame, uint32_t generation, const u
     controls.intensity = std::min(frame.intensity, kMaxControl);
     controls.local_tone = std::min(frame.local_tone, kMaxControl);
     controls.local_structure = std::min(frame.local_structure, kMaxControl);
+    controls.style = int(frame.style);
+    controls.skin_structure = frame.skin_structure;
+    controls.automatic_mask = frame.auto_mask;
     if (frame.motion) {
         const auto settings = [](const VulkanFrame& f) {
-            return std::tie(f.passes, f.intensity, f.local_tone, f.local_structure);
+            return std::tie(f.passes, f.intensity, f.local_tone, f.local_structure, f.style, f.skin_structure,
+                            f.auto_mask);
         };
         nr::TemporalFrame temporal;
         temporal.reset = !s.last || settings(*s.last) != settings(frame);

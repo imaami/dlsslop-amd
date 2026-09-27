@@ -177,7 +177,7 @@ void editorsFollowTheirSettings(QWidget& window)
         require(slider->minimum() == (s.isFloat ? 0 : static_cast<int>(s.minimum)) &&
                 slider->maximum() == (s.isFloat ? 10000 : static_cast<int>(s.maximum)), "a slider has the wrong range");
     }
-    require(readOnly == 4 && sliders >= 19, "the editor test reached too few settings");
+    require(readOnly == 1 && sliders >= 21, "the editor test reached too few settings");
 }
 
 // An action sends the edits still waiting in the write window, then acts.
