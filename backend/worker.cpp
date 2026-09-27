@@ -12,7 +12,6 @@
 
 #include <algorithm>
 #include <array>
-#include <climits>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
@@ -443,7 +442,6 @@ public:
         h->quit.store(0);
         h->modelUp.store(0);
         h->seq_ok.store(0);
-        h->transportAck.store(0); // A new worker holds no device-local imports.
         // Answer a request left by a previous worker as failed, so the layer
         // presents its own frame; requests made from here on are served.
         h->seq_resp.store(h->seq_req.load(std::memory_order_acquire), std::memory_order_release);
@@ -955,19 +953,17 @@ bool receive_offer(int peer, ShmTransportOffer& offer, dlsslop::Descriptor (&fds
            !(message.msg_flags & (MSG_TRUNC | MSG_CTRUNC));
 }
 
-// Imports every pending offer and acknowledges each imported generation.
-void accept_offers(const TransportListener& listener, Engine& engine, ShmHeader* h)
+// Imports every pending offer and answers each on its own connection: one
+// byte, nonzero when imported.
+void accept_offers(const TransportListener& listener, Engine& engine)
 {
     for (int peer; (peer = accept4(listener.socket.fd, nullptr, nullptr, SOCK_CLOEXEC)) >= 0; close(peer)) {
         ShmTransportOffer offer{};
         dlsslop::Descriptor fds[2];
         if (!receive_offer(peer, offer, fds)) continue; // A start or liveness probe sends nothing.
-        if (!engine.import(offer, fds)) {
-            std::fprintf(stderr, "device-local transport offer rejected\n");
-            continue;
-        }
-        h->transportAck.store(offer.generation, std::memory_order_release);
-        syscall(SYS_futex, reinterpret_cast<uint32_t*>(&h->transportAck), FUTEX_WAKE, INT_MAX, nullptr, nullptr, 0);
+        const uint8_t imported = engine.import(offer, fds);
+        if (!imported) std::fprintf(stderr, "device-local transport offer rejected\n");
+        send(peer, &imported, 1, MSG_NOSIGNAL);
     }
 }
 
@@ -1010,11 +1006,6 @@ bool follow_tier(std::optional<Engine>& engine, const Options& o, Mapping& mappi
         throw;
     }
     publish_raster(o, h, wanted);
-    // The new engine holds no imports. Clear the acknowledgement only now: a
-    // layer that was still waiting for it when the rebuild began has read it
-    // or given up (after 250 ms) long before, and a request naming the old
-    // imports gets transportMiss, so the layer offers them again.
-    h->transportAck.store(0);
     mapping.reason(ready);
     h->modelUp.store(o.test_identity ? 0 : 1);
     h->helperState.store(kHelperRunning, std::memory_order_release);
@@ -1089,7 +1080,7 @@ void run_worker(const Options& o)
         auto active = std::chrono::steady_clock::now();
         std::string failure;
         while (!stopping && !h->quit.load(std::memory_order_relaxed)) {
-            accept_offers(transport, *engine, h);
+            accept_offers(transport, *engine);
             if (traces && !pending_trace) {
                 try {
                     pending_trace = traces->take();
