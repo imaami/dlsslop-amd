@@ -83,6 +83,8 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     assert helptext.startswith('Usage: dlsslopd [OPTIONS]\n')
     assert default(helptext, 'assets') == str(home / '.local/share/dlsslop-amd/model')
     assert default(helptext, 'config') == str(home / '.config/dlsslop-amd/dlsslopd.conf')
+    assert default(helptext, 'backend').startswith('auto; auto takes Vulkan')
+    assert default(helptext, 'vulkan-model') == str(home / '.local/share/dlsslop-amd/dlssnr.bin')
     assert default(helptext, 'modules') == str(installed_modules)
     assert default(helptext, 'shm') == str(channel)
     assert 'DLSSNR_SHM' in helptext and 'DLSSLOP_MODULES' in helptext
@@ -239,6 +241,15 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     for options in (('--self-test', '-x', '5'), ('--idle-exit', '5', '-D')):
         result = run(binary, *options, env=env, cwd=cwd, expected=1)
         assert '--idle-exit requires serving shared-memory requests' in result.stderr, result.stderr
+
+    # The backend is one of three, and the Vulkan network needs its model: without
+    # it, --backend vulkan fails before HIP, the GPU or the channel is touched.
+    result = run(binary, '--backend', 'cuda', env=env, cwd=cwd, expected=1)
+    assert 'backend must be auto, vulkan or hip' in result.stderr, result.stderr
+    result = run(binary, '--backend', 'vulkan', '-D', env=env, cwd=cwd, expected=1)
+    assert f"no model at {home / '.local/share/dlsslop-amd/dlssnr.bin'} (dlsslop-setup --dll" in result.stderr, \
+        result.stderr
+    assert not channel.exists(), 'a missing Vulkan model created a channel'
 
     # The worker's own config file sets settable long options by name, reports
     # errors by line and yields to options; parsing fails before HIP or the

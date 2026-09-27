@@ -9,6 +9,7 @@
 #include "control_selftest.h"
 #include "trace.h"
 #include "shm_protocol.h"
+#include "vulkan_network.h"
 
 #include <algorithm>
 #include <array>
@@ -63,15 +64,35 @@ std::string xdg_path(const char* base, const char* fallback, const char* name)
 }
 
 std::string default_assets() { return xdg_path("XDG_DATA_HOME", ".local/share", "dlsslop-amd/model"); }
+std::string default_vulkan_model() { return xdg_path("XDG_DATA_HOME", ".local/share", "dlsslop-amd/dlssnr.bin"); }
 std::string default_config() { return xdg_path("XDG_CONFIG_HOME", ".config", "dlsslop-amd/dlsslopd.conf"); }
+
+std::string executable_path()
+{
+    std::error_code error;
+    const auto executable = std::filesystem::read_symlink("/proc/self/exe", error);
+    return error ? std::string() : executable.string();
+}
+
+// The Vulkan network's SPIR-V: the installed copy, or a source build's beside
+// the executable.
+std::string vulkan_shaders()
+{
+    const std::filesystem::path executable = executable_path();
+    const auto installed = executable.parent_path().parent_path() / "share/dlsslop-amd/vulkan";
+    const auto development = executable.parent_path() / "vulkan-nr/network";
+    std::error_code error;
+    return (std::filesystem::is_directory(development, error) && !std::filesystem::is_directory(installed, error)
+                ? development : installed).string();
+}
 
 std::string default_modules()
 {
     if (const char* path = std::getenv("DLSSLOP_MODULES"); path && *path) return path;
-    std::error_code error;
-    const auto executable = std::filesystem::read_symlink("/proc/self/exe", error);
-    if (error) return {};
+    const std::filesystem::path executable = executable_path();
+    if (executable.empty()) return {};
     const auto prefix = executable.parent_path().parent_path();
+    std::error_code error;
     const auto installed = prefix / "share/dlsslop-amd/HIP/gfx1201";
     if (std::filesystem::is_directory(installed, error)) return installed.string();
     // A worker run directly from the source tree's build directory uses the
@@ -84,6 +105,7 @@ std::string default_modules()
 struct Options {
     std::string assets, modules, shm = ShmNativeChannelPath();
     std::string input, output, trace_dir;
+    std::string backend = "auto", vulkan_model;
     unsigned width = 0, height = 0, self_test_runs = 10;
     unsigned idle_exit = 0;
     // Unset, a serving worker keeps the channel's live values across restarts.
@@ -98,6 +120,7 @@ Options default_options()
     Options o;
     o.assets = default_assets();
     o.modules = default_modules();
+    o.vulkan_model = default_vulkan_model();
     return o;
 }
 
@@ -159,6 +182,12 @@ struct Spec {
 
 const Spec kSpecs[] = {
     {"config", 'f', Spec::kPath, false, nullptr}, // Read before the others apply.
+    {"backend", 'b', Spec::kValue, true, [](Options& o, const char* v) {
+        if (std::strcmp(v, "auto") && std::strcmp(v, "vulkan") && std::strcmp(v, "hip"))
+            throw std::runtime_error("backend must be auto, vulkan or hip");
+        o.backend = v;
+    }},
+    {"vulkan-model", 'M', Spec::kPath, true, [](Options& o, const char* v) { o.vulkan_model = v; }},
     {"assets", 'a', Spec::kPath, true, [](Options& o, const char* v) { o.assets = v; }},
     {"modules", 'm', Spec::kPath, true, [](Options& o, const char* v) { o.modules = v; }},
     // The channel pairs the worker with its launcher and socket unit.
@@ -209,7 +238,21 @@ void usage(FILE* out)
         "                          comment line; paths are absolute or start with\n"
         "                          ~/. Settings replace the defaults below and\n"
         "                          options override them\n"
-        "  -a, --assets DIR        Model weights (.f16/.f32)\n"
+        "  -b, --backend NAME      Where the network runs: vulkan, hip or auto\n"
+        "                          Default: %s; auto takes Vulkan when its model is\n"
+        "                          installed and a device supports it, else HIP.\n"
+        "                          Vulkan evaluates NVIDIA's own intensity, local\n"
+        "                          tone and local structure controls, sizes itself\n"
+        "                          to each frame, ignores sharpness and color\n"
+        "                          preservation and cannot trace. Its SPIR-V is in\n"
+        "                          %s\n"
+        "  -M, --vulkan-model FILE The Vulkan network's model (dlssnr.bin)\n"
+        "                          Default: %s\n"
+        "                          Uses nonempty XDG_DATA_HOME/dlsslop-amd/dlssnr.bin,\n"
+        "                          otherwise ~/.local/share/dlsslop-amd/dlssnr.bin;\n"
+        "                          dlsslop-setup --dll extracts it from your own\n"
+        "                          nvngx_dlssnr.dll 310.8.0\n"
+        "  -a, --assets DIR        HIP model weights (.f16/.f32)\n"
         "                          Default: %s\n"
         "                          Uses nonempty XDG_DATA_HOME/dlsslop-amd/model,\n"
         "                          otherwise ~/.local/share/dlsslop-amd/model\n"
@@ -230,8 +273,9 @@ void usage(FILE* out)
         "                          Default: %u on a new channel; each pass consumes\n"
         "                          the previous output. Unset here and in FILE, a\n"
         "                          starting worker keeps the channel's live count\n"
-        "  -d, --device INDEX      HIP device index\n"
-        "                          Default: auto, first visible gfx1201 device\n"
+        "  -d, --device INDEX      HIP device, or with Vulkan physical device, index\n"
+        "                          Default: auto, the first device that can run\n"
+        "                          the network (HIP: gfx1201)\n"
         "  -D, --diagnose          Enumerate HIP devices, report the selection, exit\n"
         "                          Default: off; exit status 1 if none is usable\n"
         "  -S, --self-test         Real model test on a deterministic gradient\n"
@@ -273,6 +317,8 @@ void usage(FILE* out)
         "                          Default: off; evaluate the real HIP network\n"
         "  -h, --help              Show this help and exit (default: off)\n",
         config.empty() ? "unset; no home directory" : config.c_str(), settable.c_str(),
+        defaults.backend.c_str(), vulkan_shaders().c_str(),
+        defaults.vulkan_model.empty() ? "unset; no home directory" : defaults.vulkan_model.c_str(),
         defaults.assets.empty() ? "unset; required for inference" : defaults.assets.c_str(),
         defaults.modules.empty() ? "unset; required for inference" : defaults.modules.c_str(),
         defaults.shm.c_str(), ShmNativeDefaultPath().c_str(), kNativeDefaultTier,
@@ -461,7 +507,44 @@ public:
     }
 };
 
-class Engine {
+// The network as the serving loop, the offline mode and the self-test see it.
+class Backend {
+public:
+    virtual ~Backend() = default;
+    // A request's frames: host memory, or an imported device-local pair of a
+    // nonzero generation.
+    struct Frames {
+        const uint8_t* proxy = nullptr;
+        uint8_t* answer = nullptr;
+        uint32_t generation = 0;
+    };
+    virtual const char* name() const = 0;
+    virtual unsigned tier() const = 0;
+    // What the network runs at, for the log.
+    virtual std::string processing() const = 0;
+    // Takes a new tier without a new backend; false when it needs one.
+    virtual bool retier(unsigned) { return false; }
+    virtual void prepare() = 0;
+    // False when a request of this shape needs a build first (reshape): seconds
+    // of work the caller reports as a start, not a slow frame.
+    virtual bool fits(unsigned, unsigned, unsigned, const ProcessingSettings&) const { return true; }
+    virtual void reshape(unsigned, unsigned, unsigned, const ProcessingSettings&) {}
+    // Serving only: DMA the channel's frame slots directly.
+    virtual void pin(uint8_t*, uint8_t*, size_t) {}
+    // Serving, between frames: imports an offered proxy/answer pair. The backend
+    // owns each descriptor it imported; fds keeps the rest to close.
+    virtual bool import(const ShmTransportOffer&, dlsslop::Descriptor (&)[2]) = 0;
+    // The imported pair of a generation that holds bytes; generation 0 when none does.
+    virtual Frames frames(uint32_t generation, size_t bytes) const = 0;
+    // Diagnostics: copies host or device memory, such as an imported frame, to the host.
+    virtual void read_back(void* host, const void* source, size_t bytes) = 0;
+    // w * h RGBA8 frames, or RGBA16F with settings.fp16.
+    virtual void infer(const Frames& io, unsigned w, unsigned h, unsigned passes,
+                       const ProcessingSettings& settings = {}, dlsslop::FrameTrace* trace = nullptr) = 0;
+    float upload_ms = 0, inference_ms = 0, readback_ms = 0;
+};
+
+class Engine : public Backend {
     Options options_;
     unsigned tier_;
     std::unique_ptr<hip_reference::Network> network_;
@@ -505,9 +588,14 @@ class Engine {
         api.Check(api.hipEventRecord(marks_[i], network_->Stream()), "record timing event");
     }
 public:
-    float upload_ms = 0, inference_ms = 0, readback_ms = 0;
     Engine(Options o, unsigned tier) : options_(std::move(o)), tier_(tier) {}
-    unsigned tier() const { return tier_; }
+    const char* name() const override { return "HIP"; }
+    unsigned tier() const override { return tier_; }
+    std::string processing() const override
+    {
+        const auto raster = dlsslop::geometry(1, 1, tier_);
+        return "processing=" + std::to_string(raster.width) + "x" + std::to_string(raster.height);
+    }
     // The members go next, in reverse order: the helpers before the network whose runtime they use.
     ~Engine()
     {
@@ -519,7 +607,7 @@ public:
         for (void* buffer : {device_input_, device_feedback_, device_output_, device_scratch_})
             if (buffer) api.hipFree(buffer);
     }
-    void prepare()
+    void prepare() override
     {
         if (options_.test_identity) return;
         const auto raster = dlsslop::geometry(1, 1, tier_);
@@ -557,14 +645,12 @@ public:
             selftest::check_codec(*kernels_);
         }
     }
-    // Serving only: DMA the channel's frame slots directly (see GpuCodec::pin).
-    void pin(uint8_t* input, uint8_t* output, size_t bytes)
+    // See GpuCodec::pin.
+    void pin(uint8_t* input, uint8_t* output, size_t bytes) override
     {
         if (gpu_codec_) gpu_codec_->pin(input, output, bytes);
     }
-    // Serving, between frames: imports an offered proxy/answer pair for the GPU
-    // codec. HIP owns each descriptor it imported; fds keeps the rest to close.
-    bool import(const ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2])
+    bool import(const ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2]) override
     {
         if (!gpu_codec_ || !offer.generation) return false;
         auto& api = network_->Runtime();
@@ -594,20 +680,22 @@ public:
         *slot = next;
         return true;
     }
-    struct Frames { const uint8_t* proxy; uint8_t* answer; };
-    // The imported frames of a generation that hold bytes, or nulls.
-    Frames frames(uint32_t generation, size_t bytes) const
+    Frames frames(uint32_t generation, size_t bytes) const override
     {
         for (const auto& imported : imported_)
             if (imported.generation == generation && imported.bytes >= bytes)
-                return {static_cast<const uint8_t*>(imported.frame[0]), static_cast<uint8_t*>(imported.frame[1])};
+                return {static_cast<const uint8_t*>(imported.frame[0]), static_cast<uint8_t*>(imported.frame[1]), generation};
         return {};
     }
-    // Diagnostics: copies host or device memory, such as an imported frame, to the host.
-    void read_back(void* host, const void* source, size_t bytes)
+    void read_back(void* host, const void* source, size_t bytes) override
     {
         auto& api = network_->Runtime();
         api.Check(api.hipMemcpy(host, source, bytes, 4), "read diagnostic frame");
+    }
+    void infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
+               dlsslop::FrameTrace* trace = nullptr) override
+    {
+        infer(io.proxy, w, h, io.answer, passes, settings, trace);
     }
     // Input and output are w * h RGBA8, or RGBA16F with settings.fp16. verify
     // checks the GPU codec against the CPU reference inside the timed frame.
@@ -772,6 +860,150 @@ public:
     }
 };
 
+// DLSSNR-AMD's network on a Vulkan device of the daemon's own.
+class VulkanEngine : public Backend {
+    std::unique_ptr<dlsslop::VulkanNetwork> network_;
+    unsigned tier_;
+    bool warned_sharpness_ = false, warned_color_ = false;
+
+    static dlsslop::VulkanFrame frame(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings)
+    {
+        dlsslop::VulkanFrame f;
+        f.width = w;
+        f.height = h;
+        f.fp16 = settings.fp16;
+        f.passes = passes;
+        f.intensity = settings.tuning.intensity;
+        f.local_tone = settings.tuning.tone;
+        f.local_structure = settings.tuning.structure;
+        f.motion = settings.motion;
+        return f;
+    }
+public:
+    VulkanEngine(std::unique_ptr<dlsslop::VulkanNetwork> network, unsigned tier)
+        : network_(std::move(network)), tier_(tier) {}
+    const char* name() const override { return "Vulkan"; }
+    unsigned tier() const override { return tier_; }
+    std::string processing() const override { return "Vulkan on " + network_->device_name() + " at each frame's extent"; }
+    // The network sizes itself to each frame: a tier only changes the raster the layer targets.
+    bool retier(unsigned tier) override
+    {
+        tier_ = tier;
+        return true;
+    }
+    // Built before the daemon reports itself ready, for the raster's usual frame.
+    void prepare() override
+    {
+        const auto raster = dlsslop::geometry(1, 1, tier_);
+        network_->shape(frame(raster.width, tier_, 1, {}));
+    }
+    bool fits(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings) const override
+    {
+        return !network_->shape_differs(frame(w, h, passes, settings));
+    }
+    void reshape(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings) override
+    {
+        network_->shape(frame(w, h, passes, settings));
+    }
+    bool import(const ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2]) override
+    {
+        int raw[2] = {fds[0].fd, fds[1].fd};
+        const bool imported = network_->import(offer.generation, offer.allocation, raw);
+        fds[0].fd = raw[0];
+        fds[1].fd = raw[1];
+        return imported;
+    }
+    Frames frames(uint32_t generation, size_t bytes) const override
+    {
+        return network_->holds(generation, bytes) ? Frames{nullptr, nullptr, generation} : Frames{};
+    }
+    void read_back(void*, const void*, size_t) override
+    {
+        throw std::runtime_error("the Vulkan network cannot trace; use --backend hip");
+    }
+    void infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
+               dlsslop::FrameTrace* trace = nullptr) override
+    {
+        if (trace) throw std::runtime_error("the Vulkan network cannot trace; use --backend hip");
+        // Said once each: the HIP backend's own stages, which this network does not have.
+        if (settings.tuning.sharpness != 0 && !std::exchange(warned_sharpness_, true))
+            std::fprintf(stderr, "the Vulkan network ignores sharpness\n");
+        if (settings.color_preserve != 0 && !std::exchange(warned_color_, true))
+            std::fprintf(stderr, "the Vulkan network ignores color preservation\n");
+        network_->infer(frame(w, h, passes, settings), io.generation, io.proxy, io.answer);
+        upload_ms = network_->upload_ms;
+        inference_ms = network_->inference_ms;
+        readback_ms = network_->readback_ms;
+    }
+};
+
+// Where the Vulkan network loads from; the pipeline cache is a convenience.
+dlsslop::VulkanPaths vulkan_paths(const Options& o)
+{
+    std::string cache = xdg_path("XDG_CACHE_HOME", ".cache", "dlsslop-amd/vulkan-pipelines.cache");
+    std::error_code error;
+    if (!cache.empty() && !std::filesystem::create_directories(std::filesystem::path(cache).parent_path(), error) && error)
+        cache.clear();
+    return {o.vulkan_model, vulkan_shaders(), cache};
+}
+
+// The backend --backend selects. auto takes the Vulkan network when its model is
+// there and a device can run it, and says why not before taking HIP.
+std::unique_ptr<Backend> open_backend(Options& o, unsigned tier)
+{
+    if (!o.test_identity && o.backend != "hip") {
+        try {
+            std::error_code error;
+            if (!std::filesystem::is_regular_file(o.vulkan_model, error))
+                throw std::runtime_error("no model at " + o.vulkan_model +
+                                         " (dlsslop-setup --dll extracts it from nvngx_dlssnr.dll 310.8.0)");
+            auto network = std::make_unique<dlsslop::VulkanNetwork>(vulkan_paths(o), o.device);
+            std::fprintf(stderr, "Vulkan network on %s\n", network->device_name().c_str());
+            return std::make_unique<VulkanEngine>(std::move(network), tier);
+        } catch (const std::exception& e) {
+            if (o.backend == "vulkan") throw;
+            std::fprintf(stderr, "Vulkan network unavailable (%s); using HIP\n", e.what());
+        }
+    }
+    if (!o.test_identity) o.device = select_device(o.device);
+    return std::make_unique<Engine>(o, tier);
+}
+
+// The Vulkan network on a deterministic gradient: finite, repeatable and changed.
+void run_vulkan_self_test(const Options& o, Backend& engine)
+{
+    const unsigned passes = o.passes.value_or(kNativeDefaultPasses);
+    const auto raster = dlsslop::geometry(1, 1, engine.tier());
+    const unsigned w = raster.width, h = engine.tier();
+    std::vector<uint8_t> input(size_t(w) * h * 4), output(input.size()), first;
+    for (unsigned y = 0; y < h; ++y)
+        for (unsigned x = 0; x < w; ++x) {
+            uint8_t* p = &input[(size_t(y) * w + x) * 4];
+            p[0] = uint8_t(x * 255 / (w - 1));
+            p[1] = uint8_t(y * 255 / (h - 1));
+            p[2] = uint8_t(((x / 32 + y / 32) & 1) ? 200 : 60);
+            p[3] = 255;
+        }
+    for (unsigned run = 0; run < o.self_test_runs; ++run) {
+        engine.infer({input.data(), output.data(), 0}, w, h, passes);
+        if (!run) first = output;
+        else if (output != first) throw std::runtime_error("self-test run " + std::to_string(run + 1) + " differs from the first");
+    }
+    size_t changed = 0;
+    for (size_t i = 0; i < input.size(); ++i) changed += (i % 4 != 3) && input[i] != output[i];
+    if (!changed) throw std::runtime_error("self-test: the network left the input unchanged");
+    if (!o.output.empty()) {
+        std::ofstream ppm(o.output, std::ios::binary);
+        ppm << "P6\n" << w << ' ' << h << "\n255\n";
+        for (size_t i = 0; i < output.size(); i += 4) ppm.write(reinterpret_cast<const char*>(&output[i]), 3);
+        if (!ppm) throw std::runtime_error("write " + o.output);
+    }
+    std::fprintf(stderr, "Vulkan self-test PASS: %u identical runs at %ux%u; changed_components=%zu\n"
+                 "tier=%u; passes=%u; upload_ms=%.3f; network_ms=%.3f; readback_ms=%.3f\n",
+                 o.self_test_runs, w, h, changed, engine.tier(), passes, engine.upload_ms, engine.inference_ms,
+                 engine.readback_ms);
+}
+
 void run_self_test(const Options& o, Engine& engine)
 {
     const unsigned passes = o.passes.value_or(kNativeDefaultPasses);
@@ -874,7 +1106,7 @@ void run_self_test(const Options& o, Engine& engine)
                 engine.upload_ms, engine.inference_ms, engine.readback_ms);
 }
 
-void run_offline(const Options& o, Engine& engine)
+void run_offline(const Options& o, Backend& engine)
 {
     const unsigned passes = o.passes.value_or(kNativeDefaultPasses);
     const size_t bytes = size_t(o.width) * o.height * 4;
@@ -885,7 +1117,7 @@ void run_offline(const Options& o, Engine& engine)
     in.seekg(0);
     if (!in.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(bytes)))
         throw std::runtime_error("read offline input");
-    engine.infer(pixels.data(), o.width, o.height, result.data(), passes);
+    engine.infer({pixels.data(), result.data(), 0}, o.width, o.height, passes);
     std::ofstream out(o.output, std::ios::binary);
     if (!out.write(reinterpret_cast<const char*>(result.data()), static_cast<std::streamsize>(result.size())))
         throw std::runtime_error("write offline output");
@@ -955,7 +1187,7 @@ bool receive_offer(int peer, ShmTransportOffer& offer, dlsslop::Descriptor (&fds
 
 // Imports every pending offer and answers each on its own connection: one
 // byte, nonzero when imported.
-void accept_offers(const TransportListener& listener, Engine& engine)
+void accept_offers(const TransportListener& listener, Backend& engine)
 {
     for (int peer; (peer = accept4(listener.socket.fd, nullptr, nullptr, SOCK_CLOEXEC)) >= 0; close(peer)) {
         ShmTransportOffer offer{};
@@ -984,7 +1216,7 @@ void publish_raster(const Options& o, ShmHeader* h, unsigned tier)
 // engine. An unusable tier is overwritten with the active one. A failed
 // rebuild ends the worker, leaving the active tier for the next one. True
 // after a rebuild.
-bool follow_tier(std::optional<Engine>& engine, const Options& o, Mapping& mapping, const char* ready)
+bool follow_tier(std::unique_ptr<Backend>& engine, const Options& o, Mapping& mapping, const char* ready)
 {
     auto* h = mapping.h;
     const unsigned wanted = h->nativeTier.load(), active = engine->tier();
@@ -993,13 +1225,19 @@ bool follow_tier(std::optional<Engine>& engine, const Options& o, Mapping& mappi
         h->nativeTier.store(active);
         return false;
     }
+    // A network that sizes itself to each frame only needs the layer to target the new raster.
+    if (engine->retier(wanted)) {
+        std::fprintf(stderr, "neural tier %u -> %u\n", active, wanted);
+        publish_raster(o, h, wanted);
+        return false;
+    }
     h->helperState.store(kHelperStarting);
     h->modelUp.store(0);
     std::fprintf(stderr, "neural tier %u -> %u: rebuilding\n", active, wanted);
     mapping.reason("rebuilding for neural tier " + std::to_string(wanted));
     engine.reset(); // The old network's memory goes first.
     try {
-        engine.emplace(o, wanted);
+        engine = std::make_unique<Engine>(o, wanted);
         engine->prepare();
     } catch (...) {
         h->nativeTier.store(active);
@@ -1023,7 +1261,7 @@ bool retire(ShmHeader* h, uint32_t request)
     return false;
 }
 
-void run_worker(const Options& o)
+void run_worker(Options o)
 {
     Mapping mapping(o.shm);
     auto* h = mapping.h;
@@ -1053,10 +1291,11 @@ void run_worker(const Options& o)
         ~Stop() { flag.store(true); thread.join(); }
     } stop_heartbeat{heartbeat_stop, heartbeat};
     try {
-        mapping.reason(o.test_identity ? "IDENTITY TEST: inference disabled" : "initializing native HIP model");
+        mapping.reason(o.test_identity ? "IDENTITY TEST: inference disabled" : "initializing the network");
         const TransportListener transport(o.shm, !o.test_identity && !o.cpu_codec);
-        std::optional<Engine> engine;
-        engine.emplace(o, tier);
+        std::unique_ptr<Backend> engine = open_backend(o, tier);
+        if (traces && dynamic_cast<VulkanEngine*>(engine.get()))
+            throw std::runtime_error("--trace-dir requires --backend hip");
         engine->prepare();
         // Only serving stops gracefully, from the ready announcement on.
         // Before it, and in every other mode, SIGINT and SIGTERM terminate.
@@ -1064,14 +1303,13 @@ void run_worker(const Options& o)
         std::signal(SIGTERM, stop_handler);
         h->modelUp.store(o.test_identity ? 0 : 1);
         h->helperState.store(kHelperRunning, std::memory_order_release);
-        const char* const ready = o.test_identity ? "IDENTITY TEST: no neural rendering"
-                                                  : "native HIP ready; display-encoded RGBA8/FP16 proxy";
+        const std::string ready = o.test_identity ? "IDENTITY TEST: no neural rendering"
+                                                  : std::string("native ") + engine->name() +
+                                                        " ready; display-encoded RGBA8/FP16 proxy";
         mapping.reason(ready);
         std::fprintf(stderr, "worker ready: %s%s\n", o.shm.c_str(), o.test_identity ? " [IDENTITY TEST]" : "");
-        const auto raster = dlsslop::geometry(1, 1, tier);
         if (!o.test_identity)
-            std::fprintf(stderr, "neural tier=%u; processing=%ux%u; %s; live controls enabled\n",
-                         tier, raster.width, raster.height,
+            std::fprintf(stderr, "neural tier=%u; %s; %s; live controls enabled\n", tier, engine->processing().c_str(),
                          o.cpu_compose ? "CPU composition" : "native-resolution Vulkan composition");
         uint64_t frames = 0;
         unsigned previous_passes = 0;
@@ -1091,7 +1329,7 @@ void run_worker(const Options& o)
             }
             const uint32_t request = h->seq_req.load(std::memory_order_acquire);
             if (request == last) {
-                if (follow_tier(engine, o, mapping, ready)) active = std::chrono::steady_clock::now();
+                if (follow_tier(engine, o, mapping, ready.c_str())) active = std::chrono::steady_clock::now();
                 const timespec timeout{0, 100000000};
                 syscall(SYS_futex, reinterpret_cast<uint32_t*>(&h->seq_req), FUTEX_WAIT,
                         request, &timeout, nullptr, 0);
@@ -1139,17 +1377,25 @@ void run_worker(const Options& o)
                     previous_passes = passes;
                 }
                 // The request's frames: an imported device-local pair, or the channel's slots.
-                Engine::Frames io{mapping.input, mapping.output};
+                Backend::Frames io{mapping.input, mapping.output};
                 if (const uint32_t generation = h->transportGen.load()) {
                     io = engine->frames(generation, bytes);
-                    if (!io.proxy) {
+                    if (!io.generation) {
                         h->transportMiss.store(generation);
                         throw std::range_error("request names device-local frames this worker has not imported");
                     }
                 } else {
                     engine->pin(mapping.input, mapping.output, bytes);
                 }
-                engine->infer(io.proxy, w, height, io.answer, passes, settings, pending_trace.get());
+                // A frame of a new shape needs a build: seconds in which the layer
+                // presents its own frames rather than waiting for this one.
+                if (!engine->fits(w, height, passes, settings)) {
+                    h->helperState.store(kHelperStarting);
+                    std::fprintf(stderr, "building the network for %ux%u%s\n", w, height, settings.fp16 ? " FP16" : "");
+                    engine->reshape(w, height, passes, settings);
+                    h->helperState.store(kHelperRunning, std::memory_order_release);
+                }
+                engine->infer(io, w, height, passes, settings, pending_trace.get());
                 if (h->seq_req.load(std::memory_order_acquire) != request)
                     throw std::range_error("request changed during inference; old answer discarded");
                 std::string trace_metadata;
@@ -1235,16 +1481,20 @@ int main(int argc, char** argv)
 {
     try {
         Options o = parse(argc, argv);
-        if (o.diagnose) { std::fprintf(stderr, "selected device %d\n", select_device(o.device)); return 0; }
+        const unsigned tier = o.tier.value_or(kNativeDefaultTier);
+        if (o.diagnose) {
+            const auto engine = open_backend(o, tier);
+            if (!dynamic_cast<VulkanEngine*>(engine.get())) std::fprintf(stderr, "selected device %d\n", o.device);
+            return 0;
+        }
         if (o.test_identity)
             std::fprintf(stderr, "IDENTITY TEST MODE: no model, no HIP, no neural rendering.\n");
-        else
-            o.device = select_device(o.device);
         if (o.self_test || !o.input.empty()) {
-            Engine engine(o, o.tier.value_or(kNativeDefaultTier));
-            engine.prepare();
-            if (o.self_test) run_self_test(o, engine);
-            else run_offline(o, engine);
+            const auto engine = open_backend(o, tier);
+            engine->prepare();
+            if (!o.self_test) run_offline(o, *engine);
+            else if (auto* hip = dynamic_cast<Engine*>(engine.get())) run_self_test(o, *hip);
+            else run_vulkan_self_test(o, *engine);
         } else {
             run_worker(o);
         }

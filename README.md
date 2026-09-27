@@ -20,12 +20,15 @@ single god damned line of code in this repo.
 
 ## Description
 
-Experimental Linux source integration of [lmxxf](https://github.com/lmxxf)'s
-[AMD neural implementation](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting)
+Experimental Linux source integration of [mochizuki0323](https://github.com/mochizuki0323)'s
+[Vulkan neural implementation](https://github.com/mochizuki0323/DLSSNR-AMD),
+[lmxxf](https://github.com/lmxxf)'s
+[HIP neural implementation](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting)
 and [bmitch87](https://github.com/bmitch87)'s
 [Vulkan presentation layer](https://github.com/bmitch87/DLSS5VKLayer). A native
-HIP worker processes a proxy of the game frame; the Vulkan layer composes the
-neural edit at the original resolution. The standalone Qt 6 Widgets controller
+daemon runs the network on a proxy of the game frame, on a Vulkan device of its
+own or, as the alternative, with HIP; the Vulkan layer composes the neural edit
+at the original resolution. The standalone Qt 6 Widgets controller
 exposes all 41 settings. Worker, layer, CLI and GUI use shared-memory protocol
 **26**.
 
@@ -83,9 +86,10 @@ cmake --build build --parallel 2
 ctest --test-dir build --output-on-failure
 ```
 
-This compiles and validates ten Vulkan shaders, compiles the `gfx1201` HIP modules
-(the network's and `linux_native`, the worker's codec, tuning, color and motion
-kernels), and builds the worker, layer, CLI, Qt GUI and tests.
+This compiles and validates ten Vulkan shaders, compiles the Vulkan network's
+SPIR-V with `glslang` and the `gfx1201` HIP modules (the HIP network's and
+`linux_native`, its codec, tuning, color and motion kernels), and builds the
+daemon, layer, CLI, Qt GUI and tests.
 CMake builds the shaders from their prepared sources; `-DDXC` defaults to `dxc`
 on `PATH`.
 Compilation does not require a GPU, ROCm runtime or model weights. Qt uses the
@@ -119,11 +123,11 @@ installs these commands:
 
 | Command | Purpose |
 |---|---|
-| `dlsslopd` | Native HIP worker |
+| `dlsslopd` | Neural rendering daemon (Vulkan or HIP) |
 | `dlsslopctl` | Command-line controller |
 | `dlsslop-gui` | Qt controller |
 | `dlsslop-test` | Color diagnostic |
-| `dlsslop-setup` | Model coefficient importer |
+| `dlsslop-setup` | Model extractor and importer |
 | `dlsslop-run` | Game launcher |
 
 It also installs the release README, [packaging/README.md](packaging/README.md),
@@ -135,10 +139,13 @@ use the controllers and run capture and color checks.
 
 ## Source-tree notes
 
-The worker finds HIP modules under `share/dlsslop-amd/HIP/gfx1201` relative to
-its executable prefix, with `assets/HIP/gfx1201` as the development fallback.
+The daemon finds the Vulkan network's SPIR-V under `share/dlsslop-amd/vulkan`
+relative to its executable prefix, with `vulkan-nr/network` beside the executable
+as the source build's. It finds HIP modules under `share/dlsslop-amd/HIP/gfx1201`,
+with `assets/HIP/gfx1201` as the development fallback.
 Set `DLSSLOP_MODULES` or pass `-m` / `--modules` to select another directory.
-`--device N` selects a visible compatible HIP device.
+`--device N` selects a compatible device by its index: HIP's, or with the Vulkan
+backend the physical device's.
 
 The layer retains upstream `DLSSNR_*` environment names. Its shared runtime
 fallback is `/tmp/dlssnr-UID/`, with `DLSSNR_UID` overriding that ID; the

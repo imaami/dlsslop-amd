@@ -124,9 +124,10 @@ target_link_libraries(dlsslop-vknr PUBLIC vulkan Threads::Threads)
 add_library(dlsslop-codec OBJECT backend/codec.cpp)
 # The worker uses a small, versioned HIP ABI loaded with dlopen. The build itself
 # deliberately does not require ROCm headers or a GPU; real inference does.
-add_executable(dlsslopd backend/worker.cpp)
+add_executable(dlsslopd backend/worker.cpp backend/vulkan_network.cpp)
 target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
-target_link_libraries(dlsslopd PRIVATE dlsslop-codec Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-vknr Threads::Threads ${CMAKE_DL_LIBS})
+add_dependencies(dlsslopd vulkan-nr-shaders)
 target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 
 if(BUILD_TESTING)

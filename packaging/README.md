@@ -9,12 +9,16 @@ Model weights are separate.
 ## Runtime requirements
 
 On Debian Sid, or any other reasonably up-to-date Linux system, keep your
-existing Mesa RADV installation and the normal `amdgpu` kernel driver. Install
-compatible HIP userspace separately; `dlsslopd` needs `libamdhip64.so`, and
-access to `/dev/kfd` and the GPU's render device. HIP userspace must support
-`gfx1201`. The daemon runs on the host, under systemd or in a terminal, never
-inside Steam's runtime. If its loader cannot find your HIP installation, select
-the library explicitly:
+existing Mesa RADV installation and the normal `amdgpu` kernel driver. By
+default `dlsslopd` runs the network on Vulkan, which needs nothing else: RADV
+from Mesa 26.2 or newer provides the FP8 cooperative matrices it uses
+(`VK_KHR_cooperative_matrix`, `VK_EXT_shader_float8`). The daemon runs on the
+host, under systemd or in a terminal, never inside Steam's runtime.
+
+The HIP backend (`dlsslopd --backend hip`) is the alternative. It needs
+compatible HIP userspace installed separately: `libamdhip64.so` supporting
+`gfx1201`, and access to `/dev/kfd` and the GPU's render device. If its loader
+cannot find your HIP installation, select the library explicitly:
 
 ```bash
 export DLSSLOP_HIP_LIBRARY=/path/to/libamdhip64.so
@@ -105,9 +109,24 @@ itself.
 
 ## Set up the model
 
-Obtain compatible coefficients using the
-[model project's instructions](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting).
-Import your local ZIP or extracted coefficient directory:
+The model is NVIDIA's and is not included. The Vulkan network reads it from your
+own copy of `nvngx_dlssnr.dll`, which must be version 310.8.0, or a ZIP holding
+it:
+
+```bash
+dlsslop-setup --dll /path/to/nvngx_dlssnr_310.8.0.zip
+```
+
+The extractor reads the DLL's weight data without running it, checks all 599
+entries against the model the network was built for, and only then writes
+`$XDG_DATA_HOME/dlsslop-amd/dlssnr.bin`, or `~/.local/share/dlsslop-amd/dlssnr.bin`,
+where `dlsslopd` looks by default; `--vulkan-model FILE` selects another file for
+both. A DLL of any other version is refused. `dlsslopd --backend auto`, the
+default, runs the network on Vulkan once this model is there.
+
+For the HIP backend, obtain its coefficients using the
+[HIP project's instructions](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting)
+and import your local ZIP or extracted coefficient directory:
 
 ```bash
 dlsslop-setup --source /path/to/model-package.zip
@@ -122,6 +141,12 @@ again, for example after a disk error. The default model directory is
 `dlsslopd` uses the same default. To use a different directory, pass
 `--output DIR` to the importer and `--assets DIR` to the daemon. The model's
 terms are separate from the software licenses.
+
+The two backends implement the same network separately, and their pictures
+differ noticeably; neither is NVIDIA's. The Vulkan network runs about two to
+three times faster. Its intensity, local tone and local structure settings are
+NVIDIA's own model controls, not the HIP backend's residual filters, and it has
+no sharpness or color preservation stage.
 
 ## Start a game
 

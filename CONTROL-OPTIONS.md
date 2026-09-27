@@ -19,11 +19,11 @@ opening or modifying the control channel.
 | `preset` | `-N`, `--preset` | **Fixed: 0.** Alternate model presets and their weight/parameter mappings are unavailable. |
 | `style` | `-y`, `--style` | **Fixed: 0.** Natural/cinematic model conditioning is unavailable. |
 | `automask` | `-M`, `--auto-mask` | **Fixed: 1.** There is no recovered switchable semantic-mask configuration. |
-| `intensity` | `-i`, `--intensity` | **Native equivalent:** scales each pass's image residual. |
-| `localtone` | `-o`, `--local-tone` | **Native equivalent:** scales the low-frequency part of each pass's residual. |
-| `localstructure` | `-j`, `--local-structure` | **Native equivalent:** scales the high-frequency part of each pass's residual. |
+| `intensity` | `-i`, `--intensity` | **HIP:** scales each pass's image residual. **Vulkan:** the model's own intensity control, used up to 2. |
+| `localtone` | `-o`, `--local-tone` | **HIP:** scales the low-frequency part of each pass's residual. **Vulkan:** the model's own local tone control. |
+| `localstructure` | `-j`, `--local-structure` | **HIP:** scales the high-frequency part of each pass's residual. **Vulkan:** the model's own local structure control. |
 | `skinstructure` | `-K`, `--skin-structure` | **Fixed: -1.** Structure applies uniformly; separate skin-specific conditioning is unavailable. |
-| `sharpness` | `-n`, `--sharpness` | **Native equivalent:** adds unsharp-mask detail after each neural pass. |
+| `sharpness` | `-n`, `--sharpness` | **HIP only:** adds unsharp-mask detail after each neural pass. |
 | `detail` | `-d`, `--detail` | Vulkan composition strength of the final neural edit. |
 | `colour` | `-C`, `--color` | Vulkan composition strength of the edit's color contribution. |
 | `guard` | `-g`, `--guard` | Bounds per-pixel relighting gain in ratio-based composition modes. |
@@ -53,7 +53,7 @@ opening or modifying the control channel.
 | `applymodel` | `-m`, `--apply-model` | Shows the clean frame or applies the computed edit; inference still runs. |
 | `hold` | `-H`, `--hold` | Freezes captured input while allowing settings to rerun processing. |
 | `togglekey` | `-k`, `--toggle-key` | Selects the Linux input key watched by the layer. |
-| None | `-L`, `--color-preserve` | **Native:** anchors each pass's broad chroma changes to the original input before history and feedback; see [COLOR-PRESERVATION.md](COLOR-PRESERVATION.md). |
+| None | `-L`, `--color-preserve` | **HIP only:** anchors each pass's broad chroma changes to the original input before history and feedback; see [COLOR-PRESERVATION.md](COLOR-PRESERVATION.md). |
 
 The native residual controls operate after **each** evaluation and before its
 output feeds the next pass. The low-frequency component is a 3×3 binomial blur;
