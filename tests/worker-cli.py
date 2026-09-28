@@ -90,6 +90,10 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     assert 'DLSSNR_SHM' in helptext and 'DLSSLOP_MODULES' in helptext
     assert default(helptext, 'trace-dir').startswith('disabled')
     assert default(helptext, 'idle-exit').startswith('0 (never)')
+    for flag in ('diagnose', 'self-test', 'cpu-compose', 'cpu-codec', 'performance', 'once', 'test-identity'):
+        entry = re.search(r'\n  -\S, --' + flag + r' .*?(?=\n  -)', helptext, re.S)
+        assert entry and re.search(r'Default: off\b', entry.group(0)), (flag, helptext)
+    assert 'image width (1..7680)' in helptext and 'image height (1..4320)' in helptext
     assert "not 'request'" in helptext and 'ln it to DIR/request' in helptext
     assert not channel.exists(), '--help created a channel'
 

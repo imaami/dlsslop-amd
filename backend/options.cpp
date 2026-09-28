@@ -138,6 +138,10 @@ const Spec kSpecs[] = {
 };
 } // namespace
 
+namespace {
+const char* on_off(bool value) { return value ? "on" : "off"; }
+} // namespace
+
 void usage(FILE* out)
 {
     const Options defaults = default_options();
@@ -200,10 +204,10 @@ void usage(FILE* out)
         "                          the network (HIP: gfx1201)\n"
         "  -D, --diagnose          Open the backend serving would use, report its\n"
         "                          device and exit; HIP also lists its devices\n"
-        "                          Default: off; exit status 1 if none is usable\n"
+        "                          Default: %s; exit status 1 if none is usable\n"
         "  -S, --self-test         Real model test on a deterministic gradient\n"
         "                          Also checks tuning, motion history and FP16 codec\n"
-        "                          Default: off\n"
+        "                          Default: %s\n"
         "  -r, --self-test-runs N  Identical-input runs, including baseline (2..1000)\n"
         "                          Default: %u; requires --self-test\n"
         "  -i, --input FILE        Offline tightly packed RGBA8 input\n"
@@ -211,19 +215,19 @@ void usage(FILE* out)
         "  -o, --output FILE       Offline RGBA8 output; self-test PPM output\n"
         "                          Default: unset; required with --input;\n"
         "                          --self-test writes no image unless specified\n"
-        "  -W, --width PIXELS      Offline image width (1..7680)\n"
+        "  -W, --width PIXELS      Offline image width (1..%u)\n"
         "                          Default: %u (unset); required with --input\n"
-        "  -H, --height PIXELS     Offline image height (1..4320)\n"
+        "  -H, --height PIXELS     Offline image height (1..%u)\n"
         "                          Default: %u (unset); required with --input\n"
         "  -c, --cpu-compose       Use CPU composition and codec (layer bypass)\n"
-        "                          Default: off; Vulkan layer composes the result\n"
+        "                          Default: %s; Vulkan layer composes the result\n"
         "  -C, --cpu-codec         Slow CPU codec for numerical comparison\n"
-        "                          Default: off; use the GPU codec\n"
+        "                          Default: %s; use the GPU codec\n"
         "  -p, --performance       HIP: skip blocks 42,43,46, matching upstream preset\n"
-        "                          Default: off; evaluate all 71 blocks\n"
+        "                          Default: %s; evaluate all 71 blocks\n"
         "  -1, --once              Answer one shared-memory request and exit,\n"
         "                          with status 1 when that request failed\n"
-        "                          Default: off; run until stopped\n"
+        "                          Default: %s; run until stopped\n"
         "  -x, --idle-exit SECONDS Stop serving after SECONDS without a request\n"
         "                          Default: %u (never)\n"
         "  -R, --trace-dir DIR     Opt-in real-frame RGB float32 diagnostics\n"
@@ -237,7 +241,7 @@ void usage(FILE* out)
         "                          raw output, plus -tuned/-color stages when\n"
         "                          active; serving real inference only\n"
         "  -T, --test-identity     DIAGNOSTIC ONLY: copy frames without inference\n"
-        "                          Default: off; evaluate the real HIP network\n"
+        "                          Default: %s; the backend's network runs\n"
         "  -h, --help              Show this help and exit (default: off)\n",
         config.empty() ? "unset; no home directory" : config.c_str(), settable.c_str(),
         defaults.backend.c_str(), vulkan_shaders().c_str(),
@@ -245,8 +249,10 @@ void usage(FILE* out)
         defaults.assets.empty() ? "unset; required for inference" : defaults.assets.c_str(),
         defaults.modules.empty() ? "unset; required for inference" : defaults.modules.c_str(),
         defaults.shm.c_str(), ShmNativeDefaultPath().c_str(), kNativeDefaultTier,
-        kMaxPasses, kNativeDefaultPasses, dlsslop::VulkanNetwork::kMaxPasses, defaults.self_test_runs,
-        defaults.width, defaults.height, defaults.idle_exit);
+        kMaxPasses, kNativeDefaultPasses, dlsslop::VulkanNetwork::kMaxPasses, on_off(defaults.diagnose),
+        on_off(defaults.self_test), defaults.self_test_runs, kMaxW, defaults.width, kMaxH, defaults.height,
+        on_off(defaults.cpu_compose), on_off(defaults.cpu_codec), on_off(defaults.performance), on_off(defaults.once),
+        defaults.idle_exit, on_off(defaults.test_identity));
 }
 
 namespace {
