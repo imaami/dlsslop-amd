@@ -18,6 +18,10 @@ add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initi
 # Section GC and a stripped Release drop the unreached parts of the statically
 # linked libstdc++ and the symbol tables from every binary.
 add_compile_options(-ffunction-sections -fdata-sections)
+# The project's code reports errors as Results: it throws, catches and asks for
+# types at run time nowhere. Vendored code that throws keeps exceptions, and is
+# reached only through the boundary files that catch them.
+add_compile_options(-fno-exceptions -fno-rtti)
 add_link_options(-Wl,--gc-sections $<$<CONFIG:Release>:-s>)
 # Link-time optimization shrinks the daemon's code by 7% and the GUI's
 # too: the compiler inlines and drops code across files. The layer and
@@ -127,25 +131,28 @@ add_custom_target(vulkan-nr-shaders ALL DEPENDS "${VKNR_SHADERS}/shader-constant
 add_library(dlsslop-vknr STATIC "${VKNR_ROOT}/src/core/nr_runtime.cpp" "${VKNR_ROOT}/src/core/nr_native_plan.cpp")
 set_target_properties(dlsslop-vknr PROPERTIES CXX_STANDARD 20)
 target_compile_definitions(dlsslop-vknr PUBLIC ${VKNR_DEFINES})
-# Upstream code: its own warnings are not this project's to fix.
-target_compile_options(dlsslop-vknr PRIVATE -w)
+# Upstream code: its own warnings are not this project's to fix. It throws.
+target_compile_options(dlsslop-vknr PRIVATE -w -fexceptions -frtti)
 target_include_directories(dlsslop-vknr PUBLIC "${VKNR_ROOT}/src/core")
 target_link_libraries(dlsslop-vknr PUBLIC vulkan Threads::Threads)
 
 add_library(dlsslop-codec OBJECT backend/codec.cpp)
-# The boundary to the vendored HIP network, built with exceptions.
+# The boundaries to the vendored networks, built with exceptions to catch theirs.
 add_library(dlsslop-hip-vendor OBJECT backend/hip_vendor.cpp)
 set_target_properties(dlsslop-hip-vendor PROPERTIES CXX_STANDARD 20)
+target_compile_options(dlsslop-hip-vendor PRIVATE -fexceptions -frtti)
+add_library(dlsslop-nr-vendor OBJECT backend/nr_vendor.cpp)
+target_compile_options(dlsslop-nr-vendor PRIVATE -fexceptions -frtti)
+target_link_libraries(dlsslop-nr-vendor PUBLIC dlsslop-vknr)
 # The worker uses a small, versioned HIP ABI loaded with dlopen. The build itself
 # deliberately does not require ROCm headers or a GPU; real inference does.
 add_executable(dlsslopd
     backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.cpp
     backend/open.cpp backend/hip_engine.cpp backend/native_kernels.cpp
     backend/self_test.cpp
-    backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp
-    backend/nr_vendor.cpp)
+    backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp)
 target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
-target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip-vendor dlsslop-vknr Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip-vendor dlsslop-nr-vendor dlsslop-vknr Threads::Threads ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)
 target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 

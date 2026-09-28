@@ -8,10 +8,11 @@
 #include <chrono>
 #include <csignal>
 #include <cstdio>
+#include <cstring>
 #include <linux/futex.h>
 #include <memory>
 #include <optional>
-#include <stop_token>
+#include <pthread.h>
 #include <string>
 #include <sys/syscall.h>
 #include <thread>
@@ -46,6 +47,42 @@ void publish_raster(const Options& o, ShmHeader* h, unsigned tier)
     h->nativeModelMaxWidth.store(neural ? ShmNativeTier(tier)->width : 0);
     h->nativeModelMaxHeight.store(neural ? tier : 0);
 }
+
+// Counts the channel's heartbeat every 100 ms from start() until destroyed, so
+// the layer sees a live daemon even while it builds a network.
+class Heartbeat {
+    ShmHeader* const h_;
+    std::atomic<bool> stopping_ = false;
+    pthread_t thread_{};
+    bool running_ = false;
+
+    static void* beat(void* self)
+    {
+        const auto& heartbeat = *static_cast<const Heartbeat*>(self);
+        while (!heartbeat.stopping_.load(std::memory_order_relaxed)) {
+            heartbeat.h_->heartbeat.fetch_add(1, std::memory_order_relaxed);
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        return nullptr;
+    }
+
+public:
+    explicit Heartbeat(ShmHeader* h) : h_(h) {}
+    Heartbeat(const Heartbeat&) = delete;
+    ~Heartbeat()
+    {
+        if (!running_) return;
+        stopping_.store(true, std::memory_order_relaxed);
+        pthread_join(thread_, nullptr);
+    }
+    Result<void> start()
+    {
+        if (const int error = pthread_create(&thread_, nullptr, beat, this))
+            return fail(std::string("start the heartbeat: ") + std::strerror(error));
+        running_ = true;
+        return {};
+    }
+};
 
 // Idle exit: stop taking requests before leaving. A layer that reads Stopped
 // from now on sends none, and one whose request got in first is served: true
@@ -242,6 +279,8 @@ Result<void> serve(const Options& o, Mapping& mapping, const TransportListener& 
         const uint32_t number = h->seq_req.load(std::memory_order_acquire);
         if (number == last) {
             if (DLSSLOP_TRY(follow_tier(engine, o, mapping, ready))) active = Clock::now();
+            // Linux futex wake is emitted by the patched Vulkan layer. Timeout maintains liveness
+            // with old clients and permits signals/quit; no GPU polling is involved.
             const timespec timeout{0, 100000000};
             syscall(SYS_futex, reinterpret_cast<uint32_t*>(&h->seq_req), FUTEX_WAIT, number, &timeout, nullptr, 0);
             // A request that arrived during the wait is served, however late.
@@ -320,14 +359,8 @@ Result<void> run_worker(Options o)
     if (o.passes) h->passes.store(*o.passes);
     h->compositionBypass.store(o.cpu_compose || o.test_identity ? 1 : 0);
     publish_raster(o, h, tier);
-    // Linux futex wake is emitted by the patched Vulkan layer. Timeout maintains liveness
-    // with old clients and permits signals/quit; no GPU polling is involved.
-    const std::jthread heartbeat([h](std::stop_token stop) {
-        while (!stop.stop_requested()) {
-            h->heartbeat.fetch_add(1, std::memory_order_relaxed);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    });
+    Heartbeat heartbeat(h);
+    DLSSLOP_TRY(heartbeat.start());
     mapping.reason(o.test_identity ? "IDENTITY TEST: inference disabled" : "initializing the network");
     auto served = TransportListener::open(o.shm, !o.test_identity && !o.cpu_codec).and_then([&](TransportListener transport) {
         return with_engine(o, tier, [&](auto& engine) { return serve(o, mapping, transport, traces, engine); });
