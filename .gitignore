@@ -1,10 +1,16 @@
 # Generated sources and build outputs.
-/upstream-layer/
-/kernels/
-/backend/vendor/
-/vulkan-nr/
 /.prepared-sources.json
-/build*/
 /assets/HIP/
-__pycache__/
+/backend/vendor/
+/build*/
 /dist/
+/kernels/
+/upstream-layer/
+/vulkan-nr/
+__pycache__/
+
+# Tooling
+/*.creator.user
+/.qtc_clangd/
+/.vscode/
+compile_commands.json
