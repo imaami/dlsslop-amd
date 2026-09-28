@@ -7,7 +7,7 @@ namespace dlsslop {
 Result<void> NativeKernels::load(const std::string& path)
 {
     const auto image = read_file(path);
-    if (!image) return fail("module file missing: " + path);
+    if (!image) return fail("cannot read module " + path + ": " + image.error().what);
     if (image->empty()) return fail("empty module");
     DLSSLOP_TRY(api.check(api.hipModuleLoadData(&module_, image->data()), "load native module"));
     for (unsigned k = 0; k < kKernelCount; ++k)
