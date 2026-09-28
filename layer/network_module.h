@@ -55,7 +55,8 @@ int dlsslop_network_prepare(DlsslopNetwork* network, const ShmHeader* channel, u
 // into PROXY, through the network, into ANSWER for the composition. Both are
 // the composition's transfer buffers; EXPORTED says they belong to
 // VK_QUEUE_FAMILY_EXTERNAL between uses, and FAMILY is the queue's.
-// kDlsslopNetworkReady or kDlsslopNetworkFailed.
+// kDlsslopNetworkReady or kDlsslopNetworkFailed; failed, CMD still holds
+// valid commands, which give the pair back as they found it.
 int dlsslop_network_record(DlsslopNetwork* network, VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer,
                            uint32_t family, int exported);
 const char* dlsslop_network_error(const DlsslopNetwork* network);
