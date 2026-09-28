@@ -18,7 +18,9 @@ int main()
         original[p*4+3]=1;
     }
     for(float strength : {0.f,.25f,.5f,1.f}) {
-        dlsslop::preserve_color(original.data(),raw.data(),g,strength,expected);
+        if(!dlsslop::preserve_color(original.data(),raw.data(),g,strength,expected)) {
+            std::fprintf(stderr,"reference refused its input\n");return 1;
+        }
         for(group_id=0;group_id<(pixels+255)/256;++group_id)
             for(item_id=0;item_id<256;++item_id)
                 dlsslop_preserve_color(original.data(),raw.data(),actual.data(),g,strength);

@@ -9,6 +9,7 @@
 #include "native_kernels.h"
 #include "temporal_gpu.h"
 #include "tuning.h"
+#include "unwrap.h"
 #include "vendor/LmxxfProductionOptions.h"
 
 #include <cstdio>
@@ -72,8 +73,8 @@ public:
     unsigned tier() const override { return tier_; }
     std::string processing() const override
     {
-        const auto raster = dlsslop::geometry(1, 1, tier_);
-        return "processing=" + std::to_string(raster.width) + "x" + std::to_string(raster.height);
+        const NativeTier& raster = *ShmNativeTier(tier_);
+        return "processing=" + std::to_string(raster.width) + "x" + std::to_string(raster.networkHeight);
     }
     // The members go next, in reverse order: the helpers before the network whose runtime they use.
     ~Engine()
@@ -89,8 +90,8 @@ public:
     void prepare() override
     {
         if (options_.test_identity) return;
-        const auto raster = dlsslop::geometry(1, 1, tier_);
-        auto opt = LmxxfProductionOptions(raster.width, raster.height, options_.modules, options_.assets);
+        const NativeTier& raster = *ShmNativeTier(tier_);
+        auto opt = LmxxfProductionOptions(raster.width, raster.networkHeight, options_.modules, options_.assets);
         opt.device = static_cast<unsigned>(options_.device);
         if (!options_.performance) opt.skip_blocks.clear();
         // Upstream's shipped HIP configurations (scripts/hip-*-flags.txt) add
@@ -107,7 +108,7 @@ public:
         kernels_.emplace(api, network_->Stream(), options_.modules + "/linux_native.hsaco");
         if (!options_.cpu_codec) gpu_codec_.emplace(*kernels_);
         temporal_.emplace(*kernels_);
-        const size_t pixels = size_t(raster.width) * raster.height;
+        const size_t pixels = size_t(raster.width) * raster.networkHeight;
         api.Check(api.hipMalloc(&device_input_, pixels * 16), "allocate network input");
         api.Check(api.hipMalloc(&device_output_, pixels * 12), "allocate network output");
         // The host copy of the answer serves the CPU codec and the self-test's checks.
@@ -188,7 +189,7 @@ public:
             if (adaptive && std::strtoul(adaptive, nullptr, 10))
                 throw std::range_error("multi-pass/motion/self-test requires DLSS5_VIT_ADAPTIVE=0 (uncached inference)");
         }
-        const auto g = dlsslop::geometry(w, h, tier_);
+        const auto g = unwrap(dlsslop::geometry(w, h, tier_));
         auto& api = network_->Runtime();
         const auto trace_image = [&](unsigned pass, const char* stage, const void* pointer, unsigned channels) {
             if (!trace) return;
@@ -217,14 +218,14 @@ public:
             gpu_codec_->encode(input, g, device_input_, settings.fp16);
             if (verify) {
                 std::vector<float> reference;
-                dlsslop::encode_proxy(input, g, settings.fp16, reference);
+                unwrap(dlsslop::encode_proxy(input, g, settings.fp16, reference));
                 selftest::compare(selftest::Buffer::read_pointer(api, network_->Stream(), device_input_, reference.size()),
                                   reference, "GPU encoder");
                 std::printf("GPU encode vs CPU reference: FP32 bit-identical\n");
                 std::fflush(stdout);
             }
         } else {
-            dlsslop::encode_proxy(input, g, settings.fp16, encoded_);
+            unwrap(dlsslop::encode_proxy(input, g, settings.fp16, encoded_));
             api.Check(api.hipMemcpy(device_input_, encoded_.data(), encoded_.size() * sizeof(float), 1), "upload encoded frame");
         }
         mark(1);
@@ -247,7 +248,7 @@ public:
                 if (gpu_codec_) {
                     gpu_codec_->feedback(answer, pass_input, settings.precision16);
                     if (verify) {
-                        dlsslop::feedback_neural_rgb(neural_.data(), g, feedback_, settings.precision16);
+                        unwrap(dlsslop::feedback_neural_rgb(neural_.data(), g, feedback_, settings.precision16));
                         selftest::compare(selftest::Buffer::read_pointer(api, network_->Stream(), pass_input,
                                           feedback_.size()), feedback_, "GPU inter-pass feedback");
                         std::printf("GPU feedback for pass %u/%u vs CPU reference: FP32 bit-identical\n",
@@ -255,7 +256,7 @@ public:
                     }
                 } else {
                     // Retain the initial encoded_ for final CPU composition.
-                    dlsslop::feedback_neural_rgb(neural_.data(), g, feedback_, settings.precision16);
+                    unwrap(dlsslop::feedback_neural_rgb(neural_.data(), g, feedback_, settings.precision16));
                     api.Check(api.hipMemcpy(pass_input, feedback_.data(), feedback_.size() * sizeof(float), 1),
                               "upload inter-pass feedback");
                 }
@@ -299,7 +300,7 @@ public:
             if (verify) {
                 const size_t bpp = settings.fp16 ? 8 : 4;
                 std::vector<uint8_t> reference(size_t(w) * h * bpp);
-                dlsslop::decode_neural_proxy(input, g, settings.fp16, neural_.data(), reference.data());
+                unwrap(dlsslop::decode_neural_proxy(input, g, settings.fp16, neural_.data(), reference.data()));
                 const size_t first = std::mismatch(reference.begin(), reference.end(), output).first - reference.begin();
                 if (first < reference.size()) {
                     std::fprintf(stderr, "GPU decoder first mismatch: x=%zu y=%zu byte=%zu GPU=%u CPU=%u\n",
@@ -312,9 +313,9 @@ public:
             }
         } else {
             if (options_.cpu_compose)
-                dlsslop::decode_rgba8(input, g, encoded_.data(), neural_.data(), output);
+                unwrap(dlsslop::decode_rgba8(input, g, encoded_.data(), neural_.data(), output));
             else
-                dlsslop::decode_neural_proxy(input, g, settings.fp16, neural_.data(), output);
+                unwrap(dlsslop::decode_neural_proxy(input, g, settings.fp16, neural_.data(), output));
             mark(3);
         }
         previous_settings_ = settings;

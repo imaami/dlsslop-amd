@@ -8,16 +8,35 @@
 #include <cstdlib>
 #include <cstring>
 #include <limits>
-#include <stdexcept>
 #include <vector>
 
 namespace {
 
 void require(bool ok, const char* message)
 {
-    if (!ok)
-        throw std::runtime_error(message);
+    if (ok) return;
+    std::fprintf(stderr, "codec test failed: %s\n", message);
+    std::exit(EXIT_FAILURE);
 }
+
+// A geometry the test expects to be valid.
+dlsslop::Geometry geometry(unsigned width, unsigned height, unsigned tier = 0)
+{
+    const auto g = dlsslop::geometry(width, height, tier);
+    require(bool(g), "valid geometry refused");
+    return *g;
+}
+
+void check(const dlsslop::Result<void>& result, const char* what)
+{
+    if (!result) std::fprintf(stderr, "%s: %s\n", what, result.error().what.c_str());
+    require(bool(result), what);
+}
+
+// A rejected frame, not a worker fault.
+bool rejected(const dlsslop::Result<void>& result) { return !result && result.error().rejected; }
+// A worker fault.
+bool failed(const dlsslop::Result<void>& result) { return !result && !result.error().rejected; }
 
 std::vector<float> identity_neural(const std::vector<float>& rgba)
 {
@@ -30,49 +49,39 @@ std::vector<float> identity_neural(const std::vector<float>& rgba)
 
 void expect_invalid(unsigned width, unsigned height, unsigned tier)
 {
-    try {
-        (void)dlsslop::geometry(width, height, tier);
-    } catch (const std::invalid_argument&) {
-        return;
-    }
-    throw std::runtime_error("invalid geometry accepted");
+    require(!dlsslop::geometry(width, height, tier), "invalid geometry accepted");
 }
 
 void test_geometry()
 {
-    const auto a = dlsslop::geometry(1280, 720);
+    const auto a = geometry(1280, 720);
     require(a.width == 1280 && a.height == 768 && !a.x && !a.y &&
             a.fit_width == 1280 && a.fit_height == 720, "720 geometry");
-    const auto b = dlsslop::geometry(1600, 900);
+    const auto b = geometry(1600, 900);
     require(b.width == 1600 && b.height == 960, "900 geometry");
-    const auto c = dlsslop::geometry(3840, 2160);
+    const auto c = geometry(3840, 2160);
     require(c.width == 1920 && c.height == 1152, "large source geometry");
-    const auto d = dlsslop::geometry(640, 480, 720);
+    const auto d = geometry(640, 480, 720);
     require(d.x == 160 && !d.y && d.fit_width == 960 && d.fit_height == 720,
             "4:3 letterbox geometry");
-    const auto e = dlsslop::geometry(3440, 1440, 900);
+    const auto e = geometry(3440, 1440, 900);
     require(!e.x && e.y == 115 && e.fit_width == 1600 && e.fit_height == 670,
             "ultrawide letterbox geometry");
-    const auto f = dlsslop::geometry(1, 16384, 720);
+    const auto f = geometry(1, 16384, 720);
     require(f.fit_width == 1 && f.fit_height == 720, "thin image geometry");
     expect_invalid(0, 720, 720);
     expect_invalid(1920, 0, 1080);
     expect_invalid(16385, 1, 720);
     expect_invalid(1280, 720, 768);
-    dlsslop::validate(e);
+    check(dlsslop::validate(e), "consistent geometry refused");
     auto skewed = e;
     ++skewed.fit_height;
-    try {
-        dlsslop::validate(skewed);
-    } catch (const std::invalid_argument&) {
-        return;
-    }
-    throw std::runtime_error("inconsistent geometry validated");
+    require(!dlsslop::validate(skewed), "inconsistent geometry validated");
 }
 
 void test_input_contract_and_identity()
 {
-    const auto g = dlsslop::geometry(1280, 720, 720);
+    const auto g = geometry(1280, 720, 720);
     std::vector<std::uint8_t> source(std::size_t(g.source_width) * g.source_height * 4);
     for (unsigned y = 0; y < g.source_height; ++y) {
         for (unsigned x = 0; x < g.source_width; ++x) {
@@ -84,7 +93,7 @@ void test_input_contract_and_identity()
         }
     }
     std::vector<float> encoded;
-    dlsslop::encode_proxy(source.data(), g, false, encoded);
+    check(dlsslop::encode_proxy(source.data(), g, false, encoded), "encode_proxy");
     require(encoded.size() == std::size_t(g.width) * g.height * 4, "encoded extent");
     // A display encoded 128 must stay around .502, not become linear .216.
     require(encoded[128 * 4] == 0.501953125f, "sRGB input was gamma decoded or not FP16 rounded");
@@ -98,12 +107,12 @@ void test_input_contract_and_identity()
             "last reflected row mismatch");
     const auto neural = identity_neural(encoded);
     std::vector<float> feedback;
-    dlsslop::feedback_neural_rgb(neural.data(), g, feedback);
+    check(dlsslop::feedback_neural_rgb(neural.data(), g, feedback), "feedback_neural_rgb");
     require(feedback == encoded, "identity feedback must preserve the full encoded input");
     std::vector<std::uint8_t> decoded(source.size());
-    dlsslop::decode_neural_proxy(source.data(), g, false, neural.data(), decoded.data());
+    check(dlsslop::decode_neural_proxy(source.data(), g, false, neural.data(), decoded.data()), "decode_neural_proxy");
     require(decoded == source, "all 256 SDR codes + alpha must round-trip at native tier");
-    dlsslop::decode_rgba8(source.data(), g, encoded.data(), neural.data(), decoded.data());
+    check(dlsslop::decode_rgba8(source.data(), g, encoded.data(), neural.data(), decoded.data()), "decode_rgba8");
     unsigned worst = 0;
     for (std::size_t i = 0; i < source.size(); ++i) {
         worst = std::max(worst, unsigned(std::abs(int(source[i]) - int(decoded[i]))));
@@ -117,10 +126,10 @@ void test_fit_and_output()
 {
     // Tiny constant sources test fitting/clamping without relying on a matching
     // identity sampler; colored corners below then exercise bilinear averaging.
-    const auto g = dlsslop::geometry(1, 1, 720);
+    const auto g = geometry(1, 1, 720);
     const std::uint8_t source[] = {128, 64, 255, 37};
     std::vector<float> encoded;
-    dlsslop::encode_proxy(source, g, false, encoded);
+    check(dlsslop::encode_proxy(source, g, false, encoded), "encode_proxy");
     require(g.x == 280 && g.fit_width == 720, "square fit geometry");
     require(encoded[0] == 0.0f && encoded[3] == 1.0f, "letterbox must be opaque black");
     require(encoded[g.x * 4] == 0.501953125f, "first fitted pixel");
@@ -128,15 +137,15 @@ void test_fit_and_output()
     // One pixel past the source's extent stays untouched.
     std::vector<std::uint8_t> output(8, 0xa5);
     const std::vector<std::uint8_t> expected = {128, 64, 255, 37, 0xa5, 0xa5, 0xa5, 0xa5};
-    dlsslop::decode_neural_proxy(source, g, false, neural.data(), output.data());
+    check(dlsslop::decode_neural_proxy(source, g, false, neural.data(), output.data()), "decode_neural_proxy");
     require(output == expected, "constant fit decode");
-    dlsslop::decode_rgba8(source, g, encoded.data(), neural.data(), output.data());
+    check(dlsslop::decode_rgba8(source, g, encoded.data(), neural.data(), output.data()), "decode_rgba8");
     require(output == expected, "constant full composition");
 
-    const auto small = dlsslop::geometry(2, 2, 720);
+    const auto small = geometry(2, 2, 720);
     const std::uint8_t corners[] = {0, 0, 0, 0, 255, 0, 0, 255,
                                    0, 255, 0, 127, 255, 255, 255, 1};
-    dlsslop::encode_proxy(corners, small, false, encoded);
+    check(dlsslop::encode_proxy(corners, small, false, encoded), "encode_proxy");
     const unsigned x = small.x + 359, y = 359;
     const std::size_t p = (std::size_t(y) * small.width + x) * 4;
     // Coordinates correspond to .498611 on both source axes: interpolation is
@@ -152,7 +161,7 @@ void test_fit_and_output()
         pathological[q + 1] = 2.0f;
         pathological[q + 2] = 65519.0f; // Rounds to the largest finite binary16.
     }
-    dlsslop::decode_neural_proxy(source, g, false, pathological.data(), output.data());
+    check(dlsslop::decode_neural_proxy(source, g, false, pathological.data(), output.data()), "decode_neural_proxy");
     require(output == std::vector<std::uint8_t>({0, 255, 255, 37, 0xa5, 0xa5, 0xa5, 0xa5}),
             "UNORM clamp / alpha preservation");
 }
@@ -163,7 +172,7 @@ void test_fit_and_output()
 // At 1.5 texels per pixel, the pixels alternate and keep the mean.
 void test_area_downscale()
 {
-    const auto g = dlsslop::geometry(3840, 2160, 720);
+    const auto g = geometry(3840, 2160, 720);
     require(g.fit_width == 1280 && g.fit_height == 720, "3x downscale geometry");
     std::vector<std::uint8_t> rgba8(std::size_t(g.source_width) * g.source_height * 4);
     std::vector<std::uint8_t> fp16(rgba8.size() * 2);
@@ -179,19 +188,19 @@ void test_area_downscale()
             }
         }
         for (bool half : {false, true}) {
-            dlsslop::encode_proxy(half ? fp16.data() : rgba8.data(), g, half, encoded);
+            check(dlsslop::encode_proxy(half ? fp16.data() : rgba8.data(), g, half, encoded), "encode_proxy");
             for (std::size_t p = 0; p < std::size_t(g.width) * g.valid_height; ++p)
                 require(encoded[p * 4] == mean && encoded[p * 4 + 1] == mean && encoded[p * 4 + 2] == mean,
                         "3x downscale does not encode a period-3 stripe to its mean");
         }
     }
 
-    const auto h = dlsslop::geometry(1920, 1080, 720);
+    const auto h = geometry(1920, 1080, 720);
     require(h.fit_width == 1280 && h.fit_height == 720, "1.5x downscale geometry");
     for (std::size_t p = 0; p < std::size_t(h.source_width) * h.source_height; ++p)
         for (unsigned c = 0; c < 3; ++c)
             rgba8[p * 4 + c] = (p % h.source_width) % 3 ? 0 : 255;
-    dlsslop::encode_proxy(rgba8.data(), h, false, encoded);
+    check(dlsslop::encode_proxy(rgba8.data(), h, false, encoded), "encode_proxy");
     double sum = 0;
     for (unsigned x = 0; x < h.width; ++x) {
         const float expected = x % 2 ? 0.0f : 0.66650390625f; // 2/3 rounded to binary16.
@@ -204,43 +213,28 @@ void test_area_downscale()
     // no bilinear tap at 3x reaches, still rejects the FP16 frame.
     const std::uint16_t nonfinite = 0x7e00;
     std::memcpy(fp16.data(), &nonfinite, sizeof nonfinite);
-    bool rejected = false;
-    try {
-        dlsslop::encode_proxy(fp16.data(), g, true, encoded);
-    } catch (const std::range_error&) {
-        rejected = true;
-    }
-    require(rejected, "3x downscale accepted a nonfinite FP16 texel");
+    require(rejected(dlsslop::encode_proxy(fp16.data(), g, true, encoded)),
+            "3x downscale accepted a nonfinite FP16 texel");
 }
 
 void expect_decode_rejection(const std::vector<std::uint8_t>& source, const dlsslop::Geometry& g,
                              const std::vector<float>& encoded, const std::vector<float>& neural)
 {
     std::vector<std::uint8_t> output(source.size());
-    bool rejected = false;
-    try {
-        dlsslop::decode_neural_proxy(source.data(), g, false, neural.data(), output.data());
-    } catch (const std::range_error&) { // A rejected frame, not a worker fault.
-        rejected = true;
-    }
-    require(rejected, "RGBA8 decode accepted a nonfinite/FP16-overflow neural sample");
-    rejected = false;
-    try {
-        dlsslop::decode_rgba8(source.data(), g, encoded.data(), neural.data(), output.data());
-    } catch (const std::range_error&) {
-        rejected = true;
-    }
-    require(rejected, "full composition accepted a nonfinite/FP16-overflow neural sample");
+    require(rejected(dlsslop::decode_neural_proxy(source.data(), g, false, neural.data(), output.data())),
+            "RGBA8 decode accepted a nonfinite/FP16-overflow neural sample");
+    require(rejected(dlsslop::decode_rgba8(source.data(), g, encoded.data(), neural.data(), output.data())),
+            "full composition accepted a nonfinite/FP16-overflow neural sample");
 }
 
 // Like the GPU codec, the CPU RGBA8 decodes reject an invalid neural sample
 // instead of painting it and its zero-weight bilinear neighbours black.
 void test_decode_invalid_samples()
 {
-    const auto g = dlsslop::geometry(1280, 720, 720);
+    const auto g = geometry(1280, 720, 720);
     const std::vector<std::uint8_t> source(std::size_t(g.source_width) * g.source_height * 4, 128);
     std::vector<float> encoded;
-    dlsslop::encode_proxy(source.data(), g, false, encoded);
+    check(dlsslop::encode_proxy(source.data(), g, false, encoded), "encode_proxy");
     const auto neural = identity_neural(encoded);
     const std::size_t texel = (std::size_t(100) * g.width + 100) * 3;
     for (float bad : {std::numeric_limits<float>::quiet_NaN(),
@@ -257,7 +251,7 @@ void test_decode_invalid_samples()
     limit[texel] = 65519.0f;
     limit[texel + 1] = -65519.0f;
     std::vector<std::uint8_t> output(source.size());
-    dlsslop::decode_neural_proxy(source.data(), g, false, limit.data(), output.data());
+    check(dlsslop::decode_neural_proxy(source.data(), g, false, limit.data(), output.data()), "decode_neural_proxy");
     const std::size_t pixel = (std::size_t(100) * g.source_width + 100) * 4;
     require(output[pixel] == 255 && output[pixel + 1] == 0 && output[pixel + 4] == 128 &&
             output[pixel - 4] == 128, "RGBA8 decode rejected or spread the finite binary16 limits");
@@ -265,9 +259,9 @@ void test_decode_invalid_samples()
 
 void test_feedback_precision_and_padding()
 {
-    for (const auto g : {dlsslop::geometry(640, 480, 720),
-                         dlsslop::geometry(3440, 1440, 900),
-                         dlsslop::geometry(1920, 1080, 1080)}) {
+    for (const auto g : {geometry(640, 480, 720),
+                         geometry(3440, 1440, 900),
+                         geometry(1920, 1080, 1080)}) {
         // Poison everything except the fit rectangle: feedback must ignore raw
         // neural letterbox/padding, then reconstruct the original geometry.
         std::vector<float> neural(std::size_t(g.width) * g.height * 3,
@@ -285,7 +279,7 @@ void test_feedback_precision_and_padding()
         neural[marker * 3 + 1] = 0.500732421875f; // Tie to even: .5009765625.
         neural[marker * 3 + 2] = 0x1p-24f;       // Smallest binary16 subnormal.
         std::vector<float> feedback;
-        dlsslop::feedback_neural_rgb(neural.data(), g, feedback);
+        check(dlsslop::feedback_neural_rgb(neural.data(), g, feedback), "feedback_neural_rgb");
         require(feedback.size() == std::size_t(g.width) * g.height * 4,
                 "feedback extent differs from encode extent");
         require(feedback[marker * 4] == 0.5f &&
@@ -319,12 +313,12 @@ void test_feedback_precision_and_padding()
 
 void test_feedback_invalid_samples()
 {
-    const auto g = dlsslop::geometry(1280, 720, 720);
+    const auto g = geometry(1280, 720, 720);
     std::vector<float> neural(std::size_t(g.width) * g.height * 3, 0.5f);
     std::vector<float> feedback;
     neural[0] = 65504.0f;
     neural[1] = -65504.0f;
-    dlsslop::feedback_neural_rgb(neural.data(), g, feedback);
+    check(dlsslop::feedback_neural_rgb(neural.data(), g, feedback), "feedback_neural_rgb");
     require(feedback[0] == 65504.0f && feedback[1] == -65504.0f,
             "feedback rejected finite binary16 limits");
     neural[0] = neural[1] = 0.5f;
@@ -333,13 +327,8 @@ void test_feedback_invalid_samples()
                        -std::numeric_limits<float>::infinity(), 65520.0f, -65520.0f}) {
         for (unsigned channel = 0; channel < 3; ++channel) {
             neural[channel] = bad;
-            bool rejected = false;
-            try {
-                dlsslop::feedback_neural_rgb(neural.data(), g, feedback);
-            } catch (const std::runtime_error&) {
-                rejected = true;
-            }
-            require(rejected, "feedback accepted nonfinite/FP16-overflow fitted sample");
+            require(failed(dlsslop::feedback_neural_rgb(neural.data(), g, feedback)),
+                    "feedback accepted nonfinite/FP16-overflow fitted sample");
             neural[channel] = 0.5f;
         }
     }
@@ -347,7 +336,7 @@ void test_feedback_invalid_samples()
 
 void test_fp16_proxy()
 {
-    const auto g = dlsslop::geometry(1280, 720, 720);
+    const auto g = geometry(1280, 720, 720);
     const std::uint16_t samples[] = {0x0000, 0x0001, 0x03ff, 0x0400, 0x3555,
         0x3801, 0x3c00, 0x4000, 0xb400, 0xc000, 0x7bff, 0xfbff};
     std::vector<std::uint8_t> source(std::size_t(g.source_width) * g.source_height * 8);
@@ -359,42 +348,31 @@ void test_fp16_proxy()
         }
     }
     std::vector<float> encoded;
-    dlsslop::encode_proxy(source.data(), g, true, encoded);
+    check(dlsslop::encode_proxy(source.data(), g, true, encoded), "encode_proxy");
     require(encoded[4] == 0x1p-24f && encoded[5 * 4] == 0.50048828125f &&
             encoded[8 * 4] == -0.25f && encoded[10 * 4] == 65504.0f,
             "FP16 input was gamma decoded, clamped, or lost binary16 precision");
     const auto neural = identity_neural(encoded);
     std::vector<std::uint8_t> decoded(source.size());
-    dlsslop::decode_neural_proxy(source.data(), g, true, neural.data(), decoded.data());
+    check(dlsslop::decode_neural_proxy(source.data(), g, true, neural.data(), decoded.data()), "decode_neural_proxy");
     require(decoded == source, "FP16 proxy native-tier round-trip or alpha preservation");
 
     const std::uint16_t nonfinite = 0x7e00;
     std::memcpy(source.data(), &nonfinite, sizeof nonfinite);
-    bool rejected = false;
-    try {
-        dlsslop::encode_proxy(source.data(), g, true, encoded);
-    } catch (const std::range_error&) { // A rejected frame, not a worker fault.
-        rejected = true;
-    }
-    require(rejected, "FP16 proxy accepted nonfinite RGB input");
+    require(rejected(dlsslop::encode_proxy(source.data(), g, true, encoded)), "FP16 proxy accepted nonfinite RGB input");
 
     std::vector<float> bad = neural;
     for (float value : {std::numeric_limits<float>::quiet_NaN(),
                         std::numeric_limits<float>::infinity(), 65520.0f}) {
         bad[0] = value;
-        rejected = false;
-        try {
-            dlsslop::decode_neural_proxy(source.data(), g, true, bad.data(), decoded.data());
-        } catch (const std::range_error&) {
-            rejected = true;
-        }
-        require(rejected, "FP16 proxy decode accepted nonfinite/overflow neural sample");
+        require(rejected(dlsslop::decode_neural_proxy(source.data(), g, true, bad.data(), decoded.data())),
+                "FP16 proxy decode accepted nonfinite/overflow neural sample");
     }
 }
 
 void test_feedback_unorm8()
 {
-    const auto g = dlsslop::geometry(1280, 720, 720);
+    const auto g = geometry(1280, 720, 720);
     std::vector<float> neural(std::size_t(g.width) * g.height * 3, 0.0f);
     neural[0] = -0.25f;
     neural[1] = 1.5f;
@@ -403,7 +381,7 @@ void test_feedback_unorm8()
     neural[4] = std::numeric_limits<float>::max();
     neural[5] = -std::numeric_limits<float>::max();
     std::vector<float> feedback;
-    dlsslop::feedback_neural_rgb(neural.data(), g, feedback, false);
+    check(dlsslop::feedback_neural_rgb(neural.data(), g, feedback, false), "feedback_neural_rgb");
     require(feedback[0] == 0.0f && feedback[1] == 1.0f &&
             feedback[2] == 0.498046875f && feedback[4] == 0.501953125f &&
             feedback[5] == 1.0f && feedback[6] == 0.0f,
@@ -416,13 +394,8 @@ void test_feedback_unorm8()
                       std::numeric_limits<float>::infinity(),
                       -std::numeric_limits<float>::infinity()}) {
         neural[0] = bad;
-        bool rejected = false;
-        try {
-            dlsslop::feedback_neural_rgb(neural.data(), g, feedback, false);
-        } catch (const std::runtime_error&) {
-            rejected = true;
-        }
-        require(rejected, "8-bit feedback accepted nonfinite raw sample");
+        require(failed(dlsslop::feedback_neural_rgb(neural.data(), g, feedback, false)),
+                "8-bit feedback accepted nonfinite raw sample");
     }
 }
 
@@ -430,7 +403,7 @@ void test_feedback_unorm8()
 
 int main()
 {
-    try {
+    {
         test_geometry();
         test_input_contract_and_identity();
         test_fit_and_output();
@@ -441,9 +414,6 @@ int main()
         test_fp16_proxy();
         test_feedback_unorm8();
         std::puts("codec: geometry, SDR/FP16 transport, reflection, round-trip, fitting, area-weighted downscale, composition, invalid-sample rejection and 8/16-bit multi-pass feedback passed");
-    } catch (const std::exception& e) {
-        std::fprintf(stderr, "codec test failed: %s\n", e.what());
-        return EXIT_FAILURE;
     }
     return EXIT_SUCCESS;
 }

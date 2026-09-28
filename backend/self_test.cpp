@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "engine.h"
 #include "hip_engine.h"
+#include "unwrap.h"
 
 #include <cmath>
 #include <cstdio>
@@ -14,8 +15,7 @@ namespace dlsslop {
 void run_vulkan_self_test(const Options& o, Backend& engine)
 {
     const unsigned passes = std::min(o.passes.value_or(kNativeDefaultPasses), engine.max_passes);
-    const auto raster = dlsslop::geometry(1, 1, engine.tier());
-    const unsigned w = raster.width, h = engine.tier();
+    const unsigned w = ShmNativeTier(engine.tier())->width, h = engine.tier();
     std::vector<uint8_t> input(size_t(w) * h * 4), output(input.size()), first;
     for (unsigned y = 0; y < h; ++y)
         for (unsigned x = 0; x < w; ++x) {
@@ -58,7 +58,7 @@ void run_self_test(const Options& o, Engine& engine)
         input[p + 3] = 255;
     }
     const unsigned repeats = o.self_test_runs;
-    const auto g = dlsslop::geometry(w, h, engine.tier());
+    const auto g = unwrap(dlsslop::geometry(w, h, engine.tier()));
     std::vector<float> first_raw;
     std::vector<uint8_t> first_output;
     // Only the first run checks the codec against the CPU reference, so the

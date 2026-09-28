@@ -3,6 +3,7 @@
 
 #include "codec.h"
 #include "native_kernels.h"
+#include "unwrap.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -97,7 +98,7 @@ public:
     // copies infer their direction.
     void encode(const std::uint8_t* input, const Geometry& g, void* device_rgba, bool fp16 = false)
     {
-        validate(g);
+        unwrap(validate(g));
         if (!device_rgba)
             throw std::invalid_argument("null GPU encode output");
         format_ = &kFormats[fp16];

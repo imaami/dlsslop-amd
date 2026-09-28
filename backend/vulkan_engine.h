@@ -53,8 +53,7 @@ public:
     // Built before the daemon reports itself ready, for the raster's usual frame.
     void prepare() override
     {
-        const auto raster = dlsslop::geometry(1, 1, tier_);
-        network_->shape(frame(raster.width, tier_, 1, {}));
+        network_->shape(frame(ShmNativeTier(tier_)->width, tier_, 1, {}));
     }
     bool fits(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings) const override
     {

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "color_preserve_math.h"
+#include "result.h"
+
 #include <cmath>
 #include <cstring>
-#include <stdexcept>
 #include <vector>
 
 namespace dlsslop {
@@ -12,19 +13,19 @@ namespace dlsslop {
 // forcing original chroma onto newly generated edges. This preserves weighted
 // proxy-space luma (not physical linear-light luminance). High-frequency chroma
 // changes remain possible; this is not a guarantee of inference correctness.
-inline void preserve_color(const float* original_rgba, const float* model_rgb,
-                            const Geometry& g, float strength, std::vector<float>& result)
+inline Result<void> preserve_color(const float* original_rgba, const float* model_rgb, const Geometry& g,
+                                   float strength, std::vector<float>& result)
 {
     if (!std::isfinite(strength) || strength < 0 || strength > 1)
-        throw std::invalid_argument("color preservation must be finite and within 0..1");
+        return fail("color preservation must be finite and within 0..1");
     if (!original_rgba || !model_rgb || !fits(g) || g.width > 16384 || g.height > 16384)
-        throw std::invalid_argument("invalid color preservation buffers or geometry");
+        return fail("invalid color preservation buffers or geometry");
     if (!result.empty() && (result.data() == model_rgb || result.data() == original_rgba))
-        throw std::invalid_argument("color preservation requires distinct output");
+        return fail("color preservation requires distinct output");
     const std::size_t pixels = std::size_t(g.width) * g.height;
     result.resize(pixels * 3);
     std::memcpy(result.data(), model_rgb, pixels * 3 * sizeof(float));
-    if (strength == 0) return;
+    if (strength == 0) return {};
     const unsigned right = g.x + g.fit_width - 1, bottom = g.y + g.fit_height - 1;
     for (unsigned y = g.y; y <= bottom; ++y) {
         for (unsigned x = g.x; x <= right; ++x) {
@@ -33,8 +34,9 @@ inline void preserve_color(const float* original_rgba, const float* model_rgb,
             const std::size_t p = (std::size_t(y) * g.width + x) * 3;
             for (unsigned c = 0; c < 3; ++c)
                 if (!std::isfinite(result[p+c]))
-                    throw std::runtime_error("nonfinite color preservation result");
+                    return fail("nonfinite color preservation result");
         }
     }
+    return {};
 }
 } // namespace dlsslop

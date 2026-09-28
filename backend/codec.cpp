@@ -29,7 +29,6 @@
 #include <cmath>
 #include <cstring>
 #include <iterator>
-#include <stdexcept>
 
 namespace dlsslop {
 namespace {
@@ -191,17 +190,20 @@ Rgb rgba8(const std::uint8_t* p)
 }
 
 // The answer at source pixel (x, y) through the upstream FP16 surface. Like
-// the GPU codec, reject it when a texel it reads is not a finite binary16.
+// the GPU codec, the decoders reject it when a texel it reads is not a finite
+// binary16: it is then not finite either.
 // Out of line: inlining it into both decoders adds about 9 KB of text.
 [[gnu::noinline]] Rgb answer(const float* neural_rgb, const Geometry& g, unsigned x, unsigned y)
 {
-    const Rgb c = sample_answer([&](unsigned px, unsigned py) {
+    return sample_answer([&](unsigned px, unsigned py) {
         const float* p = neural_rgb + (std::size_t(py) * g.width + px) * 3;
         return Rgb{half_round(p[0]), half_round(p[1]), half_round(p[2])};
     }, g, x, y);
-    if (!finite(c))
-        throw std::range_error("neural output contains nonfinite or FP16-overflow samples");
-    return c;
+}
+
+std::unexpected<Error> nonfinite_answer()
+{
+    return reject("neural output contains nonfinite or FP16-overflow samples");
 }
 
 void reflect_padding(const Geometry& g, std::vector<float>& rgba)
@@ -213,15 +215,15 @@ void reflect_padding(const Geometry& g, std::vector<float>& rgba)
 
 } // namespace
 
-Geometry geometry(unsigned source_width, unsigned source_height, unsigned tier_height)
+Result<Geometry> geometry(unsigned source_width, unsigned source_height, unsigned tier_height)
 {
     if (!source_width || !source_height || source_width > 16384 || source_height > 16384)
-        throw std::invalid_argument("source extent must be in 1..16384");
+        return fail("source extent must be in 1..16384");
     const auto holds = [=](const NativeTier& t) { return source_width <= t.width && source_height <= t.height; };
     // The named tier, or the smallest that holds the source, else the largest.
     const NativeTier* tier = tier_height ? ShmNativeTier(tier_height)
         : std::min(std::find_if(std::begin(kNativeTiers), std::end(kNativeTiers), holds), std::end(kNativeTiers) - 1);
-    if (!tier) throw std::invalid_argument("network height must be 0, 720, 900 or 1080");
+    if (!tier) return fail("network height must be 0, 720, 900 or 1080");
     Geometry g;
     g.source_width = source_width;
     g.source_height = source_height;
@@ -241,19 +243,17 @@ Geometry geometry(unsigned source_width, unsigned source_height, unsigned tier_h
     return g;
 }
 
-void validate(const Geometry& g)
+Result<void> validate(const Geometry& g)
 {
-    const Geometry expected = geometry(g.source_width, g.source_height, g.valid_height);
-    if (std::memcmp(&expected, &g, sizeof g))
-        throw std::invalid_argument("inconsistent codec geometry");
+    const auto expected = geometry(g.source_width, g.source_height, g.valid_height);
+    if (!expected || std::memcmp(&*expected, &g, sizeof g)) return fail("inconsistent codec geometry");
+    return {};
 }
 
-void encode_proxy(const std::uint8_t* source, const Geometry& g, bool fp16,
-                  std::vector<float>& rgba)
+Result<void> encode_proxy(const std::uint8_t* source, const Geometry& g, bool fp16, std::vector<float>& rgba)
 {
-    validate(g);
-    if (!source)
-        throw std::invalid_argument("null source image");
+    DLSSLOP_TRY(validate(g));
+    if (!source) return fail("null source image");
     const auto read8 = [&](unsigned x, unsigned y) {
         return rgba8(source + (std::size_t(y) * g.source_width + x) * 4);
     };
@@ -268,7 +268,7 @@ void encode_proxy(const std::uint8_t* source, const Geometry& g, bool fp16,
             if (fitted(g, x, y))
                 c = fp16 ? sample_proxy(read16, g, x, y) : sample_proxy(read8, g, x, y);
             if (!finite(c)) // Only FP16 samples can be.
-                throw std::range_error("FP16 proxy contains nonfinite RGB samples");
+                return reject("FP16 proxy contains nonfinite RGB samples");
             float* p = rgba.data() + (std::size_t(y) * g.width + x) * 4;
             p[0] = half_round(c.r);
             p[1] = half_round(c.g);
@@ -277,14 +277,14 @@ void encode_proxy(const std::uint8_t* source, const Geometry& g, bool fp16,
         }
     }
     reflect_padding(g, rgba);
+    return {};
 }
 
-void feedback_neural_rgb(const float* neural_rgb, const Geometry& g,
-                         std::vector<float>& rgba, bool precision16)
+Result<void> feedback_neural_rgb(const float* neural_rgb, const Geometry& g, std::vector<float>& rgba,
+                                 bool precision16)
 {
-    validate(g);
-    if (!neural_rgb)
-        throw std::invalid_argument("null neural feedback image");
+    DLSSLOP_TRY(validate(g));
+    if (!neural_rgb) return fail("null neural feedback image");
     rgba.resize(std::size_t(g.width) * g.height * 4);
     for (unsigned y = 0; y < g.valid_height; ++y) {
         for (unsigned x = 0; x < g.width; ++x) {
@@ -299,7 +299,7 @@ void feedback_neural_rgb(const float* neural_rgb, const Geometry& g,
                 // Binary16 feedback also rejects what rounds past binary16;
                 // UNORM8 feedback, which clamps, only nonfinite input.
                 if (!finite(raw) || !finite(c))
-                    throw std::runtime_error("neural feedback contains nonfinite or FP16-overflow samples");
+                    return fail("neural feedback contains nonfinite or FP16-overflow samples");
             }
             float* p = rgba.data() + (std::size_t(y) * g.width + x) * 4;
             p[0] = c.r;
@@ -309,18 +309,19 @@ void feedback_neural_rgb(const float* neural_rgb, const Geometry& g,
         }
     }
     reflect_padding(g, rgba);
+    return {};
 }
 
-void decode_neural_proxy(const std::uint8_t* original, const Geometry& g, bool fp16,
-                         const float* neural_rgb, std::uint8_t* output)
+Result<void> decode_neural_proxy(const std::uint8_t* original, const Geometry& g, bool fp16,
+                                 const float* neural_rgb, std::uint8_t* output)
 {
-    validate(g);
-    if (!original || !neural_rgb)
-        throw std::invalid_argument("null decode image");
+    DLSSLOP_TRY(validate(g));
+    if (!original || !neural_rgb) return fail("null decode image");
     const unsigned pixel_bytes = fp16 ? 8 : 4;
     for (unsigned y = 0; y < g.source_height; ++y) {
         for (unsigned x = 0; x < g.source_width; ++x) {
             const Rgb neural = answer(neural_rgb, g, x, y);
+            if (!finite(neural)) return nonfinite_answer();
             const std::size_t p = (std::size_t(y) * g.source_width + x) * pixel_bytes;
             if (fp16) {
                 pack_half(neural.r, output + p);
@@ -335,15 +336,14 @@ void decode_neural_proxy(const std::uint8_t* original, const Geometry& g, bool f
             }
         }
     }
+    return {};
 }
 
-void decode_rgba8(const std::uint8_t* original, const Geometry& g,
-                  const float* encoded_rgba, const float* neural_rgb,
-                  std::uint8_t* output)
+Result<void> decode_rgba8(const std::uint8_t* original, const Geometry& g, const float* encoded_rgba,
+                          const float* neural_rgb, std::uint8_t* output)
 {
-    validate(g);
-    if (!original || !encoded_rgba || !neural_rgb)
-        throw std::invalid_argument("null decode image");
+    DLSSLOP_TRY(validate(g));
+    if (!original || !encoded_rgba || !neural_rgb) return fail("null decode image");
     const auto encoded = [&](unsigned x, unsigned y) {
         const float* p = encoded_rgba + (std::size_t(y) * g.width + x) * 4;
         return Rgb{p[0], p[1], p[2]};
@@ -353,7 +353,9 @@ void decode_rgba8(const std::uint8_t* original, const Geometry& g,
             const std::size_t pixel = std::size_t(y) * g.source_width + x;
             const Rgb source = decode(rgba8(original + pixel * 4));
             const Rgb proxy = decode(sample_answer(encoded, g, x, y));
-            const Rgb neural = decode(answer(neural_rgb, g, x, y));
+            const Rgb sampled = answer(neural_rgb, g, x, y);
+            if (!finite(sampled)) return nonfinite_answer();
+            const Rgb neural = decode(sampled);
             const Rgb upgraded = upgrade(source, proxy, neural);
             const float oy = luminance(source), uy = luminance(upgraded);
             const float ratio = oy == 0.0f ? 1.0f : std::clamp(uy / oy, 0.0f, 4.0f);
@@ -364,6 +366,7 @@ void decode_rgba8(const std::uint8_t* original, const Geometry& g,
             output[pixel * 4 + 3] = original[pixel * 4 + 3];
         }
     }
+    return {};
 }
 
 } // namespace dlsslop

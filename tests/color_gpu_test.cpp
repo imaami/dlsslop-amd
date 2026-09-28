@@ -83,7 +83,7 @@ int main(int argc,char** argv)
                     api.Check(api.hipMemcpy(original,input.data(),input.size()*sizeof(float),1),"replace test reference");
                 }
                 for(float strength : {0.f,.25f,.5f,1.f}) {
-                    dlsslop::preserve_color(input.data(),model.data(),g,strength,expected);
+                    if(!dlsslop::preserve_color(input.data(),model.data(),g,strength,expected)) throw std::runtime_error("reference refused its input");
                     dlsslop::gpu_preserve_color(kernels,g,original,raw,output,strength);
                     api.Check(api.hipStreamSynchronize(stream),"finish correction");
                     api.Check(api.hipMemcpy(actual.data(),output,actual.size()*sizeof(float),2),"read correction");

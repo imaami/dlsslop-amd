@@ -5,6 +5,7 @@
 #include "hip_engine.h"
 #include "open.h"
 #include "transport.h"
+#include "unwrap.h"
 
 #include <atomic>
 #include <chrono>
@@ -37,7 +38,7 @@ dlsslop::NativeTuning read_tuning(const ShmHeader* h)
 void publish_raster(const Options& o, ShmHeader* h, unsigned tier)
 {
     const bool neural = !o.cpu_compose && !o.test_identity;
-    h->nativeModelMaxWidth.store(neural ? dlsslop::geometry(1, 1, tier).width : 0);
+    h->nativeModelMaxWidth.store(neural ? ShmNativeTier(tier)->width : 0);
     h->nativeModelMaxHeight.store(neural ? tier : 0);
 }
 
@@ -209,7 +210,7 @@ void run_worker(Options o)
                     throw std::range_error("the preset must be 0, style 0..2, auto-mask 0 or 1 and skin structure -1..2");
                 if (!(settings.color_preserve >= 0 && settings.color_preserve <= 1))
                     throw std::range_error("invalid color preservation strength");
-                dlsslop::validate_native_tuning(settings.tuning);
+                unwrap(dlsslop::validate_native_tuning(settings.tuning));
                 const size_t bytes = size_t(w) * height * (settings.fp16 ? 8 : 4);
                 // A live control change takes effect on the next request;
                 // never shorten or extend a chain partway through a frame.
@@ -258,7 +259,7 @@ void run_worker(Options o)
                     for (uint8_t byte : proxy)
                         metadata.source_proxy_hash = (metadata.source_proxy_hash ^ byte) * 1099511628211ull;
                     metadata.passes = passes;
-                    metadata.geometry = dlsslop::geometry(w, height, engine->tier());
+                    metadata.geometry = unwrap(dlsslop::geometry(w, height, engine->tier()));
                     metadata.fp16_proxy = settings.fp16;
                     metadata.fp16_feedback = settings.precision16;
                     metadata.motion = settings.motion;

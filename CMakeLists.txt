@@ -16,6 +16,8 @@ add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initi
 # linked libstdc++ and the symbol tables from every binary.
 add_compile_options(-ffunction-sections -fdata-sections)
 add_link_options(-Wl,--gc-sections $<$<CONFIG:Release>:-s>)
+# Project headers shared by the daemon, the layer's own code, the tools and tests.
+include_directories(common)
 find_package(Threads REQUIRED)
 include(CTest)
 
@@ -127,7 +129,7 @@ add_executable(dlsslopd
     backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.cpp
     backend/open.cpp backend/hip_engine.cpp backend/self_test.cpp backend/offline.cpp
     backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp)
-target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common common)
+target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
 target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-vknr Threads::Threads ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)
 target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
@@ -182,7 +184,6 @@ if(BUILD_TESTING)
     target_include_directories(temporal-test PRIVATE backend)
     add_test(NAME temporal COMMAND temporal-test)
     add_executable(trace-test tests/trace_test.cpp backend/trace.cpp backend/files.cpp)
-    target_include_directories(trace-test PRIVATE common)
     add_test(NAME trace COMMAND trace-test ${Python3_EXECUTABLE})
     add_executable(capture-writer-test tests/capture_writer_test.cpp)
     target_link_libraries(capture-writer-test PRIVATE dlsslop-layer-objects)

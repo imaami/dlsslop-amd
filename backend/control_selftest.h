@@ -4,6 +4,7 @@
 #include "codec_gpu.h"
 #include "temporal_gpu.h"
 #include "tuning.h"
+#include "unwrap.h"
 
 #include <cmath>
 #include <cstddef>
@@ -97,7 +98,7 @@ inline void check_tuning(const NativeKernels& kernels)
     const NativeTuning states[] = {{}, {0, 1, 1, 0}, {1.75f, .25f, 2.5f, .375f},
                                   {1, 0, 1, 0}, {1, 1, 0, 1}};
     for (const auto& state : states) {
-        tune_neural_rgb(input.data(), model.data(), g, reference, state);
+        unwrap(tune_neural_rgb(input.data(), model.data(), g, reference, state));
         gpu_tune(kernels, g, device_input.pointer, device_model.pointer, device_result.pointer, state);
         compare(device_result.read(), reference, "GPU native tuning");
     }
@@ -269,7 +270,7 @@ inline bool codec_rejects(GpuCodec& codec, const std::vector<std::uint8_t>& prox
 
 inline void check_codec(const NativeKernels& kernels)
 {
-    const Geometry g = geometry(7, 5, 720);
+    const Geometry g = unwrap(geometry(7, 5, 720));
     const std::size_t pixels = std::size_t(g.width) * g.height;
     std::vector<std::uint8_t> proxy(g.source_width * g.source_height * 8);
     const std::uint16_t half_samples[] = {0xb800, 0x0000, 0x3400, 0x3a00, 0x3e00, 0x4000};
@@ -284,7 +285,7 @@ inline void check_codec(const NativeKernels& kernels)
     Buffer device_rgb(kernels, pixels * 3 * sizeof(float));
     GpuCodec codec(kernels);
     std::vector<float> reference, model(pixels * 3);
-    encode_proxy(proxy.data(), g, true, reference);
+    unwrap(encode_proxy(proxy.data(), g, true, reference));
     codec.encode(proxy.data(), g, device_input.pointer, true);
     compare(device_input.read(), reference, "GPU FP16 proxy encode");
 
@@ -297,7 +298,7 @@ inline void check_codec(const NativeKernels& kernels)
     std::vector<std::uint8_t> decoded(proxy.size()), expected(proxy.size());
     codec.decode(device_rgb.pointer, decoded.data());
     codec.finish();
-    decode_neural_proxy(proxy.data(), g, true, model.data(), expected.data());
+    unwrap(decode_neural_proxy(proxy.data(), g, true, model.data(), expected.data()));
     require(decoded == expected, "GPU FP16 proxy decode disagrees on exact signed/extended-range fixture");
     // Decode overwrites the uploaded proxy's RGB in place; a repeat must agree.
     std::vector<std::uint8_t> repeated(proxy.size());
@@ -326,7 +327,7 @@ inline void check_codec(const NativeKernels& kernels)
     }
     device_rgb.upload(model);
     for (bool precision16 : {true, false}) {
-        feedback_neural_rgb(model.data(), g, reference, precision16);
+        unwrap(feedback_neural_rgb(model.data(), g, reference, precision16));
         codec.feedback(device_rgb.pointer, device_input.pointer, precision16);
         compare(device_input.read(), reference, precision16 ? "GPU FP16 feedback" : "GPU UNORM8 feedback");
     }
@@ -334,7 +335,7 @@ inline void check_codec(const NativeKernels& kernels)
 
     // A source larger than the fit (4 and 4.17 texels per pixel) takes the
     // area-weighted encode, which no other check reaches.
-    const Geometry large = geometry(40, 3000, 720);
+    const Geometry large = unwrap(geometry(40, 3000, 720));
     std::vector<std::uint8_t> source(std::size_t(large.source_width) * large.source_height * 8);
     for (std::size_t i = 0; i < source.size() / 2; ++i) {
         const std::uint16_t value = std::uint16_t(0x2c00u + (i * 37u) % 0x1000u); // 1/16 up to 1
@@ -342,7 +343,7 @@ inline void check_codec(const NativeKernels& kernels)
     }
     Buffer device_large(kernels, std::size_t(large.width) * large.height * 4 * sizeof(float));
     for (bool fp16 : {false, true}) {
-        encode_proxy(source.data(), large, fp16, reference);
+        unwrap(encode_proxy(source.data(), large, fp16, reference));
         codec.encode(source.data(), large, device_large.pointer, fp16);
         compare(device_large.read(), reference, fp16 ? "GPU FP16 downscaling encode" : "GPU RGBA8 downscaling encode");
     }
