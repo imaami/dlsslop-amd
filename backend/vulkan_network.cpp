@@ -3,7 +3,7 @@
 #include "vulkan_network.h"
 
 #include "nr_log.hpp"
-#include "nr_runtime.hpp"
+#include "nr_vendor.h"
 
 #include <algorithm>
 #include <array>
@@ -11,7 +11,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -21,9 +20,10 @@
 namespace dlsslop {
 namespace {
 
-void check(VkResult result, const char* what)
+Result<void> check(VkResult result, const char* what)
 {
-    if (result != VK_SUCCESS) throw std::runtime_error(std::string(what) + " failed (VkResult " + std::to_string(int(result)) + ")");
+    if (result != VK_SUCCESS) return fail(std::string(what) + " failed (VkResult " + std::to_string(int(result)) + ")");
+    return {};
 }
 
 void log_line(const char* line) { std::fprintf(stderr, "%s\n", line); }
@@ -151,11 +151,11 @@ struct VulkanNetwork::Impl {
     };
     std::array<Imported, kImportSlots> imported{};
 
-    uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags want) const
+    Result<uint32_t> memory_type(uint32_t bits, VkMemoryPropertyFlags want) const
     {
         for (uint32_t i = 0; i < memory.memoryTypeCount; ++i)
             if ((bits & (1u << i)) && (memory.memoryTypes[i].propertyFlags & want) == want) return i;
-        throw std::runtime_error("no suitable Vulkan memory type");
+        return fail("no suitable Vulkan memory type");
     }
     void drop(Buffer& b)
     {
@@ -170,26 +170,27 @@ struct VulkanNetwork::Impl {
         i = {};
     }
     // A host-visible transfer buffer of at least bytes.
-    void host_buffer(Buffer& b, VkDeviceSize bytes, VkBufferUsageFlags usage, VkMemoryPropertyFlags extra)
+    Result<void> host_buffer(Buffer& b, VkDeviceSize bytes, VkBufferUsageFlags usage, VkMemoryPropertyFlags extra)
     {
-        if (b.size >= bytes) return;
+        if (b.size >= bytes) return {};
         drop(b);
         VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
         info.size = bytes;
         info.usage = usage;
-        check(vkCreateBuffer(device, &info, nullptr, &b.buffer), "create transfer buffer");
+        DLSSLOP_TRY(check(vkCreateBuffer(device, &info, nullptr, &b.buffer), "create transfer buffer"));
         VkMemoryRequirements req;
         vkGetBufferMemoryRequirements(device, b.buffer, &req);
         VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
         alloc.allocationSize = req.size;
-        alloc.memoryTypeIndex = memory_type(req.memoryTypeBits,
-                                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | extra);
-        check(vkAllocateMemory(device, &alloc, nullptr, &b.memory), "allocate transfer buffer");
-        check(vkBindBufferMemory(device, b.buffer, b.memory, 0), "bind transfer buffer");
-        check(vkMapMemory(device, b.memory, 0, VK_WHOLE_SIZE, 0, &b.mapped), "map transfer buffer");
+        alloc.memoryTypeIndex = DLSSLOP_TRY(
+            memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | extra));
+        DLSSLOP_TRY(check(vkAllocateMemory(device, &alloc, nullptr, &b.memory), "allocate transfer buffer"));
+        DLSSLOP_TRY(check(vkBindBufferMemory(device, b.buffer, b.memory, 0), "bind transfer buffer"));
+        DLSSLOP_TRY(check(vkMapMemory(device, b.memory, 0, VK_WHOLE_SIZE, 0, &b.mapped), "map transfer buffer"));
         b.size = bytes;
+        return {};
     }
-    void image(Image& i, VkFormat format, unsigned w, unsigned h, VkImageUsageFlags usage)
+    Result<void> image(Image& i, VkFormat format, unsigned w, unsigned h, VkImageUsageFlags usage)
     {
         VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
         info.imageType = VK_IMAGE_TYPE_2D;
@@ -199,14 +200,14 @@ struct VulkanNetwork::Impl {
         info.samples = VK_SAMPLE_COUNT_1_BIT;
         info.tiling = VK_IMAGE_TILING_OPTIMAL;
         info.usage = usage;
-        check(vkCreateImage(device, &info, nullptr, &i.image), "create frame image");
+        DLSSLOP_TRY(check(vkCreateImage(device, &info, nullptr, &i.image), "create frame image"));
         VkMemoryRequirements req;
         vkGetImageMemoryRequirements(device, i.image, &req);
         VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
         alloc.allocationSize = req.size;
-        alloc.memoryTypeIndex = memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        check(vkAllocateMemory(device, &alloc, nullptr, &i.memory), "allocate frame image");
-        check(vkBindImageMemory(device, i.image, i.memory, 0), "bind frame image");
+        alloc.memoryTypeIndex = DLSSLOP_TRY(memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT));
+        DLSSLOP_TRY(check(vkAllocateMemory(device, &alloc, nullptr, &i.memory), "allocate frame image"));
+        return check(vkBindImageMemory(device, i.image, i.memory, 0), "bind frame image");
     }
     void release(Imported& slot)
     {
@@ -232,9 +233,10 @@ struct VulkanNetwork::Impl {
     }
 };
 
-VulkanNetwork::VulkanNetwork(const VulkanPaths& paths, int device) : impl_(std::make_unique<Impl>())
+Result<VulkanNetwork> VulkanNetwork::create(const VulkanPaths& paths, int device)
 {
-    auto& s = *impl_;
+    VulkanNetwork network(std::make_unique<Impl>());
+    auto& s = *network.impl_;
     s.paths = paths;
     nr::set_log_sink(log_line);
     // The daemon has no overlay to show: keep implicit layers (Steam's, MangoHud's) out
@@ -245,11 +247,11 @@ VulkanNetwork::VulkanNetwork(const VulkanPaths& paths, int device) : impl_(std::
     app.apiVersion = VK_API_VERSION_1_3;
     VkInstanceCreateInfo info{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     info.pApplicationInfo = &app;
-    check(vkCreateInstance(&info, nullptr, &s.instance), "create Vulkan instance");
+    DLSSLOP_TRY(check(vkCreateInstance(&info, nullptr, &s.instance), "create Vulkan instance"));
     uint32_t count = 0;
-    check(vkEnumeratePhysicalDevices(s.instance, &count, nullptr), "enumerate Vulkan devices");
+    DLSSLOP_TRY(check(vkEnumeratePhysicalDevices(s.instance, &count, nullptr), "enumerate Vulkan devices"));
     std::vector<VkPhysicalDevice> devices(count);
-    check(vkEnumeratePhysicalDevices(s.instance, &count, devices.data()), "enumerate Vulkan devices");
+    DLSSLOP_TRY(check(vkEnumeratePhysicalDevices(s.instance, &count, devices.data()), "enumerate Vulkan devices"));
     bool layout = false;
     std::string reasons;
     for (uint32_t i = 0; i < count && !s.physical; ++i) {
@@ -266,8 +268,8 @@ VulkanNetwork::VulkanNetwork(const VulkanPaths& paths, int device) : impl_(std::
         }
     }
     if (!s.physical)
-        throw std::runtime_error(device >= 0 && unsigned(device) >= count ? "no Vulkan device " + std::to_string(device)
-                                                                          : "no Vulkan device can run the network:" + reasons);
+        return fail(device >= 0 && unsigned(device) >= count ? "no Vulkan device " + std::to_string(device)
+                                                             : "no Vulkan device can run the network:" + reasons);
     Features enable(layout);
     enable.coop.cooperativeMatrix = VK_TRUE;
     enable.fp8.shaderFloat8 = enable.fp8.shaderFloat8CooperativeMatrix = VK_TRUE;
@@ -291,7 +293,7 @@ VulkanNetwork::VulkanNetwork(const VulkanPaths& paths, int device) : impl_(std::
     create.pQueueCreateInfos = &queue;
     create.enabledExtensionCount = uint32_t(extensions.size());
     create.ppEnabledExtensionNames = extensions.data();
-    check(vkCreateDevice(s.physical, &create, nullptr, &s.device), "create Vulkan device");
+    DLSSLOP_TRY(check(vkCreateDevice(s.physical, &create, nullptr, &s.device), "create Vulkan device"));
     vkGetDeviceQueue(s.device, s.family, 0, &s.queue);
     vkGetPhysicalDeviceMemoryProperties(s.physical, &s.memory);
     VkPhysicalDeviceProperties2 p{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &s.ids};
@@ -300,20 +302,23 @@ VulkanNetwork::VulkanNetwork(const VulkanPaths& paths, int device) : impl_(std::
     VkCommandPoolCreateInfo pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     pool.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     pool.queueFamilyIndex = s.family;
-    check(vkCreateCommandPool(s.device, &pool, nullptr, &s.pool), "create command pool");
+    DLSSLOP_TRY(check(vkCreateCommandPool(s.device, &pool, nullptr, &s.pool), "create command pool"));
     VkCommandBufferAllocateInfo alloc{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     alloc.commandPool = s.pool;
     alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc.commandBufferCount = 1;
-    check(vkAllocateCommandBuffers(s.device, &alloc, &s.cmd), "allocate command buffer");
+    DLSSLOP_TRY(check(vkAllocateCommandBuffers(s.device, &alloc, &s.cmd), "allocate command buffer"));
     VkFenceCreateInfo fence{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-    check(vkCreateFence(s.device, &fence, nullptr, &s.fence), "create fence");
+    DLSSLOP_TRY(check(vkCreateFence(s.device, &fence, nullptr, &s.fence), "create fence"));
     VkQueryPoolCreateInfo queries{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
     queries.queryType = VK_QUERY_TYPE_TIMESTAMP;
     queries.queryCount = 4;
-    check(vkCreateQueryPool(s.device, &queries, nullptr, &s.queries), "create timestamp queries");
+    DLSSLOP_TRY(check(vkCreateQueryPool(s.device, &queries, nullptr, &s.queries), "create timestamp queries"));
+    return network;
 }
 
+VulkanNetwork::VulkanNetwork(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
+VulkanNetwork::VulkanNetwork(VulkanNetwork&&) noexcept = default;
 VulkanNetwork::~VulkanNetwork() = default;
 
 const std::string& VulkanNetwork::device_name() const { return impl_->name; }
@@ -327,13 +332,13 @@ bool VulkanNetwork::shape_differs(const VulkanFrame& frame) const
            (uses_stages(frame) && !s.shape.stages);
 }
 
-bool VulkanNetwork::shape(const VulkanFrame& frame)
+Result<bool> VulkanNetwork::shape(const VulkanFrame& frame)
 {
     auto& s = *impl_;
     if (!shape_differs(frame)) return false;
     const unsigned passes = std::clamp(frame.passes, 1u, kMaxPasses);
     const Shape want{frame.width, frame.height, frame.fp16, frame.motion, passes, uses_stages(frame)};
-    check(vkDeviceWaitIdle(s.device), "wait for the device");
+    DLSSLOP_TRY(check(vkDeviceWaitIdle(s.device), "wait for the device"));
     s.runtime.reset();
     s.drop(s.colour);
     s.drop(s.half);
@@ -341,9 +346,9 @@ bool VulkanNetwork::shape(const VulkanFrame& frame)
     // The network takes 8-bit frames as they are and every other one as RGBA32F.
     const VkFormat format = frame.fp16 ? VK_FORMAT_R32G32B32A32_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
     const VkImageUsageFlags transfer = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-    s.image(s.colour, format, frame.width, frame.height,
-            transfer | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
-    if (frame.fp16) s.image(s.half, VK_FORMAT_R16G16B16A16_SFLOAT, frame.width, frame.height, transfer);
+    DLSSLOP_TRY(s.image(s.colour, format, frame.width, frame.height,
+                        transfer | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT));
+    if (frame.fp16) DLSSLOP_TRY(s.image(s.half, VK_FORMAT_R16G16B16A16_SFLOAT, frame.width, frame.height, transfer));
     nr::HostDevice host;
     host.instance = s.instance;
     host.physical = s.physical;
@@ -363,7 +368,7 @@ bool VulkanNetwork::shape(const VulkanFrame& frame)
     config.pipeline_cache = s.paths.cache;
     nr::TemporalConfig temporal;
     temporal.enable = frame.motion;
-    s.runtime = std::make_unique<nr::Runtime>(host, config, nr::ControlMaskConfig{}, temporal);
+    s.runtime = DLSSLOP_TRY(nr_vendor::build(host, config, temporal));
     s.shape = want;
     s.last.reset();
     return true;
@@ -393,10 +398,7 @@ bool VulkanNetwork::import(unsigned slot, const ShmTransportOffer& offer, int fd
             vkGetBufferMemoryRequirements(s.device, b.buffer, &req);
             // The layer exports from the first device-local type the buffer allows; on the
             // same GPU and driver that is this device's too.
-            try {
-                type = s.memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-            } catch (const std::exception&) {
-            }
+            type = s.memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT).value_or(type);
         }
         VkMemoryDedicatedAllocateInfo dedicated{VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO};
         dedicated.buffer = b.buffer;
@@ -418,36 +420,41 @@ bool VulkanNetwork::import(unsigned slot, const ShmTransportOffer& offer, int fd
         }
         b.size = offer.size[i];
     }
-    // An earlier frame may still be reading the slot's old import.
-    check(vkQueueWaitIdle(s.queue), "wait for the queue");
+    // An earlier frame may still be reading the slot's old import. A queue that
+    // cannot go idle leaves the old pair where it is.
+    if (vkQueueWaitIdle(s.queue) != VK_SUCCESS) {
+        s.release(next);
+        return false;
+    }
     s.release(s.imported[slot]);
     s.imported[slot] = next;
     return true;
 }
 
-void VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint8_t* input, uint8_t* output)
+Result<void> VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint8_t* input, uint8_t* output)
 {
     auto& s = *impl_;
-    shape(frame);
+    DLSSLOP_TRY(shape(frame));
     const VkDeviceSize bytes = VkDeviceSize(frame.width) * frame.height * (frame.fp16 ? 8 : 4);
     const bool exported = slot >= 0;  // the layer's device-local pair
     VkBuffer source = VK_NULL_HANDLE, target = VK_NULL_HANDLE;
     if (exported) {
-        source = s.imported.at(size_t(slot)).frame[0].buffer;
+        if (size_t(slot) >= s.imported.size() || !s.imported[size_t(slot)].frame[0].buffer)
+            return fail("import slot " + std::to_string(slot) + " holds no frames");
+        source = s.imported[size_t(slot)].frame[0].buffer;
         target = s.imported[size_t(slot)].frame[1].buffer;
-        if (!source) throw std::logic_error("import slot " + std::to_string(slot) + " holds no frames");
     } else {
-        s.host_buffer(s.upload, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 0);
-        s.host_buffer(s.download, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+        DLSSLOP_TRY(s.host_buffer(s.upload, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 0));
+        DLSSLOP_TRY(s.host_buffer(s.download, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT));
         std::memcpy(s.upload.mapped, input, bytes);
         source = s.upload.buffer;
         target = s.download.buffer;
     }
     VkCommandBuffer cmd = s.cmd;
-    check(vkResetCommandBuffer(cmd, 0), "reset command buffer");
+    DLSSLOP_TRY(check(vkResetCommandBuffer(cmd, 0), "reset command buffer"));
     VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    check(vkBeginCommandBuffer(cmd, &begin), "begin command buffer");
+    DLSSLOP_TRY(check(vkBeginCommandBuffer(cmd, &begin), "begin command buffer"));
     vkCmdResetQueryPool(cmd, s.queries, 0, 4);
     vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, s.queries, 0);
 
@@ -543,9 +550,9 @@ void VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint8_t* inp
         };
         nr::TemporalFrame temporal;
         temporal.reset = !s.last || settings(*s.last) != settings(frame);
-        s.runtime->record_temporal(cmd, colour, controls, temporal);
+        DLSSLOP_TRY(nr_vendor::record_temporal(*s.runtime, cmd, colour, controls, temporal));
     } else {
-        s.runtime->record(cmd, colour, controls);
+        DLSSLOP_TRY(nr_vendor::record(*s.runtime, cmd, colour, controls));
     }
     vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, s.queries, 2);
 
@@ -577,14 +584,14 @@ void VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint8_t* inp
                              nullptr);
     }
     vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, s.queries, 3);
-    check(vkEndCommandBuffer(cmd), "end command buffer");
+    DLSSLOP_TRY(check(vkEndCommandBuffer(cmd), "end command buffer"));
     VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &cmd;
-    check(vkResetFences(s.device, 1, &s.fence), "reset fence");
-    check(vkQueueSubmit(s.queue, 1, &submit, s.fence), "submit frame");
+    DLSSLOP_TRY(check(vkResetFences(s.device, 1, &s.fence), "reset fence"));
+    DLSSLOP_TRY(check(vkQueueSubmit(s.queue, 1, &submit, s.fence), "submit frame"));
     // A healthy frame takes milliseconds; ten seconds means the device is gone.
-    check(vkWaitForFences(s.device, 1, &s.fence, VK_TRUE, 10'000'000'000ull), "wait for the frame");
+    DLSSLOP_TRY(check(vkWaitForFences(s.device, 1, &s.fence, VK_TRUE, 10'000'000'000ull), "wait for the frame"));
     s.last = frame;
     uint64_t stamps[4] = {};
     if (vkGetQueryPoolResults(s.device, s.queries, 0, 4, sizeof stamps, stamps, sizeof stamps[0],
@@ -595,6 +602,7 @@ void VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint8_t* inp
         readback_ms = ms(2, 3);
     }
     if (!exported) std::memcpy(output, s.download.mapped, bytes);
+    return {};
 }
 
 }  // namespace dlsslop

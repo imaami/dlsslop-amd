@@ -21,9 +21,8 @@ Result<std::unique_ptr<Backend>> open_vulkan(const Options& o, unsigned tier)
 {
     if (!is_regular_file(o.vulkan_model))
         return fail("no model at " + o.vulkan_model + " (dlsslop-setup --dll extracts it from nvngx_dlssnr.dll 310.8.0)");
-    std::unique_ptr<VulkanNetwork> network;
-    DLSSLOP_TRY(guarded([&] { network = std::make_unique<VulkanNetwork>(vulkan_paths(o), o.device); }));
-    std::fprintf(stderr, "Vulkan network on %s\n", network->device_name().c_str());
+    auto network = DLSSLOP_TRY(VulkanNetwork::create(vulkan_paths(o), o.device));
+    std::fprintf(stderr, "Vulkan network on %s\n", network.device_name().c_str());
     auto engine = std::make_unique<VulkanEngine>(std::move(network), tier);
     DLSSLOP_TRY(engine->prepare());
     return engine;
