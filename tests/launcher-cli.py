@@ -41,6 +41,7 @@ def main():
         assert "dlssnr-amd" not in default_help
         help_text = run([BASH, str(LAUNCHER), "--help"], env=env).stdout
         assert "--shm" in help_text and "--log" in help_text and "default:" in help_text
+        assert "-n, --layer-network" in help_text and "(default: off; experimental)" in help_text
         assert str(channel) in help_text
         assert "resolved against the launcher's working directory" in help_text
         relative_help = run([BASH, str(LAUNCHER), "--help"], cwd=base,
@@ -96,7 +97,7 @@ def main():
                           DLSSNR_ENABLE="0", DLSSLOP_BACKEND="inherited",
                           DLSSNR_DMABUF="1", DLSSNR_IDLE_REPAINT="1",
                           DLSS5_VIT_ADAPTIVE="0", DLSSLOP_HIP_LIBRARY="external library",
-                          VKLayer_DLSS5="1", FIXTURE_EXIT="37")
+                          VKLayer_DLSS5="1", DLSSLOP_LAYER_NETWORK="1", FIXTURE_EXIT="37")
         arguments = ["--shm", "unchanged", "", "two words", "literal '$() ` text"]
         with channel.open("rb") as lock:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -115,6 +116,11 @@ def main():
             assert "DLSSLOP_SHM" not in got["env"] and "DLSSLOP_LOG" not in got["env"]
             assert got["env"]["DLSS5_VIT_ADAPTIVE"] == "0"
             assert got["env"]["DLSSLOP_HIP_LIBRARY"] == "external library"
+            # The in-layer network runs only when asked for here, never by inheritance.
+            assert "DLSSLOP_LAYER_NETWORK" not in got["env"]
+            for flag in ("-n", "--layer-network"):
+                result = run([BASH, str(LAUNCHER), flag, "--", recorder.name], expected=37, env=launch_env)
+                assert json.loads(result.stdout)["env"]["DLSSLOP_LAYER_NETWORK"] == "1", flag
             override_env = dict(launch_env, DLSSNR_SHM=str(base / "missing"),
                                 DLSSNR_LOG="inherited.log")
             result = run([BASH, str(LAUNCHER), f"--shm={channel}", "-l", "selected log", str(recorder)],

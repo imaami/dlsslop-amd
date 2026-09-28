@@ -7,6 +7,7 @@ channel_default=${DLSSNR_SHM:-/tmp/dlsslop-amd-${UID}/shm.bin}
 [[ $channel_default == /* ]] || channel_default=$PWD/$channel_default
 channel=$channel_default
 log=${DLSSNR_LOG:-}
+network=
 # The layer manifest installed beside this launcher; the Vulkan loader does not
 # search every prefix (/opt/dlsslop-amd, say) by itself.
 self=$(readlink -f -- "${BASH_SOURCE[0]}")
@@ -26,6 +27,10 @@ Run a game with the native AMD presentation layer and a native worker.
 Options:
   -s, --shm PATH   Worker channel (default: ${channel_default}).
   -l, --log PATH   Layer log (default: ${DLSSNR_LOG:-${channel_default%/*}/layer.log}).
+  -n, --layer-network
+                   Run the network in the layer, on the game's device, for a
+                   Vulkan 1.3 game on a device that can; the worker remains
+                   its fallback (default: off; experimental).
   -h, --help       Show this help and exit (default: off).
   --              End launcher options (default: first COMMAND ends options).
 
@@ -36,6 +41,7 @@ Relative paths are resolved against the launcher's working directory.
 
 The launcher sets these values for COMMAND, overriding inherited values:
   DLSSLOP_AMD_ENABLE=1  DLSSNR_ENABLE=1  DLSSNR_IDLE_REPAINT=0
+  DLSSLOP_LAYER_NETWORK=1 with --layer-network; unset without it.
 It prepends the installation's layer manifests to VK_ADD_IMPLICIT_LAYER_PATH
 (${layers:-none: no share/vulkan/implicit_layer.d beside this launcher}).
 It unsets DLSSNR_DISABLE and VKLayer_DLSS5. Other environment is inherited.
@@ -49,6 +55,7 @@ HELP
 while (( $# )); do
     case $1 in
         -h|--help) usage; exit 0 ;;
+        -n|--layer-network) network=1; shift ;;
         --shm=*|--log=*) set -- "${1%%=*}" "${1#*=}" "${@:2}" ;;
         -s?*|-l?*) set -- "${1:0:2}" "${1:2}" "${@:2}" ;;
         -s|--shm|-l|--log)
@@ -96,6 +103,11 @@ case $status in
     *) fail 1 'Could not inspect the native worker channel.' ;;
 esac
 export DLSSNR_SHM=$channel DLSSNR_LOG=$log DLSSLOP_AMD_ENABLE=1 DLSSNR_ENABLE=1 DLSSNR_IDLE_REPAINT=0
+if [[ $network ]]; then
+    export DLSSLOP_LAYER_NETWORK=1
+else
+    unset DLSSLOP_LAYER_NETWORK
+fi
 [[ $layers ]] && export VK_ADD_IMPLICIT_LAYER_PATH=$layers${VK_ADD_IMPLICIT_LAYER_PATH:+:$VK_ADD_IMPLICIT_LAYER_PATH}
 unset DLSSNR_DISABLE VKLayer_DLSS5
 shopt -s execfail
