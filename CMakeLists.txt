@@ -164,7 +164,7 @@ add_executable(dlsslopd
     backend/open.cpp backend/hip_engine.cpp backend/native_kernels.cpp
     backend/self_test.cpp
     backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp
-    common/network_recorder.cpp)
+    backend/processing.cpp common/network_recorder.cpp)
 target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
 target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip-vendor dlsslop-nr-vendor Threads::Threads ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)

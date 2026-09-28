@@ -5,6 +5,7 @@
 #pragma once
 #include "files.h"
 #include "options.h"
+#include "processing.h"
 #include "result.h"
 #include "shm_protocol.h"
 #include "trace.h"
@@ -17,20 +18,6 @@
 #include <string>
 
 namespace dlsslop {
-
-struct ProcessingSettings {
-    NativeTuning tuning;
-    // The Vulkan model's own conditioning; the HIP network has only the defaults.
-    unsigned style = 0;
-    float skin_structure = -1;
-    bool auto_mask = true;
-    float color_preserve = 0;
-    bool fp16 = false;
-    bool precision16 = true;
-    bool motion = false;
-    unsigned motion_quality = kMVecBalanced;
-    unsigned motion_grid = kMVecPixels4;
-};
 
 // A request's frames: host memory, or the device-local pair in an import slot.
 struct Frames {

@@ -11,25 +11,6 @@ class VulkanEngine : public EngineBase<VulkanEngine> {
     VulkanNetwork network_;
     unsigned tier_;
 
-    static VulkanFrame frame(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings)
-    {
-        VulkanFrame f;
-        f.width = w;
-        f.height = h;
-        f.fp16 = settings.fp16;
-        f.passes = passes;
-        f.intensity = settings.tuning.intensity;
-        f.local_tone = settings.tuning.tone;
-        f.local_structure = settings.tuning.structure;
-        f.style = settings.style;
-        f.skin_structure = settings.skin_structure;
-        f.auto_mask = settings.auto_mask;
-        f.sharpness = settings.tuning.sharpness;
-        f.color_preserve = settings.color_preserve;
-        f.motion = settings.motion;
-        return f;
-    }
-
 public:
     static constexpr unsigned max_passes = VulkanNetwork::kMaxPasses;
     // The network sizes itself to each frame: a tier only changes the raster the layer targets.
@@ -50,14 +31,14 @@ public:
         return {};
     }
     // Built before the daemon reports itself ready, for the raster's usual frame.
-    Result<void> prepare() { return network_.shape(frame(ShmNativeTier(tier_)->width, tier_, 1, {})).transform([](bool) {}); }
+    Result<void> prepare() { return network_.shape(vulkan_frame(ShmNativeTier(tier_)->width, tier_, 1, {})).transform([](bool) {}); }
     bool fits(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings) const
     {
-        return !network_.shape_differs(frame(w, h, passes, settings));
+        return !network_.shape_differs(vulkan_frame(w, h, passes, settings));
     }
     Result<void> reshape(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings)
     {
-        return network_.shape(frame(w, h, passes, settings)).transform([](bool) {});
+        return network_.shape(vulkan_frame(w, h, passes, settings)).transform([](bool) {});
     }
     bool import_into(unsigned slot, const ShmTransportOffer& offer, Descriptor (&fds)[2])
     {
@@ -70,7 +51,7 @@ public:
     Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
                        FrameTrace* = nullptr)
     {
-        DLSSLOP_TRY(network_.infer(frame(w, h, passes, settings), io.slot, io.proxy, io.answer));
+        DLSSLOP_TRY(network_.infer(vulkan_frame(w, h, passes, settings), io.slot, io.proxy, io.answer));
         upload_ms = network_.upload_ms;
         inference_ms = network_.inference_ms;
         readback_ms = network_.readback_ms;

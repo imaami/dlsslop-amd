@@ -26,12 +26,6 @@ void stop_handler(int) { stopping = 1; }
 
 using Clock = std::chrono::steady_clock;
 
-NativeTuning read_tuning(const ShmHeader* h)
-{
-    return {BitsToFloat(h->intensityBits.load()), BitsToFloat(h->localToneBits.load()),
-            BitsToFloat(h->localStructureBits.load()), BitsToFloat(h->sharpnessBits.load())};
-}
-
 void wake(std::atomic<uint32_t>& word)
 {
     syscall(SYS_futex, reinterpret_cast<uint32_t*>(&word), FUTEX_WAKE, 1, nullptr, nullptr, 0);
@@ -147,30 +141,11 @@ struct Request {
 Result<Request> read_request(const Options& o, ShmHeader* h, Request request, unsigned max_passes,
                              unsigned& previous_passes)
 {
-    ProcessingSettings& settings = request.settings;
-    settings.fp16 = h->hdrEncode.load() != 0;
-    const bool hdr = h->hdrDetected.load() != kHdrNone && h->colourMode.load() != kColourDisplay;
-    settings.precision16 = hdr || h->sdr16Multipass.load() != 0;
-    settings.motion = h->mvecEnabled.load() != 0;
-    settings.motion_quality = ShmMVecQuality(h);
-    settings.motion_grid = ShmMVecPixelSize(h);
-    settings.tuning = read_tuning(h);
-    settings.color_preserve = BitsToFloat(h->colorPreserveBits.load());
     const unsigned w = request.width, height = request.height;
     if (!w || !height || w > kMaxW || height > kMaxH || h->format.load() != 1)
         return reject("unsupported request dimensions or proxy format");
-    settings.style = h->style.load();
-    settings.skin_structure = BitsToFloat(h->skinStructureBits.load());
-    const uint32_t mask = h->autoMask.load();
-    settings.auto_mask = mask != 0;
-    // Older/external clients must not enable an NVIDIA preset neither
-    // network has, nor controls outside their ranges.
-    if (h->preset.load() || settings.style > 2 || mask > 1 ||
-        !(settings.skin_structure >= -1 && settings.skin_structure <= 2))
-        return reject("the preset must be 0, style 0..2, auto-mask 0 or 1 and skin structure -1..2");
-    if (!(settings.color_preserve >= 0 && settings.color_preserve <= 1))
-        return reject("invalid color preservation strength");
-    DLSSLOP_TRY(validate_native_tuning(settings.tuning));
+    request.settings = DLSSLOP_TRY(read_settings(h));
+    const ProcessingSettings& settings = request.settings;
     request.bytes = size_t(w) * height * (settings.fp16 ? 8 : 4);
     // A live control change takes effect on the next request;
     // never shorten or extend a chain partway through a frame.
