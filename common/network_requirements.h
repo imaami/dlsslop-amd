@@ -13,7 +13,7 @@
 namespace dlsslop {
 
 // A feature bit the network's shaders use (vulkan-nr/src/core/nrvk.hpp,
-// Context::create): the structure that carries it alone, and the core
+// Context::adopt): the structure that carries it alone, and the core
 // VkPhysicalDeviceVulkan1xFeatures structure that carries it too, if any.
 struct NetworkFeature {
     const char* name;
@@ -23,8 +23,6 @@ struct NetworkFeature {
     uint32_t core_offset;
     // The extension that provides it; null for core Vulkan 1.3.
     const char* extension;
-    // The network runs without it, more slowly: explicit workgroup layout.
-    bool optional;
 };
 constexpr VkStructureType kNoCore = VK_STRUCTURE_TYPE_MAX_ENUM;
 
@@ -33,43 +31,43 @@ constexpr VkStructureType kNoCore = VK_STRUCTURE_TYPE_MAX_ENUM;
     VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_##version##_FEATURES, offsetof(VkPhysicalDeviceVulkan##digits##Features, field)
 constexpr NetworkFeature kNetworkFeatures[] = {
     {"cooperativeMatrix", DLSSLOP_ALONE(VkPhysicalDeviceCooperativeMatrixFeaturesKHR, COOPERATIVE_MATRIX_FEATURES_KHR,
-                                        cooperativeMatrix), kNoCore, 0, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, false},
+                                        cooperativeMatrix), kNoCore, 0, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME},
     {"shaderFloat8", DLSSLOP_ALONE(VkPhysicalDeviceShaderFloat8FeaturesEXT, SHADER_FLOAT8_FEATURES_EXT, shaderFloat8),
-     kNoCore, 0, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME, false},
+     kNoCore, 0, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME},
     {"shaderFloat8CooperativeMatrix", DLSSLOP_ALONE(VkPhysicalDeviceShaderFloat8FeaturesEXT, SHADER_FLOAT8_FEATURES_EXT,
                                                     shaderFloat8CooperativeMatrix),
-     kNoCore, 0, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME, false},
+     kNoCore, 0, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME},
     {"storageBuffer16BitAccess", DLSSLOP_ALONE(VkPhysicalDevice16BitStorageFeatures, 16BIT_STORAGE_FEATURES,
                                                storageBuffer16BitAccess),
-     DLSSLOP_CORE(11, 1_1, storageBuffer16BitAccess), nullptr, false},
+     DLSSLOP_CORE(11, 1_1, storageBuffer16BitAccess), nullptr},
     {"storageBuffer8BitAccess", DLSSLOP_ALONE(VkPhysicalDevice8BitStorageFeatures, 8BIT_STORAGE_FEATURES,
                                               storageBuffer8BitAccess),
-     DLSSLOP_CORE(12, 1_2, storageBuffer8BitAccess), nullptr, false},
+     DLSSLOP_CORE(12, 1_2, storageBuffer8BitAccess), nullptr},
     {"shaderFloat16", DLSSLOP_ALONE(VkPhysicalDeviceShaderFloat16Int8Features, SHADER_FLOAT16_INT8_FEATURES, shaderFloat16),
-     DLSSLOP_CORE(12, 1_2, shaderFloat16), nullptr, false},
+     DLSSLOP_CORE(12, 1_2, shaderFloat16), nullptr},
     {"shaderInt8", DLSSLOP_ALONE(VkPhysicalDeviceShaderFloat16Int8Features, SHADER_FLOAT16_INT8_FEATURES, shaderInt8),
-     DLSSLOP_CORE(12, 1_2, shaderInt8), nullptr, false},
+     DLSSLOP_CORE(12, 1_2, shaderInt8), nullptr},
     {"vulkanMemoryModel", DLSSLOP_ALONE(VkPhysicalDeviceVulkanMemoryModelFeatures, VULKAN_MEMORY_MODEL_FEATURES,
                                         vulkanMemoryModel),
-     DLSSLOP_CORE(12, 1_2, vulkanMemoryModel), nullptr, false},
+     DLSSLOP_CORE(12, 1_2, vulkanMemoryModel), nullptr},
     {"subgroupSizeControl", DLSSLOP_ALONE(VkPhysicalDeviceSubgroupSizeControlFeatures, SUBGROUP_SIZE_CONTROL_FEATURES,
                                           subgroupSizeControl),
-     DLSSLOP_CORE(13, 1_3, subgroupSizeControl), nullptr, false},
+     DLSSLOP_CORE(13, 1_3, subgroupSizeControl), nullptr},
     {"synchronization2", DLSSLOP_ALONE(VkPhysicalDeviceSynchronization2Features, SYNCHRONIZATION_2_FEATURES,
                                        synchronization2),
-     DLSSLOP_CORE(13, 1_3, synchronization2), nullptr, false},
+     DLSSLOP_CORE(13, 1_3, synchronization2), nullptr},
     {"workgroupMemoryExplicitLayout",
      DLSSLOP_ALONE(VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR, WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR,
                    workgroupMemoryExplicitLayout),
-     kNoCore, 0, VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME, true},
+     kNoCore, 0, VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME},
     {"workgroupMemoryExplicitLayout8BitAccess",
      DLSSLOP_ALONE(VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR, WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR,
                    workgroupMemoryExplicitLayout8BitAccess),
-     kNoCore, 0, VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME, true},
+     kNoCore, 0, VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME},
     {"workgroupMemoryExplicitLayout16BitAccess",
      DLSSLOP_ALONE(VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR, WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR,
                    workgroupMemoryExplicitLayout16BitAccess),
-     kNoCore, 0, VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME, true},
+     kNoCore, 0, VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME},
 };
 #undef DLSSLOP_ALONE
 #undef DLSSLOP_CORE
@@ -81,8 +79,7 @@ inline VkBool32& FeatureBit(void* structure, uint32_t offset)
 }
 
 // One structure of each type the table names, zeroed and chained behind a
-// VkPhysicalDeviceFeatures2: for a support query or a vkCreateDevice. With
-// optional false, the optional features' structure stays out of the chain.
+// VkPhysicalDeviceFeatures2: for a support query or a vkCreateDevice.
 class NetworkFeatureChain {
     VkPhysicalDeviceCooperativeMatrixFeaturesKHR coop_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR};
     VkPhysicalDeviceShaderFloat8FeaturesEXT fp8_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT};
@@ -99,10 +96,10 @@ class NetworkFeatureChain {
                                   &layout_};
 
 public:
-    explicit NetworkFeatureChain(bool optional)
+    NetworkFeatureChain()
     {
-        void* next = optional ? &layout_ : nullptr;
-        for (unsigned i = 8; i-- > 0;) {
+        void* next = nullptr;
+        for (unsigned i = 9; i-- > 0;) {
             static_cast<VkBaseOutStructure*>(structures_[i])->pNext = static_cast<VkBaseOutStructure*>(next);
             next = structures_[i];
         }
@@ -121,12 +118,11 @@ public:
 };
 
 // What stops the network running on PHYSICAL, or null: a feature's or an
-// extension's name, "Vulkan 1.3" or "32-lane compute subgroups". LAYOUT says
-// whether the optional features are there too. The functions are the caller's
-// route to the device: the loader's, or the next layer's.
+// extension's name, "Vulkan 1.3" or "32-lane compute subgroups". The functions
+// are the caller's route to the device: the loader's, or the next layer's.
 inline const char* NetworkUnsupported(VkPhysicalDevice physical, PFN_vkGetPhysicalDeviceProperties2 properties2,
                                       PFN_vkGetPhysicalDeviceFeatures2 features2,
-                                      PFN_vkEnumerateDeviceExtensionProperties extensions, bool& layout)
+                                      PFN_vkEnumerateDeviceExtensionProperties extensions)
 {
     VkPhysicalDeviceSubgroupSizeControlProperties subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES};
     VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &subgroup};
@@ -141,16 +137,12 @@ inline const char* NetworkUnsupported(VkPhysicalDevice physical, PFN_vkGetPhysic
             if (!std::strcmp(e.extensionName, name)) return true;
         return false;
     };
-    layout = has(VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME);
     for (const auto& f : kNetworkFeatures)
-        if (!f.optional && f.extension && !has(f.extension)) return f.extension;
-    NetworkFeatureChain supported(layout);
+        if (f.extension && !has(f.extension)) return f.extension;
+    NetworkFeatureChain supported;
     features2(physical, &supported.features2());
-    for (const auto& f : kNetworkFeatures) {
-        if (supported.bit(f)) continue;
-        if (!f.optional) return f.name;
-        layout = false;
-    }
+    for (const auto& f : kNetworkFeatures)
+        if (!supported.bit(f)) return f.name;
     // The cooperative-matrix fragments are laid out for 32-lane subgroups.
     if (subgroup.minSubgroupSize > 32 || subgroup.maxSubgroupSize < 32 ||
         !(subgroup.requiredSubgroupSizeStages & VK_SHADER_STAGE_COMPUTE_BIT))

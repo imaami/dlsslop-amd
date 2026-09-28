@@ -44,10 +44,9 @@ inline std::pair<const VkBaseInStructure*, uint32_t> NetworkFeatureIn(const void
 }
 
 // The ledger: whether a device created from INFO, the request vkCreateDevice
-// accepted, has every feature and extension the in-layer network needs.
-// LAYOUT says whether the optional ones are enabled too. A device's supported
-// features are no proof: only what was enabled may be used.
-inline bool NetworkEnabled(const VkDeviceCreateInfo& info, bool& layout) {
+// accepted, has every feature and extension the in-layer network needs. A
+// device's supported features are no proof: only what was enabled may be used.
+inline bool NetworkEnabled(const VkDeviceCreateInfo& info) {
     const auto enabled = [&info](const dlsslop::NetworkFeature& f) {
         bool extension = !f.extension;
         for (uint32_t i = 0; !extension && i < info.enabledExtensionCount; ++i)
@@ -55,13 +54,7 @@ inline bool NetworkEnabled(const VkDeviceCreateInfo& info, bool& layout) {
         const auto [node, offset] = NetworkFeatureIn(info.pNext, f);
         return extension && node && dlsslop::FeatureBit(const_cast<VkBaseInStructure*>(node), offset);
     };
-    layout = true;
-    for (const auto& f : dlsslop::kNetworkFeatures) {
-        if (enabled(f)) continue;
-        if (!f.optional) return false;
-        layout = false;
-    }
-    return true;
+    return std::all_of(std::begin(dlsslop::kNetworkFeatures), std::end(dlsslop::kNetworkFeatures), enabled);
 }
 
 // Whether the in-layer network is asked for: DLSSLOP_LAYER_NETWORK=1, while it
@@ -73,27 +66,25 @@ inline bool NetworkRequested() {
 
 // What keeps the in-layer network off a game's device, or null: a Vulkan 1.3
 // instance, or what the device lacks (common/network_requirements.h). The
-// functions are the next layer's. LAYOUT reports the optional features.
+// functions are the next layer's.
 inline const char* NetworkUnavailable(VkPhysicalDevice physical, uint32_t instanceVersion,
                                       PFN_vkGetPhysicalDeviceProperties2 properties2,
                                       PFN_vkGetPhysicalDeviceFeatures2 features2,
-                                      PFN_vkEnumerateDeviceExtensionProperties extensions, bool& layout) {
+                                      PFN_vkEnumerateDeviceExtensionProperties extensions) {
     if (instanceVersion < VK_API_VERSION_1_3 || !properties2 || !features2) return "a Vulkan 1.3 instance";
-    return dlsslop::NetworkUnsupported(physical, properties2, features2, extensions, layout);
+    return dlsslop::NetworkUnsupported(physical, properties2, features2, extensions);
 }
 
 // Adds the network's extensions the request lacks: EXTENSIONS holds the
 // request's list, as the layer extends it, and replaces it. True if any was added.
-inline bool AddNetworkExtensions(VkDeviceCreateInfo& info, std::vector<const char*>& extensions, bool layout) {
+inline bool AddNetworkExtensions(VkDeviceCreateInfo& info, std::vector<const char*>& extensions) {
     if (extensions.empty())
         extensions.assign(info.ppEnabledExtensionNames, info.ppEnabledExtensionNames + info.enabledExtensionCount);
     const size_t before = extensions.size();
-    for (const auto& f : dlsslop::kNetworkFeatures) {
-        if (!f.extension || (f.optional && !layout)) continue;
-        if (std::none_of(extensions.begin(), extensions.end(),
-                         [&f](const char* name) { return !std::strcmp(name, f.extension); }))
+    for (const auto& f : dlsslop::kNetworkFeatures)
+        if (f.extension && std::none_of(extensions.begin(), extensions.end(),
+                                        [&f](const char* name) { return !std::strcmp(name, f.extension); }))
             extensions.push_back(f.extension);
-    }
     if (extensions.size() == before) return false;
     info.enabledExtensionCount = uint32_t(extensions.size());
     info.ppEnabledExtensionNames = extensions.data();
@@ -111,7 +102,7 @@ inline bool AddNetworkExtensions(VkDeviceCreateInfo& info, std::vector<const cha
 class DeviceFeatureRequest {
     VkPhysicalDeviceFeatures legacy_{};
     std::vector<std::shared_ptr<void>> copies_;
-    dlsslop::NetworkFeatureChain added_{true};
+    dlsslop::NetworkFeatureChain added_;
 
     template<class T> VkBaseOutStructure* Copy(const VkBaseInStructure* node) {
         auto copy = std::make_shared<T>(*reinterpret_cast<const T*>(node));
@@ -153,23 +144,23 @@ class DeviceFeatureRequest {
     }
 
 public:
-    // Adds the features to INFO: with NETWORK the in-layer network's, with
-    // LAYOUT its optional ones too. False, leaving INFO as it was, when a
-    // structure to change follows one this cannot copy.
-    bool Enable(VkDeviceCreateInfo& info, bool network, bool layout) {
+    // Adds the features to INFO, with NETWORK the in-layer network's. False,
+    // leaving INFO as it was, when a structure to change follows one this
+    // cannot copy.
+    bool Enable(VkDeviceCreateInfo& info, bool network) {
         // The bits to set in the game's structures, and the network's that none carries.
         std::vector<std::pair<const VkBaseInStructure*, uint32_t>> changes;
         std::vector<const dlsslop::NetworkFeature*> missing;
         const auto* features2 = FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
         constexpr uint32_t kFormatless = offsetof(VkPhysicalDeviceFeatures2, features.shaderStorageImageWriteWithoutFormat);
         if (features2 && !HasFormatlessStorageWrites(info)) changes.emplace_back(features2, kFormatless);
-        for (const auto& f : dlsslop::kNetworkFeatures) {
-            if (!network || (f.optional && !layout)) continue;
-            const auto place = NetworkFeatureIn(info.pNext, f);
-            if (!place.first) missing.push_back(&f);
-            else if (!dlsslop::FeatureBit(const_cast<VkBaseInStructure*>(place.first), place.second))
-                changes.push_back(place);
-        }
+        if (network)
+            for (const auto& f : dlsslop::kNetworkFeatures) {
+                const auto place = NetworkFeatureIn(info.pNext, f);
+                if (!place.first) missing.push_back(&f);
+                else if (!dlsslop::FeatureBit(const_cast<VkBaseInStructure*>(place.first), place.second))
+                    changes.push_back(place);
+            }
         // Private copies of the chain up to the last structure changed. The
         // last copy's pNext still leads to the rest of the game's chain.
         auto* head = const_cast<VkBaseOutStructure*>(static_cast<const VkBaseOutStructure*>(info.pNext));

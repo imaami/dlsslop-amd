@@ -24,10 +24,10 @@ namespace {
 void log_line(const char* line) { std::fprintf(stderr, "%s\n", line); }
 
 // What stops the network running on a device, or empty.
-std::string unsuitable(VkPhysicalDevice physical, bool& layout, uint32_t& family)
+std::string unsuitable(VkPhysicalDevice physical, uint32_t& family)
 {
     if (const char* missing = NetworkUnsupported(physical, vkGetPhysicalDeviceProperties2, vkGetPhysicalDeviceFeatures2,
-                                                 vkEnumerateDeviceExtensionProperties, layout))
+                                                 vkEnumerateDeviceExtensionProperties))
         return std::string(missing) + " unavailable";
     uint32_t count = 0;
     vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr);
@@ -154,13 +154,12 @@ Result<VulkanNetwork> VulkanNetwork::create(const VulkanPaths& paths, int device
     DLSSLOP_TRY(vk_check(vkEnumeratePhysicalDevices(s.instance, &count, nullptr), "enumerate Vulkan devices"));
     std::vector<VkPhysicalDevice> devices(count);
     DLSSLOP_TRY(vk_check(vkEnumeratePhysicalDevices(s.instance, &count, devices.data()), "enumerate Vulkan devices"));
-    bool layout = false;
     std::string reasons;
     for (uint32_t i = 0; i < count && !s.physical; ++i) {
         if (device >= 0 && i != unsigned(device)) continue;
         VkPhysicalDeviceProperties p;
         vkGetPhysicalDeviceProperties(devices[i], &p);
-        const std::string why = unsuitable(devices[i], layout, s.family);
+        const std::string why = unsuitable(devices[i], s.family);
         if (why.empty()) {
             s.physical = devices[i];
             s.index = i;
@@ -172,10 +171,9 @@ Result<VulkanNetwork> VulkanNetwork::create(const VulkanPaths& paths, int device
     if (!s.physical)
         return fail(device >= 0 && unsigned(device) >= count ? "no Vulkan device " + std::to_string(device)
                                                              : "no Vulkan device can run the network:" + reasons);
-    NetworkFeatureChain enable(layout);
+    NetworkFeatureChain enable;
     std::vector<const char*> extensions = {VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME};
     for (const auto& f : kNetworkFeatures) {
-        if (f.optional && !layout) continue;
         enable.bit(f) = VK_TRUE;
         if (f.extension && std::find_if(extensions.begin(), extensions.end(), [&f](const char* e) {
                                return !std::strcmp(e, f.extension);
