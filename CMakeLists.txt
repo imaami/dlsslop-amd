@@ -108,6 +108,8 @@ add_neural_layer(VkLayer_DLSSLOP_amd)
 add_executable(dlssnr-shmctl ${LAYER_ROOT}/tools/shmctl.cpp)
 target_link_options(dlssnr-shmctl PRIVATE -static-libstdc++ -static-libgcc)
 set_target_properties(dlssnr-shmctl PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
+# A command that runs once: its code is built for size.
+target_compile_options(dlssnr-shmctl PRIVATE -Os)
 
 # The Vulkan network, prepared into vulkan-nr/ from DLSSNR-AMD: its SPIR-V and
 # the host library dlsslopd runs it with. The host must be compiled with the
@@ -161,6 +163,12 @@ target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
 target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip-vendor dlsslop-nr-vendor dlsslop-vknr Threads::Threads ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)
 target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
+# What runs once per start, per transport offer or per diagnostic is built for
+# size; the frame path (serving loop, engines, codec, networks) stays at -O3.
+# GCC does not inline -O3 code into these callers, so none of it slows down.
+set_source_files_properties(backend/main.cpp backend/options.cpp backend/paths.cpp backend/files.cpp
+    backend/channel.cpp backend/transport.cpp backend/trace.cpp backend/open.cpp backend/self_test.cpp
+    PROPERTIES COMPILE_OPTIONS -Os)
 
 if(BUILD_TESTING)
     add_test(NAME control-cli COMMAND ${Python3_EXECUTABLE}

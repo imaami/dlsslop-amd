@@ -12,6 +12,8 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 # Uses the installed Qt 6 version; no vendored or pinned legacy Qt release.
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 add_executable(dlsslop-gui main.cpp)
+# Event-driven: its code is built for size.
+target_compile_options(dlsslop-gui PRIVATE -Os)
 target_link_libraries(dlsslop-gui PRIVATE Qt6::Widgets)
 install(TARGETS dlsslop-gui RUNTIME DESTINATION bin)
 include(CTest)
