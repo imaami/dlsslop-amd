@@ -289,14 +289,18 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
     VkQueue queue = VK_NULL_HANDLE;
     vkGetDeviceQueue(c.device, family, 0, &queue);
     // run-smoke.py turns the idle repaint and dma-buf off, as the launcher does, so the layer hooks
-    // the present but leaves the application's other queue operations to the next layer down.
+    // the present but leaves the application's other queue operations to the next layer down --
+    // unless the in-layer network is asked for: its build submits from a thread of its own.
+    const char* inLayer = std::getenv("DLSSLOP_LAYER_NETWORK");
+    const bool network = inLayer && !std::strcmp(inLayer, "1");
     Dl_info hooked{}, next{};
     require(dladdr(reinterpret_cast<void*>(vkGetDeviceProcAddr(c.device, "vkQueuePresentKHR")), &hooked),
             "vkQueuePresentKHR is not in a loaded object");
     for (const char* name : {"vkAcquireNextImageKHR", "vkQueueSubmit", "vkQueueWaitIdle"})
         require(dladdr(reinterpret_cast<void*>(vkGetDeviceProcAddr(c.device, name)), &next) &&
-                std::strcmp(next.dli_fname, hooked.dli_fname),
-                "the layer hooks queue operations while the idle repaint and dma-buf are off");
+                !std::strcmp(next.dli_fname, hooked.dli_fname) == network,
+                network ? "the layer leaves queue operations unhooked while the in-layer network builds"
+                        : "the layer hooks queue operations while the idle repaint and dma-buf are off");
 
     VkSurfaceCapabilitiesKHR caps{};
     check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical, c.surface, &caps), "surface caps");
