@@ -46,20 +46,37 @@ void HipEngine::release(Imported& slot)
     slot = {};
 }
 
-HipEngine::~HipEngine()
+Result<std::unique_ptr<HipEngine>> HipEngine::open(Options& o, unsigned tier)
+{
+    const auto api = DLSSLOP_TRY(hip::load());
+    o.device = DLSSLOP_TRY(select_device(api, o.device));
+    return std::make_unique<HipEngine>(o, tier, api);
+}
+
+void HipEngine::release()
 {
     if (!network_) return;
     api_.hipStreamSynchronize(stream_);
     for (auto& slot : imported_) release(slot);
-    for (auto event : marks_)
+    for (auto& event : marks_) {
         if (event) api_.hipEventDestroy(event);
-    for (void* buffer : {device_input_, device_feedback_, device_output_, device_scratch_})
-        if (buffer) api_.hipFree(buffer);
+        event = nullptr;
+    }
+    for (void** buffer : {&device_input_, &device_feedback_, &device_output_, &device_scratch_}) {
+        if (*buffer) api_.hipFree(*buffer);
+        *buffer = nullptr;
+    }
+    answer_ = nullptr;
+    temporal_.reset();
+    gpu_codec_.reset();
+    kernels_.reset();
+    network_.reset();
+    stream_ = nullptr;
+    previous_settings_ = {};
 }
 
 Result<void> HipEngine::prepare()
 {
-    if (options_.test_identity) return {};
     const NativeTier& raster = *ShmNativeTier(tier_);
     network_ = DLSSLOP_TRY(hip::network({raster.width, raster.networkHeight, unsigned(options_.device), options_.modules,
                                          options_.assets, options_.performance}));
@@ -134,10 +151,6 @@ Result<void> HipEngine::trace_image(FrameTrace* trace, const Geometry& g, unsign
 Result<void> HipEngine::infer(const uint8_t* input, unsigned w, unsigned h, uint8_t* output, unsigned passes,
                               const ProcessingSettings& settings, FrameTrace* trace, bool verify)
 {
-    if (options_.test_identity) {
-        std::memcpy(output, input, size_t(w) * h * (settings.fp16 ? 8 : 4));
-        return {};
-    }
     if (passes > 1 || options_.self_test || settings.motion) {
         // The optional upstream approximate cache has one history, not
         // one history per pass. Do not silently mix those states.

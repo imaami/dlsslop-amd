@@ -3,18 +3,17 @@
 #include "engine.h"
 #include "vulkan_network.h"
 
-#include <memory>
 #include <string>
 
 namespace dlsslop {
 // DLSSNR-AMD's network on a Vulkan device of the daemon's own.
-class VulkanEngine : public Backend {
+class VulkanEngine : public EngineBase<VulkanEngine> {
     VulkanNetwork network_;
     unsigned tier_;
 
-    static dlsslop::VulkanFrame frame(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings)
+    static VulkanFrame frame(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings)
     {
-        dlsslop::VulkanFrame f;
+        VulkanFrame f;
         f.width = w;
         f.height = h;
         f.fp16 = settings.fp16;
@@ -30,40 +29,37 @@ class VulkanEngine : public Backend {
         f.motion = settings.motion;
         return f;
     }
+
 public:
-    VulkanEngine(VulkanNetwork network, unsigned tier)
-        : network_(std::move(network)), tier_(tier)
-    {
-        max_passes = dlsslop::VulkanNetwork::kMaxPasses;
-    }
-    const char* name() const override { return "Vulkan"; }
-    std::string device() const override
+    static constexpr unsigned max_passes = VulkanNetwork::kMaxPasses;
+    // The network sizes itself to each frame: a tier only changes the raster the layer targets.
+    static constexpr bool rebuilds_for_tier = false;
+    static_assert(kSlots == VulkanNetwork::kImportSlots);
+
+    VulkanEngine(VulkanNetwork network, unsigned tier) : network_(std::move(network)), tier_(tier) {}
+    const char* name() const { return "Vulkan"; }
+    std::string device() const
     {
         return "Vulkan device " + std::to_string(network_.device_index()) + " (" + network_.device_name() + ")";
     }
-    unsigned tier() const override { return tier_; }
-    std::string processing() const override { return "Vulkan on " + network_.device_name() + " at each frame's extent"; }
-    // The network sizes itself to each frame: a tier only changes the raster the layer targets.
-    bool retier(unsigned tier) override
+    unsigned tier() const { return tier_; }
+    std::string processing() const { return "Vulkan on " + network_.device_name() + " at each frame's extent"; }
+    Result<void> retier(unsigned tier)
     {
         tier_ = tier;
-        return true;
+        return {};
     }
     // Built before the daemon reports itself ready, for the raster's usual frame.
-    Result<void> prepare() override
-    {
-        return network_.shape(frame(ShmNativeTier(tier_)->width, tier_, 1, {})).transform([](bool) {});
-    }
-    bool fits(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings) const override
+    Result<void> prepare() { return network_.shape(frame(ShmNativeTier(tier_)->width, tier_, 1, {})).transform([](bool) {}); }
+    bool fits(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings) const
     {
         return !network_.shape_differs(frame(w, h, passes, settings));
     }
-    Result<void> reshape(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings) override
+    Result<void> reshape(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings)
     {
         return network_.shape(frame(w, h, passes, settings)).transform([](bool) {});
     }
-    static_assert(kSlots == dlsslop::VulkanNetwork::kImportSlots);
-    bool import_into(unsigned slot, const ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2]) override
+    bool import_into(unsigned slot, const ShmTransportOffer& offer, Descriptor (&fds)[2])
     {
         int raw[2] = {fds[0].fd, fds[1].fd};
         const bool imported = network_.import(slot, offer, raw);
@@ -71,10 +67,8 @@ public:
         fds[1].fd = raw[1];
         return imported;
     }
-    // Only HIP traces (hip_only).
-    Result<void> read_back(void*, const void*, size_t) override { return fail("the Vulkan network cannot trace"); }
     Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
-                       dlsslop::FrameTrace* = nullptr) override
+                       FrameTrace* = nullptr)
     {
         DLSSLOP_TRY(network_.infer(frame(w, h, passes, settings), io.slot, io.proxy, io.answer));
         upload_ms = network_.upload_ms;
@@ -82,6 +76,6 @@ public:
         readback_ms = network_.readback_ms;
         return {};
     }
-    Result<void> self_test(const Options& o) override { return run_vulkan_self_test(o, *this); }
+    Result<void> self_test(const Options& o) { return run_self_test(o, *this); }
 };
 } // namespace dlsslop

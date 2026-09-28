@@ -2,6 +2,7 @@
 #include "engine.h"
 #include "files.h"
 #include "hip_engine.h"
+#include "vulkan_engine.h"
 
 #include <cmath>
 #include <cstdio>
@@ -21,9 +22,9 @@ std::string ppm(const std::vector<uint8_t>& rgba, unsigned w, unsigned h)
 } // namespace
 
 // The Vulkan network on a deterministic gradient: finite, repeatable and changed.
-Result<void> run_vulkan_self_test(const Options& o, Backend& engine)
+Result<void> run_self_test(const Options& o, VulkanEngine& engine)
 {
-    const unsigned passes = std::min(o.passes.value_or(kNativeDefaultPasses), engine.max_passes);
+    const unsigned passes = std::min(o.passes.value_or(kNativeDefaultPasses), VulkanEngine::max_passes);
     const unsigned w = ShmNativeTier(engine.tier())->width, h = engine.tier();
     std::vector<uint8_t> input(size_t(w) * h * 4), output(input.size()), first;
     for (unsigned y = 0; y < h; ++y)

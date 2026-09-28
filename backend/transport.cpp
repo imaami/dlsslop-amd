@@ -67,17 +67,4 @@ bool receive_offer(int peer, ShmTransportOffer& offer, dlsslop::Descriptor (&fds
            !(message.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) && fits(0) && fits(1);
 }
 
-// Imports every pending offer and answers each on its own connection: one
-// byte, nonzero when imported.
-void accept_offers(const TransportListener& listener, Backend& engine)
-{
-    for (int peer; (peer = accept4(listener.socket.fd, nullptr, nullptr, SOCK_CLOEXEC)) >= 0; close(peer)) {
-        ShmTransportOffer offer{};
-        dlsslop::Descriptor fds[2];
-        if (!receive_offer(peer, offer, fds)) continue; // A start or liveness probe sends nothing.
-        const uint8_t imported = engine.import(offer, fds);
-        if (!imported) std::fprintf(stderr, "device-local transport offer rejected\n");
-        send(peer, &imported, 1, MSG_NOSIGNAL);
-    }
-}
 } // namespace dlsslop

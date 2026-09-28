@@ -1,12 +1,13 @@
 // Device-local transport: the socket on which the layer offers its exported frames.
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "engine.h"
 #include "shm_protocol.h"
 #include "files.h"
 #include "result.h"
 
+#include <cstdio>
 #include <string>
+#include <sys/socket.h>
 #include <unistd.h>
 
 namespace dlsslop {
@@ -36,5 +37,16 @@ private:
 bool receive_offer(int peer, ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2]);
 // Imports every pending offer and answers each on its own connection: one
 // byte, nonzero when imported.
-void accept_offers(const TransportListener& listener, Backend& engine);
+template <class E>
+void accept_offers(const TransportListener& listener, E& engine)
+{
+    for (int peer; (peer = accept4(listener.socket.fd, nullptr, nullptr, SOCK_CLOEXEC)) >= 0; close(peer)) {
+        ShmTransportOffer offer{};
+        Descriptor fds[2];
+        if (!receive_offer(peer, offer, fds)) continue; // A start or liveness probe sends nothing.
+        const uint8_t imported = engine.import(offer, fds);
+        if (!imported) std::fprintf(stderr, "device-local transport offer rejected\n");
+        send(peer, &imported, 1, MSG_NOSIGNAL);
+    }
+}
 } // namespace dlsslop

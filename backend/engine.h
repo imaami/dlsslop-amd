@@ -1,6 +1,9 @@
-// The network as the serving loop, the offline mode and the self-test see it.
+// The network as serving, the offline mode and the self-test see it: one of the
+// engines, chosen once at startup, each compiled into what it serves. None is
+// dispatched at run time.
 // SPDX-License-Identifier: MIT
 #pragma once
+#include "files.h"
 #include "options.h"
 #include "result.h"
 #include "shm_protocol.h"
@@ -9,12 +12,14 @@
 
 #include <algorithm>
 #include <array>
+#include <concepts>
 #include <cstdint>
 #include <string>
 
 namespace dlsslop {
+
 struct ProcessingSettings {
-    dlsslop::NativeTuning tuning;
+    NativeTuning tuning;
     // The Vulkan model's own conditioning; the HIP network has only the defaults.
     unsigned style = 0;
     float skin_structure = -1;
@@ -27,41 +32,44 @@ struct ProcessingSettings {
     unsigned motion_grid = kMVecPixels4;
 };
 
-// The network as the serving loop, the offline mode and the self-test see it.
-class Backend {
-public:
-    virtual ~Backend() = default;
-    // A request's frames: host memory, or the device-local pair in an import slot.
-    struct Frames {
-        const uint8_t* proxy = nullptr;
-        uint8_t* answer = nullptr;
-        int slot = -1;
+// A request's frames: host memory, or the device-local pair in an import slot.
+struct Frames {
+    const uint8_t* proxy = nullptr;
+    uint8_t* answer = nullptr;
+    int slot = -1;
+};
+
+// What every engine shares: the device-local frames the layer exported
+// (ShmTransportOffer), one pair per producer generation in as many slots, the
+// oldest replaced first; the latest frame's timing; and doing nothing where an
+// engine has nothing to do. An engine imports an offer into the slot it is given
+// (import_into) and may say where a slot's frames are (frames_of).
+template <class Derived>
+class EngineBase {
+    struct Held {
+        uint32_t generation = 0;
+        size_t bytes = 0;
     };
-    virtual const char* name() const = 0;
-    // The device it runs on, as --device names it, for --diagnose.
-    virtual std::string device() const = 0;
-    virtual unsigned tier() const = 0;
-    // What the network runs at, for the log.
-    virtual std::string processing() const = 0;
-    // Takes a new tier without a new backend; false when it needs one.
-    virtual bool retier(unsigned) { return false; }
-    virtual Result<void> prepare() = 0;
-    // False when a request of this shape needs a build first (reshape): seconds
-    // of work the caller reports as a start, not a slow frame.
-    virtual bool fits(unsigned, unsigned, unsigned, const ProcessingSettings&) const { return true; }
-    virtual Result<void> reshape(unsigned, unsigned, unsigned, const ProcessingSettings&) { return {}; }
-    // Serving only: DMA the channel's frame slots directly.
-    virtual void pin(uint8_t*, uint8_t*, size_t) {}
+    std::array<Held, 4> held_{};
+    unsigned next_slot_ = 0;
+
+    Derived& self() { return static_cast<Derived&>(*this); }
+    const Derived& self() const { return static_cast<const Derived&>(*this); }
+
+public:
+    static constexpr unsigned kSlots = 4;
+    float upload_ms = 0, inference_ms = 0, readback_ms = 0;
+
     // Serving, between frames: imports an offered proxy/answer pair into the slot of
-    // its generation, or else the oldest one. The backend owns each descriptor it
+    // its generation, or else the oldest one. The engine owns each descriptor it
     // imported; fds keeps the rest to close.
-    bool import(const ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2])
+    bool import(const ShmTransportOffer& offer, Descriptor (&fds)[2])
     {
         if (!offer.generation) return false;
         unsigned slot = 0;
         while (slot < kSlots && held_[slot].generation != offer.generation) ++slot;
         if (slot == kSlots) slot = next_slot_++ % kSlots;
-        if (!import_into(slot, offer, fds)) return false;
+        if (!self().import_into(slot, offer, fds)) return false;
         held_[slot] = {offer.generation, size_t(std::min(offer.size[0], offer.size[1]))};
         return true;
     }
@@ -69,35 +77,50 @@ public:
     Frames frames(uint32_t generation, size_t bytes) const
     {
         for (unsigned slot = 0; slot < kSlots; ++slot)
-            if (held_[slot].generation == generation && held_[slot].bytes >= bytes) return frames_of(slot);
+            if (held_[slot].generation == generation && held_[slot].bytes >= bytes) return self().frames_of(slot);
         return {};
     }
+
+    // Defaults an engine replaces where it has something to do.
+    bool import_into(unsigned, const ShmTransportOffer&, Descriptor (&)[2]) { return false; }
+    // A slot's frames: the slot alone, for an engine that finds them itself.
+    Frames frames_of(unsigned slot) const { return {nullptr, nullptr, int(slot)}; }
+    // False when a request of this shape needs a build first (reshape): seconds
+    // of work the caller reports as a start, not a slow frame.
+    bool fits(unsigned, unsigned, unsigned, const ProcessingSettings&) const { return true; }
+    Result<void> reshape(unsigned, unsigned, unsigned, const ProcessingSettings&) { return {}; }
+    // Serving only: DMA the channel's frame slots directly.
+    void pin(uint8_t*, uint8_t*, size_t) {}
     // Diagnostics: copies host or device memory, such as an imported frame, to the host.
-    virtual Result<void> read_back(void* host, const void* source, size_t bytes) = 0;
-    // w * h RGBA8 frames, or RGBA16F with settings.fp16.
-    virtual Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned passes,
-                               const ProcessingSettings& settings = {}, dlsslop::FrameTrace* trace = nullptr) = 0;
-    virtual Result<void> self_test(const Options& o) = 0;
-    float upload_ms = 0, inference_ms = 0, readback_ms = 0;
-    unsigned max_passes = kMaxPasses;
+    Result<void> read_back(void*, const void*, size_t) { return fail("this network cannot trace"); }
+
 protected:
-    // Device-local frames the layer exported (ShmTransportOffer): one pair per producer
-    // generation, in as many slots, the oldest replaced first.
-    static constexpr unsigned kSlots = 4;
-    // Imports an offer into a slot, releasing the pair it held once the new one is in.
-    virtual bool import_into(unsigned slot, const ShmTransportOffer&, dlsslop::Descriptor (&)[2]) = 0;
-    // A slot's frames; the slot alone for a backend that finds them itself.
-    virtual Frames frames_of(unsigned slot) const { return {nullptr, nullptr, int(slot)}; }
-private:
-    struct Held {
-        uint32_t generation = 0;
-        size_t bytes = 0;
-    };
-    std::array<Held, kSlots> held_{};
-    unsigned next_slot_ = 0;
+    // Imports held before a rebuild are gone: the layer offers them again.
+    void forget_imports() { held_ = {}; }
+};
+
+// What serving, the offline mode and --diagnose need of an engine.
+template <class E>
+concept Engine = std::derived_from<E, EngineBase<E>> && requires(E& engine, const E& view, unsigned n,
+                                                                 const ProcessingSettings& settings, FrameTrace* trace) {
+    { E::max_passes } -> std::convertible_to<unsigned>;
+    // Whether a tier change rebuilds it, with the layer presenting its own frames meanwhile.
+    { E::rebuilds_for_tier } -> std::convertible_to<bool>;
+    { view.name() } -> std::convertible_to<const char*>;
+    // The device it runs on, as --device names it, for --diagnose.
+    { view.device() } -> std::convertible_to<std::string>;
+    { view.tier() } -> std::convertible_to<unsigned>;
+    // What the network runs at, for the log.
+    { view.processing() } -> std::convertible_to<std::string>;
+    { engine.retier(n) } -> std::same_as<Result<void>>;
+    { engine.prepare() } -> std::same_as<Result<void>>;
+    // w * h RGBA8 frames, or RGBA16F with settings.fp16.
+    { engine.infer(Frames{}, n, n, n, settings, trace) } -> std::same_as<Result<void>>;
 };
 
 class HipEngine;
+class VulkanEngine;
 Result<void> run_self_test(const Options& o, HipEngine& engine);
-Result<void> run_vulkan_self_test(const Options& o, Backend& engine);
+Result<void> run_self_test(const Options& o, VulkanEngine& engine);
+
 } // namespace dlsslop

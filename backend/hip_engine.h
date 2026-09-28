@@ -9,6 +9,7 @@
 #include "temporal_gpu.h"
 
 #include <array>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -18,7 +19,7 @@ namespace dlsslop {
 // device is listed on the way.
 Result<int> select_device(const hip::Api& api, int requested);
 
-class HipEngine : public Backend {
+class HipEngine : public EngineBase<HipEngine> {
     Options options_;
     unsigned tier_;
     hip::Api api_;
@@ -46,47 +47,64 @@ class HipEngine : public Backend {
     std::array<Imported, kSlots> imported_{};
 
     void release(Imported& slot);
+    // Everything prepare() made, and every import.
+    void release();
     Result<void> mark(unsigned i) { return api_.check(api_.hipEventRecord(marks_[i], stream_), "record timing event"); }
     // A pass's stage, read back into the trace.
     Result<void> trace_image(FrameTrace* trace, const Geometry& g, unsigned pass, const char* stage,
                              const void* pointer, unsigned channels);
 
 public:
-    // API is loaded unless the identity test runs without HIP.
+    static constexpr unsigned max_passes = kMaxPasses;
+    // A tier is a raster the network is built for.
+    static constexpr bool rebuilds_for_tier = true;
+
     HipEngine(Options o, unsigned tier, const hip::Api& api) : options_(std::move(o)), tier_(tier), api_(api) {}
     HipEngine(const HipEngine&) = delete;
+    // The HIP engine on the gfx1201 device o.device names, or the first, which
+    // it records there; not yet prepared.
+    static Result<std::unique_ptr<HipEngine>> open(Options& o, unsigned tier);
     // The members go next, in reverse order: the helpers before the network whose runtime they use.
-    ~HipEngine();
-    const char* name() const override { return "HIP"; }
-    std::string device() const override { return "device " + std::to_string(options_.device); }
-    unsigned tier() const override { return tier_; }
-    std::string processing() const override
+    ~HipEngine() { release(); }
+    const char* name() const { return "HIP"; }
+    std::string device() const { return "device " + std::to_string(options_.device); }
+    unsigned tier() const { return tier_; }
+    std::string processing() const
     {
         const NativeTier& raster = *ShmNativeTier(tier_);
         return "processing=" + std::to_string(raster.width) + "x" + std::to_string(raster.networkHeight);
     }
-    Result<void> prepare() override;
+    Result<void> prepare();
+    // Builds the network for another tier, between frames. The layer offers its
+    // device-local frames again.
+    Result<void> retier(unsigned tier)
+    {
+        release();
+        forget_imports();
+        tier_ = tier;
+        return prepare();
+    }
     // See GpuCodec::pin.
-    void pin(uint8_t* input, uint8_t* output, size_t bytes) override
+    void pin(uint8_t* input, uint8_t* output, size_t bytes)
     {
         if (gpu_codec_) gpu_codec_->pin(input, output, bytes);
     }
-    bool import_into(unsigned slot, const ShmTransportOffer& offer, Descriptor (&fds)[2]) override;
-    Frames frames_of(unsigned slot) const override
+    bool import_into(unsigned slot, const ShmTransportOffer& offer, Descriptor (&fds)[2]);
+    Frames frames_of(unsigned slot) const
     {
         const Imported& pair = imported_[slot];
         return {static_cast<const uint8_t*>(pair.frame[0]), static_cast<uint8_t*>(pair.frame[1]), int(slot)};
     }
-    Result<void> read_back(void* host, const void* source, size_t bytes) override
+    Result<void> read_back(void* host, const void* source, size_t bytes)
     {
         return api_.check(api_.hipMemcpy(host, source, bytes, 4), "read diagnostic frame");
     }
     Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
-                       FrameTrace* trace = nullptr) override
+                       FrameTrace* trace = nullptr)
     {
         return infer(io.proxy, w, h, io.answer, passes, settings, trace);
     }
-    Result<void> self_test(const Options& o) override { return run_self_test(o, *this); }
+    Result<void> self_test(const Options& o) { return run_self_test(o, *this); }
     // Input and output are w * h RGBA8, or RGBA16F with settings.fp16. verify
     // checks the GPU codec against the CPU reference inside the timed frame.
     Result<void> infer(const uint8_t* input, unsigned w, unsigned h, uint8_t* output, unsigned passes,

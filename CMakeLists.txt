@@ -128,7 +128,7 @@ add_library(dlsslop-codec OBJECT backend/codec.cpp)
 add_executable(dlsslopd
     backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.cpp
     backend/open.cpp backend/hip_engine.cpp backend/hip_vendor.cpp backend/native_kernels.cpp
-    backend/self_test.cpp backend/offline.cpp
+    backend/self_test.cpp
     backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp
     backend/nr_vendor.cpp)
 target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
