@@ -4,14 +4,19 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 #include <random>
-#include <stdexcept>
 #include <vector>
 
 namespace {
 struct Plane { dlsslop_temporal::Extent size; std::vector<float> pixels; };
 struct Field { dlsslop_temporal::Extent size; std::vector<dlsslop_temporal::Flow> pixels; };
-void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
+void require(bool value, const char* message)
+{
+    if (value) return;
+    std::fprintf(stderr, "temporal-test: %s\n", message);
+    std::exit(1);
+}
 // The finest luma level, as dlsslop_temporal_luma builds it from the frame's original input.
 std::vector<float> luma(const std::vector<float>& rgba)
 {
@@ -284,6 +289,6 @@ void run()
 }
 int main()
 {
-    try { run(); return 0; }
-    catch (const std::exception& e) { std::fprintf(stderr, "temporal-test: %s\n", e.what()); return 1; }
+    run();
+    return 0;
 }

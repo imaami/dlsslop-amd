@@ -17,7 +17,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -31,13 +30,18 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+[[noreturn]] static void fail(const std::string& message) {
+    std::fprintf(stderr, "transport smoke: %s\n", message.c_str());
+    std::exit(1);
+}
+
 static void require(bool condition, const char* message) {
-    if (!condition) throw std::runtime_error(message);
+    if (!condition) fail(message);
 }
 
 static void check(VkResult result, const char* operation) {
     if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
-        throw std::runtime_error(std::string(operation) + ": " + std::to_string(result));
+        fail(std::string(operation) + ": " + std::to_string(result));
 }
 
 struct Context {
@@ -119,7 +123,7 @@ public:
         require(pipe(ready) == 0, "contention ready pipe failed");
         if (pipe(release)) {
             close(ready[0]); close(ready[1]);
-            throw std::runtime_error("contention release pipe failed");
+            fail("contention release pipe failed");
         }
         child_ = fork();
         if (!child_) {
@@ -141,7 +145,7 @@ public:
         close(ready[0]);
         if (!success) {
             finish();
-            throw std::runtime_error("contention subprocess could not acquire producer lock");
+            fail("contention subprocess could not acquire producer lock");
         }
     }
     ~ContendingProducer() { finish(); }
@@ -531,45 +535,40 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
 }
 
 int main(int argc, char** argv) {
-    try {
-        bool headless = false, contention = false, reduced = false, bgra = false, proxy16 = false,
-             linear = false, noWorker = false;
-        const option options[] = {
-            {"help", no_argument, nullptr, 'h'}, {"headless", no_argument, nullptr, 'H'},
-            {"contention", no_argument, nullptr, 'c'}, {"reduced", no_argument, nullptr, 'r'},
-            {"bgra", no_argument, nullptr, 'b'}, {"proxy16", no_argument, nullptr, 'f'},
-            {"linear-hdr", no_argument, nullptr, 'l'}, {"no-worker", no_argument, nullptr, 'n'},
-            {nullptr, 0, nullptr, 0}
-        };
-        int value;
-        while ((value = getopt_long(argc, argv, "hHcrbfln", options, nullptr)) != -1) {
-            switch (value) {
-            case 'h':
-                std::printf("Usage: vulkan-smoke [OPTIONS]\n"
-                    "  -h, --help         Show help (default: no)\n"
-                    "  -H, --headless     Use headless Vulkan surface (default: no, use X11)\n"
-                    "  -c, --contention   Test producer lock contention (default: no)\n"
-                    "  -r, --reduced      Use half-resolution model proxy (default: no)\n"
-                    "  -b, --bgra         Select BGRA swapchain (default: no, RGBA)\n"
-                    "  -f, --proxy16      Force FP16 encoded proxy transport (default: no, RGBA8)\n"
-                    "  -l, --linear-hdr   Compose in linear-HDR colour mode (default: no, colour auto)\n"
-                    "  -n, --no-worker    Expect a stopped or killed worker: present without\n"
-                    "                     blocking or composing (default: no, expect answers)\n");
-                return 0;
-            case 'H': headless = true; break;
-            case 'c': contention = true; break;
-            case 'r': reduced = true; break;
-            case 'b': bgra = true; break;
-            case 'f': proxy16 = true; break;
-            case 'l': linear = true; break;
-            case 'n': noWorker = true; break;
-            default: throw std::runtime_error("invalid option; use --help");
-            }
+    bool headless = false, contention = false, reduced = false, bgra = false, proxy16 = false,
+         linear = false, noWorker = false;
+    const option options[] = {
+        {"help", no_argument, nullptr, 'h'}, {"headless", no_argument, nullptr, 'H'},
+        {"contention", no_argument, nullptr, 'c'}, {"reduced", no_argument, nullptr, 'r'},
+        {"bgra", no_argument, nullptr, 'b'}, {"proxy16", no_argument, nullptr, 'f'},
+        {"linear-hdr", no_argument, nullptr, 'l'}, {"no-worker", no_argument, nullptr, 'n'},
+        {nullptr, 0, nullptr, 0}
+    };
+    int value;
+    while ((value = getopt_long(argc, argv, "hHcrbfln", options, nullptr)) != -1) {
+        switch (value) {
+        case 'h':
+            std::printf("Usage: vulkan-smoke [OPTIONS]\n"
+                "  -h, --help         Show help (default: no)\n"
+                "  -H, --headless     Use headless Vulkan surface (default: no, use X11)\n"
+                "  -c, --contention   Test producer lock contention (default: no)\n"
+                "  -r, --reduced      Use half-resolution model proxy (default: no)\n"
+                "  -b, --bgra         Select BGRA swapchain (default: no, RGBA)\n"
+                "  -f, --proxy16      Force FP16 encoded proxy transport (default: no, RGBA8)\n"
+                "  -l, --linear-hdr   Compose in linear-HDR colour mode (default: no, colour auto)\n"
+                "  -n, --no-worker    Expect a stopped or killed worker: present without\n"
+                "                     blocking or composing (default: no, expect answers)\n");
+            return 0;
+        case 'H': headless = true; break;
+        case 'c': contention = true; break;
+        case 'r': reduced = true; break;
+        case 'b': bgra = true; break;
+        case 'f': proxy16 = true; break;
+        case 'l': linear = true; break;
+        case 'n': noWorker = true; break;
+        default: fail("invalid option; use --help");
         }
-        require(optind == argc, "unexpected positional argument; use --help");
-        return smoke(headless, contention, reduced, bgra, proxy16, linear, noWorker);
-    } catch (const std::exception& e) {
-        std::fprintf(stderr, "transport smoke: %s\n", e.what());
-        return 1;
     }
+    require(optind == argc, "unexpected positional argument; use --help");
+    return smoke(headless, contention, reduced, bgra, proxy16, linear, noWorker);
 }

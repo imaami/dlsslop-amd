@@ -8,9 +8,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -21,13 +21,17 @@ constexpr size_t components = width * height * 4;
 constexpr size_t float_bytes = components * sizeof(float);
 constexpr float max_ratio = 2;  // the resolve's guard
 
+[[noreturn]] void Fail(const std::string& message) {
+    std::fprintf(stderr, "hdr-shader-test: %s\n", message.c_str());
+    std::exit(1);
+}
+
 void Check(bool condition, const char* message) {
-    if (!condition) throw std::runtime_error(message);
+    if (!condition) Fail(message);
 }
 
 void VkCheck(VkResult result, const char* operation) {
-    if (result != VK_SUCCESS)
-        throw std::runtime_error(std::string(operation) + ": VkResult " + std::to_string(result));
+    if (result != VK_SUCCESS) Fail(std::string(operation) + ": VkResult " + std::to_string(result));
 }
 
 struct Context {
@@ -133,7 +137,7 @@ struct Context {
         for (uint32_t i = 0; i < properties.memoryTypeCount; ++i)
             if ((mask & (1u << i)) && (properties.memoryTypes[i].propertyFlags & wanted) == wanted)
                 return i;
-        throw std::runtime_error("required memory type unavailable");
+        Fail("required memory type unavailable");
     }
 };
 
@@ -393,7 +397,7 @@ Result Run(Context& c, const std::array<float, components>& input, const Options
         const float actual = LoadTexel(bytes + small_offset, i, unorm);
         if (std::abs(actual - expected) <= tolerance) continue;
         std::fprintf(stderr, "downsample component %zu: expected %.9g, got %.9g\n", i, expected, actual);
-        throw std::runtime_error("downsample is not the proxy's area average");
+        Fail("downsample is not the proxy's area average");
     }
     const unsigned char* answer = bytes + (o.reduced ? small_offset : proxy_offset);
     for (size_t i = 0; i < model_components; ++i)
@@ -429,7 +433,7 @@ void Identity(const char* name, const std::array<float, components>& input, cons
             error > absolute_tolerance + relative_tolerance * std::abs(input[i])) {
             std::fprintf(stderr, "%s component %zu: input %.9g output %.9g error %.9g\n",
                          name, i, input[i], result.output[i], error);
-            throw std::runtime_error("identity model did not preserve native frame");
+            Fail("identity model did not preserve native frame");
         }
     }
     std::printf("%s: identity maximum absolute error %.9g, relative %.9g\n",
@@ -472,7 +476,7 @@ void NoNegativeLight(const char* name, const std::array<float, components>& inpu
             if (!std::isfinite(value) || value < std::min(source, 0.0f)) {
                 std::fprintf(stderr, "%s pixel %zu channel %zu: %.9g from %.9g\n", name, pixel, channel, value,
                              source);
-                throw std::runtime_error("darkening edit drove an edge channel below the frame's own");
+                Fail("darkening edit drove an edge channel below the frame's own");
             }
             in += weights[pq][channel] * (pq ? PqToLinear(source) : source);
             out += weights[pq][channel] * (pq ? PqToLinear(value) : value);
@@ -480,7 +484,7 @@ void NoNegativeLight(const char* name, const std::array<float, components>& inpu
         lowest = std::min(lowest, out / in);
         if (!banded || out >= in / band) continue;
         std::fprintf(stderr, "%s pixel %zu: luminance %.9g from %.9g\n", name, pixel, out, in);
-        throw std::runtime_error("darkening edit crushed an edge pixel below the luminance band");
+        Fail("darkening edit crushed an edge pixel below the luminance band");
     }
     std::printf("%s: no channel below the frame's own, lowest luminance ratio %.9g\n", name, lowest);
 }
@@ -507,7 +511,7 @@ void ColourBoundView(const char* name, const std::array<float, components>& inpu
             continue;
         std::fprintf(stderr, "%s pixel %zu: %.9g %.9g %.9g %.9g, linear %.9g %.9g %.9g, expected red plus "
                      "green %.9g\n", name, pixel, out[0], out[1], out[2], out[3], rgb[0], rgb[1], rgb[2], white);
-        throw std::runtime_error("colour-bound view is not paper white split between red and green");
+        Fail("colour-bound view is not paper white split between red and green");
     }
     std::printf("%s: colour-bound view sums to paper white %.9g\n", name, white);
 }
@@ -515,148 +519,143 @@ void ColourBoundView(const char* name, const std::array<float, components>& inpu
 } // namespace
 
 int main() {
-    try {
-        Context context;
-        if (!context.Init()) {
-            std::puts("SKIP: no Vulkan compute device with formatless storage writes");
-            return 77;
-        }
-        std::array<float, components> linear{}, pq{}, sdr{};
-        constexpr float levels[] = {0.003f, 0.03f, 0.2f, 0.7f, 1.0f, 2.0f, 4.0f, 10.0f};
-        for (size_t pixel = 0; pixel < components / 4; ++pixel) {
-            const float value = levels[pixel % 8];
-            const float rgb[] = {value, value * 0.8f, value * 0.6f};
-            for (size_t channel = 0; channel < 3; ++channel) {
-                linear[pixel * 4 + channel] = rgb[channel];
-                // Encode a BT.709 color as BT.2020 PQ, matching an HDR10 swapchain.
-                constexpr float to2020[3][3] = {{0.627404f, 0.329283f, 0.043313f},
-                    {0.069097f, 0.919540f, 0.011362f}, {0.016391f, 0.088013f, 0.895595f}};
-                float component = 0;
-                for (size_t k = 0; k < 3; ++k) component += to2020[channel][k] * rgb[k];
-                pq[pixel * 4 + channel] = Pq(component * 0.0203f);
-                sdr[pixel * 4 + channel] = rgb[channel] / 10.0f;
-            }
-            linear[pixel * 4 + 3] = pq[pixel * 4 + 3] = sdr[pixel * 4 + 3] = 0.75f;
-        }
-        pq[0] = 0.65f;
-        pq[1] = 0.60f;
-        pq[2] = 0.55f;
-        // BT.2020 primaries lie outside the model's BT.709 gamut. An identity
-        // model must still preserve their native chroma, including black channels.
-        for (size_t mask = 1; mask < 8; ++mask)
-            for (size_t channel = 0; channel < 3; ++channel)
-                pq[mask * 4 + channel] = mask & (size_t(1) << channel) ? 0.7f : 0.0f;
-        const Result one = Run(context, linear, {});
-        // FP16 proxy rounding is magnified by the nonlinear encode/composition.
-        // A 0.1% relative bound admits that error while catching highlight clipping
-        // and a missing PQ transfer by orders of magnitude. PQ is checked in code units.
-        Identity("linear HDR, soft knee", linear, one, 0.0001f, 0.001f);
-        Check(*std::max_element(one.output.begin(), one.output.end()) > 9.9f,
-              "HDR highlights were clipped to SDR range");
-        Options hdr10;
-        hdr10.pq = true;
-        Identity("HDR10 PQ/BT.2020, soft knee", pq, Run(context, pq, hdr10), 0.0002f, 0.0001f);
-        Options display;
-        display.sdr = true;
-        Identity("SDR, FP16 encoded proxy", sdr, Run(context, sdr, display), 0.0001f, 0.001f);
-        Options brighter;
-        brighter.white = 2;
-        const Result two = Run(context, linear, brighter);
-        Identity("linear HDR, white point 2", linear, two, 0.0001f, 0.001f);
-        float difference = 0;
-        for (size_t i = 0; i < components; ++i)
-            if (i % 4 != 3) difference = std::max(difference, std::abs(one.proxy[i] - two.proxy[i]));
-        Check(difference > 0.05f, "changing white point did not change encoded HDR proxy");
-        std::printf("white-point control: maximum encoded proxy change %.9g\n", difference);
-        Options reduced;
-        reduced.reduced = true;
-        Identity("linear HDR, reduced FP16 proxy", linear, Run(context, linear, reduced), 0.0001f, 0.001f);
-        Options reduced_hdr10 = reduced;
-        reduced_hdr10.pq = true;
-        Identity("HDR10 PQ/BT.2020, reduced FP16 proxy", pq, Run(context, pq, reduced_hdr10), 0.0002f, 0.0001f);
-        // Transfer 1, the matched residual, is the non-native default and a user option.
-        Options matched = reduced;
-        matched.transfer = 1;
-        Identity("linear HDR, reduced FP16 proxy, transfer 1", linear, Run(context, linear, matched),
-                 0.0001f, 0.001f);
-        matched.pq = true;
-        Identity("HDR10 PQ/BT.2020, reduced FP16 proxy, transfer 1", pq, Run(context, pq, matched),
-                 0.0002f, 0.0001f);
-        // HdrProxy 0 is native HIP's default: HDR transport off, an RGBA8 proxy. Eight bits move a
-        // native highlight by up to a couple of percent; the reduced path lays only the (zero) edit
-        // on the native frame and stays exact.
-        Options rgba8;
-        rgba8.hdrProxy = 0;
-        rgba8.proxyFormat = VK_FORMAT_R8G8B8A8_UNORM;
-        Identity("linear HDR, RGBA8 proxy", linear, Run(context, linear, rgba8), 0.03f, 0.025f);
-        rgba8.reduced = true;
-        Identity("linear HDR, reduced RGBA8 proxy", linear, Run(context, linear, rgba8), 0.0001f, 0.001f);
-        // scRGB permits negative BT.709 components for colors outside that
-        // gamut. Keep their native values even though the model proxy is bounded.
-        auto scrgb = linear;
-        constexpr float outside709[][3] = {{-0.1f, 1.0f, 0.2f}, {2.0f, -0.1f, 0.3f},
-                                           {0.2f, 0.5f, -0.05f}, {-0.2f, 4.0f, -0.1f}};
-        for (size_t pixel = 0; pixel < 4; ++pixel)
-            for (size_t channel = 0; channel < 3; ++channel)
-                scrgb[pixel * 4 + channel] = outside709[pixel][channel];
-        const Result native_scrgb = Run(context, scrgb, {});
-        Identity("scRGB negative components, native FP16 proxy", scrgb, native_scrgb, 0.0001f, 0.001f);
-        Check(native_scrgb.output[0] < 0, "native scRGB negative component was clipped");
-        const Result reduced_scrgb = Run(context, scrgb, reduced);
-        Identity("scRGB negative components, reduced FP16 proxy", scrgb, reduced_scrgb, 0.0001f, 0.001f);
-        Check(reduced_scrgb.output[0] < 0, "reduced scRGB negative component was clipped");
-        // A model that darkens a column-by-column edge, below frame size: every transfer and
-        // transport combination the native path can take.
-        std::array<float, components> edge{}, edge_pq{};
-        for (size_t i = 0; i < components; ++i) {
-            edge[i] = i % 4 == 3 ? 0.75f : i / 4 % 2 ? 0.01f : 0.9f;
-            edge_pq[i] = i % 4 == 3 ? 0.75f : Pq(edge[i] * 0.0203f);
-        }
-        for (unsigned variant = 0; variant < 8; ++variant) {
-            Options darker;
-            darker.reduced = true;
-            darker.modelScale = 0.8f;
-            darker.pq = variant & 1;
-            darker.hdrProxy = variant & 2 ? 2 : 0;
-            darker.proxyFormat = variant & 2 ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
-            darker.transfer = variant & 4 ? 2 : 1;
-            char name[80];
-            std::snprintf(name, sizeof(name), "darkening edge, %s, HdrProxy %u, transfer %u",
-                          darker.pq ? "HDR10 PQ" : "linear HDR", darker.hdrProxy, darker.transfer);
-            const auto& input = darker.pq ? edge_pq : edge;
-            NoNegativeLight(name, input, Run(context, input, darker), darker.pq, darker.transfer == 1);
-        }
-        // A BT.2020 green in scRGB beside a bright white column, under native plus edit. The native
-        // transports compose it from the frame's own hue; HdrProxy 1 carries it to the model with no
-        // such fallback and relies on the sum's zero clamp to keep a channel above the frame's own.
-        std::array<float, components> gamut_edge{};
-        constexpr float green2020[] = {-0.5876f, 1.1329f, -0.1006f};
-        for (size_t i = 0; i < components; ++i)
-            gamut_edge[i] = i % 4 == 3 ? 0.75f : i / 4 % 2 ? green2020[i % 4] : 4.0f;
-        for (unsigned variant = 0; variant < 6; ++variant) {
-            Options darker;
-            darker.reduced = true;
-            darker.modelScale = variant & 1 ? 0.5f : 0.8f;
-            darker.hdrProxy = variant >> 1;
-            darker.proxyFormat = darker.hdrProxy ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
-            char name[80];
-            std::snprintf(name, sizeof(name), "wide-gamut edge x%.1f, HdrProxy %u, transfer 2",
-                          darker.modelScale, darker.hdrProxy);
-            NoNegativeLight(name, gamut_edge, Run(context, gamut_edge, darker), false, false);
-        }
-        Options bound_hdr10 = hdr10;
-        bound_hdr10.debugView = 4;
-        ColourBoundView("debug view 4, HDR10 PQ", pq, Run(context, pq, bound_hdr10), true, 0.0203f);
-        Options bound_linear = brighter;
-        bound_linear.debugView = 4;
-        ColourBoundView("debug view 4, linear HDR, white point 2", linear, Run(context, linear, bound_linear),
-                        false, 2);
-        Options bound_sdr = display;
-        bound_sdr.debugView = 4;
-        ColourBoundView("debug view 4, SDR", sdr, Run(context, sdr, bound_sdr), false, 1);
-        return 0;
-    } catch (const std::exception& error) {
-        std::fprintf(stderr, "hdr-shader-test: %s\n", error.what());
-        return 1;
+    Context context;
+    if (!context.Init()) {
+        std::puts("SKIP: no Vulkan compute device with formatless storage writes");
+        return 77;
     }
+    std::array<float, components> linear{}, pq{}, sdr{};
+    constexpr float levels[] = {0.003f, 0.03f, 0.2f, 0.7f, 1.0f, 2.0f, 4.0f, 10.0f};
+    for (size_t pixel = 0; pixel < components / 4; ++pixel) {
+        const float value = levels[pixel % 8];
+        const float rgb[] = {value, value * 0.8f, value * 0.6f};
+        for (size_t channel = 0; channel < 3; ++channel) {
+            linear[pixel * 4 + channel] = rgb[channel];
+            // Encode a BT.709 color as BT.2020 PQ, matching an HDR10 swapchain.
+            constexpr float to2020[3][3] = {{0.627404f, 0.329283f, 0.043313f},
+                {0.069097f, 0.919540f, 0.011362f}, {0.016391f, 0.088013f, 0.895595f}};
+            float component = 0;
+            for (size_t k = 0; k < 3; ++k) component += to2020[channel][k] * rgb[k];
+            pq[pixel * 4 + channel] = Pq(component * 0.0203f);
+            sdr[pixel * 4 + channel] = rgb[channel] / 10.0f;
+        }
+        linear[pixel * 4 + 3] = pq[pixel * 4 + 3] = sdr[pixel * 4 + 3] = 0.75f;
+    }
+    pq[0] = 0.65f;
+    pq[1] = 0.60f;
+    pq[2] = 0.55f;
+    // BT.2020 primaries lie outside the model's BT.709 gamut. An identity
+    // model must still preserve their native chroma, including black channels.
+    for (size_t mask = 1; mask < 8; ++mask)
+        for (size_t channel = 0; channel < 3; ++channel)
+            pq[mask * 4 + channel] = mask & (size_t(1) << channel) ? 0.7f : 0.0f;
+    const Result one = Run(context, linear, {});
+    // FP16 proxy rounding is magnified by the nonlinear encode/composition.
+    // A 0.1% relative bound admits that error while catching highlight clipping
+    // and a missing PQ transfer by orders of magnitude. PQ is checked in code units.
+    Identity("linear HDR, soft knee", linear, one, 0.0001f, 0.001f);
+    Check(*std::max_element(one.output.begin(), one.output.end()) > 9.9f,
+          "HDR highlights were clipped to SDR range");
+    Options hdr10;
+    hdr10.pq = true;
+    Identity("HDR10 PQ/BT.2020, soft knee", pq, Run(context, pq, hdr10), 0.0002f, 0.0001f);
+    Options display;
+    display.sdr = true;
+    Identity("SDR, FP16 encoded proxy", sdr, Run(context, sdr, display), 0.0001f, 0.001f);
+    Options brighter;
+    brighter.white = 2;
+    const Result two = Run(context, linear, brighter);
+    Identity("linear HDR, white point 2", linear, two, 0.0001f, 0.001f);
+    float difference = 0;
+    for (size_t i = 0; i < components; ++i)
+        if (i % 4 != 3) difference = std::max(difference, std::abs(one.proxy[i] - two.proxy[i]));
+    Check(difference > 0.05f, "changing white point did not change encoded HDR proxy");
+    std::printf("white-point control: maximum encoded proxy change %.9g\n", difference);
+    Options reduced;
+    reduced.reduced = true;
+    Identity("linear HDR, reduced FP16 proxy", linear, Run(context, linear, reduced), 0.0001f, 0.001f);
+    Options reduced_hdr10 = reduced;
+    reduced_hdr10.pq = true;
+    Identity("HDR10 PQ/BT.2020, reduced FP16 proxy", pq, Run(context, pq, reduced_hdr10), 0.0002f, 0.0001f);
+    // Transfer 1, the matched residual, is the non-native default and a user option.
+    Options matched = reduced;
+    matched.transfer = 1;
+    Identity("linear HDR, reduced FP16 proxy, transfer 1", linear, Run(context, linear, matched),
+             0.0001f, 0.001f);
+    matched.pq = true;
+    Identity("HDR10 PQ/BT.2020, reduced FP16 proxy, transfer 1", pq, Run(context, pq, matched),
+             0.0002f, 0.0001f);
+    // HdrProxy 0 is native HIP's default: HDR transport off, an RGBA8 proxy. Eight bits move a
+    // native highlight by up to a couple of percent; the reduced path lays only the (zero) edit
+    // on the native frame and stays exact.
+    Options rgba8;
+    rgba8.hdrProxy = 0;
+    rgba8.proxyFormat = VK_FORMAT_R8G8B8A8_UNORM;
+    Identity("linear HDR, RGBA8 proxy", linear, Run(context, linear, rgba8), 0.03f, 0.025f);
+    rgba8.reduced = true;
+    Identity("linear HDR, reduced RGBA8 proxy", linear, Run(context, linear, rgba8), 0.0001f, 0.001f);
+    // scRGB permits negative BT.709 components for colors outside that
+    // gamut. Keep their native values even though the model proxy is bounded.
+    auto scrgb = linear;
+    constexpr float outside709[][3] = {{-0.1f, 1.0f, 0.2f}, {2.0f, -0.1f, 0.3f},
+                                       {0.2f, 0.5f, -0.05f}, {-0.2f, 4.0f, -0.1f}};
+    for (size_t pixel = 0; pixel < 4; ++pixel)
+        for (size_t channel = 0; channel < 3; ++channel)
+            scrgb[pixel * 4 + channel] = outside709[pixel][channel];
+    const Result native_scrgb = Run(context, scrgb, {});
+    Identity("scRGB negative components, native FP16 proxy", scrgb, native_scrgb, 0.0001f, 0.001f);
+    Check(native_scrgb.output[0] < 0, "native scRGB negative component was clipped");
+    const Result reduced_scrgb = Run(context, scrgb, reduced);
+    Identity("scRGB negative components, reduced FP16 proxy", scrgb, reduced_scrgb, 0.0001f, 0.001f);
+    Check(reduced_scrgb.output[0] < 0, "reduced scRGB negative component was clipped");
+    // A model that darkens a column-by-column edge, below frame size: every transfer and
+    // transport combination the native path can take.
+    std::array<float, components> edge{}, edge_pq{};
+    for (size_t i = 0; i < components; ++i) {
+        edge[i] = i % 4 == 3 ? 0.75f : i / 4 % 2 ? 0.01f : 0.9f;
+        edge_pq[i] = i % 4 == 3 ? 0.75f : Pq(edge[i] * 0.0203f);
+    }
+    for (unsigned variant = 0; variant < 8; ++variant) {
+        Options darker;
+        darker.reduced = true;
+        darker.modelScale = 0.8f;
+        darker.pq = variant & 1;
+        darker.hdrProxy = variant & 2 ? 2 : 0;
+        darker.proxyFormat = variant & 2 ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
+        darker.transfer = variant & 4 ? 2 : 1;
+        char name[80];
+        std::snprintf(name, sizeof(name), "darkening edge, %s, HdrProxy %u, transfer %u",
+                      darker.pq ? "HDR10 PQ" : "linear HDR", darker.hdrProxy, darker.transfer);
+        const auto& input = darker.pq ? edge_pq : edge;
+        NoNegativeLight(name, input, Run(context, input, darker), darker.pq, darker.transfer == 1);
+    }
+    // A BT.2020 green in scRGB beside a bright white column, under native plus edit. The native
+    // transports compose it from the frame's own hue; HdrProxy 1 carries it to the model with no
+    // such fallback and relies on the sum's zero clamp to keep a channel above the frame's own.
+    std::array<float, components> gamut_edge{};
+    constexpr float green2020[] = {-0.5876f, 1.1329f, -0.1006f};
+    for (size_t i = 0; i < components; ++i)
+        gamut_edge[i] = i % 4 == 3 ? 0.75f : i / 4 % 2 ? green2020[i % 4] : 4.0f;
+    for (unsigned variant = 0; variant < 6; ++variant) {
+        Options darker;
+        darker.reduced = true;
+        darker.modelScale = variant & 1 ? 0.5f : 0.8f;
+        darker.hdrProxy = variant >> 1;
+        darker.proxyFormat = darker.hdrProxy ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
+        char name[80];
+        std::snprintf(name, sizeof(name), "wide-gamut edge x%.1f, HdrProxy %u, transfer 2",
+                      darker.modelScale, darker.hdrProxy);
+        NoNegativeLight(name, gamut_edge, Run(context, gamut_edge, darker), false, false);
+    }
+    Options bound_hdr10 = hdr10;
+    bound_hdr10.debugView = 4;
+    ColourBoundView("debug view 4, HDR10 PQ", pq, Run(context, pq, bound_hdr10), true, 0.0203f);
+    Options bound_linear = brighter;
+    bound_linear.debugView = 4;
+    ColourBoundView("debug view 4, linear HDR, white point 2", linear, Run(context, linear, bound_linear),
+                    false, 2);
+    Options bound_sdr = display;
+    bound_sdr.debugView = 4;
+    ColourBoundView("debug view 4, SDR", sdr, Run(context, sdr, bound_sdr), false, 1);
+    return 0;
 }

@@ -5,11 +5,11 @@
 
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
-#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -26,9 +26,27 @@ namespace {
 using Clock = std::chrono::steady_clock;
 constexpr unsigned kWidth = 64, kHeight = 36;
 
+// The worker a failed check stops; at most one runs at a time.
+pid_t running = -1;
+// The test's directory, removed however the test ends.
+struct Scratch {
+    std::filesystem::path directory;
+    ~Scratch()
+    {
+        std::error_code ignored;
+        if (!directory.empty()) std::filesystem::remove_all(directory, ignored);
+    }
+} scratch;
+
 void require(bool condition, const std::string& message)
 {
-    if (!condition) throw std::runtime_error(message);
+    if (condition) return;
+    std::fprintf(stderr, "worker channel: %s\n", message.c_str());
+    if (running > 0) {
+        kill(running, SIGKILL);
+        waitpid(running, nullptr, 0);
+    }
+    std::exit(1);
 }
 
 void wake(std::atomic<uint32_t>& word)
@@ -110,6 +128,7 @@ public:
                               once ? "--once" : option, once ? option : value, once ? value : nullptr, nullptr};
         pid_ = fork();
         require(pid_ >= 0, "fork worker");
+        running = pid_;
         if (!pid_) {
             const int fd = open(log_.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
             if (fd < 0 || dup2(fd, 1) < 0 || dup2(fd, 2) < 0) _exit(127);
@@ -130,6 +149,7 @@ public:
         if (pid_ <= 0) return;
         kill(pid_, SIGKILL);
         waitpid(pid_, nullptr, 0);
+        running = -1;
     }
     std::string text() const
     {
@@ -145,7 +165,7 @@ public:
             require(Clock::now() < deadline, "worker did not exit:\n" + text());
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        pid_ = -1;
+        pid_ = running = -1;
         return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
     }
     int quit(Channel& channel)
@@ -268,7 +288,9 @@ void live_settings(const char* executable, const std::filesystem::path& director
     }
     // main points XDG_CONFIG_HOME at the test directory.
     const auto config = directory / "dlsslop-amd/dlsslopd.conf";
-    std::filesystem::create_directories(config.parent_path());
+    std::error_code error;
+    std::filesystem::create_directories(config.parent_path(), error);
+    require(!error, "create the config directory");
     std::ofstream(config) << "# live settings\npasses = 4\n";
     {
         Worker worker(executable, channel, log);
@@ -276,7 +298,7 @@ void live_settings(const char* executable, const std::filesystem::path& director
         require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
     }
     Worker worker(executable, channel, log, false, "--passes", "2");
-    std::filesystem::remove(config);
+    require(std::filesystem::remove(config, error), "remove the config file");
     require(channel.h->passes.load() == 2, "--passes did not override the config file");
     require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
     std::printf("PASS: a restarted worker kept the live pass count; the config file and --passes replaced it\n");
@@ -359,27 +381,21 @@ int main(int argc, char** argv)
         return 2;
     }
     // mkdtemp makes the private (0700) directory the worker requires.
-    std::string buffer = (std::filesystem::temp_directory_path() / "dlsslop-worker-channel-XXXXXX").string();
-    if (!mkdtemp(buffer.data())) {
+    std::error_code error;
+    std::string buffer = (std::filesystem::temp_directory_path(error) / "dlsslop-worker-channel-XXXXXX").string();
+    if (error || !mkdtemp(buffer.data())) {
         std::perror("mkdtemp");
         return 1;
     }
-    const std::filesystem::path directory = buffer;
+    scratch.directory = buffer;
+    const std::filesystem::path& directory = scratch.directory;
     // Workers read no config file but the test's own.
     setenv("XDG_CONFIG_HOME", buffer.c_str(), 1);
-    int result = 0;
-    try {
-        restart(argv[1], directory);
-        rejection(argv[1], directory);
-        controls(argv[1], directory);
-        once(argv[1], directory);
-        live_settings(argv[1], directory);
-        tiers(argv[1], directory);
-    } catch (const std::exception& e) {
-        std::fprintf(stderr, "worker channel: %s\n", e.what());
-        result = 1;
-    }
-    std::error_code ignored;
-    std::filesystem::remove_all(directory, ignored);
-    return result;
+    restart(argv[1], directory);
+    rejection(argv[1], directory);
+    controls(argv[1], directory);
+    once(argv[1], directory);
+    live_settings(argv[1], directory);
+    tiers(argv[1], directory);
+    return 0;
 }

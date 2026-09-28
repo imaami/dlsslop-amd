@@ -12,14 +12,15 @@
 #include <fstream>
 #include <iterator>
 #include <set>
-#include <stdexcept>
 #include <string>
 #include <unistd.h>
 
 namespace {
 
 void require(bool condition, const char* message) {
-    if (!condition) throw std::runtime_error(message);
+    if (condition) return;
+    std::fprintf(stderr, "capture-writer-test: %s\n", message);
+    std::exit(1);
 }
 
 std::string read(const std::filesystem::path& path) {
@@ -53,8 +54,10 @@ struct TemporaryDirectory {
 
 std::set<std::filesystem::path> directories(const std::filesystem::path& root) {
     std::set<std::filesystem::path> result;
-    for (const auto& item : std::filesystem::directory_iterator(root))
-        if (item.is_directory()) result.insert(item.path());
+    std::error_code error;
+    for (const auto& item : std::filesystem::directory_iterator(root, error))
+        if (item.is_directory(error)) result.insert(item.path());
+    require(!error, "cannot list the capture directory");
     return result;
 }
 
@@ -83,98 +86,96 @@ void check_channel_paths() {
 } // namespace
 
 int main() {
-    try {
-        check_channel_paths();
-        TemporaryDirectory temporary;
-        require(unsetenv("XDG_STATE_HOME") == 0, "unsetenv failed");
-        require(setenv("HOME", temporary.path.c_str(), 1) == 0, "setenv failed");
-        require(dlssnr::CaptureWriter::Directory() == temporary.path / ".local/state/dlssnr/captures",
-                "wrong home capture directory");
-        require(unsetenv("HOME") == 0, "unsetenv failed");
-        require(dlssnr::CaptureWriter::Directory() == "/tmp/dlssnr-captures",
-                "wrong fallback capture directory");
-        require(setenv("XDG_STATE_HOME", temporary.path.c_str(), 1) == 0, "setenv failed");
-        const std::filesystem::path root = dlssnr::CaptureWriter::Directory();
-        require(root == temporary.path / "dlssnr/captures", "wrong state capture directory");
-        std::filesystem::create_directories(root);
-        // Legacy unbatched files and unrelated user content must survive a new capture.
-        std::ofstream(root / "before_00.png") << "old capture";
-        std::ofstream(root / "notes.txt") << "keep";
+    check_channel_paths();
+    // Static, so a failed check that exits removes it too.
+    static const TemporaryDirectory temporary;
+    require(unsetenv("XDG_STATE_HOME") == 0, "unsetenv failed");
+    require(setenv("HOME", temporary.path.c_str(), 1) == 0, "setenv failed");
+    require(dlssnr::CaptureWriter::Directory() == temporary.path / ".local/state/dlssnr/captures",
+            "wrong home capture directory");
+    require(unsetenv("HOME") == 0, "unsetenv failed");
+    require(dlssnr::CaptureWriter::Directory() == "/tmp/dlssnr-captures",
+            "wrong fallback capture directory");
+    require(setenv("XDG_STATE_HOME", temporary.path.c_str(), 1) == 0, "setenv failed");
+    const std::filesystem::path root = dlssnr::CaptureWriter::Directory();
+    require(root == temporary.path / "dlssnr/captures", "wrong state capture directory");
+    std::error_code error;
+    std::filesystem::create_directories(root, error);
+    require(!error, "cannot create the capture directory");
+    // Legacy unbatched files and unrelated user content must survive a new capture.
+    std::ofstream(root / "before_00.png") << "old capture";
+    std::ofstream(root / "notes.txt") << "keep";
 
-        dlssnr::CaptureWriter writer;
-        dlssnr::CaptureMetadata metadata;
-        metadata.frameControlSeq = 123;
-        metadata.inferenceSeq = 55;
-        metadata.hold = 1;
-        metadata.passes = 1;
-        metadata.debugView = 2;
-        metadata.color = 0.25f;
-        metadata.detail = 0.5f;
-        const unsigned char bgra[] = {17, 32, 64, 255};
-        writer.Begin(2, 123);
-        writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
-        require(!std::filesystem::exists(root / "manifest.txt"), "published an incomplete batch");
-        require(writer.Remaining() == 1, "wrong remaining frame count");
-        writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
-        require(!writer.Active(), "completed batch remains active");
-        const auto first = read(root / "manifest.txt");
-        require(field(first, "capture_metadata_version") == "2", "wrong metadata version");
-        require(field(first, "capture_control_seq") == "123", "wrong capture token");
-        require(field(first, "frame_1_before_hash") == "c2de31fd48ac5f39", "wrong input hash");
-        require(field(first, "frame_1_inference_seq") == "55", "wrong inference provenance");
-        require(field(first, "debug_view") == "2", "wrong renderer view");
-        require(field(first, "color") == "0.25", "wrong renderer color");
-        const auto batch = root / field(first, "batch_dir");
-        require(read(batch / "manifest.txt") == first, "batch and published manifests differ");
-        int width = 0, height = 0, channels = 0;
-        unsigned char* png = stbi_load((batch / "before_00.png").c_str(), &width, &height, &channels, 4);
-        require(png, "cannot decode captured PNG");
-        const bool correct = width == 1 && height == 1 && png[0] == 64 && png[1] == 32 &&
-                             png[2] == 17 && png[3] == 255;
-        stbi_image_free(png);
-        require(correct, "BGRA capture channels were not converted to RGBA PNG");
-        require(read(root / "before_00.png") == "old capture", "overwrote an existing capture");
-        require(read(root / "notes.txt") == "keep", "removed unrelated content");
+    dlssnr::CaptureWriter writer;
+    dlssnr::CaptureMetadata metadata;
+    metadata.frameControlSeq = 123;
+    metadata.inferenceSeq = 55;
+    metadata.hold = 1;
+    metadata.passes = 1;
+    metadata.debugView = 2;
+    metadata.color = 0.25f;
+    metadata.detail = 0.5f;
+    const unsigned char bgra[] = {17, 32, 64, 255};
+    writer.Begin(2, 123);
+    writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
+    require(!std::filesystem::exists(root / "manifest.txt", error) && !error, "published an incomplete batch");
+    require(writer.Remaining() == 1, "wrong remaining frame count");
+    writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
+    require(!writer.Active(), "completed batch remains active");
+    const auto first = read(root / "manifest.txt");
+    require(field(first, "capture_metadata_version") == "2", "wrong metadata version");
+    require(field(first, "capture_control_seq") == "123", "wrong capture token");
+    require(field(first, "frame_1_before_hash") == "c2de31fd48ac5f39", "wrong input hash");
+    require(field(first, "frame_1_inference_seq") == "55", "wrong inference provenance");
+    require(field(first, "debug_view") == "2", "wrong renderer view");
+    require(field(first, "color") == "0.25", "wrong renderer color");
+    const auto batch = root / field(first, "batch_dir");
+    require(read(batch / "manifest.txt") == first, "batch and published manifests differ");
+    int width = 0, height = 0, channels = 0;
+    unsigned char* png = stbi_load((batch / "before_00.png").c_str(), &width, &height, &channels, 4);
+    require(png, "cannot decode captured PNG");
+    const bool correct = width == 1 && height == 1 && png[0] == 64 && png[1] == 32 &&
+                         png[2] == 17 && png[3] == 255;
+    stbi_image_free(png);
+    require(correct, "BGRA capture channels were not converted to RGBA PNG");
+    require(read(root / "before_00.png") == "old capture", "overwrote an existing capture");
+    require(read(root / "notes.txt") == "keep", "removed unrelated content");
 
-        writer.Begin(1, 124);
-        require(read(root / "manifest.txt") == first, "changed completion before new batch finished");
-        writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
-        const auto second = read(root / "manifest.txt");
-        require(field(second, "capture_control_seq") == "124", "new completion not published");
-        require(field(second, "batch_dir") != field(first, "batch_dir"), "reused batch directory");
-        require(read(batch / "manifest.txt") == first, "changed prior batch metadata");
+    writer.Begin(1, 124);
+    require(read(root / "manifest.txt") == first, "changed completion before new batch finished");
+    writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
+    const auto second = read(root / "manifest.txt");
+    require(field(second, "capture_control_seq") == "124", "new completion not published");
+    require(field(second, "batch_dir") != field(first, "batch_dir"), "reused batch directory");
+    require(read(batch / "manifest.txt") == first, "changed prior batch metadata");
 
-        writer.Begin(1, 125);
-        const unsigned short fp16[] = {0x3800, 0x3800, 0x3800, 0x3c00};
-        writer.WriteFrame(fp16, fp16, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, metadata);
-        const auto third = read(root / "manifest.txt");
-        require(field(third, "encoding") == "raw", "FP16 capture was not raw");
-        require(field(third, "bytes_per_pixel") == "8", "FP16 capture byte count incorrect");
-        // Eight bytes take the hash's word step; the BGRA pixel above takes its byte tail.
-        require(field(third, "before_hash") == "736955abadf41fdf", "wrong FP16 input hash");
-        const auto raw = read(root / field(third, "batch_dir") / "before_00.raw");
-        require(raw == std::string(reinterpret_cast<const char*>(fp16), sizeof fp16), "FP16 bytes changed");
+    writer.Begin(1, 125);
+    const unsigned short fp16[] = {0x3800, 0x3800, 0x3800, 0x3c00};
+    writer.WriteFrame(fp16, fp16, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, metadata);
+    const auto third = read(root / "manifest.txt");
+    require(field(third, "encoding") == "raw", "FP16 capture was not raw");
+    require(field(third, "bytes_per_pixel") == "8", "FP16 capture byte count incorrect");
+    // Eight bytes take the hash's word step; the BGRA pixel above takes its byte tail.
+    require(field(third, "before_hash") == "736955abadf41fdf", "wrong FP16 input hash");
+    const auto raw = read(root / field(third, "batch_dir") / "before_00.raw");
+    require(raw == std::string(reinterpret_cast<const char*>(fp16), sizeof fp16), "FP16 bytes changed");
 
-        // A failed image write must leave the last completed batch visible.
-        const auto priorDirectories = directories(root);
-        writer.Begin(1, 126);
-        for (const auto& directory : directories(root))
-            if (!priorDirectories.count(directory)) std::filesystem::remove(directory);
-        writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
-        require(!writer.Active(), "failed batch still active");
-        require(read(root / "manifest.txt") == third, "published failed batch as complete");
+    // A failed image write must leave the last completed batch visible.
+    const auto priorDirectories = directories(root);
+    writer.Begin(1, 126);
+    for (const auto& directory : directories(root))
+        if (!priorDirectories.count(directory)) require(std::filesystem::remove(directory, error), "cannot remove a batch");
+    writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
+    require(!writer.Active(), "failed batch still active");
+    require(read(root / "manifest.txt") == third, "published failed batch as complete");
 
-        // A batch publishes where it began, even if the environment moves before it completes.
-        writer.Begin(1, 127);
-        require(setenv("XDG_STATE_HOME", (temporary.path / "moved").c_str(), 1) == 0, "setenv failed");
-        writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
-        const auto fourth = read(root / "manifest.txt");
-        require(field(fourth, "capture_control_seq") == "127", "batch did not publish where it began");
-        require(read(root / field(fourth, "batch_dir") / "manifest.txt") == fourth, "wrong batch name");
-        std::printf("PASS: runtime and capture paths, capture publication, provenance, preserved batches, BGRA PNG, FP16 raw, write failure, moved environment\n");
-        return 0;
-    } catch (const std::exception& error) {
-        std::fprintf(stderr, "capture-writer-test: %s\n", error.what());
-        return 1;
-    }
+    // A batch publishes where it began, even if the environment moves before it completes.
+    writer.Begin(1, 127);
+    require(setenv("XDG_STATE_HOME", (temporary.path / "moved").c_str(), 1) == 0, "setenv failed");
+    writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
+    const auto fourth = read(root / "manifest.txt");
+    require(field(fourth, "capture_control_seq") == "127", "batch did not publish where it began");
+    require(read(root / field(fourth, "batch_dir") / "manifest.txt") == fourth, "wrong batch name");
+    std::printf("PASS: runtime and capture paths, capture publication, provenance, preserved batches, BGRA PNG, FP16 raw, write failure, moved environment\n");
+    return 0;
 }
