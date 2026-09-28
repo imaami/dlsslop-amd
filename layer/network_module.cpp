@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cerrno>
 #include <cstring>
 #include <new>
 #include <pthread.h>
@@ -59,13 +58,18 @@ struct DlsslopNetwork {
 
     DlsslopNetwork(const DlsslopNetworkDevice& d) : recorder(host_device(d), d.memory, module_paths()) {}
 
+    // The network cannot run: WHAT says why.
+    int fail(std::string what)
+    {
+        error = std::move(what);
+        failed = true;
+        return kDlsslopNetworkFailed;
+    }
+
     static void* build(void* self)
     {
         auto& n = *static_cast<DlsslopNetwork*>(self);
-        if (auto built = n.recorder.shape(n.target); !built) {
-            n.error = std::move(built).error().what;
-            n.failed = true;
-        }
+        if (auto built = n.recorder.shape(n.target); !built) n.fail(std::move(built).error().what);
         n.building.store(false, std::memory_order_release);
         return nullptr;
     }
@@ -99,19 +103,13 @@ int dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader* channel, uint32_
         n->prepared = frame;
         return kDlsslopNetworkReady;
     }
-    const std::string& model = dlsslop::default_vulkan_model();
-    if (!dlsslop::is_regular_file(model)) {
-        n->error = "no model at " + model + " (dlsslop-setup --dll extracts it from nvngx_dlssnr.dll 310.8.0)";
-        n->failed = true;
-        return kDlsslopNetworkFailed;
-    }
+    if (auto model = dlsslop::require_vulkan_model(dlsslop::default_vulkan_model()); !model)
+        return n->fail(std::move(model).error().what);
     n->target = frame;
     n->building.store(true, std::memory_order_relaxed);
     if (const int error = pthread_create(&n->builder, nullptr, DlsslopNetwork::build, n)) {
         n->building.store(false, std::memory_order_relaxed);
-        n->error = std::string("start the network's build: ") + std::strerror(error);
-        n->failed = true;
-        return kDlsslopNetworkFailed;
+        return n->fail(std::string("start the network's build: ") + std::strerror(error));
     }
     n->joinable = true;
     return kDlsslopNetworkBuilding;
@@ -141,10 +139,7 @@ int dlsslop_network_record(DlsslopNetwork* n, VkCommandBuffer cmd, VkBuffer prox
     }
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 2, take, 0,
                          nullptr);
-    if (recorded) return kDlsslopNetworkReady;
-    n->error = std::move(recorded).error().what;
-    n->failed = true;
-    return kDlsslopNetworkFailed;
+    return recorded ? kDlsslopNetworkReady : n->fail(std::move(recorded).error().what);
 }
 
 const char* dlsslop_network_error(const DlsslopNetwork* n) { return n->error.c_str(); }

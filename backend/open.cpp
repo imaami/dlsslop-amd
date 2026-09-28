@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 #include "open.h"
-#include "files.h"
 #include "paths.h"
 
 #include <cstdio>
@@ -13,8 +12,7 @@ VulkanPaths vulkan_paths(const Options& o) { return {o.vulkan_model, vulkan_shad
 // The Vulkan engine, prepared, or why not.
 Result<VulkanEngine> open_vulkan(const Options& o, unsigned tier)
 {
-    if (!is_regular_file(o.vulkan_model))
-        return fail("no model at " + o.vulkan_model + " (dlsslop-setup --dll extracts it from nvngx_dlssnr.dll 310.8.0)");
+    DLSSLOP_TRY(require_vulkan_model(o.vulkan_model));
     auto network = DLSSLOP_TRY(VulkanNetwork::create(vulkan_paths(o), o.device));
     std::fprintf(stderr, "Vulkan network on %s\n", network.device_name().c_str());
     VulkanEngine engine(std::move(network), tier);

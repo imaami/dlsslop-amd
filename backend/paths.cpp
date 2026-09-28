@@ -9,6 +9,12 @@
 
 namespace dlsslop {
 
+Result<void> require_vulkan_model(const std::string& model)
+{
+    if (is_regular_file(model)) return {};
+    return fail("no model at " + model + " (dlsslop-setup --dll extracts it from nvngx_dlssnr.dll 310.8.0)");
+}
+
 std::string home_directory()
 {
     const char* home = std::getenv("HOME");

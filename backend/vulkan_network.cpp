@@ -4,7 +4,6 @@
 #include "network_requirements.h"
 
 #include "nr_log.hpp"
-#include "nr_vendor.h"
 
 #include <algorithm>
 #include <array>
@@ -13,7 +12,6 @@
 #include <cstring>
 #include <optional>
 #include <string>
-#include <tuple>
 #include <vector>
 #include <unistd.h>
 #include <vulkan/vulkan.h>
@@ -75,12 +73,6 @@ struct VulkanNetwork::Impl {
     };
     std::array<Imported, kImportSlots> imported{};
 
-    Result<uint32_t> memory_type(uint32_t bits, VkMemoryPropertyFlags want) const
-    {
-        for (uint32_t i = 0; i < memory.memoryTypeCount; ++i)
-            if ((bits & (1u << i)) && (memory.memoryTypes[i].propertyFlags & want) == want) return i;
-        return fail("no suitable Vulkan memory type");
-    }
     void drop(Buffer& b)
     {
         if (b.buffer) vkDestroyBuffer(device, b.buffer, nullptr);
@@ -101,7 +93,8 @@ struct VulkanNetwork::Impl {
         VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
         alloc.allocationSize = req.size;
         alloc.memoryTypeIndex = DLSSLOP_TRY(
-            memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | extra));
+            memory_type(memory, req.memoryTypeBits,
+                        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | extra));
         DLSSLOP_TRY(vk_check(vkAllocateMemory(device, &alloc, nullptr, &b.memory), "allocate transfer buffer"));
         DLSSLOP_TRY(vk_check(vkBindBufferMemory(device, b.buffer, b.memory, 0), "bind transfer buffer"));
         DLSSLOP_TRY(vk_check(vkMapMemory(device, b.memory, 0, VK_WHOLE_SIZE, 0, &b.mapped), "map transfer buffer"));
@@ -258,7 +251,7 @@ bool VulkanNetwork::import(unsigned slot, const ShmTransportOffer& offer, int fd
             vkGetBufferMemoryRequirements(s.device, b.buffer, &req);
             // The layer exports from the first device-local type the buffer allows; on the
             // same GPU and driver that is this device's too.
-            type = s.memory_type(req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT).value_or(type);
+            type = memory_type(s.memory, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT).value_or(type);
         }
         VkMemoryDedicatedAllocateInfo dedicated{VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO};
         dedicated.buffer = b.buffer;

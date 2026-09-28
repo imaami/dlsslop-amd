@@ -22,6 +22,9 @@ struct VulkanPaths {
 
 // VkResult as a Result: WHAT, and the code, when it is not VK_SUCCESS.
 Result<void> vk_check(VkResult result, const char* what);
+// The first of MEMORY's types among BITS with every property in WANT.
+Result<uint32_t> memory_type(const VkPhysicalDeviceMemoryProperties& memory, uint32_t bits,
+                             VkMemoryPropertyFlags want);
 
 // The network on one device: its runtime, built for one frame shape at a time,
 // and the image it works in.

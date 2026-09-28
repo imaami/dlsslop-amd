@@ -14,6 +14,13 @@ Result<void> vk_check(VkResult result, const char* what)
     return {};
 }
 
+Result<uint32_t> memory_type(const VkPhysicalDeviceMemoryProperties& memory, uint32_t bits, VkMemoryPropertyFlags want)
+{
+    for (uint32_t i = 0; i < memory.memoryTypeCount; ++i)
+        if ((bits & (1u << i)) && (memory.memoryTypes[i].propertyFlags & want) == want) return i;
+    return fail("no suitable Vulkan memory type");
+}
+
 namespace {
 bool uses_stages(const VulkanFrame& f) { return f.sharpness != 0 || f.color_preserve != 0; }
 }  // namespace
@@ -46,11 +53,7 @@ Result<void> NetworkRecorder::image(Image& i, VkFormat format, unsigned w, unsig
     vkGetImageMemoryRequirements(host_.device, i.image, &req);
     VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     alloc.allocationSize = req.size;
-    alloc.memoryTypeIndex = memory_.memoryTypeCount;
-    for (uint32_t t = 0; t < memory_.memoryTypeCount && alloc.memoryTypeIndex == memory_.memoryTypeCount; ++t)
-        if ((req.memoryTypeBits & (1u << t)) && (memory_.memoryTypes[t].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT))
-            alloc.memoryTypeIndex = t;
-    if (alloc.memoryTypeIndex == memory_.memoryTypeCount) return fail("no suitable Vulkan memory type");
+    alloc.memoryTypeIndex = DLSSLOP_TRY(memory_type(memory_, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT));
     DLSSLOP_TRY(vk_check(vkAllocateMemory(host_.device, &alloc, nullptr, &i.memory), "allocate frame image"));
     return vk_check(vkBindImageMemory(host_.device, i.image, i.memory, 0), "bind frame image");
 }

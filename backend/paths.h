@@ -1,6 +1,8 @@
 // Where dlsslopd finds its model, modules, shaders and settings.
 // SPDX-License-Identifier: MIT
 #pragma once
+#include "result.h"
+
 #include <string>
 
 namespace dlsslop {
@@ -9,6 +11,8 @@ std::string home_directory();
 std::string xdg_path(const char* base, const char* fallback, const char* name);
 std::string default_assets();
 std::string default_vulkan_model();
+// The Vulkan network's model at MODEL, or how to get one.
+Result<void> require_vulkan_model(const std::string& model);
 std::string default_config();
 std::string executable_path();
 // The Vulkan network's SPIR-V for a binary installed under PREFIX, or a
