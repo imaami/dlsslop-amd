@@ -135,11 +135,11 @@ Result<bool> follow_tier(E& engine, const Options& o, Mapping& mapping, const st
 // One request as the channel states it, checked.
 struct Request {
     uint32_t number;
+    // The generations sampled before any setting, for a trace.
+    uint32_t control_sequence, tuning_sequence, held_input;
     unsigned width, height, passes;
     size_t bytes;
     ProcessingSettings settings;
-    // The generations sampled before any setting, for a trace.
-    uint32_t control_sequence, tuning_sequence, held_input;
 };
 
 // The request's settings, or its rejection. A pass count beyond what the engine
@@ -294,9 +294,9 @@ Result<void> serve(const Options& o, Mapping& mapping, const TransportListener& 
         // Writers store a setting before bumping controlSeq, so sample the
         // generations after this loop's own bump (the trace claim) and
         // before reading any setting, the dimensions or the input; sample
-        // again after inference.
-        Request request{number, h->width.load(), h->height.load(), 0, 0, {}, h->controlSeq.load(),
-                        h->tuningSeq.load(), pending_trace ? h->holdFrame.load() : 0};
+        // again after inference. The members are initialized in this order.
+        Request request{number, h->controlSeq.load(), h->tuningSeq.load(), pending_trace ? h->holdFrame.load() : 0,
+                        h->width.load(), h->height.load()};
         last = number;
         const auto answered = read_request(o, h, request, E::max_passes, previous_passes).and_then([&](const Request& r) {
             return process(r, engine, mapping, pending_trace.get());
