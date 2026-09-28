@@ -153,7 +153,7 @@ set_target_properties(dlsslop-hip-vendor PROPERTIES CXX_STANDARD 20 INTERPROCEDU
 # The vendored network's own warnings are not this project's to fix.
 target_compile_options(dlsslop-hip-vendor PRIVATE -fexceptions -frtti -Wno-deprecated-declarations
     -Wno-misleading-indentation)
-add_library(dlsslop-nr-vendor OBJECT backend/nr_vendor.cpp)
+add_library(dlsslop-nr-vendor OBJECT common/nr_vendor.cpp)
 set_target_properties(dlsslop-nr-vendor PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
 target_compile_options(dlsslop-nr-vendor PRIVATE -fexceptions -frtti)
 target_link_libraries(dlsslop-nr-vendor PUBLIC dlsslop-vknr)
@@ -163,7 +163,8 @@ add_executable(dlsslopd
     backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.cpp
     backend/open.cpp backend/hip_engine.cpp backend/native_kernels.cpp
     backend/self_test.cpp
-    backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp)
+    backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp
+    common/network_recorder.cpp)
 target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
 target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip-vendor dlsslop-nr-vendor Threads::Threads ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)
