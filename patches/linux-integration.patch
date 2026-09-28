@@ -1670,7 +1670,7 @@ index 0941c93..b544124 100644
      // present only because Vulkan will not accept an unwritten binding.
      VkImage _dummyImage = VK_NULL_HANDLE;
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..a036abb 100644
+index 4b37520..3a5051e 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -1890,7 +1890,7 @@ index 4b37520..a036abb 100644
      // Four rather than eight, and with a pause before the next attempt, so giving up costs a
      // fraction of a second and retrying costs that again only every few seconds.
      if (++s.timeouts >= 4) {
-@@ -429,6 +511,85 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -429,12 +511,93 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
      return false;
  }
  
@@ -1976,7 +1976,24 @@ index 4b37520..a036abb 100644
  // ---------------------------------------------------------------------------
  // Dispatch chains
  // ---------------------------------------------------------------------------
-@@ -477,13 +638,19 @@ struct SwapchainState {
+ struct InstanceChain {
+     PFN_vkGetInstanceProcAddr next_gipa = nullptr;
+     bool surfaceMaintenance1 = false;
++    // The game's own: device features beyond it need extensions of their own.
++    uint32_t apiVersion = VK_API_VERSION_1_0;
+ 
+     // The instance-level entry points the composition needs, resolved once. Kept here rather than on
+     // the device chain because this is where the VkInstance handle is in scope.
+@@ -445,6 +608,8 @@ struct InstanceChain {
+     PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties = nullptr;
+     PFN_vkEnumerateDeviceExtensionProperties vkEnumerateDeviceExtensionProperties = nullptr;
+     PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties = nullptr;
++    PFN_vkGetPhysicalDeviceProperties2 vkGetPhysicalDeviceProperties2 = nullptr;
++    PFN_vkGetPhysicalDeviceFeatures2 vkGetPhysicalDeviceFeatures2 = nullptr;
+ };
+ 
+ #define DEVICE_FN_LIST(X) \
+@@ -477,13 +642,19 @@ struct SwapchainState {
      uint32_t width = 0, height = 0;
      // Two fences, not one. Leg 1's must be waited on before the proxy is handed to the helper --
      // the sequence number is the helper's only ordering signal, and it may not be bumped ahead of
@@ -2000,15 +2017,30 @@ index 4b37520..a036abb 100644
      VkCommandPool pool = VK_NULL_HANDLE;
      VkCommandBuffer cb = VK_NULL_HANDLE;
      // Reused by the present path; resizing only occurs when an unusual caller supplies more waits.
-@@ -542,6 +709,7 @@ struct DeviceChain {
+@@ -542,6 +713,11 @@ struct DeviceChain {
      double repaintNextMs = 0.0;
      bool repaintWasEnabled = true;   // so switching the effect off is itself a change to answer
      bool releaseImages = false;      // VK_EXT_swapchain_maintenance1 was enabled
 +    bool exportMemory = false;       // VK_KHR_external_memory_fd was enabled
++    // The ledger: the in-layer network's features and extensions were enabled,
++    // and its optional layout features too.
++    bool network = false;
++    bool networkLayout = false;
      std::unordered_map<VkSwapchainKHR, SwapchainState> swapchains;
      std::unordered_map<VkQueue, uint32_t> queueFamilies;
      ShmMap shm;
-@@ -751,7 +919,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_EnumeratePhysicalDevices(
+@@ -706,6 +882,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateInstance(
+     chain.vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)next_gipa(*pInstance, "vkGetPhysicalDeviceProperties");
+     chain.vkEnumerateDeviceExtensionProperties = (PFN_vkEnumerateDeviceExtensionProperties)next_gipa(*pInstance, "vkEnumerateDeviceExtensionProperties");
+     chain.vkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)next_gipa(*pInstance, "vkGetPhysicalDeviceMemoryProperties");
++    chain.vkGetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2)next_gipa(*pInstance, "vkGetPhysicalDeviceProperties2");
++    chain.vkGetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2)next_gipa(*pInstance, "vkGetPhysicalDeviceFeatures2");
++    if (pCreateInfo->pApplicationInfo && pCreateInfo->pApplicationInfo->apiVersion)
++        chain.apiVersion = pCreateInfo->pApplicationInfo->apiVersion;
+ 
+     chain.table.next_gipa = next_gipa;
+     chain.table.Load(*pInstance);
+@@ -751,7 +931,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_EnumeratePhysicalDevices(
  // ---------------------------------------------------------------------------
  // Both declared here for the idle repaint, which draws a frame the application did not ask for.
  static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
@@ -2017,7 +2049,7 @@ index 4b37520..a036abb 100644
                             bool repaint, bool* waitsConsumed);
  
  // Put the captured frame back, for when the effect is switched off while the picture is still.
-@@ -759,12 +927,19 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -759,12 +939,19 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
  // No model and no round trip: the composed result is replaced by the frame it was made from, which
  // is what the application drew and what it would draw again if it were running. Without this,
  // switching the effect off while paused leaves the edit on screen until something else redraws.
@@ -2039,7 +2071,7 @@ index 4b37520..a036abb 100644
          dc->vkEndCommandBuffer(sc.cb);
          return false;
      }
-@@ -772,12 +947,12 @@ static bool RestorePresent(DeviceChain* dc, SwapchainState& sc, VkImage swapchai
+@@ -772,12 +959,12 @@ static bool RestorePresent(DeviceChain* dc, SwapchainState& sc, VkImage swapchai
      VkSubmitInfo si{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
      si.commandBufferCount = 1;
      si.pCommandBuffers = &sc.cb;
@@ -2057,7 +2089,7 @@ index 4b37520..a036abb 100644
      {
          static std::once_flag said;
          std::call_once(said, [] { Log("[layer] idle repaint: put the captured frame back"); });
-@@ -851,6 +1026,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -851,6 +1038,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              for (size_t k = 0; k < kWantCount; ++k)
                      if (!std::strcmp(pCreateInfo->ppEnabledExtensionNames[i], kWantExts[k])) enabled[k] = true;
          for (size_t k = 0; k < kWantCount; ++k) {
@@ -2068,7 +2100,23 @@ index 4b37520..a036abb 100644
              if (!ic->surfaceMaintenance1 &&
                  !std::strcmp(kWantExts[k], VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME))
                  continue;
-@@ -886,6 +1065,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -874,6 +1065,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+             effective = &modified;
+         }
+     }
++    // The in-layer network, on request, where the game's instance and device allow it.
++    bool networkLayout = false;
++    const char* networkOff = nullptr;
++    const bool network = LayerEnabled() && ic && dlssnr::NetworkRequested() &&
++                         !(networkOff = dlssnr::NetworkUnavailable(
++                               physicalDevice, ic->apiVersion, ic->vkGetPhysicalDeviceProperties2,
++                               ic->vkGetPhysicalDeviceFeatures2, ic->vkEnumerateDeviceExtensionProperties, networkLayout));
++    if (networkOff) Log("[layer] in-layer network unavailable: needs %s", networkOff);
++    if (network && dlssnr::AddNetworkExtensions(modified, enabledExts, networkLayout)) effective = &modified;
+     // The extension does nothing unless its feature is asked for.
+     VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT swapMaint{};
+     if (addedSwapMaint) {
+@@ -886,6 +1086,28 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
  
      link->u.pLayerInfo = link->u.pLayerInfo->pNext;
      auto* const nextLayerInfo = link->u.pLayerInfo;
@@ -2082,8 +2130,14 @@ index 4b37520..a036abb 100644
 +        auto query = ic ? ic->table.vkGetPhysicalDeviceFeatures : nullptr;
 +        if (query) query(physicalDevice, &supported);
 +        if (supported.shaderStorageImageWriteWithoutFormat) {
-+            if (storageFeatures.Enable(modified, false, false)) effective = &modified;
-+            else Log("[layer] cannot safely clone the Features2 prefix; compositor disabled");
++            if (storageFeatures.Enable(modified, network, networkLayout)) {
++                effective = &modified;
++            } else if (network && storageFeatures.Enable(modified, false, false)) {
++                effective = &modified;
++                Log("[layer] in-layer network unavailable: cannot safely copy the game's feature chain");
++            } else {
++                Log("[layer] cannot safely clone the Features2 prefix; compositor disabled");
++            }
 +        } else {
 +            Log("[layer] formatless storage writes unsupported; compositor disabled");
 +        }
@@ -2091,7 +2145,7 @@ index 4b37520..a036abb 100644
      VkResult res = create(physicalDevice, effective, pAllocator, pDevice);
      if (res != VK_SUCCESS && effective != pCreateInfo) {
          // Nothing added here is worth failing a device creation over.
-@@ -893,6 +1088,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -893,6 +1115,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              (int) res);
          link->u.pLayerInfo = nextLayerInfo;
          addedSwapMaint = false;
@@ -2099,13 +2153,17 @@ index 4b37520..a036abb 100644
          res = create(physicalDevice, pCreateInfo, pAllocator, pDevice);
      }
      if (res != VK_SUCCESS) return res;
-@@ -909,10 +1105,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -909,10 +1132,21 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
      dc->table.next_dpa = next_dpa;
      dc->table.Load(*pDevice);
      dc->releaseImages = addedSwapMaint && dc->vkReleaseSwapchainImagesEXT != nullptr;
 +    for (uint32_t i = 0; i < effective->enabledExtensionCount; ++i)
 +        if (!std::strcmp(effective->ppEnabledExtensionNames[i], VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME))
 +            dc->exportMemory = dc->table.vkGetMemoryFdKHR != nullptr;
++    dc->network = dlssnr::NetworkEnabled(*effective, dc->networkLayout);
++    if (network)
++        Log("[layer] in-layer network features %s%s", dc->network ? "enabled" : "not enabled",
++            dc->network && !dc->networkLayout ? " (without explicit workgroup layout)" : "");
      if (!dc->vkQueuePresentKHR || !dc->vkCreateSwapchainKHR || !ic) dc->inert = true;
 +    if (LayerEnabled() && !dlssnr::HasFormatlessStorageWrites(*effective)) {
 +        dc->inert = true;
@@ -2119,7 +2177,7 @@ index 4b37520..a036abb 100644
      // Hybrid machines are the case that matters: an implicit layer is loaded for every device the
      // loader builds, including the integrated one a game may well be running on.
      char deviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE] = "?";
-@@ -920,9 +1123,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -920,9 +1154,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
          VkPhysicalDeviceProperties props{};
          ic->vkGetPhysicalDeviceProperties(physicalDevice, &props);
          std::snprintf(deviceName, sizeof(deviceName), "%s", props.deviceName);
@@ -2137,7 +2195,7 @@ index 4b37520..a036abb 100644
          }
      }
  
-@@ -950,11 +1159,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -950,11 +1190,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
      // was enabled and no helper was running.
      //
      // DLSSNR_IDLE_REPAINT=0 turns it off.
@@ -2150,7 +2208,7 @@ index 4b37520..a036abb 100644
          dc->repaintThread = std::thread([dc] {
              while (dc->repaintRun.load(std::memory_order_relaxed)) {
                  std::this_thread::sleep_for(std::chrono::milliseconds(60));
-@@ -1089,11 +1294,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -1089,11 +1325,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
                  }
  
                  const bool drew =
@@ -2166,7 +2224,7 @@ index 4b37520..a036abb 100644
                      pi.swapchainCount = 1;
                      pi.pSwapchains = &swapchain;
                      pi.pImageIndices = &index;
-@@ -1159,6 +1365,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
+@@ -1159,6 +1396,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
              sc.comp.reset();
              if (sc.fenceLeg1) dc->vkDestroyFence(device, sc.fenceLeg1, nullptr);
              if (sc.fenceLeg2) dc->vkDestroyFence(device, sc.fenceLeg2, nullptr);
@@ -2174,7 +2232,7 @@ index 4b37520..a036abb 100644
              if (sc.repaintFence) dc->vkDestroyFence(device, sc.repaintFence, nullptr);
              if (sc.pool) dc->vkDestroyCommandPool(device, sc.pool, nullptr);
          }
-@@ -1250,8 +1457,26 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
+@@ -1250,8 +1488,26 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
      }
      if (!dc || !dc->vkCreateSwapchainKHR) return VK_ERROR_INITIALIZATION_FAILED;
  
@@ -2202,7 +2260,7 @@ index 4b37520..a036abb 100644
          m.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
  
      VkResult res = dc->vkCreateSwapchainKHR(device, &m, pAllocator, pSwapchain);
-@@ -1269,14 +1494,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
+@@ -1269,14 +1525,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
      sc.width = pCreateInfo->imageExtent.width;
      sc.height = pCreateInfo->imageExtent.height;
      const bool tooSmall = sc.width < kMinW || sc.height < kMinH;
@@ -2222,7 +2280,7 @@ index 4b37520..a036abb 100644
                            : tooSmall ? " (too small)" : " (too large)") : "");
      dc->swapchains[*pSwapchain] = std::move(sc);
      return VK_SUCCESS;
-@@ -1303,6 +1531,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
+@@ -1303,6 +1562,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
          sc.comp.reset();
          if (sc.fenceLeg1) dc->vkDestroyFence(device, sc.fenceLeg1, nullptr);
          if (sc.fenceLeg2) dc->vkDestroyFence(device, sc.fenceLeg2, nullptr);
@@ -2230,7 +2288,7 @@ index 4b37520..a036abb 100644
          if (sc.repaintFence) dc->vkDestroyFence(device, sc.repaintFence, nullptr);
          if (sc.pool) dc->vkDestroyCommandPool(device, sc.pool, nullptr);
          dc->swapchains.erase(it);
-@@ -1335,6 +1564,17 @@ static bool SetLoaderData(DeviceChain* dc, void* object) {
+@@ -1335,6 +1595,17 @@ static bool SetLoaderData(DeviceChain* dc, void* object) {
  static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family) {
      VkDevice d = dc->self;
  
@@ -2248,7 +2306,7 @@ index 4b37520..a036abb 100644
      VkCommandPoolCreateInfo cpci{};
      cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
      cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-@@ -1352,6 +1592,11 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
+@@ -1352,6 +1623,11 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
      fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
      if (dc->vkCreateFence(d, &fci, nullptr, &sc.fenceLeg1) != VK_SUCCESS) return false;
      if (dc->vkCreateFence(d, &fci, nullptr, &sc.fenceLeg2) != VK_SUCCESS) return false;
@@ -2260,7 +2318,7 @@ index 4b37520..a036abb 100644
  
      if (!dc->instance) return false;
      sc.comp = std::make_unique<dlssnr::Composition>(&dc->table, &dc->instance->table, d, dc->physical);
-@@ -1360,6 +1605,7 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
+@@ -1360,6 +1636,7 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
          sc.comp.reset();
          return false;
      }
@@ -2268,7 +2326,7 @@ index 4b37520..a036abb 100644
      return true;
  }
  
-@@ -1383,30 +1629,48 @@ static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
+@@ -1383,30 +1660,48 @@ static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
      return false;
  }
  
@@ -2324,7 +2382,7 @@ index 4b37520..a036abb 100644
  
      // The previous frame's compose, if it is still running, must finish before anything here
      // touches the surfaces it reads or the command buffer it was recorded into. Waiting here rather
-@@ -1437,19 +1701,21 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1437,19 +1732,21 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // frame on the 8-bit path it has always used. hdrActive doubles as the echo the helper reads, so
      // it builds the float images only for a layer that has said it will feed them.
      const uint32_t hdrMode = dc->shm.hdr ? dc->shm.hdr->hdrMode.load() : kHdrAuto;
@@ -2353,7 +2411,7 @@ index 4b37520..a036abb 100644
          uint32_t mw = 0, mh = 0;
          dlssnr::Composition::ModelExtent(sc.width, sc.height, fs, mw, mh);
          if (ShmMapFrames(dc->shm, size_t(mw) * mh * (hdrProxy ? 8 : 4)))
-@@ -1533,9 +1799,10 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1533,9 +1830,10 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
  
      // A capture is asked for by writing a frame count into the header; taking it clears the request,
      // so one press produces one run rather than one per frame for as long as nobody clears it.
@@ -2366,7 +2424,7 @@ index 4b37520..a036abb 100644
      }
  
      VkCommandBufferBeginInfo bi{};
-@@ -1559,7 +1826,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1559,7 +1857,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          si.pWaitDstStageMask = nullptr;
      };
  
@@ -2380,7 +2438,7 @@ index 4b37520..a036abb 100644
          if (!NoteVk(dc, dc->vkEndCommandBuffer(cb), "vkEndCommandBuffer")) return false;
          if (!NoteVk(dc, dc->vkQueueSubmit(queue, 1, &si, fence), "vkQueueSubmit")) return false;
          if (waitsConsumed && si.waitSemaphoreCount != 0) *waitsConsumed = true;
-@@ -1572,9 +1845,33 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1572,9 +1876,33 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          return true;
      };
  
@@ -2415,7 +2473,7 @@ index 4b37520..a036abb 100644
          dc->vkEndCommandBuffer(cb);
          return false;
      }
-@@ -1588,27 +1885,40 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1588,27 +1916,40 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
  
      // ---- the round trip ----
      if (!ShmProcessFrame(dc->shm, sc.comp->ModelWidth(), sc.comp->ModelHeight(), sc.comp->ModelBytes(),
@@ -2463,7 +2521,7 @@ index 4b37520..a036abb 100644
  
      if (dc->shm.hdr) {
          ShmStore64(dc->shm.hdr->layerFramesLo, dc->shm.hdr->layerFramesHi, ++dc->framesComposed);
-@@ -1650,11 +1960,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1650,11 +1991,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
      dc->lastPresentMs.store(NowMs(), std::memory_order_relaxed);
  
      // Whether this call's wait semaphores have already been consumed by a submit of ours. They are
@@ -2478,7 +2536,7 @@ index 4b37520..a036abb 100644
  
      // Held from here to the present at the end, alongside Hook_QueueSubmit{,2}. Vulkan requires
      // external synchronization for every operation on a queue; the repaint uses the application's
-@@ -1679,6 +1991,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1679,6 +2022,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
                  if (k < 3) Log("[layer] present: swapchain %p is not primary", (void*)pPresentInfo->pSwapchains[i]);
                  continue;
              }
@@ -2488,7 +2546,7 @@ index 4b37520..a036abb 100644
              sc.queue = queue;
              if (!sc.ready && !dc->shm.dead) {
                  if (!CreateResources(dc, sc, family)) {
-@@ -1700,11 +2015,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1700,11 +2046,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
              }
              const uint32_t waitCount = waitsConsumed ? 0u : pPresentInfo->waitSemaphoreCount;
              bool submittedWaits = false;
@@ -2503,7 +2561,7 @@ index 4b37520..a036abb 100644
              if (VerboseEnabled()) {
                  Log("[present] swapchain=%p image=%u seq=%u composed=%d",
                      (void*)pPresentInfo->pSwapchains[i], pPresentInfo->pImageIndices[i],
-@@ -1723,13 +2039,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1723,13 +2070,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
          }
      }
  
@@ -2520,7 +2578,7 @@ index 4b37520..a036abb 100644
      return dc->vkQueuePresentKHR(queue, &pi);
  }
  
-@@ -1793,11 +2109,12 @@ static PFN_vkVoidFunction LookupHook(const char* n) {
+@@ -1793,11 +2140,12 @@ static PFN_vkVoidFunction LookupHook(const char* n) {
      if (!std::strcmp(n, "vkGetDeviceQueue2")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue2;
      if (!std::strcmp(n, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)Hook_CreateSwapchainKHR;
      if (!std::strcmp(n, "vkDestroySwapchainKHR")) return (PFN_vkVoidFunction)Hook_DestroySwapchainKHR;
@@ -2534,7 +2592,7 @@ index 4b37520..a036abb 100644
      return nullptr;
  }
  
-@@ -1807,11 +2124,12 @@ static PFN_vkVoidFunction LookupDeviceHook(const char* n) {
+@@ -1807,11 +2155,12 @@ static PFN_vkVoidFunction LookupDeviceHook(const char* n) {
      if (!std::strcmp(n, "vkGetDeviceQueue2")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue2;
      if (!std::strcmp(n, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)Hook_CreateSwapchainKHR;
      if (!std::strcmp(n, "vkDestroySwapchainKHR")) return (PFN_vkVoidFunction)Hook_DestroySwapchainKHR;
@@ -2548,7 +2606,7 @@ index 4b37520..a036abb 100644
      return nullptr;
  }
  
-@@ -1851,7 +2169,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
+@@ -1851,7 +2200,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
      if (*pCount < 1) { *pCount = 1; return VK_INCOMPLETE; }
      std::memset(pProperties, 0, sizeof(*pProperties));
      std::strncpy(pProperties->layerName, VK_LAYER_NAME, VK_MAX_EXTENSION_NAME_SIZE - 1);

@@ -6,6 +6,7 @@
 #include <vulkan/vk_layer.h>
 #include <algorithm>
 #include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <utility>
@@ -60,6 +61,42 @@ inline bool NetworkEnabled(const VkDeviceCreateInfo& info, bool& layout) {
         if (!f.optional) return false;
         layout = false;
     }
+    return true;
+}
+
+// Whether the in-layer network is asked for: DLSSLOP_LAYER_NETWORK=1, while it
+// is being developed.
+inline bool NetworkRequested() {
+    const char* value = std::getenv("DLSSLOP_LAYER_NETWORK");
+    return value && !std::strcmp(value, "1");
+}
+
+// What keeps the in-layer network off a game's device, or null: a Vulkan 1.3
+// instance, or what the device lacks (common/network_requirements.h). The
+// functions are the next layer's. LAYOUT reports the optional features.
+inline const char* NetworkUnavailable(VkPhysicalDevice physical, uint32_t instanceVersion,
+                                      PFN_vkGetPhysicalDeviceProperties2 properties2,
+                                      PFN_vkGetPhysicalDeviceFeatures2 features2,
+                                      PFN_vkEnumerateDeviceExtensionProperties extensions, bool& layout) {
+    if (instanceVersion < VK_API_VERSION_1_3 || !properties2 || !features2) return "a Vulkan 1.3 instance";
+    return dlsslop::NetworkUnsupported(physical, properties2, features2, extensions, layout);
+}
+
+// Adds the network's extensions the request lacks: EXTENSIONS holds the
+// request's list, as the layer extends it, and replaces it. True if any was added.
+inline bool AddNetworkExtensions(VkDeviceCreateInfo& info, std::vector<const char*>& extensions, bool layout) {
+    if (extensions.empty())
+        extensions.assign(info.ppEnabledExtensionNames, info.ppEnabledExtensionNames + info.enabledExtensionCount);
+    const size_t before = extensions.size();
+    for (const auto& f : dlsslop::kNetworkFeatures) {
+        if (!f.extension || (f.optional && !layout)) continue;
+        if (std::none_of(extensions.begin(), extensions.end(),
+                         [&f](const char* name) { return !std::strcmp(name, f.extension); }))
+            extensions.push_back(f.extension);
+    }
+    if (extensions.size() == before) return false;
+    info.enabledExtensionCount = uint32_t(extensions.size());
+    info.ppEnabledExtensionNames = extensions.data();
     return true;
 }
 
