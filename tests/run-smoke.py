@@ -56,6 +56,7 @@ def main():
                    DLSSNR_LOG=str(logs / "layer.log"), VK_KHRONOS_VALIDATION_VALIDATE_SYNC="true")
         env.pop("DLSSNR_DISABLE", None)
         env.pop("VKLayer_DLSS5", None)
+        env.pop("DLSSLOP_LAYER_NETWORK", None)
         layer = root / "share/vulkan/implicit_layer.d/test.json"
         layer.parent.mkdir(parents=True)
         layer.write_text(json.dumps({"file_format_version": "1.2.0", "layer": {
@@ -79,7 +80,7 @@ def main():
                     wait_for(socket.exists, xvfb, "Xvfb")
                 layer_log = logs / "layer.log"
                 for mode in ("native", "reduced", "reduced-bgra", "native-fp16", "reduced-fp16", "native-linear",
-                             "stopped-worker", "killed-worker"):
+                             "native-network", "stopped-worker", "killed-worker"):
                     # A stopped worker gets no requests. A killed one still reads as
                     # running; its silent heartbeat ends the one wait within a second.
                     if mode == "stopped-worker":
@@ -110,7 +111,10 @@ def main():
                         command.append("--proxy16")
                     if mode.endswith("linear"):
                         command.append("--linear-hdr")
-                    result = subprocess.run(command, env=env, text=True,
+                    # Asked for the in-layer network, a Vulkan 1.1 client is refused it and
+                    # composes through dlsslopd, while the layer hooks its queue operations.
+                    run_env = dict(env, DLSSLOP_LAYER_NETWORK="1") if mode == "native-network" else env
+                    result = subprocess.run(command, env=run_env, text=True,
                                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
                     (logs / f"smoke-{mode}.log").write_text(result.stdout)
                     print(result.stdout, end="")
@@ -127,6 +131,9 @@ def main():
                         layer_output = log.read()
                     if "cannot run here" in layer_output:
                         raise RuntimeError(f"{mode} composition could not be prepared; inspect {logs}")
+                    if mode == "native-network" and \
+                            "in-layer network unavailable: needs a Vulkan 1.3 instance" not in layer_output:
+                        raise RuntimeError(f"the layer did not refuse a Vulkan 1.1 client the network; inspect {logs}")
                     if mode.endswith("worker"):
                         if mode == "killed-worker" and "worker did not answer frame" not in layer_output:
                             raise RuntimeError(f"layer did not log giving up on the killed worker; inspect {logs}")
