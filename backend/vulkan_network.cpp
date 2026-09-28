@@ -26,17 +26,12 @@ void log_line(const char* line) { std::fprintf(stderr, "%s\n", line); }
 // What stops the network running on a device, or empty.
 std::string unsuitable(VkPhysicalDevice physical, uint32_t& family)
 {
+    // External memory: the layer's device-local frames are imported.
     if (const char* missing = NetworkUnsupported(physical, vkGetPhysicalDeviceProperties2, vkGetPhysicalDeviceFeatures2,
-                                                 vkEnumerateDeviceExtensionProperties))
+                                                 vkEnumerateDeviceExtensionProperties,
+                                                 VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME))
         return std::string(missing) + " unavailable";
     uint32_t count = 0;
-    vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr);
-    std::vector<VkExtensionProperties> extensions(count);
-    vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, extensions.data());
-    if (!std::any_of(extensions.begin(), extensions.end(), [](const VkExtensionProperties& e) {
-            return !std::strcmp(e.extensionName, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
-        }))
-        return VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME " unavailable";
     // Graphics too: the runtime converts colour formats with blits.
     vkGetPhysicalDeviceQueueFamilyProperties(physical, &count, nullptr);
     std::vector<VkQueueFamilyProperties> queues(count);

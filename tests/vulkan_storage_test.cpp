@@ -293,6 +293,10 @@ static void NetworkAvailability() {
         Check(Same(stub::Unavailable(VK_API_VERSION_1_3), all[i]), "a missing extension was not named");
     }
     stub::extensions.assign(all.begin(), all.end());
+    Check(Same(dlsslop::NetworkUnsupported(VK_NULL_HANDLE, stub::Properties2, stub::Features2, stub::Extensions,
+                                           VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME),
+               VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME),
+          "the extension dlsslopd needs besides was not named");
     stub::minimumSubgroup = 64;
     Check(Same(stub::Unavailable(VK_API_VERSION_1_3), "32-lane compute subgroups"),
           "a device without 32-lane subgroups was given the network");

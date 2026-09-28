@@ -143,11 +143,12 @@ public:
 };
 
 // What stops the network running on PHYSICAL, or null: a feature's or an
-// extension's name, "Vulkan 1.3" or "32-lane compute subgroups". The functions
-// are the caller's route to the device: the loader's, or the next layer's.
+// extension's name, "Vulkan 1.3" or "32-lane compute subgroups". ALSO names an
+// extension the caller needs besides, or is null. The functions are the
+// caller's route to the device: the loader's, or the next layer's.
 inline const char* NetworkUnsupported(VkPhysicalDevice physical, PFN_vkGetPhysicalDeviceProperties2 properties2,
                                       PFN_vkGetPhysicalDeviceFeatures2 features2,
-                                      PFN_vkEnumerateDeviceExtensionProperties extensions)
+                                      PFN_vkEnumerateDeviceExtensionProperties extensions, const char* also)
 {
     VkPhysicalDeviceSubgroupSizeControlProperties subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES};
     VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &subgroup};
@@ -162,6 +163,7 @@ inline const char* NetworkUnsupported(VkPhysicalDevice physical, PFN_vkGetPhysic
             if (!std::strcmp(e.extensionName, name)) return true;
         return false;
     };
+    if (also && !has(also)) return also;
     for (const auto& f : kNetworkFeatures)
         if (f.extension && !has(f.extension)) return f.extension;
     NetworkFeatureChain supported;
