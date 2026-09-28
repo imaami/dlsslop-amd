@@ -50,6 +50,12 @@ Result<std::unique_ptr<HipEngine>> HipEngine::open(Options& o, unsigned tier)
 {
     const auto api = DLSSLOP_TRY(hip::load());
     o.device = DLSSLOP_TRY(select_device(api, o.device));
+    // Wait for the device asleep, not spinning a core per waiting thread
+    // (hipDeviceScheduleBlockingSync), before the device's context exists.
+    if (api.hipSetDeviceFlags) {
+        DLSSLOP_TRY(api.check(api.hipSetDevice(o.device), "select the HIP device"));
+        DLSSLOP_TRY(api.check(api.hipSetDeviceFlags(4), "wait for the device without spinning"));
+    }
     return std::make_unique<HipEngine>(o, tier, api);
 }
 

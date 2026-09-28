@@ -45,6 +45,8 @@ struct Entries {
     int (*hipRuntimeGetVersion)(int*);
     int (*hipGetDeviceCount)(int*);
     int (*hipSetDevice)(int);
+    // Null when the runtime lacks it: waits for the device then spin.
+    int (*hipSetDeviceFlags)(unsigned);
     int (*hipMalloc)(void**, size_t);
     int (*hipFree)(void*);
     int (*hipHostMalloc)(void**, size_t, unsigned);

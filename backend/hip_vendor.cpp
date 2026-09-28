@@ -70,6 +70,7 @@ std::string load(Entries& api)
         api.hipGetErrorName = vendor.hipGetErrorName;
         // Resolved here so the vendored loader stays as upstream adapted it.
         api.hipHostFree = reinterpret_cast<decltype(api.hipHostFree)>(dlsym(vendor.dll, "hipHostFree"));
+        api.hipSetDeviceFlags = reinterpret_cast<decltype(api.hipSetDeviceFlags)>(dlsym(vendor.dll, "hipSetDeviceFlags"));
         api.hipHostRegister = reinterpret_cast<decltype(api.hipHostRegister)>(dlsym(vendor.dll, "hipHostRegister"));
         api.hipHostUnregister = reinterpret_cast<decltype(api.hipHostUnregister)>(dlsym(vendor.dll, "hipHostUnregister"));
     });
