@@ -161,7 +161,7 @@ target_link_libraries(dlsslop-nr-vendor PUBLIC dlsslop-vknr)
 # (layer/network_module.h): vulkan-nr and the libstdc++ it needs stay out of
 # the layer, which every game loads. It exports its C functions only.
 add_library(dlsslop-network MODULE layer/network_module.cpp common/network_recorder.cpp backend/processing.cpp
-    backend/paths.cpp backend/files.cpp)
+    backend/options.cpp backend/paths.cpp backend/files.cpp)
 target_include_directories(dlsslop-network PRIVATE backend ${LAYER_ROOT}/common)
 target_link_libraries(dlsslop-network PRIVATE dlsslop-nr-vendor ${CMAKE_DL_LIBS})
 target_link_options(dlsslop-network PRIVATE -static-libstdc++ -static-libgcc -Wl,-Bsymbolic

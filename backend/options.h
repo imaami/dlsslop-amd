@@ -26,6 +26,9 @@ struct Options {
 // for it and the Vulkan backend refuses it.
 const char* hip_only(const Options& o);
 Options default_options();
+// The Vulkan model dlsslopd loads without options: vulkan-model from its
+// default config file, else the default path.
+Result<std::string> configured_vulkan_model();
 void usage(FILE* out);
 Result<Options> parse(int argc, char** argv);
 } // namespace dlsslop

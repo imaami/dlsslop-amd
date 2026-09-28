@@ -307,6 +307,13 @@ Result<void> read_config(Options& o, const std::string& path, bool given)
 }
 } // namespace
 
+Result<std::string> configured_vulkan_model()
+{
+    Options o = default_options();
+    DLSSLOP_TRY(read_config(o, default_config(), false));
+    return o.vulkan_model;
+}
+
 Result<Options> parse(int argc, char** argv)
 {
     std::string letters;

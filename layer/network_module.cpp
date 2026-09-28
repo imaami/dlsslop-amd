@@ -4,6 +4,7 @@
 #include "files.h"
 #include "network_recorder.h"
 #include "nr_log.hpp"
+#include "options.h"
 #include "paths.h"
 #include "processing.h"
 
@@ -18,14 +19,14 @@
 namespace {
 using dlsslop::NetworkRecorder;
 
-// Where the module finds the network: its shaders beside the module, installed
-// or in a source build, and the user's model and pipeline cache.
-dlsslop::VulkanPaths module_paths()
+// Where the module finds the network: MODEL, its shaders beside the module,
+// installed or in a source build, and the user's pipeline cache.
+dlsslop::VulkanPaths module_paths(const std::string& model)
 {
     Dl_info self{};
     dladdr(reinterpret_cast<void*>(&dlsslop_network_open), &self);
     const std::string directory = self.dli_fname ? dlsslop::parent_path(dlsslop::absolute(self.dli_fname)) : std::string();
-    return {dlsslop::default_vulkan_model(), dlsslop::vulkan_shaders(dlsslop::parent_path(dlsslop::parent_path(directory)), directory),
+    return {model, dlsslop::vulkan_shaders(dlsslop::parent_path(dlsslop::parent_path(directory)), directory),
             dlsslop::vulkan_cache()};
 }
 
@@ -45,6 +46,9 @@ nr::HostDevice host_device(const DlsslopNetworkDevice& d)
 }  // namespace
 
 struct DlsslopNetwork {
+    // The model dlsslopd loads, as its config file names it; or why that is unknown, which fails
+    // the network.
+    dlsslop::Result<std::string> model;
     NetworkRecorder recorder;
     dlsslop::VulkanFrame prepared;
     // A build in the background: its frame, and whether it still runs. The
@@ -56,7 +60,12 @@ struct DlsslopNetwork {
     bool failed = false;
     std::string error;
 
-    DlsslopNetwork(const DlsslopNetworkDevice& d) : recorder(host_device(d), d.memory, module_paths()) {}
+    DlsslopNetwork(const DlsslopNetworkDevice& d)
+        : model(dlsslop::configured_vulkan_model()),
+          recorder(host_device(d), d.memory, module_paths(model.value_or(std::string())))
+    {
+        if (!model) fail(model.error().what);
+    }
 
     // The network cannot run: WHAT says why.
     int fail(std::string what)
@@ -103,8 +112,7 @@ int dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader* channel, uint32_
         n->prepared = frame;
         return kDlsslopNetworkReady;
     }
-    if (auto model = dlsslop::require_vulkan_model(dlsslop::default_vulkan_model()); !model)
-        return n->fail(std::move(model).error().what);
+    if (auto model = dlsslop::require_vulkan_model(*n->model); !model) return n->fail(std::move(model).error().what);
     n->target = frame;
     n->building.store(true, std::memory_order_relaxed);
     if (const int error = pthread_create(&n->builder, nullptr, DlsslopNetwork::build, n)) {
