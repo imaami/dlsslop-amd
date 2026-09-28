@@ -27,8 +27,8 @@
 #include <QVBoxLayout>
 #include <array>
 #include <cstdio>
-#include <functional>
 #include <getopt.h>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -77,21 +77,39 @@ class Window final : public QWidget {
         state_->setText("Disconnected — " + error + ". Start the worker, then Connect / refresh.");
     }
 
-    // Writes the pending edits, then the operation, through one mapping.
-    bool send(const std::function<void(Channel&)>& operation)
+    // The channel the controls edit, with the pending edits written to it.
+    dlsslop::Result<Channel> channelWithEdits()
     {
-        try {
-            Channel channel(activePath_, true);
-            if (!sameChannel(channel)) throw std::runtime_error("Channel replaced; refresh before editing");
-            channel.write(pending_);
-            pending_.clear();
-            operation(channel);
-            state_->setText("Settings sent • Closing this window leaves the worker running");
-            return true;
-        } catch (const std::exception& error) {
-            failed(QString::fromUtf8(error.what()));
+        auto channel = DLSSLOP_TRY(Channel::open(activePath_, true));
+        if (!sameChannel(channel)) return dlsslop::fail("Channel replaced; refresh before editing");
+        DLSSLOP_TRY(channel.write(pending_));
+        pending_.clear();
+        return channel;
+    }
+
+    // Whether an edit or action was sent; a failure disconnects the controls.
+    bool sent(const dlsslop::Result<void>& result)
+    {
+        if (!result) {
+            failed(QString::fromStdString(result.error().what));
             return false;
         }
+        state_->setText("Settings sent • Closing this window leaves the worker running");
+        return true;
+    }
+
+    // Writes the pending edits, then the operation, through one mapping.
+    template <class Operation>
+    bool send(Operation operation)
+    {
+        return sent(channelWithEdits().and_then([&](Channel&& channel) -> dlsslop::Result<void> {
+            if constexpr (std::is_void_v<std::invoke_result_t<Operation, Channel&>>) {
+                operation(channel);
+                return {};
+            } else {
+                return operation(channel);
+            }
+        }));
     }
 
     bool flush()
@@ -141,44 +159,43 @@ class Window final : public QWidget {
     void refresh()
     {
         if (!flush()) return;
-        try {
-            const auto path = path_->text().toLocal8Bit();
-            Channel channel(path.constData(), false);
-            auto* h = channel.header();
-            ShmHeader defaults{};
-            ShmInitNativeDefaults(&defaults, dlsslop_control::workerBypass(h));
-            // Reject invalid live values rather than displaying a silently clamped setting.
-            std::array<double, std::size(kSettings)> values;
-            for (std::size_t i = 0; i < values.size(); ++i) {
-                const auto& s = kSettings[i];
-                values[i] = dlsslop_control::value(s, (h->*s.field).load());
-                if (!dlsslop_control::inRange(s, values[i]))
-                    throw std::runtime_error(std::string("Invalid live setting: ") + s.name);
-            }
-            for (std::size_t i = 0; i < editors_.size(); ++i) {
-                auto& e = editors_[i];
-                e.defaultValue = dlsslop_control::value(kSettings[i], (defaults.*kSettings[i].field).load());
-                e.reset->setToolTip(QString("Reset to %1").arg(e.defaultValue, 0, 'g', 9));
-                display(i, values[i]);
-            }
-            device_ = channel.device();
-            inode_ = channel.inode();
-            activePath_ = path.constData();
-            controls_->setEnabled(true);
-            const auto reason = ShmLoadString(h->helperReasonSeq, h->helperReason, kReasonBytes);
-            status_->setPlainText(QString("Snapshot on refresh\n\nProtocol: %1\nWorker state: %2\nModel up: %3\nStop requested: %4\n"
-                "Request / response: %5 / %6\nProxy: %7 × %8\nNeural raster limit: %9 × %10\n"
-                "Network: %11 ms\nUpload: %12 ms\nReadback: %13 ms\nReason: %14")
-                .arg(h->version.load()).arg(h->helperState.load()).arg(h->modelUp.load()).arg(h->quit.load())
-                .arg(h->seq_req.load()).arg(h->seq_resp.load()).arg(h->width.load()).arg(h->height.load())
-                .arg(h->nativeModelMaxWidth.load()).arg(h->nativeModelMaxHeight.load())
-                .arg(BitsToFloat(h->helperEvalMsBits.load())).arg(BitsToFloat(h->helperUploadMsBits.load()))
-                .arg(BitsToFloat(h->helperReadbackMsBits.load())).arg(QString::fromStdString(reason)));
-            state_->setText("Channel connected • Changes apply live • Refresh to read changes made elsewhere");
-        } catch (const std::exception& error) { failed(QString::fromUtf8(error.what())); }
+        const auto path = path_->text().toLocal8Bit();
+        const auto channel = Channel::open(path.constData(), false);
+        if (!channel) return failed(QString::fromStdString(channel.error().what));
+        auto* h = channel->header();
+        ShmHeader defaults{};
+        ShmInitNativeDefaults(&defaults, dlsslop_control::workerBypass(h));
+        // Reject invalid live values rather than displaying a silently clamped setting.
+        std::array<double, std::size(kSettings)> values;
+        for (std::size_t i = 0; i < values.size(); ++i) {
+            const auto& s = kSettings[i];
+            values[i] = dlsslop_control::value(s, (h->*s.field).load());
+            if (!dlsslop_control::inRange(s, values[i])) return failed(QString("Invalid live setting: ") + s.name);
+        }
+        for (std::size_t i = 0; i < editors_.size(); ++i) {
+            auto& e = editors_[i];
+            e.defaultValue = dlsslop_control::value(kSettings[i], (defaults.*kSettings[i].field).load());
+            e.reset->setToolTip(QString("Reset to %1").arg(e.defaultValue, 0, 'g', 9));
+            display(i, values[i]);
+        }
+        device_ = channel->device();
+        inode_ = channel->inode();
+        activePath_ = path.constData();
+        controls_->setEnabled(true);
+        const auto reason = ShmLoadString(h->helperReasonSeq, h->helperReason, kReasonBytes);
+        status_->setPlainText(QString("Snapshot on refresh\n\nProtocol: %1\nWorker state: %2\nModel up: %3\nStop requested: %4\n"
+            "Request / response: %5 / %6\nProxy: %7 × %8\nNeural raster limit: %9 × %10\n"
+            "Network: %11 ms\nUpload: %12 ms\nReadback: %13 ms\nReason: %14")
+            .arg(h->version.load()).arg(h->helperState.load()).arg(h->modelUp.load()).arg(h->quit.load())
+            .arg(h->seq_req.load()).arg(h->seq_resp.load()).arg(h->width.load()).arg(h->height.load())
+            .arg(h->nativeModelMaxWidth.load()).arg(h->nativeModelMaxHeight.load())
+            .arg(BitsToFloat(h->helperEvalMsBits.load())).arg(BitsToFloat(h->helperUploadMsBits.load()))
+            .arg(BitsToFloat(h->helperReadbackMsBits.load())).arg(QString::fromStdString(reason)));
+        state_->setText("Channel connected • Changes apply live • Refresh to read changes made elsewhere");
     }
 
-    void action(const std::function<void(Channel&)>& operation, const QString& success)
+    template <class Operation>
+    void action(Operation operation, const QString& success)
     {
         if (!send(operation)) return;
         refresh();
@@ -362,7 +379,7 @@ public:
         captureRow->addWidget(capture);
         pages[6]->addLayout(captureRow);
         connect(capture, &QPushButton::clicked, this, [this, count] {
-            action([count](Channel& c) { c.capture(static_cast<unsigned>(count->value())); },
+            action([count](Channel& c) { return c.capture(static_cast<unsigned>(count->value())); },
                    "Capture requested • Uses the running layer's configured capture directory");
         });
         auto* actions = new QHBoxLayout;

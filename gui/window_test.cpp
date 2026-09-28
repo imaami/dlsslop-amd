@@ -6,13 +6,34 @@
 #undef main
 #include <QScrollBar>
 #include <QTest>
-#include <stdexcept>
+#include <cstdlib>
 
 namespace {
 
+// The fixture's files, removed however the test ends.
+struct Fixture {
+    char directory[40] = "/tmp/dlsslop-amd-gui-window-test-XXXXXX";
+    std::string path;
+    int fd = -1;
+    ShmHeader* header = nullptr;
+    ~Fixture()
+    {
+        if (header) munmap(header, kHeaderBytes);
+        if (fd >= 0) close(fd);
+        if (path.empty()) return;
+        unlink(path.c_str());
+        rmdir(directory);
+    }
+} fixture;
+
+[[noreturn]] void failed(const char* message)
+{
+    std::fprintf(stderr, "%s\n", message);
+    std::exit(1);
+}
 void require(bool condition, const char* message)
 {
-    if (!condition) throw std::runtime_error(message);
+    if (!condition) failed(message);
 }
 
 bool editor(const QWidget* widget)
@@ -65,7 +86,7 @@ template <class Widget> Widget* find(QWidget& window, const QString& name)
 template <class Widget> Widget* named(QWidget& window, const QString& name)
 {
     if (auto* widget = find<Widget>(window, name)) return widget;
-    throw std::runtime_error("missing test widget");
+    failed("missing test widget");
 }
 
 void unfocusedEditorsScrollThePage(QWidget& window, const ShmHeader& header)
@@ -262,43 +283,33 @@ void closingSendsTypedTextOrWarns(QWidget& window, const ShmHeader& header, cons
 
 int main(int argc, char** argv)
 {
-    char directory[] = "/tmp/dlsslop-amd-gui-window-test-XXXXXX";
-    if (!mkdtemp(directory)) return 1;
-    const std::string path = std::string(directory) + "/channel";
-    int fd = -1;
-    ShmHeader* header = nullptr;
-    int result = 0;
-    try {
-        fd = open(path.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
-        require(fd >= 0, "create fixture");
-        require(!ftruncate(fd, static_cast<off_t>(ShmTotalBytes())), "size fixture");
-        void* memory = mmap(nullptr, kHeaderBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-        require(memory != MAP_FAILED, "map fixture");
-        header = static_cast<ShmHeader*>(memory);
-        ShmInitNativeDefaults(header);
-        QApplication application(argc, argv);
-        QApplication::setStyle(QStyleFactory::create("Fusion"));
-        QLocale::setDefault(QLocale::c());
-        application.setStyleSheet(controllerTheme());
-        Window window(QString::fromStdString(path));
-        window.show();
-        require(QTest::qWaitForWindowExposed(&window), "window not exposed");
-        unfocusedEditorsScrollThePage(window, *header);
-        focusedEditorsTakeTheWheel(window, *header);
-        editsWriteAtOnceThenCoalesce(window, *header);
-        editorsFollowTheirSettings(window);
-        actionsSendPendingEdits(window, *header);
-        closingSendsTypedTextOrWarns(window, *header, path);
-        std::puts("GUI window tests passed: page scrolling over unfocused controls, wheel edits of focused ones, "
-                  "edits written at once then coalesced, arrow steps, read-only cards and slider ranges, "
-                  "pending edits sent by actions, and typed text sent or warned about on close");
-    } catch (const std::exception& error) {
-        std::fprintf(stderr, "%s\n", error.what());
-        result = 1;
-    }
-    if (header) munmap(header, kHeaderBytes);
-    if (fd >= 0) close(fd);
-    unlink(path.c_str());
-    rmdir(directory);
-    return result;
+    if (!mkdtemp(fixture.directory)) return 1;
+    fixture.path = std::string(fixture.directory) + "/channel";
+    const std::string& path = fixture.path;
+    int& fd = fixture.fd;
+    ShmHeader*& header = fixture.header;
+    fd = open(path.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
+    require(fd >= 0, "create fixture");
+    require(!ftruncate(fd, static_cast<off_t>(ShmTotalBytes())), "size fixture");
+    void* memory = mmap(nullptr, kHeaderBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    require(memory != MAP_FAILED, "map fixture");
+    header = static_cast<ShmHeader*>(memory);
+    ShmInitNativeDefaults(header);
+    QApplication application(argc, argv);
+    QApplication::setStyle(QStyleFactory::create("Fusion"));
+    QLocale::setDefault(QLocale::c());
+    application.setStyleSheet(controllerTheme());
+    Window window(QString::fromStdString(path));
+    window.show();
+    require(QTest::qWaitForWindowExposed(&window), "window not exposed");
+    unfocusedEditorsScrollThePage(window, *header);
+    focusedEditorsTakeTheWheel(window, *header);
+    editsWriteAtOnceThenCoalesce(window, *header);
+    editorsFollowTheirSettings(window);
+    actionsSendPendingEdits(window, *header);
+    closingSendsTypedTextOrWarns(window, *header, path);
+    std::puts("GUI window tests passed: page scrolling over unfocused controls, wheel edits of focused ones, "
+              "edits written at once then coalesced, arrow steps, read-only cards and slider ranges, "
+              "pending edits sent by actions, and typed text sent or warned about on close");
+    return 0;
 }

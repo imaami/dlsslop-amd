@@ -8,14 +8,19 @@
 #include <QStyleFactory>
 #include <QTest>
 #include <cstdio>
-#include <stdexcept>
+#include <cstdlib>
 #include <string_view>
 
 namespace {
 
+[[noreturn]] void failed(const char* message)
+{
+    std::fprintf(stderr, "%s\n", message);
+    std::exit(1);
+}
 void require(bool condition, const char* message)
 {
-    if (!condition) throw std::runtime_error(message);
+    if (!condition) failed(message);
 }
 
 class Slider final : public dlsslop_gui::AbsoluteSlider {
@@ -45,7 +50,7 @@ const dlsslop_control::Setting& setting(std::string_view name)
 {
     for (const auto& value : dlsslop_control::kSettings)
         if (value.name == name) return value;
-    throw std::runtime_error("missing test setting");
+    failed("missing test setting");
 }
 
 void interaction(Slider& slider)
@@ -165,14 +170,9 @@ int main(int argc, char** argv)
     card.show();
     slider.setFocus();
     QApplication::processEvents();
-    try {
-        interaction(slider);
-        directions(slider);
-        settingScales(slider);
-        std::puts("GUI slider tests passed: absolute press, drag, release, tracking, keyboard, orientation, RTL and setting scales");
-        return 0;
-    } catch (const std::exception& error) {
-        std::fprintf(stderr, "%s\n", error.what());
-        return 1;
-    }
+    interaction(slider);
+    directions(slider);
+    settingScales(slider);
+    std::puts("GUI slider tests passed: absolute press, drag, release, tracking, keyboard, orientation, RTL and setting scales");
+    return 0;
 }

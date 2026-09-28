@@ -1,18 +1,20 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "../common/control_settings.h"
+#include "../common/result.h"
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
 #include <map>
 #include <iterator>
-#include <stdexcept>
 #include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <utility>
 
 namespace dlsslop_gui {
+using dlsslop::Result;
 
 // Short-lived mappings avoid retaining a channel replaced by a restarted worker.
 // A controller never creates, truncates, initializes or unlinks the channel.
@@ -20,45 +22,44 @@ class Channel {
     int fd_ = -1;
     ShmHeader* header_ = nullptr;
     struct stat stat_ {};
+
+    explicit Channel(int fd) : fd_(fd) {}
 public:
-    Channel(const std::string& path, bool writable)
+    static Result<Channel> open(const std::string& path, bool writable)
     {
-        fd_ = open(path.c_str(), (writable ? O_RDWR : O_RDONLY) | O_CLOEXEC | O_NOFOLLOW);
-        if (fd_ < 0) throw std::runtime_error(std::strerror(errno));
-        try {
-            if (fstat(fd_, &stat_)) throw std::runtime_error(std::strerror(errno));
-            if (!S_ISREG(stat_.st_mode) || stat_.st_uid != getuid() ||
-                stat_.st_size < static_cast<off_t>(ShmTotalBytes()))
-                throw std::runtime_error("Channel must be an owned, full-size regular file");
-            void* base = mmap(nullptr, kHeaderBytes, PROT_READ | (writable ? PROT_WRITE : 0),
-                              MAP_SHARED, fd_, 0);
-            if (base == MAP_FAILED) throw std::runtime_error(std::strerror(errno));
-            header_ = static_cast<ShmHeader*>(base);
-            if (header_->magic.load() != kShmMagic || header_->version.load() != kShmVersion)
-                throw std::runtime_error("Channel protocol mismatch; use the matching controller version");
-        } catch (...) {
-            if (header_) munmap(header_, kHeaderBytes);
-            close(fd_);
-            throw;
-        }
+        Channel channel(::open(path.c_str(), (writable ? O_RDWR : O_RDONLY) | O_CLOEXEC | O_NOFOLLOW));
+        if (channel.fd_ < 0 || fstat(channel.fd_, &channel.stat_)) return dlsslop::fail(std::strerror(errno));
+        if (!S_ISREG(channel.stat_.st_mode) || channel.stat_.st_uid != getuid() ||
+            channel.stat_.st_size < static_cast<off_t>(ShmTotalBytes()))
+            return dlsslop::fail("Channel must be an owned, full-size regular file");
+        void* base = mmap(nullptr, kHeaderBytes, PROT_READ | (writable ? PROT_WRITE : 0), MAP_SHARED, channel.fd_, 0);
+        if (base == MAP_FAILED) return dlsslop::fail(std::strerror(errno));
+        channel.header_ = static_cast<ShmHeader*>(base);
+        if (channel.header_->magic.load() != kShmMagic || channel.header_->version.load() != kShmVersion)
+            return dlsslop::fail("Channel protocol mismatch; use the matching controller version");
+        return channel;
     }
-    Channel(const Channel&) = delete;
-    Channel& operator=(const Channel&) = delete;
-    ~Channel() { munmap(header_, kHeaderBytes); close(fd_); }
+    Channel(Channel&& other) noexcept
+        : fd_(std::exchange(other.fd_, -1)), header_(std::exchange(other.header_, nullptr)), stat_(other.stat_)
+    {
+    }
+    ~Channel()
+    {
+        if (header_) munmap(header_, kHeaderBytes);
+        if (fd_ >= 0) close(fd_);
+    }
     ShmHeader* header() const { return header_; }
     dev_t device() const { return stat_.st_dev; }
     ino_t inode() const { return stat_.st_ino; }
 
     // Validate the complete batch before writing any field. Only edited fields
     // are written, preserving unrelated edits made by the CLI or another GUI.
-    void write(const std::map<std::size_t, double>& changes)
+    Result<void> write(const std::map<std::size_t, double>& changes)
     {
         for (const auto& [index, number] : changes) {
-            if (index >= std::size(dlsslop_control::kSettings))
-                throw std::invalid_argument("Unknown setting");
+            if (index >= std::size(dlsslop_control::kSettings)) return dlsslop::fail("Unknown setting");
             const auto& s = dlsslop_control::kSettings[index];
-            if (!dlsslop_control::inRange(s, number))
-                throw std::invalid_argument("Setting outside supported range");
+            if (!dlsslop_control::inRange(s, number)) return dlsslop::fail("Setting outside supported range");
         }
         bool tuningChanged = false;
         for (const auto& [index, number] : changes) {
@@ -68,9 +69,10 @@ public:
                                                static_cast<uint32_t>(number));
             tuningChanged |= s.tuning;
         }
-        if (changes.empty()) return;
+        if (changes.empty()) return {};
         if (tuningChanged) header_->tuningSeq.fetch_add(1);
         header_->controlSeq.fetch_add(1);
+        return {};
     }
     void reset()
     {
@@ -81,11 +83,12 @@ public:
         header_->tuningSeq.fetch_add(1);
         header_->controlSeq.fetch_add(1);
     }
-    void capture(unsigned count)
+    Result<void> capture(unsigned count)
     {
-        if (count > 64) throw std::invalid_argument("Capture count must be 0..64");
+        if (count > 64) return dlsslop::fail("Capture count must be 0..64");
         header_->controlSeq.fetch_add(1);
         header_->captureRequest.store(count, std::memory_order_release);
+        return {};
     }
     void stop(bool requested)
     {
