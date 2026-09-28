@@ -1,18 +1,27 @@
 // SPDX-License-Identifier: MIT
 #include "engine.h"
+#include "files.h"
 #include "hip_engine.h"
-#include "unwrap.h"
 
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
-#include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace dlsslop {
+namespace {
+// RGBA8 as a binary PPM image.
+std::string ppm(const std::vector<uint8_t>& rgba, unsigned w, unsigned h)
+{
+    std::string image = "P6\n" + std::to_string(w) + ' ' + std::to_string(h) + "\n255\n";
+    for (size_t p = 0; p < rgba.size(); p += 4) image.append(reinterpret_cast<const char*>(&rgba[p]), 3);
+    return image;
+}
+} // namespace
+
 // The Vulkan network on a deterministic gradient: finite, repeatable and changed.
-void run_vulkan_self_test(const Options& o, Backend& engine)
+Result<void> run_vulkan_self_test(const Options& o, Backend& engine)
 {
     const unsigned passes = std::min(o.passes.value_or(kNativeDefaultPasses), engine.max_passes);
     const unsigned w = ShmNativeTier(engine.tier())->width, h = engine.tier();
@@ -26,26 +35,22 @@ void run_vulkan_self_test(const Options& o, Backend& engine)
             p[3] = 255;
         }
     for (unsigned run = 0; run < o.self_test_runs; ++run) {
-        engine.infer({input.data(), output.data()}, w, h, passes);
+        DLSSLOP_TRY(engine.infer({input.data(), output.data()}, w, h, passes));
         if (!run) first = output;
-        else if (output != first) throw std::runtime_error("self-test run " + std::to_string(run + 1) + " differs from the first");
+        else if (output != first) return fail("self-test run " + std::to_string(run + 1) + " differs from the first");
     }
     size_t changed = 0;
     for (size_t i = 0; i < input.size(); ++i) changed += (i % 4 != 3) && input[i] != output[i];
-    if (!changed) throw std::runtime_error("self-test: the network left the input unchanged");
-    if (!o.output.empty()) {
-        std::ofstream ppm(o.output, std::ios::binary);
-        ppm << "P6\n" << w << ' ' << h << "\n255\n";
-        for (size_t i = 0; i < output.size(); i += 4) ppm.write(reinterpret_cast<const char*>(&output[i]), 3);
-        if (!ppm) throw std::runtime_error("write " + o.output);
-    }
+    if (!changed) return fail("self-test: the network left the input unchanged");
+    if (!o.output.empty() && !write_file(o.output, ppm(output, w, h))) return fail("write " + o.output);
     std::fprintf(stderr, "Vulkan self-test PASS: %u identical runs at %ux%u; changed_components=%zu\n"
                  "tier=%u; passes=%u; upload_ms=%.3f; network_ms=%.3f; readback_ms=%.3f\n",
                  o.self_test_runs, w, h, changed, engine.tier(), passes, engine.upload_ms, engine.inference_ms,
                  engine.readback_ms);
+    return {};
 }
 
-void run_self_test(const Options& o, Engine& engine)
+Result<void> run_self_test(const Options& o, HipEngine& engine)
 {
     const unsigned passes = o.passes.value_or(kNativeDefaultPasses);
     constexpr unsigned w = 640, h = 360;
@@ -58,21 +63,21 @@ void run_self_test(const Options& o, Engine& engine)
         input[p + 3] = 255;
     }
     const unsigned repeats = o.self_test_runs;
-    const auto g = unwrap(dlsslop::geometry(w, h, engine.tier()));
+    const auto g = DLSSLOP_TRY(dlsslop::geometry(w, h, engine.tier()));
     std::vector<float> first_raw;
     std::vector<uint8_t> first_output;
     // Only the first run checks the codec against the CPU reference, so the
     // later runs time the production path; each must reproduce the first.
     for (unsigned run = 0; run < repeats; ++run) {
-        engine.infer(input.data(), w, h, output.data(), passes, {}, nullptr, !run);
-        const auto& raw = engine.raw_result();
+        DLSSLOP_TRY(engine.infer(input.data(), w, h, output.data(), passes, {}, nullptr, !run));
+        const auto& raw = *DLSSLOP_TRY(engine.raw_result());
         if (!run) {
             first_raw = raw;
             first_output = output;
             float minimum = raw.front(), maximum = raw.front();
             size_t below_zero = 0, above_one = 0;
             for (float value : raw) {
-                if (!std::isfinite(value)) throw std::runtime_error("network produced nonfinite values");
+                if (!std::isfinite(value)) return fail("network produced nonfinite values");
                 minimum = std::min(minimum, value);
                 maximum = std::max(maximum, value);
                 below_zero += value < 0.0f;
@@ -105,7 +110,7 @@ void run_self_test(const Options& o, Engine& engine)
                 run + 1, repeats, different, raw.size(), double(maximum),
                 (first / 3) % g.width, (first / 3) / g.width, first % 3,
                 double(first_raw[first]), unsigned(first_before), double(raw[first]), unsigned(first_after));
-            throw std::runtime_error("network is nondeterministic with identical input and fixed seed");
+            return fail("network is nondeterministic with identical input and fixed seed");
         } else if (const auto [a, b] = std::mismatch(first_output.begin(), first_output.end(), output.begin());
                    a != first_output.end()) {
             const size_t first = a - first_output.begin();
@@ -114,7 +119,7 @@ void run_self_test(const Options& o, Engine& engine)
                 "network repeat %u/%u decoded output differs from the first run: "
                 "first x=%zu y=%zu channel=%zu first=%u repeat=%u\n",
                 run + 1, repeats, (first / 4) % w, (first / 4) / w, first % 4, unsigned(*a), unsigned(*b));
-            throw std::runtime_error("decoded output differs from the verified first run");
+            return fail("decoded output differs from the verified first run");
         }
         std::printf("network repeat %u/%u: %s; passes=%u upload_ms=%.3f network_ms=%.3f readback_ms=%.3f\n",
                     run + 1, repeats, run ? "raw FP32 and output bit-identical" : "baseline", passes,
@@ -131,19 +136,13 @@ void run_self_test(const Options& o, Engine& engine)
         high = std::max(high, unsigned(output[i]));
         changed += output[i] != input[i];
     }
-    if (high <= low || !changed)
-        throw std::runtime_error("self-test returned constant or unchanged RGB output");
-    if (!o.output.empty()) {
-        std::ofstream file(o.output, std::ios::binary);
-        file << "P6\n" << w << ' ' << h << "\n255\n";
-        for (size_t p = 0; p < size_t(w) * h; ++p)
-            file.write(reinterpret_cast<const char*>(output.data() + p * 4), 3);
-        if (!file) throw std::runtime_error("write self-test PPM");
-    }
+    if (high <= low || !changed) return fail("self-test returned constant or unchanged RGB output");
+    if (!o.output.empty() && !write_file(o.output, ppm(output, w, h))) return fail("write self-test PPM");
     std::printf("real-network self-test PASS: finite output; %u identical-input runs bit-exact; RGB range=%u..%u; changed_components=%zu; fnv1a64=%016llx\n",
                 repeats, low, high, changed, static_cast<unsigned long long>(hash));
     std::printf("tier=%u; passes=%u; blocks=%s; upload_ms=%.3f; network_ms=%.3f; readback_ms=%.3f\n",
                 engine.tier(), passes, o.performance ? "upstream performance preset" : "all 71",
                 engine.upload_ms, engine.inference_ms, engine.readback_ms);
+    return {};
 }
 } // namespace dlsslop

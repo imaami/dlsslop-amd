@@ -5,6 +5,7 @@
 #include "hip_engine.h"
 #include "open.h"
 #include "transport.h"
+#include "tuning.h"
 #include "unwrap.h"
 
 #include <atomic>
@@ -69,8 +70,8 @@ bool follow_tier(std::unique_ptr<Backend>& engine, const Options& o, Mapping& ma
     mapping.reason("rebuilding for neural tier " + std::to_string(wanted));
     engine.reset(); // The old network's memory goes first.
     try {
-        engine = std::make_unique<Engine>(o, wanted);
-        engine->prepare();
+        engine = std::make_unique<HipEngine>(o, wanted, unwrap(hip::load()));
+        unwrap(engine->prepare());
     } catch (...) {
         h->nativeTier.store(active);
         throw;
@@ -133,8 +134,8 @@ void run_worker(Options o)
         auto listener = TransportListener::open(o.shm, !o.test_identity && !o.cpu_codec);
         if (!listener) throw std::runtime_error(listener.error().what);
         const TransportListener& transport = *listener;
-        std::unique_ptr<Backend> engine = open_backend(o, tier);
-        engine->prepare();
+        std::unique_ptr<Backend> engine = unwrap(open_backend(o, tier));
+        unwrap(engine->prepare());
         // Only serving stops gracefully, from the ready announcement on.
         // Before it, and in every other mode, SIGINT and SIGTERM terminate.
         std::signal(SIGINT, stop_handler);
@@ -237,10 +238,10 @@ void run_worker(Options o)
                 if (!engine->fits(w, height, passes, settings)) {
                     h->helperState.store(kHelperStarting);
                     std::fprintf(stderr, "building the network for %ux%u%s\n", w, height, settings.fp16 ? " FP16" : "");
-                    engine->reshape(w, height, passes, settings);
+                    unwrap(engine->reshape(w, height, passes, settings));
                     h->helperState.store(kHelperRunning, std::memory_order_release);
                 }
-                engine->infer(io, w, height, passes, settings, pending_trace.get());
+                unwrap(engine->infer(io, w, height, passes, settings, pending_trace.get()));
                 if (h->seq_req.load(std::memory_order_acquire) != request)
                     throw std::range_error("request changed during inference; old answer discarded");
                 std::string trace_metadata;
@@ -254,7 +255,7 @@ void run_worker(Options o)
                     metadata.held_input = held_input;
                     metadata.held_input_end = h->holdFrame.load();
                     std::vector<uint8_t> proxy(bytes);
-                    engine->read_back(proxy.data(), io.proxy, bytes);
+                    unwrap(engine->read_back(proxy.data(), io.proxy, bytes));
                     metadata.source_proxy_hash = 14695981039346656037ull;
                     for (uint8_t byte : proxy)
                         metadata.source_proxy_hash = (metadata.source_proxy_hash ^ byte) * 1099511628211ull;

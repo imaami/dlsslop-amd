@@ -1,11 +1,90 @@
 // SPDX-License-Identifier: MIT
 // Independent HIP test: no model weights, game or worker required.
-#include "../backend/native_kernels.h"
 #include "../backend/color_preserve.h"
+#include "../backend/native_kernels.h"
 #include <getopt.h>
 #include <unistd.h>
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
-#include <memory>
+#include <cstdlib>
+#include <string>
+#include <vector>
+
+namespace {
+// The test's stream, events and buffers, released however it ends.
+struct Resources {
+    const dlsslop::hip::Api& api;
+    dlsslop::hip::Handle stream = nullptr, start = nullptr, end = nullptr;
+    void *original = nullptr, *raw = nullptr, *output = nullptr;
+    ~Resources()
+    {
+        if (stream) api.hipStreamSynchronize(stream);
+        for (auto event : {end, start})
+            if (event) api.hipEventDestroy(event);
+        for (void* buffer : {output, raw, original})
+            if (buffer) api.hipFree(buffer);
+        if (stream) api.hipStreamDestroy(stream);
+    }
+};
+
+dlsslop::Result<void> run(const dlsslop::hip::Api& api, int device, const std::string& module)
+{
+    DLSSLOP_TRY(api.check(api.hipSetDevice(device), "select device"));
+    Resources r{api};
+    DLSSLOP_TRY(api.check(api.hipStreamCreate(&r.stream), "create stream"));
+    const dlsslop::Geometry g{1920,1080,1920,1152,1080,0,0,1920,1080};
+    const std::size_t pixels=std::size_t(g.width)*g.height;
+    std::vector<float> input(pixels*4),model(pixels*3),expected,actual(pixels*3);
+    for(std::size_t p=0;p<pixels;++p) {
+        for(unsigned c=0;c<3;++c) {
+            input[p*4+c]=float((p*11+c*71)%1000)/999;
+            model[p*3+c]=float((p*37+c*113)%1000)/999;
+        }
+        input[p*4+3]=1;
+    }
+    DLSSLOP_TRY(api.check(api.hipMalloc(&r.original,input.size()*sizeof(float)),"allocate test input"));
+    DLSSLOP_TRY(api.check(api.hipMalloc(&r.raw,model.size()*sizeof(float)),"allocate test model"));
+    DLSSLOP_TRY(api.check(api.hipMalloc(&r.output,model.size()*sizeof(float)),"allocate test output"));
+    DLSSLOP_TRY(api.check(api.hipMemcpy(r.original,input.data(),input.size()*sizeof(float),1),"upload test reference"));
+    DLSSLOP_TRY(api.check(api.hipMemcpy(r.raw,model.data(),model.size()*sizeof(float),1),"upload test model"));
+    dlsslop::NativeKernels kernels(api,r.stream);
+    DLSSLOP_TRY(kernels.load(module));
+    // The kernel reads a neighbourhood of the model output, so it cannot run in place.
+    if(dlsslop::gpu_preserve_color(kernels,g,r.original,r.raw,r.raw,1)) return dlsslop::fail("GPU correction accepted an in-place output");
+    for(unsigned reference=0;reference<2;++reference) {
+        if(reference) {
+            // Each apply reads the caller's reference as it is when the kernel runs.
+            for(std::size_t p=0;p<pixels;++p)
+                for(unsigned c=0;c<3;++c) input[p*4+c]=float((p*53+c*29)%1000)/999;
+            DLSSLOP_TRY(api.check(api.hipMemcpy(r.original,input.data(),input.size()*sizeof(float),1),"replace test reference"));
+        }
+        for(float strength : {0.f,.25f,.5f,1.f}) {
+            DLSSLOP_TRY(dlsslop::preserve_color(input.data(),model.data(),g,strength,expected));
+            DLSSLOP_TRY(dlsslop::gpu_preserve_color(kernels,g,r.original,r.raw,r.output,strength));
+            DLSSLOP_TRY(api.check(api.hipStreamSynchronize(r.stream),"finish correction"));
+            DLSSLOP_TRY(api.check(api.hipMemcpy(actual.data(),r.output,actual.size()*sizeof(float),2),"read correction"));
+            float worst=0;
+            for(std::size_t i=0;i<actual.size();++i) {
+                if(!std::isfinite(actual[i])) return dlsslop::fail("nonfinite GPU correction");
+                worst=std::max(worst,std::fabs(actual[i]-expected[i]));
+            }
+            std::printf("reference=%u strength=%g max_abs_error=%.9g\n",reference,double(strength),double(worst));
+            if(worst>2e-6f) return dlsslop::fail("GPU correction differs from CPU reference");
+        }
+    }
+    DLSSLOP_TRY(api.check(api.hipEventCreate(&r.start),"create start event"));
+    DLSSLOP_TRY(api.check(api.hipEventCreate(&r.end),"create end event"));
+    DLSSLOP_TRY(api.check(api.hipEventRecord(r.start,r.stream),"record start"));
+    for(unsigned i=0;i<20;++i) DLSSLOP_TRY(dlsslop::gpu_preserve_color(kernels,g,r.original,r.raw,r.output,1));
+    DLSSLOP_TRY(api.check(api.hipEventRecord(r.end,r.stream),"record end"));
+    DLSSLOP_TRY(api.check(api.hipEventSynchronize(r.end),"wait for timing"));
+    float ms=0;
+    DLSSLOP_TRY(api.check(api.hipEventElapsedTime(&ms,r.start,r.end),"measure correction"));
+    std::printf("GPU correction mean_ms=%.6f over 20 runs; excludes inference\n",double(ms)/20);
+    return {};
+}
+}
 
 int main(int argc,char** argv)
 {
@@ -33,85 +112,17 @@ int main(int argc,char** argv)
     }
     if(optind!=argc || module.empty()) return 2;
     if(access(module.c_str(),R_OK)) {std::fprintf(stderr,"SKIP: cannot read module: %s\n",module.c_str());return 77;}
-    std::unique_ptr<hip_probe::Api> holder;
-    try { holder=std::make_unique<hip_probe::Api>(); }
-    catch(const std::exception& e) {std::fprintf(stderr,"SKIP: %s\n",e.what());return 77;}
-    auto& api=*holder;
-    hip_probe::Handle stream=nullptr,start=nullptr,end=nullptr;
-    void* original=nullptr;void* raw=nullptr;void* output=nullptr;
-    int result=0;
-    try {
-        api.Check(api.hipInit(0),"initialize HIP");
-        int devices=0;api.Check(api.hipGetDeviceCount(&devices),"enumerate devices");
-        if(!devices) {std::fprintf(stderr,"SKIP: no HIP devices\n");return 77;}
-        if(device<0) {
-            for(int i=0;i<devices;++i) {
-                const auto properties=api.Properties(i);
-                if(std::string(properties.gcnArchName).find("gfx1201")==0) {device=i;break;}
-            }
-            if(device<0) {std::fprintf(stderr,"SKIP: no gfx1201 device\n");return 77;}
-        }
-        api.Check(api.hipSetDevice(device),"select device");
-        api.Check(api.hipStreamCreate(&stream),"create stream");
-        const dlsslop::Geometry g{1920,1080,1920,1152,1080,0,0,1920,1080};
-        const std::size_t pixels=std::size_t(g.width)*g.height;
-        std::vector<float> input(pixels*4),model(pixels*3),expected,actual(pixels*3);
-        for(std::size_t p=0;p<pixels;++p) {
-            for(unsigned c=0;c<3;++c) {
-                input[p*4+c]=float((p*11+c*71)%1000)/999;
-                model[p*3+c]=float((p*37+c*113)%1000)/999;
-            }
-            input[p*4+3]=1;
-        }
-        api.Check(api.hipMalloc(&original,input.size()*sizeof(float)),"allocate test input");
-        api.Check(api.hipMalloc(&raw,model.size()*sizeof(float)),"allocate test model");
-        api.Check(api.hipMalloc(&output,model.size()*sizeof(float)),"allocate test output");
-        api.Check(api.hipMemcpy(original,input.data(),input.size()*sizeof(float),1),"upload test reference");
-        api.Check(api.hipMemcpy(raw,model.data(),model.size()*sizeof(float),1),"upload test model");
-        {
-            const dlsslop::NativeKernels kernels(api,stream,module);
-            // The kernel reads a neighbourhood of the model output, so it cannot run in place.
-            bool rejected=false;
-            try {dlsslop::gpu_preserve_color(kernels,g,original,raw,raw,1);}
-            catch(const std::invalid_argument&) {rejected=true;}
-            if(!rejected) throw std::runtime_error("GPU correction accepted an in-place output");
-            for(unsigned reference=0;reference<2;++reference) {
-                if(reference) {
-                    // Each apply reads the caller's reference as it is when the kernel runs.
-                    for(std::size_t p=0;p<pixels;++p)
-                        for(unsigned c=0;c<3;++c) input[p*4+c]=float((p*53+c*29)%1000)/999;
-                    api.Check(api.hipMemcpy(original,input.data(),input.size()*sizeof(float),1),"replace test reference");
-                }
-                for(float strength : {0.f,.25f,.5f,1.f}) {
-                    if(!dlsslop::preserve_color(input.data(),model.data(),g,strength,expected)) throw std::runtime_error("reference refused its input");
-                    dlsslop::gpu_preserve_color(kernels,g,original,raw,output,strength);
-                    api.Check(api.hipStreamSynchronize(stream),"finish correction");
-                    api.Check(api.hipMemcpy(actual.data(),output,actual.size()*sizeof(float),2),"read correction");
-                    float worst=0;
-                    for(std::size_t i=0;i<actual.size();++i) {
-                        if(!std::isfinite(actual[i])) throw std::runtime_error("nonfinite GPU correction");
-                        worst=std::max(worst,std::fabs(actual[i]-expected[i]));
-                    }
-                    std::printf("reference=%u strength=%g max_abs_error=%.9g\n",reference,double(strength),double(worst));
-                    if(worst>2e-6f) throw std::runtime_error("GPU correction differs from CPU reference");
-                }
-            }
-            api.Check(api.hipEventCreate(&start),"create start event");
-            api.Check(api.hipEventCreate(&end),"create end event");
-            api.Check(api.hipEventRecord(start,stream),"record start");
-            for(unsigned i=0;i<20;++i) dlsslop::gpu_preserve_color(kernels,g,original,raw,output,1);
-            api.Check(api.hipEventRecord(end,stream),"record end");
-            api.Check(api.hipEventSynchronize(end),"wait for timing");
-            float ms=0;api.Check(api.hipEventElapsedTime(&ms,start,end),"measure correction");
-            std::printf("GPU correction mean_ms=%.6f over 20 runs; excludes inference\n",double(ms)/20);
-        }
-    } catch(const std::exception& e) {std::fprintf(stderr,"%s\n",e.what());result=1;}
-    if(stream) api.hipStreamSynchronize(stream);
-    if(end) api.hipEventDestroy(end);
-    if(start) api.hipEventDestroy(start);
-    if(output) api.hipFree(output);
-    if(raw) api.hipFree(raw);
-    if(original) api.hipFree(original);
-    if(stream) api.hipStreamDestroy(stream);
-    return result;
+    const auto loaded=dlsslop::hip::load();
+    if(!loaded) {std::fprintf(stderr,"SKIP: %s\n",loaded.error().what.c_str());return 77;}
+    const auto& api=*loaded;
+    int devices=0;
+    if(api.hipInit(0) || api.hipGetDeviceCount(&devices) || !devices) {std::fprintf(stderr,"SKIP: no HIP devices\n");return 77;}
+    for(int i=0;device<0 && i<devices;++i) {
+        dlsslop::hip::DeviceProperties properties{};
+        if(!api.hipGetDevicePropertiesR0600(&properties,i) && std::string(properties.gcnArchName).find("gfx1201")==0) device=i;
+    }
+    if(device<0) {std::fprintf(stderr,"SKIP: no gfx1201 device\n");return 77;}
+    const auto result=run(api,device,module);
+    if(!result) {std::fprintf(stderr,"%s\n",result.error().what.c_str());return 1;}
+    return 0;
 }

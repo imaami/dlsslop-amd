@@ -65,17 +65,30 @@ Result<void> write_all(int fd, const void* data, size_t bytes)
     return {};
 }
 
+Result<void> write_file(const std::string& file, std::string_view data)
+{
+    const Descriptor out(open(file.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666));
+    if (out.fd < 0) return fail(std::strerror(errno));
+    return write_all(out.fd, data.data(), data.size());
+}
+
+Result<bool> make_directories(const std::string& path)
+{
+    const std::string directory = path.substr(0, path.find_last_not_of('/') + 1);
+    bool created = false;
+    for (size_t end = directory.find('/', 1);; end = directory.find('/', end + 1)) {
+        created = !mkdir(directory.substr(0, end).c_str(), 0777);
+        if (!created && errno != EEXIST) return fail(std::strerror(errno));
+        if (end == std::string::npos) return created;
+    }
+}
+
 Result<void> private_directory(const std::string& path, const char* what)
 {
     const std::string directory = path.substr(0, path.find_last_not_of('/') + 1);
-    // mkdir -p: each missing component, the last one private.
-    bool created = false;
-    for (size_t end = directory.find('/', 1);; end = directory.find('/', end + 1)) {
-        const std::string component = directory.substr(0, end);
-        created = !mkdir(component.c_str(), 0777);
-        if (!created && errno != EEXIST) return fail(std::string("create ") + what + " directory: " + std::strerror(errno));
-        if (end == std::string::npos) break;
-    }
+    const auto made = make_directories(directory);
+    if (!made) return fail(std::string("create ") + what + " directory: " + made.error().what);
+    const bool created = *made;
     struct stat st{};
     if (lstat(directory.c_str(), &st) || !S_ISDIR(st.st_mode) || st.st_uid != getuid())
         return fail(std::string(what) + " directory must be owned by the current user and not a symlink");

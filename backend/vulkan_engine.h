@@ -3,11 +3,23 @@
 #include "engine.h"
 #include "vulkan_network.h"
 
+#include <exception>
 #include <memory>
-#include <stdexcept>
 #include <string>
 
 namespace dlsslop {
+// Until the Vulkan network returns Results: what it throws, as an Error.
+template <class F>
+Result<void> guarded(F&& f)
+{
+    try {
+        f();
+        return {};
+    } catch (const std::exception& error) {
+        return fail(error.what());
+    }
+}
+
 // DLSSNR-AMD's network on a Vulkan device of the daemon's own.
 class VulkanEngine : public Backend {
     std::unique_ptr<dlsslop::VulkanNetwork> network_;
@@ -51,17 +63,17 @@ public:
         return true;
     }
     // Built before the daemon reports itself ready, for the raster's usual frame.
-    void prepare() override
+    Result<void> prepare() override
     {
-        network_->shape(frame(ShmNativeTier(tier_)->width, tier_, 1, {}));
+        return guarded([&] { network_->shape(frame(ShmNativeTier(tier_)->width, tier_, 1, {})); });
     }
     bool fits(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings) const override
     {
         return !network_->shape_differs(frame(w, h, passes, settings));
     }
-    void reshape(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings) override
+    Result<void> reshape(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings) override
     {
-        network_->shape(frame(w, h, passes, settings));
+        return guarded([&] { network_->shape(frame(w, h, passes, settings)); });
     }
     static_assert(kSlots == dlsslop::VulkanNetwork::kImportSlots);
     bool import_into(unsigned slot, const ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2]) override
@@ -73,18 +85,16 @@ public:
         return imported;
     }
     // Only HIP traces (hip_only).
-    void read_back(void*, const void*, size_t) override
+    Result<void> read_back(void*, const void*, size_t) override { return fail("the Vulkan network cannot trace"); }
+    Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
+                       dlsslop::FrameTrace* = nullptr) override
     {
-        throw std::logic_error("the Vulkan network cannot trace");
-    }
-    void infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
-               dlsslop::FrameTrace* = nullptr) override
-    {
-        network_->infer(frame(w, h, passes, settings), io.slot, io.proxy, io.answer);
+        DLSSLOP_TRY(guarded([&] { network_->infer(frame(w, h, passes, settings), io.slot, io.proxy, io.answer); }));
         upload_ms = network_->upload_ms;
         inference_ms = network_->inference_ms;
         readback_ms = network_->readback_ms;
+        return {};
     }
-    void self_test(const Options& o) override { run_vulkan_self_test(o, *this); }
+    Result<void> self_test(const Options& o) override { return run_vulkan_self_test(o, *this); }
 };
 } // namespace dlsslop

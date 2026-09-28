@@ -59,16 +59,6 @@ bool trace_valid_token(const std::string& token)
     return token != "request"; // DIR/request is the request file itself
 }
 
-namespace {
-// DATA as FILE, created or truncated.
-Result<void> write_file(const std::string& file, const std::string& data)
-{
-    const Descriptor out(open(file.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666));
-    if (out.fd < 0) return fail(std::strerror(errno));
-    return write_all(out.fd, data.data(), data.size());
-}
-} // namespace
-
 Result<void> trace_write_text(const std::string& file, const std::string& text)
 {
     const std::string temporary = file + ".tmp";

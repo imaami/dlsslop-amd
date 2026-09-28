@@ -39,6 +39,10 @@ std::string absolute(const std::string& path);
 Result<std::string> read_file(const std::string& path);
 // All of DATA to FD.
 Result<void> write_all(int fd, const void* data, size_t bytes);
+// DATA as FILE, created or truncated; or strerror of what stopped it.
+Result<void> write_file(const std::string& file, std::string_view data);
+// Creates DIR and any missing parents: true when DIR itself was created.
+Result<bool> make_directories(const std::string& directory);
 // Creates DIR, with any missing parents, as 0700, or accepts an existing real
 // directory the current user owns with exactly that mode, so no other user can
 // plant or swap files in it. WHAT names it in errors.

@@ -127,7 +127,8 @@ add_library(dlsslop-codec OBJECT backend/codec.cpp)
 # deliberately does not require ROCm headers or a GPU; real inference does.
 add_executable(dlsslopd
     backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.cpp
-    backend/open.cpp backend/hip_engine.cpp backend/self_test.cpp backend/offline.cpp
+    backend/open.cpp backend/hip_engine.cpp backend/hip_vendor.cpp backend/native_kernels.cpp
+    backend/self_test.cpp backend/offline.cpp
     backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp)
 target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
 target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-vknr Threads::Threads ${CMAKE_DL_LIBS})
@@ -166,7 +167,7 @@ if(BUILD_TESTING)
     add_executable(codec-test backend/codec_test.cpp)
     target_link_libraries(codec-test PRIVATE dlsslop-codec)
     add_test(NAME codec COMMAND codec-test)
-    add_executable(color-gpu-test tests/color_gpu_test.cpp)
+    add_executable(color-gpu-test tests/color_gpu_test.cpp backend/hip_vendor.cpp backend/native_kernels.cpp backend/files.cpp)
     target_link_libraries(color-gpu-test PRIVATE ${CMAKE_DL_LIBS})
     # Uses the GPU when the HIP runtime, a gfx1201 device and the module exist.
     set(HIP_MODULES ${CMAKE_CURRENT_SOURCE_DIR}/assets/HIP/gfx1201)

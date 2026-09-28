@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "options.h"
+#include "result.h"
 #include "shm_protocol.h"
 #include "trace.h"
 #include "tuning_math.h"
@@ -44,11 +45,11 @@ public:
     virtual std::string processing() const = 0;
     // Takes a new tier without a new backend; false when it needs one.
     virtual bool retier(unsigned) { return false; }
-    virtual void prepare() = 0;
+    virtual Result<void> prepare() = 0;
     // False when a request of this shape needs a build first (reshape): seconds
     // of work the caller reports as a start, not a slow frame.
     virtual bool fits(unsigned, unsigned, unsigned, const ProcessingSettings&) const { return true; }
-    virtual void reshape(unsigned, unsigned, unsigned, const ProcessingSettings&) {}
+    virtual Result<void> reshape(unsigned, unsigned, unsigned, const ProcessingSettings&) { return {}; }
     // Serving only: DMA the channel's frame slots directly.
     virtual void pin(uint8_t*, uint8_t*, size_t) {}
     // Serving, between frames: imports an offered proxy/answer pair into the slot of
@@ -72,11 +73,11 @@ public:
         return {};
     }
     // Diagnostics: copies host or device memory, such as an imported frame, to the host.
-    virtual void read_back(void* host, const void* source, size_t bytes) = 0;
+    virtual Result<void> read_back(void* host, const void* source, size_t bytes) = 0;
     // w * h RGBA8 frames, or RGBA16F with settings.fp16.
-    virtual void infer(const Frames& io, unsigned w, unsigned h, unsigned passes,
-                       const ProcessingSettings& settings = {}, dlsslop::FrameTrace* trace = nullptr) = 0;
-    virtual void self_test(const Options& o) = 0;
+    virtual Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned passes,
+                               const ProcessingSettings& settings = {}, dlsslop::FrameTrace* trace = nullptr) = 0;
+    virtual Result<void> self_test(const Options& o) = 0;
     float upload_ms = 0, inference_ms = 0, readback_ms = 0;
     unsigned max_passes = kMaxPasses;
 protected:
@@ -96,7 +97,7 @@ private:
     unsigned next_slot_ = 0;
 };
 
-class Engine;
-void run_self_test(const Options& o, Engine& engine);
-void run_vulkan_self_test(const Options& o, Backend& engine);
+class HipEngine;
+Result<void> run_self_test(const Options& o, HipEngine& engine);
+Result<void> run_vulkan_self_test(const Options& o, Backend& engine);
 } // namespace dlsslop

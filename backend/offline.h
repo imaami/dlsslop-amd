@@ -3,5 +3,5 @@
 #include "engine.h"
 
 namespace dlsslop {
-void run_offline(const Options& o, Backend& engine);
+Result<void> run_offline(const Options& o, Backend& engine);
 } // namespace dlsslop
