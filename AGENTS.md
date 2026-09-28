@@ -13,5 +13,9 @@
   conditionals and arrays. Do not use global `set -e`, `set -u` or equivalents.
   Handle consequential errors explicitly and preserve arguments and exit status.
 - In C/C++, avoid `using namespace` and use `\n` rather than `std::endl`.
+- Project C++ is built without exceptions or RTTI. Fallible functions return
+  `dlsslop::Result` (`common/result.h`); only the vendor boundary files catch
+  what vendored code throws. Choose implementations at compile time (CRTP,
+  concepts, templates), not through virtual calls or type erasure.
 - Update CLI examples and focused parsing/launcher checks when changing tools.
 - Build with CMake and follow `VALIDATION.md` for automated and hardware tests.
