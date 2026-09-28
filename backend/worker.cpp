@@ -949,7 +949,7 @@ public:
     bool import(const ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2]) override
     {
         int raw[2] = {fds[0].fd, fds[1].fd};
-        const bool imported = network_->import(offer.generation, offer.allocation, offer.size, raw);
+        const bool imported = network_->import(offer, raw);
         fds[0].fd = raw[0];
         fds[1].fd = raw[1];
         return imported;
@@ -1221,8 +1221,10 @@ bool receive_offer(int peer, ShmTransportOffer& offer, dlsslop::Descriptor (&fds
     if (!rights || rights->cmsg_level != SOL_SOCKET || rights->cmsg_type != SCM_RIGHTS) return false;
     const size_t count = std::min<size_t>(2, (rights->cmsg_len - CMSG_LEN(0)) / sizeof(int));
     for (size_t i = 0; i < count; ++i) std::memcpy(&fds[i].fd, CMSG_DATA(rights) + i * sizeof(int), sizeof(int));
+    // Each buffer lies within its memory: a backend maps the memory and fits frames to the buffer.
+    const auto fits = [&offer](unsigned i) { return offer.size[i] && offer.size[i] <= offer.allocation[i]; };
     return size_t(got) == sizeof offer && count == 2 && offer.magic == kShmMagic &&
-           !(message.msg_flags & (MSG_TRUNC | MSG_CTRUNC));
+           !(message.msg_flags & (MSG_TRUNC | MSG_CTRUNC)) && fits(0) && fits(1);
 }
 
 // Imports every pending offer and answers each on its own connection: one

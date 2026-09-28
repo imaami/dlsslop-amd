@@ -30,7 +30,7 @@ daemon runs the network on a proxy of the game frame, on a Vulkan device of its
 own or, as the alternative, with HIP; the Vulkan layer composes the neural edit
 at the original resolution. The standalone Qt 6 Widgets controller
 exposes all 41 settings. Worker, layer, CLI and GUI use shared-memory protocol
-**26**.
+**28**.
 
 This repository contains source, patches and build tools. **No compiled binaries
 or model weights are included.** See [VALIDATION.md](VALIDATION.md) for automated

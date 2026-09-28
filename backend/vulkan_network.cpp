@@ -132,6 +132,7 @@ struct VulkanNetwork::Impl {
     uint32_t family = 0;
     unsigned index = 0;
     std::string name;
+    VkPhysicalDeviceIDProperties ids{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES};
     VkPhysicalDeviceMemoryProperties memory{};
     float timestamp_ns = 0;
     VkCommandPool pool = VK_NULL_HANDLE;
@@ -295,9 +296,9 @@ VulkanNetwork::VulkanNetwork(const VulkanPaths& paths, int device) : impl_(std::
     check(vkCreateDevice(s.physical, &create, nullptr, &s.device), "create Vulkan device");
     vkGetDeviceQueue(s.device, s.family, 0, &s.queue);
     vkGetPhysicalDeviceMemoryProperties(s.physical, &s.memory);
-    VkPhysicalDeviceProperties p;
-    vkGetPhysicalDeviceProperties(s.physical, &p);
-    s.timestamp_ns = p.limits.timestampPeriod;
+    VkPhysicalDeviceProperties2 p{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &s.ids};
+    vkGetPhysicalDeviceProperties2(s.physical, &p);
+    s.timestamp_ns = p.properties.limits.timestampPeriod;
     VkCommandPoolCreateInfo pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     pool.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     pool.queueFamilyIndex = s.family;
@@ -370,10 +371,18 @@ bool VulkanNetwork::shape(const VulkanFrame& frame)
     return true;
 }
 
-bool VulkanNetwork::import(uint32_t generation, const uint64_t allocation[2], const uint64_t size[2], int fds[2])
+bool VulkanNetwork::import(const ShmTransportOffer& offer, int fds[2])
 {
     auto& s = *impl_;
+    const uint64_t* allocation = offer.allocation;
+    const uint64_t* size = offer.size;
+    const uint32_t generation = offer.generation;
     if (!generation) return false;
+    if (std::memcmp(offer.deviceUuid, s.ids.deviceUUID, VK_UUID_SIZE) ||
+        std::memcmp(offer.driverUuid, s.ids.driverUUID, VK_UUID_SIZE)) {
+        std::fprintf(stderr, "device-local transport: the game's frames are on another device or driver\n");
+        return false;
+    }
     Impl::Imported next{generation, size_t(std::min(size[0], size[1]))};
     for (unsigned i = 0; i < 2; ++i) {
         Buffer& b = next.frame[i];
