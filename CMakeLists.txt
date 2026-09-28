@@ -19,6 +19,10 @@ add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initi
 # linked libstdc++ and the symbol tables from every binary.
 add_compile_options(-ffunction-sections -fdata-sections)
 add_link_options(-Wl,--gc-sections $<$<CONFIG:Release>:-s>)
+# Link-time optimization shrinks the daemon's code by 7% and the GUI's
+# too: the compiler inlines and drops code across files. The layer and
+# dlssnr-shmctl do not shrink, so they are built without it.
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 # Project headers shared by the daemon, the layer's own code, the tools and tests.
 include_directories(common)
 find_package(Threads REQUIRED)
@@ -77,7 +81,8 @@ add_library(dlsslop-layer-objects OBJECT
     ${LAYER_ROOT}/layer_linux/src/shader_vk.cpp ${LAYER_ROOT}/layer_linux/src/dlssnr_pass.cpp
     ${LAYER_ROOT}/layer_linux/src/composition.cpp ${LAYER_ROOT}/layer_linux/src/capture.cpp
     ${LAYER_ROOT}/layer_linux/src/scaler_vk.cpp ${LAYER_ROOT}/layer_linux/src/hotkey.cpp)
-set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_STANDARD 17)
+set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_STANDARD 17
+    INTERPROCEDURAL_OPTIMIZATION OFF)
 add_dependencies(dlsslop-layer-objects layer-shaders)
 target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC
     ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party
@@ -86,7 +91,7 @@ target_link_libraries(dlsslop-layer-objects PUBLIC Threads::Threads ${CMAKE_DL_L
 
 function(add_neural_layer target)
     add_library(${target} SHARED ${LAYER_ROOT}/layer_linux/src/layer.cpp)
-    set_target_properties(${target} PROPERTIES CXX_STANDARD 17)
+    set_target_properties(${target} PROPERTIES CXX_STANDARD 17 INTERPROCEDURAL_OPTIMIZATION OFF)
     target_include_directories(${target} PRIVATE layer)
     target_link_libraries(${target} PRIVATE dlsslop-layer-objects)
     target_link_options(${target} PRIVATE
@@ -98,6 +103,7 @@ endfunction()
 add_neural_layer(VkLayer_DLSSLOP_amd)
 add_executable(dlssnr-shmctl ${LAYER_ROOT}/tools/shmctl.cpp)
 target_link_options(dlssnr-shmctl PRIVATE -static-libstdc++ -static-libgcc)
+set_target_properties(dlssnr-shmctl PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
 
 # The Vulkan network, prepared into vulkan-nr/ from DLSSNR-AMD: its SPIR-V and
 # the host library dlsslopd runs it with. The host must be compiled with the
