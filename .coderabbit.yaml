@@ -25,7 +25,7 @@ reviews:
       instructions: >-
         C++23 daemon and project headers, built without exceptions or
         RTTI: errors are dlsslop::Result values, and only
-        backend/hip_vendor.cpp and backend/nr_vendor.cpp catch what the
+        backend/hip_vendor.cpp and common/nr_vendor.cpp catch what the
         vendored networks throw. HIP kernels are compiled by clang for
         gfx1201 (wave32). Check GPU stream ordering,
         host/device synchronization and buffer lifetimes, and races on
