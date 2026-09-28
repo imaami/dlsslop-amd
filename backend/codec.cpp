@@ -201,7 +201,7 @@ Rgb rgba8(const std::uint8_t* p)
     }, g, x, y);
 }
 
-std::unexpected<Error> nonfinite_answer()
+Failure<const char*> nonfinite_answer()
 {
     return reject("neural output contains nonfinite or FP16-overflow samples");
 }
