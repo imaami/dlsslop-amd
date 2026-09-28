@@ -133,15 +133,21 @@ set_target_properties(dlsslop-vknr PROPERTIES CXX_STANDARD 20)
 target_compile_definitions(dlsslop-vknr PUBLIC ${VKNR_DEFINES})
 # Upstream code: its own warnings are not this project's to fix. It throws.
 target_compile_options(dlsslop-vknr PRIVATE -w -fexceptions -frtti)
+# Code that throws stays out of LTO. With it, the program's one copy of an
+# inline function such as std::vector::reserve may come from a file built
+# without exceptions, and a catch around a call to it is then dropped as dead:
+# what the vendored code throws would end the daemon instead of being caught.
+set_target_properties(dlsslop-vknr PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
 target_include_directories(dlsslop-vknr PUBLIC "${VKNR_ROOT}/src/core")
 target_link_libraries(dlsslop-vknr PUBLIC vulkan Threads::Threads)
 
 add_library(dlsslop-codec OBJECT backend/codec.cpp)
 # The boundaries to the vendored networks, built with exceptions to catch theirs.
 add_library(dlsslop-hip-vendor OBJECT backend/hip_vendor.cpp)
-set_target_properties(dlsslop-hip-vendor PROPERTIES CXX_STANDARD 20)
+set_target_properties(dlsslop-hip-vendor PROPERTIES CXX_STANDARD 20 INTERPROCEDURAL_OPTIMIZATION OFF)
 target_compile_options(dlsslop-hip-vendor PRIVATE -fexceptions -frtti)
 add_library(dlsslop-nr-vendor OBJECT backend/nr_vendor.cpp)
+set_target_properties(dlsslop-nr-vendor PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
 target_compile_options(dlsslop-nr-vendor PRIVATE -fexceptions -frtti)
 target_link_libraries(dlsslop-nr-vendor PUBLIC dlsslop-vknr)
 # The worker uses a small, versioned HIP ABI loaded with dlopen. The build itself
