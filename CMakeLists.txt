@@ -26,8 +26,8 @@ add_link_options(-Wl,--gc-sections $<$<CONFIG:Release>:-s>)
 # Link-time optimization shrinks the daemon's code by 7% and the GUI's
 # too: the compiler inlines and drops code across files. The layer and
 # dlssnr-shmctl do not shrink, so they are built without it.
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
-# Project headers shared by the daemon, the layer's own code, the tools and tests.
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON CACHE BOOL "Link-time optimization")
+# Project headers shared by the daemon and its tests.
 include_directories(common)
 find_package(Threads REQUIRED)
 include(CTest)
@@ -147,7 +147,9 @@ add_library(dlsslop-codec OBJECT backend/codec.cpp)
 # The boundaries to the vendored networks, built with exceptions to catch theirs.
 add_library(dlsslop-hip-vendor OBJECT backend/hip_vendor.cpp)
 set_target_properties(dlsslop-hip-vendor PROPERTIES CXX_STANDARD 20 INTERPROCEDURAL_OPTIMIZATION OFF)
-target_compile_options(dlsslop-hip-vendor PRIVATE -fexceptions -frtti)
+# The vendored network's own warnings are not this project's to fix.
+target_compile_options(dlsslop-hip-vendor PRIVATE -fexceptions -frtti -Wno-deprecated-declarations
+    -Wno-misleading-indentation)
 add_library(dlsslop-nr-vendor OBJECT backend/nr_vendor.cpp)
 set_target_properties(dlsslop-nr-vendor PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
 target_compile_options(dlsslop-nr-vendor PRIVATE -fexceptions -frtti)
@@ -160,7 +162,7 @@ add_executable(dlsslopd
     backend/self_test.cpp
     backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp)
 target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
-target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip-vendor dlsslop-nr-vendor dlsslop-vknr Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip-vendor dlsslop-nr-vendor Threads::Threads ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)
 target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 # What runs once per start, per transport offer or per diagnostic is built for

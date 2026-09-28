@@ -8,7 +8,7 @@ set(CMAKE_SKIP_RPATH TRUE)
 add_compile_options(-Wall -Wextra -Wpedantic -Wunused-parameter)
 # Errors are Results: the GUI's code throws and catches nothing.
 add_compile_options(-fno-exceptions -fno-rtti)
-set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON CACHE BOOL "Link-time optimization")
 # Uses the installed Qt 6 version; no vendored or pinned legacy Qt release.
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 add_executable(dlsslop-gui main.cpp)
