@@ -435,6 +435,7 @@ void VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint8_t* inp
     if (exported) {
         source = s.imported.at(size_t(slot)).frame[0].buffer;
         target = s.imported[size_t(slot)].frame[1].buffer;
+        if (!source) throw std::logic_error("import slot " + std::to_string(slot) + " holds no frames");
     } else {
         s.host_buffer(s.upload, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 0);
         s.host_buffer(s.download, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT);

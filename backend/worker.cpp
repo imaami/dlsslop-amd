@@ -1048,7 +1048,7 @@ void run_vulkan_self_test(const Options& o, Backend& engine)
             p[3] = 255;
         }
     for (unsigned run = 0; run < o.self_test_runs; ++run) {
-        engine.infer({input.data(), output.data(), 0}, w, h, passes);
+        engine.infer({input.data(), output.data()}, w, h, passes);
         if (!run) first = output;
         else if (output != first) throw std::runtime_error("self-test run " + std::to_string(run + 1) + " differs from the first");
     }
@@ -1180,7 +1180,7 @@ void run_offline(const Options& o, Backend& engine)
     in.seekg(0);
     if (!in.read(reinterpret_cast<char*>(pixels.data()), static_cast<std::streamsize>(bytes)))
         throw std::runtime_error("read offline input");
-    engine.infer({pixels.data(), result.data(), 0}, o.width, o.height, passes);
+    engine.infer({pixels.data(), result.data()}, o.width, o.height, passes);
     std::ofstream out(o.output, std::ios::binary);
     if (!out.write(reinterpret_cast<const char*>(result.data()), static_cast<std::streamsize>(result.size())))
         throw std::runtime_error("write offline output");
