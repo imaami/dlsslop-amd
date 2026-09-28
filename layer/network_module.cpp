@@ -38,6 +38,8 @@ nr::HostDevice host_device(const DlsslopNetworkDevice& d)
     host.queue = d.queue;
     host.queue_family = d.family;
     host.physical_dispatch = d.physicalDispatch;
+    host.queue_lock = [lock = d.lockQueue, context = d.context] { lock(context); };
+    host.queue_unlock = [unlock = d.unlockQueue, context = d.context] { unlock(context); };
     return host;
 }
 }  // namespace

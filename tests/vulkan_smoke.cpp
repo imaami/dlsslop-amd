@@ -296,7 +296,8 @@ static int smoke(bool headless, bool contention, bool reduced, bool bgra, bool p
     Dl_info hooked{}, next{};
     require(dladdr(reinterpret_cast<void*>(vkGetDeviceProcAddr(c.device, "vkQueuePresentKHR")), &hooked),
             "vkQueuePresentKHR is not in a loaded object");
-    for (const char* name : {"vkAcquireNextImageKHR", "vkQueueSubmit", "vkQueueWaitIdle"})
+    for (const char* name : {"vkAcquireNextImageKHR", "vkQueueSubmit", "vkQueueWaitIdle", "vkQueueBindSparse",
+                             "vkDeviceWaitIdle"})
         require(dladdr(reinterpret_cast<void*>(vkGetDeviceProcAddr(c.device, name)), &next) &&
                 !std::strcmp(next.dli_fname, hooked.dli_fname) == network,
                 network ? "the layer leaves queue operations unhooked while the in-layer network builds"

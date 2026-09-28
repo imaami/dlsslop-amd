@@ -19,9 +19,14 @@ struct DlsslopNetworkDevice {
     VkInstance instance;
     VkPhysicalDevice physical;
     VkDevice device;
-    // The queue that takes the network's uploads while it builds.
+    // The queue that takes the network's uploads while it builds, from a
+    // thread of the module's own: LOCK_QUEUE and UNLOCK_QUEUE, with CONTEXT,
+    // are called around each of those submits.
     VkQueue queue;
     uint32_t family;
+    void (*lockQueue)(void* context);
+    void (*unlockQueue)(void* context);
+    void* context;
     // The next layer's, for physical-device queries through the layer's handles.
     PFN_vkGetInstanceProcAddr physicalDispatch;
     VkPhysicalDeviceMemoryProperties memory;
