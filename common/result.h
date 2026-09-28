@@ -23,6 +23,8 @@ using Result = std::expected<T, Error>;
 // An error on its way into the Result its function returns. The Result is
 // made out of line, where the error's words become a string: each return of an
 // error is one call, and the path to it is kept cold, out of the hot code.
+// Return one at once: its words may be a temporary that ends with the return
+// statement, so a lambda that returns one states its Result return type.
 template <class Words>
 struct Failure {
     Words what;

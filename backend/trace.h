@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 
 namespace dlsslop {
 // Independent of the shared-memory protocol and PFM/summary file format.
@@ -65,7 +66,11 @@ class TraceRequests {
     TraceRequests(std::string directory, Descriptor lock) : directory_(std::move(directory)), lock_(std::move(lock)) {}
 public:
     static Result<TraceRequests> open(const std::string& directory, const std::string& shm);
-    TraceRequests(TraceRequests&&) = default;
+    // The moved-from requests remove no owner file.
+    TraceRequests(TraceRequests&& other) noexcept
+        : directory_(std::exchange(other.directory_, {})), lock_(std::move(other.lock_))
+    {
+    }
     ~TraceRequests();
     // The next requested frame's trace, or none without a request.
     Result<std::unique_ptr<FrameTrace>> take();

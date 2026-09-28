@@ -46,18 +46,21 @@ struct Frames {
 // (import_into) and may say where a slot's frames are (frames_of).
 template <class Derived>
 class EngineBase {
+public:
+    static constexpr unsigned kSlots = 4;
+
+private:
     struct Held {
         uint32_t generation = 0;
         size_t bytes = 0;
     };
-    std::array<Held, 4> held_{};
+    std::array<Held, kSlots> held_{};
     unsigned next_slot_ = 0;
 
     Derived& self() { return static_cast<Derived&>(*this); }
     const Derived& self() const { return static_cast<const Derived&>(*this); }
 
 public:
-    static constexpr unsigned kSlots = 4;
     float upload_ms = 0, inference_ms = 0, readback_ms = 0;
 
     // Serving, between frames: imports an offered proxy/answer pair into the slot of
