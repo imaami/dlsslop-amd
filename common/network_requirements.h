@@ -50,6 +50,11 @@ constexpr NetworkFeature kNetworkFeatures[] = {
     {"vulkanMemoryModel", DLSSLOP_ALONE(VkPhysicalDeviceVulkanMemoryModelFeatures, VULKAN_MEMORY_MODEL_FEATURES,
                                         vulkanMemoryModel),
      DLSSLOP_CORE(12, 1_2, vulkanMemoryModel), nullptr},
+    // Not the network's own need: with the memory model on and this off, no shader on the device,
+    // the game's or the composition's, may use Device scope (VUID-RuntimeSpirv-vulkanMemoryModel-06265).
+    {"vulkanMemoryModelDeviceScope", DLSSLOP_ALONE(VkPhysicalDeviceVulkanMemoryModelFeatures,
+                                                   VULKAN_MEMORY_MODEL_FEATURES, vulkanMemoryModelDeviceScope),
+     DLSSLOP_CORE(12, 1_2, vulkanMemoryModelDeviceScope), nullptr},
     {"subgroupSizeControl", DLSSLOP_ALONE(VkPhysicalDeviceSubgroupSizeControlFeatures, SUBGROUP_SIZE_CONTROL_FEATURES,
                                           subgroupSizeControl),
      DLSSLOP_CORE(13, 1_3, subgroupSizeControl), nullptr},

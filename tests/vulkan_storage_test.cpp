@@ -224,7 +224,8 @@ static void NetworkFeatures() {
     Check(!declined.Enable(hidden, true) && hidden.pNext == &opaque && !late.shaderInt8 &&
           !hidden.pEnabledFeatures, "an uncopyable prefix was not declined intact");
     // With nothing to change behind it, the network's own structures go in front.
-    late.storageBuffer8BitAccess = late.shaderFloat16 = late.shaderInt8 = late.vulkanMemoryModel = VK_TRUE;
+    for (const auto& f : dlsslop::kNetworkFeatures)
+        if (f.core == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) dlsslop::FeatureBit(&late, f.core_offset) = VK_TRUE;
     dlssnr::DeviceFeatureRequest ahead;
     Check(ahead.Enable(hidden, true) && Valid(hidden) && AllNetworkBits(hidden) &&
           dlsslop::FindStructure(hidden.pNext, VK_STRUCTURE_TYPE_APPLICATION_INFO) == &opaque,
