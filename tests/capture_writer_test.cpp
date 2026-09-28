@@ -55,8 +55,8 @@ struct TemporaryDirectory {
 std::set<std::filesystem::path> directories(const std::filesystem::path& root) {
     std::set<std::filesystem::path> result;
     std::error_code error;
-    for (const auto& item : std::filesystem::directory_iterator(root, error))
-        if (item.is_directory(error)) result.insert(item.path());
+    for (std::filesystem::directory_iterator item(root, error), end; !error && item != end; item.increment(error))
+        if (item->is_directory(error)) result.insert(item->path());
     require(!error, "cannot list the capture directory");
     return result;
 }

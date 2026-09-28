@@ -2,7 +2,6 @@
 #include "../backend/trace.h"
 #include <array>
 #include <cstdio>
-#include <cstring>
 #include <memory>
 #include <string>
 #include <unistd.h>

@@ -51,7 +51,9 @@ dlsslop::Result<void> run(const dlsslop::hip::Api& api, int device, const std::s
     dlsslop::NativeKernels kernels(api,r.stream);
     DLSSLOP_TRY(kernels.load(module));
     // The kernel reads a neighbourhood of the model output, so it cannot run in place.
-    if(dlsslop::gpu_preserve_color(kernels,g,r.original,r.raw,r.raw,1)) return dlsslop::fail("GPU correction accepted an in-place output");
+    if(const auto in_place=dlsslop::gpu_preserve_color(kernels,g,r.original,r.raw,r.raw,1);
+       in_place || in_place.error().what.find("distinct input and output")==std::string::npos)
+        return dlsslop::fail("GPU correction accepted an in-place output");
     for(unsigned reference=0;reference<2;++reference) {
         if(reference) {
             // Each apply reads the caller's reference as it is when the kernel runs.
@@ -115,12 +117,20 @@ int main(int argc,char** argv)
     const auto loaded=dlsslop::hip::load();
     if(!loaded) {std::fprintf(stderr,"SKIP: %s\n",loaded.error().what.c_str());return 77;}
     const auto& api=*loaded;
+    // A runtime that loads but fails is a failure; only an absent device skips.
     int devices=0;
-    if(api.hipInit(0) || api.hipGetDeviceCount(&devices) || !devices) {std::fprintf(stderr,"SKIP: no HIP devices\n");return 77;}
-    for(int i=0;device<0 && i<devices;++i) {
-        dlsslop::hip::DeviceProperties properties{};
-        if(!api.hipGetDevicePropertiesR0600(&properties,i) && std::string(properties.gcnArchName).find("gfx1201")==0) device=i;
-    }
+    const auto listed=[&]() -> dlsslop::Result<void> {
+        DLSSLOP_TRY(api.check(api.hipInit(0),"initialize HIP"));
+        DLSSLOP_TRY(api.check(api.hipGetDeviceCount(&devices),"enumerate devices"));
+        for(int i=0;device<0 && i<devices;++i) {
+            dlsslop::hip::DeviceProperties properties{};
+            DLSSLOP_TRY(api.check(api.hipGetDevicePropertiesR0600(&properties,i),"device properties"));
+            if(std::string(properties.gcnArchName).find("gfx1201")==0) device=i;
+        }
+        return {};
+    }();
+    if(!listed) {std::fprintf(stderr,"%s\n",listed.error().what.c_str());return 1;}
+    if(!devices) {std::fprintf(stderr,"SKIP: no HIP devices\n");return 77;}
     if(device<0) {std::fprintf(stderr,"SKIP: no gfx1201 device\n");return 77;}
     const auto result=run(api,device,module);
     if(!result) {std::fprintf(stderr,"%s\n",result.error().what.c_str());return 1;}

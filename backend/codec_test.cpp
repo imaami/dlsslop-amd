@@ -29,14 +29,15 @@ dlsslop::Geometry geometry(unsigned width, unsigned height, unsigned tier = 0)
 
 void check(const dlsslop::Result<void>& result, const char* what)
 {
-    if (!result) std::fprintf(stderr, "%s: %s\n", what, result.error().what.c_str());
-    require(bool(result), what);
+    if (result) return;
+    std::fprintf(stderr, "codec test failed: %s: %s\n", what, result.error().what.c_str());
+    std::exit(1);
 }
 
 // A rejected frame, not a worker fault.
 bool rejected(const dlsslop::Result<void>& result) { return !result && result.error().rejected; }
-// A worker fault.
-bool failed(const dlsslop::Result<void>& result) { return !result && !result.error().rejected; }
+// A worker fault, as the invalid_argument and runtime_error it replaced.
+template <class T> bool failed(const dlsslop::Result<T>& result) { return !result && !result.error().rejected; }
 
 std::vector<float> identity_neural(const std::vector<float>& rgba)
 {
@@ -49,7 +50,7 @@ std::vector<float> identity_neural(const std::vector<float>& rgba)
 
 void expect_invalid(unsigned width, unsigned height, unsigned tier)
 {
-    require(!dlsslop::geometry(width, height, tier), "invalid geometry accepted");
+    require(failed(dlsslop::geometry(width, height, tier)), "invalid geometry accepted");
 }
 
 void test_geometry()
@@ -76,7 +77,7 @@ void test_geometry()
     check(dlsslop::validate(e), "consistent geometry refused");
     auto skewed = e;
     ++skewed.fit_height;
-    require(!dlsslop::validate(skewed), "inconsistent geometry validated");
+    require(failed(dlsslop::validate(skewed)), "inconsistent geometry validated");
 }
 
 void test_input_contract_and_identity()
@@ -403,17 +404,15 @@ void test_feedback_unorm8()
 
 int main()
 {
-    {
-        test_geometry();
-        test_input_contract_and_identity();
-        test_fit_and_output();
-        test_area_downscale();
-        test_feedback_precision_and_padding();
-        test_feedback_invalid_samples();
-        test_decode_invalid_samples();
-        test_fp16_proxy();
-        test_feedback_unorm8();
-        std::puts("codec: geometry, SDR/FP16 transport, reflection, round-trip, fitting, area-weighted downscale, composition, invalid-sample rejection and 8/16-bit multi-pass feedback passed");
-    }
+    test_geometry();
+    test_input_contract_and_identity();
+    test_fit_and_output();
+    test_area_downscale();
+    test_feedback_precision_and_padding();
+    test_feedback_invalid_samples();
+    test_decode_invalid_samples();
+    test_fp16_proxy();
+    test_feedback_unorm8();
+    std::puts("codec: geometry, SDR/FP16 transport, reflection, round-trip, fitting, area-weighted downscale, composition, invalid-sample rejection and 8/16-bit multi-pass feedback passed");
     return EXIT_SUCCESS;
 }
