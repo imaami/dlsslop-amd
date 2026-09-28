@@ -1698,7 +1698,7 @@ index 0941c93..b544124 100644
      // present only because Vulkan will not accept an unwritten binding.
      VkImage _dummyImage = VK_NULL_HANDLE;
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..2bbce33 100644
+index 4b37520..f1f8ed1 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -2441,11 +2441,172 @@ index 4b37520..2bbce33 100644
      return true;
  }
  
-@@ -1383,30 +1685,191 @@ static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
+@@ -1383,43 +1685,221 @@ static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
      return false;
  }
  
 -// Returns true if the swapchain image now holds the composed frame.
++// A leg of the present path: its command buffer begun, then ended and submitted, and its fence
++// waited on and reset.
++static bool BeginLeg(DeviceChain* dc, VkCommandBuffer cb) {
++    static constexpr VkCommandBufferBeginInfo kOnce{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr,
++                                                     VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, nullptr };
++    return NoteVk(dc, dc->vkBeginCommandBuffer(cb, &kOnce), "vkBeginCommandBuffer");
++}
++
++// A fence wait does not make device writes visible to the host, and the host reads what the legs
++// copy out: the proxy, the meter mirror and the capture pair.
++static bool SubmitLeg(DeviceChain* dc, VkQueue queue, const VkSubmitInfo& si, VkFence fence, bool* waitsConsumed) {
++    static constexpr VkMemoryBarrier kToHost{ VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
++                                              VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT };
++    VkCommandBuffer cb = si.pCommandBuffers[0];
++    dc->vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &kToHost,
++                             0, nullptr, 0, nullptr);
++    if (!NoteVk(dc, dc->vkEndCommandBuffer(cb), "vkEndCommandBuffer")) return false;
++    if (!NoteVk(dc, dc->vkQueueSubmit(queue, 1, &si, fence), "vkQueueSubmit")) return false;
++    if (waitsConsumed && si.waitSemaphoreCount != 0) *waitsConsumed = true;
++    return true;
++}
++
++static bool WaitLeg(DeviceChain* dc, VkFence fence) {
++    if (!NoteVk(dc, dc->vkWaitForFences(dc->self, 1, &fence, VK_TRUE, UINT64_MAX), "vkWaitForFences"))
++        return false;
++    dc->vkResetFences(dc->self, 1, &fence);
++    return true;
++}
++
++// Leg 2 done: the command buffer and the composed surfaces are free again, and the capture pair it
++// copied out is written.
++static bool CollectLeg2(DeviceChain* dc, SwapchainState& sc) {
++    if (!WaitLeg(dc, sc.fenceLeg2)) return false;
++    sc.leg2Pending = false;
++    sc.comp->WriteCapturedFrame();
++    return true;
++}
++
++// A composed frame, for the controllers: MS is the time the layer took over it.
++static void PublishFrame(DeviceChain* dc, const SwapchainState& sc, double ms) {
++    ShmHeader* const hdr = dc->shm.hdr;
++    if (!hdr) return;
++    ShmStore64(hdr->layerFramesLo, hdr->layerFramesHi, ++dc->framesComposed);
++    hdr->layerWidth.store(sc.width);
++    hdr->layerHeight.store(sc.height);
++    hdr->layerFormat.store(uint32_t(sc.format));
++    hdr->layerCompositionUp.store(1);
++    hdr->layerPid.store(uint32_t(getpid()));
++    hdr->layerMsBits.store(FloatToBits(float(ms)));
++    hdr->layerMeasuredWhiteBits.store(FloatToBits(sc.comp->MeasuredWhitePoint()));
++    hdr->layerHeartbeat.fetch_add(1);
++}
++
++static void NetworkLog(const char* line) { Log("[network] %s", line); }
++
++// The in-layer network's state in the channel's layer reason, for the controllers: WHAT, DETAIL and
++// AFTER, stored when it changes and logged when it is news. Unchanged, it allocates nothing.
++static void NetworkReason(DeviceChain* dc, const char* what, const char* detail = "", const char* after = "") {
++    std::string& reason = dc->networkReason;
++    const size_t a = std::strlen(what), b = std::strlen(detail);
++    if (reason.size() == a + b + std::strlen(after) && !reason.compare(0, a, what) &&
++        !reason.compare(a, b, detail) && !reason.compare(a + b, std::string::npos, after))
++        return;
++    reason.assign(what).append(detail).append(after);
++    Log("[layer] %s", reason.c_str());
++    if (dc->shm.hdr) ShmStoreString(dc->shm.hdr->layerReasonSeq, dc->shm.hdr->layerReason, kReasonBytes, reason.c_str());
++}
++
++// The network failed: frames go to dlsslopd from now on.
++static bool NetworkFailed(DeviceChain* dc) {
++    NetworkReason(dc, "in-layer network off: ", g_network.error(dc->inLayer), "; frames go to dlsslopd");
++    dc->inLayerOff = true;
++    return false;
++}
++
++// The network on DC's device, building through QUEUE, SC's present queue; null, with the reason
++// published, when it does not open.
++static DlsslopNetwork* OpenNetwork(DeviceChain* dc, const SwapchainState& sc, VkQueue queue) {
++    static const bool loaded = [] {
++        const std::string self = LayerObjectPath();
++        return g_network.Load((self.substr(0, self.rfind('/') + 1) + "libdlsslop-network.so").c_str());
++    }();
++    if (!loaded) {
++        NetworkReason(dc, "in-layer network off, module unavailable: ", g_network.failure.c_str(),
++                      "; frames go to dlsslopd");
++        return nullptr;
++    }
++    DlsslopNetworkDevice device{};
++    device.instance = dc->instance->self;
++    device.physical = dc->physical;
++    device.device = dc->self;
++    device.queue = queue;
++    device.family = sc.family;
++    device.lockQueue = [](void* context) { static_cast<DeviceChain*>(context)->networkSubmit.lock(); };
++    device.unlockQueue = [](void* context) { static_cast<DeviceChain*>(context)->networkSubmit.unlock(); };
++    device.context = dc;
++    device.physicalDispatch = dc->instance->next_gipa;
++    dc->instance->vkGetPhysicalDeviceMemoryProperties(dc->physical, &device.memory);
++    device.log = NetworkLog;
++    DlsslopNetwork* network = g_network.open(&device);
++    if (network)
++        Log("[layer] in-layer network on the game's device: frames skip dlsslopd");
++    else
++        NetworkReason(dc, "in-layer network off: out of memory; frames go to dlsslopd");
++    return network;
++}
++
++// Whether this frame goes through the in-layer network instead of dlsslopd: the device enabled it,
++// it has not failed, and it opens, which is tried once.
++static bool UseInLayerNetwork(DeviceChain* dc, const SwapchainState& sc, VkQueue queue) {
++    if (!dc->network || dc->inLayerOff) return false;
++    if (dc->inLayer) return true;
++    dc->inLayer = OpenNetwork(dc, sc, queue);
++    dc->inLayerOff = !dc->inLayer;
++    return dc->inLayer;
++}
++
++// The frame through the in-layer network: capture, network and composition in one submission, SI
++// with the game's waits, and no CPU wait between them. False presents the game's own frame: while
++// the network builds, for a rejected setting, or once it fails, after which frames go to dlsslopd.
++static bool ProcessInLayer(DeviceChain* dc, SwapchainState& sc, VkQueue queue, uint32_t index,
++                           const dlssnr::FrameSettings& fs, VkSubmitInfo& si, bool* waitsConsumed, double t0) {
++    // The previous frame's meter, whose fence the frame waited for.
++    sc.comp->ConsumeMeter();
++    switch (g_network.prepare(dc->inLayer, dc->shm.hdr, sc.comp->ModelWidth(), sc.comp->ModelHeight(),
++                              sc.comp->HdrProxyActive())) {
++    case kDlsslopNetworkReady:
++        NetworkReason(dc, "in-layer network running");
++        break;
++    case kDlsslopNetworkBuilding:
++        NetworkReason(dc, "in-layer network building; the game presents its own frames");
++        return false;
++    case kDlsslopNetworkRejected:
++        NetworkReason(dc, "in-layer network: ", g_network.error(dc->inLayer));
++        return false;
++    default:
++        return NetworkFailed(dc);
++    }
++    VkCommandBuffer cb = sc.cb;
++    if (!BeginLeg(dc, cb)) return false;
++    const auto abandon = [&] {
++        dc->vkEndCommandBuffer(cb);
++        return false;
++    };
++    if (!sc.comp->RecordCapture(cb, sc.images[index], fs)) return abandon();
++    if (g_network.record(dc->inLayer, cb, sc.comp->ProxyBuffer(), sc.comp->AnswerBuffer(), sc.family,
++                         sc.comp->TransportExported()) != kDlsslopNetworkReady) {
++        NetworkFailed(dc);
++        return abandon();
++    }
++    sc.comp->MarkModelFrame();
++    if (!sc.comp->RecordCompose(cb, sc.images[index], fs)) return abandon();
++    si.signalSemaphoreCount = 1;
++    si.pSignalSemaphores = &sc.leg2Done[index];
++    if (!SubmitLeg(dc, queue, si, sc.fenceLeg2, waitsConsumed)) return false;
++    sc.leg2Pending = true;
++    if (sc.comp->CaptureRecorded()) CollectLeg2(dc, sc);
++    PublishFrame(dc, sc, NowMs() - t0);
++    return true;
++}
++
 +// Returns true if the swapchain image will hold the composed frame: leg 2 was submitted and signals
 +// sc.leg2Done[index], which the present must wait on.
  //
@@ -2465,142 +2626,6 @@ index 4b37520..2bbce33 100644
 +// handed to vkQueuePresentKHR again; the caller presents with the composed image's semaphore or none.
  //
  // Every path out leaves the swapchain image in PRESENT_SRC_KHR, including the ones that give up.
-+static void NetworkLog(const char* line) { Log("[network] %s", line); }
-+
-+// The in-layer network's state in the channel's layer reason, for the
-+// controllers; stored when it changes, and logged when it is news.
-+static void NetworkReason(DeviceChain* dc, const std::string& reason) {
-+    if (reason == dc->networkReason) return;
-+    dc->networkReason = reason;
-+    Log("[layer] %s", reason.c_str());
-+    if (dc->shm.hdr) ShmStoreString(dc->shm.hdr->layerReasonSeq, dc->shm.hdr->layerReason, kReasonBytes, reason.c_str());
-+}
-+
-+// Whether this frame goes through the in-layer network instead of dlsslopd:
-+// the device enabled it, it has not failed, and it opens on this device.
-+static bool UseInLayerNetwork(DeviceChain* dc, SwapchainState& sc, VkQueue queue) {
-+    if (!dc->network || dc->inLayerOff) return false;
-+    if (dc->inLayer) return true;
-+    static std::string unavailable;
-+    static const bool loaded = [] {
-+        const std::string self = LayerObjectPath();
-+        const std::string path = self.substr(0, self.rfind('/') + 1) + "libdlsslop-network.so";
-+        if (g_network.Load(path.c_str())) return true;
-+        const char* why = dlerror();
-+        unavailable = why ? why : path;
-+        return false;
-+    }();
-+    dc->inLayerOff = true; // Tried once: it stays off unless it opens now.
-+    if (!loaded) {
-+        NetworkReason(dc, "in-layer network off, module unavailable: " + unavailable + "; frames go to dlsslopd");
-+        return false;
-+    }
-+    if (!dc->instance || !dc->instance->vkGetPhysicalDeviceMemoryProperties) return false;
-+    DlsslopNetworkDevice device{};
-+    device.instance = dc->instance->self;
-+    device.physical = dc->physical;
-+    device.device = dc->self;
-+    device.queue = queue;
-+    device.family = sc.family;
-+    device.lockQueue = [](void* context) { static_cast<DeviceChain*>(context)->networkSubmit.lock(); };
-+    device.unlockQueue = [](void* context) { static_cast<DeviceChain*>(context)->networkSubmit.unlock(); };
-+    device.context = dc;
-+    device.physicalDispatch = dc->instance->next_gipa;
-+    dc->instance->vkGetPhysicalDeviceMemoryProperties(dc->physical, &device.memory);
-+    device.log = NetworkLog;
-+    dc->inLayer = g_network.open(&device);
-+    if (!dc->inLayer) {
-+        NetworkReason(dc, "in-layer network off: out of memory; frames go to dlsslopd");
-+        return false;
-+    }
-+    dc->inLayerOff = false;
-+    Log("[layer] in-layer network on the game's device: frames skip dlsslopd");
-+    return true;
-+}
-+
-+// The frame through the in-layer network: capture, network and composition in
-+// one submission, with no CPU wait between them. False presents the game's own
-+// frame: while the network builds, for a rejected setting, or once it fails,
-+// after which frames go to dlsslopd.
-+static bool ProcessInLayer(DeviceChain* dc, SwapchainState& sc, VkQueue queue, uint32_t index,
-+                           const dlssnr::FrameSettings& fs, uint32_t waitCount,
-+                           const VkSemaphore* waitSemaphores, bool* waitsConsumed, double t0) {
-+    ShmHeader* const hdr = dc->shm.hdr;
-+    // The previous frame's meter, whose fence the frame waited for.
-+    sc.comp->ConsumeMeter();
-+    switch (g_network.prepare(dc->inLayer, hdr, sc.comp->ModelWidth(), sc.comp->ModelHeight(),
-+                              sc.comp->HdrProxyActive())) {
-+    case kDlsslopNetworkReady:
-+        NetworkReason(dc, "in-layer network running");
-+        break;
-+    case kDlsslopNetworkBuilding:
-+        NetworkReason(dc, "in-layer network building; the game presents its own frames");
-+        return false;
-+    case kDlsslopNetworkRejected:
-+        NetworkReason(dc, std::string("in-layer network: ") + g_network.error(dc->inLayer));
-+        return false;
-+    default:
-+        NetworkReason(dc, std::string("in-layer network off: ") + g_network.error(dc->inLayer) +
-+                              "; frames go to dlsslopd");
-+        dc->inLayerOff = true;
-+        return false;
-+    }
-+    VkCommandBuffer cb = sc.cb;
-+    VkCommandBufferBeginInfo bi{};
-+    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-+    if (!NoteVk(dc, dc->vkBeginCommandBuffer(cb, &bi), "vkBeginCommandBuffer")) return false;
-+    const auto abandon = [&] {
-+        dc->vkEndCommandBuffer(cb);
-+        return false;
-+    };
-+    if (!sc.comp->RecordCapture(cb, sc.images[index], fs)) return abandon();
-+    if (g_network.record(dc->inLayer, cb, sc.comp->ProxyBuffer(), sc.comp->AnswerBuffer(), sc.family,
-+                         sc.comp->TransportExported()) != kDlsslopNetworkReady) {
-+        NetworkReason(dc, std::string("in-layer network off: ") + g_network.error(dc->inLayer) +
-+                              "; frames go to dlsslopd");
-+        dc->inLayerOff = true;
-+        return abandon();
-+    }
-+    sc.comp->MarkModelFrame();
-+    if (!sc.comp->RecordCompose(cb, sc.images[index], fs)) return abandon();
-+    // The host reads the capture pair and the meter mirror after the fence.
-+    static constexpr VkMemoryBarrier kToHost{ VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
-+                                              VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT };
-+    dc->vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &kToHost,
-+                             0, nullptr, 0, nullptr);
-+    if (!NoteVk(dc, dc->vkEndCommandBuffer(cb), "vkEndCommandBuffer")) return false;
-+    if (sc.waitStages.size() < waitCount) sc.waitStages.resize(waitCount, VK_PIPELINE_STAGE_TRANSFER_BIT);
-+    VkSubmitInfo si{};
-+    si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-+    si.waitSemaphoreCount = waitCount;
-+    si.pWaitSemaphores = waitCount ? waitSemaphores : nullptr;
-+    si.pWaitDstStageMask = waitCount ? sc.waitStages.data() : nullptr;
-+    si.commandBufferCount = 1;
-+    si.pCommandBuffers = &cb;
-+    si.signalSemaphoreCount = 1;
-+    si.pSignalSemaphores = &sc.leg2Done[index];
-+    if (!NoteVk(dc, dc->vkQueueSubmit(queue, 1, &si, sc.fenceLeg2), "vkQueueSubmit")) return false;
-+    if (waitsConsumed && waitCount) *waitsConsumed = true;
-+    sc.leg2Pending = true;
-+    if (sc.comp->CaptureRecorded() &&
-+        NoteVk(dc, dc->vkWaitForFences(dc->self, 1, &sc.fenceLeg2, VK_TRUE, UINT64_MAX), "vkWaitForFences")) {
-+        dc->vkResetFences(dc->self, 1, &sc.fenceLeg2);
-+        sc.leg2Pending = false;
-+        sc.comp->WriteCapturedFrame();
-+    }
-+    ShmStore64(hdr->layerFramesLo, hdr->layerFramesHi, ++dc->framesComposed);
-+    hdr->layerWidth.store(sc.width);
-+    hdr->layerHeight.store(sc.height);
-+    hdr->layerFormat.store(uint32_t(sc.format));
-+    hdr->layerCompositionUp.store(1);
-+    hdr->layerPid.store(uint32_t(getpid()));
-+    hdr->layerMsBits.store(FloatToBits(float(NowMs() - t0)));
-+    hdr->layerMeasuredWhiteBits.store(FloatToBits(sc.comp->MeasuredWhitePoint()));
-+    hdr->layerHeartbeat.fetch_add(1);
-+    return true;
-+}
-+
  static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
 -                            VkImage swapchainImage, uint32_t waitCount,
 +                            uint32_t index, uint32_t waitCount,
@@ -2608,6 +2633,7 @@ index 4b37520..2bbce33 100644
                              bool* waitsConsumed) {
      if (waitsConsumed) *waitsConsumed = false;
      if (!sc.comp) return false;
+-    VkDevice d = dc->self;
 +    NativeFrameGuard producer(dc->shm);
 +    if (!producer) return false;
 +    // A timed-out request still owns the sole input/output slot. Do this BEFORE
@@ -2632,7 +2658,6 @@ index 4b37520..2bbce33 100644
 +    } else if (hdr->seq_req.load(std::memory_order_acquire) != hdr->seq_resp.load(std::memory_order_acquire)) {
 +        return false;
 +    }
-     VkDevice d = dc->self;
      VkCommandBuffer cb = sc.cb;
      const bool time = TimeEnabled();
 -    const double t0 = time ? NowMs() : 0.0;
@@ -2640,7 +2665,21 @@ index 4b37520..2bbce33 100644
  
      // The previous frame's compose, if it is still running, must finish before anything here
      // touches the surfaces it reads or the command buffer it was recorded into. Waiting here rather
-@@ -1437,19 +1900,21 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+     // than at the end of that frame keeps the game thread out of the GPU's way for the whole of the
+     // helper's round trip. The capture pair that compose recorded lands with it.
+-    if (sc.leg2Pending) {
+-        if (!NoteVk(dc, dc->vkWaitForFences(d, 1, &sc.fenceLeg2, VK_TRUE, UINT64_MAX),
+-                    "vkWaitForFences(leg2)"))
+-            return false;
+-        dc->vkResetFences(d, 1, &sc.fenceLeg2);
+-        sc.leg2Pending = false;
+-        sc.comp->WriteCapturedFrame();
+-    }
++    if (sc.leg2Pending && !CollectLeg2(dc, sc)) return false;
+ 
+     dlssnr::FrameSettings fs = dlssnr::FrameSettings::Read(dc->shm.hdr);
+     // A repaint holds the captured frame, whatever the setting says.
+@@ -1437,19 +1917,21 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // frame on the 8-bit path it has always used. hdrActive doubles as the echo the helper reads, so
      // it builds the float images only for a layer that has said it will feed them.
      const uint32_t hdrMode = dc->shm.hdr ? dc->shm.hdr->hdrMode.load() : kHdrAuto;
@@ -2669,7 +2708,7 @@ index 4b37520..2bbce33 100644
          uint32_t mw = 0, mh = 0;
          dlssnr::Composition::ModelExtent(sc.width, sc.height, fs, mw, mh);
          if (ShmMapFrames(dc->shm, size_t(mw) * mh * (hdrProxy ? 8 : 4)))
-@@ -1468,7 +1933,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1468,7 +1950,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // or imported leaves that direction on the shared-memory transport, which is the arrangement
      // that shipped before. The flags written below say which surfaces this frame's bytes travel
      // through, and the helper honours them on exactly the frame they were set for.
@@ -2678,7 +2717,7 @@ index 4b37520..2bbce33 100644
  
      if (!sc.comp->Prepare(sc.width, sc.height, sc.format, fs, linearHdr, hdrProxy, hdrTransfer)) {
          Log("[layer] composition cannot run here: %s", sc.comp->Reason());
-@@ -1533,9 +1998,10 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1533,14 +2015,12 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
  
      // A capture is asked for by writing a frame count into the header; taking it clears the request,
      // so one press produces one run rather than one per frame for as long as nobody clears it.
@@ -2690,26 +2729,25 @@ index 4b37520..2bbce33 100644
 +            sc.comp->RequestCapture(std::min<uint32_t>(frames, 64), fs.controlSeq);
      }
  
-     VkCommandBufferBeginInfo bi{};
-@@ -1559,7 +2025,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+-    VkCommandBufferBeginInfo bi{};
+-    bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+-    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+     VkSubmitInfo si{};
+     si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+     si.commandBufferCount = 1;
+@@ -1559,68 +2039,79 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          si.pWaitDstStageMask = nullptr;
      };
  
-+    // A fence wait does not make device writes visible to the host, and the host reads what both
-+    // legs copy out: the proxy, the meter mirror and the capture pair.
-+    static constexpr VkMemoryBarrier kToHost{ VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
-+                                              VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT };
-     const auto endAndSubmit = [&](VkFence fence) {
-+        dc->vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &kToHost,
-+                                 0, nullptr, 0, nullptr);
-         if (!NoteVk(dc, dc->vkEndCommandBuffer(cb), "vkEndCommandBuffer")) return false;
-         if (!NoteVk(dc, dc->vkQueueSubmit(queue, 1, &si, fence), "vkQueueSubmit")) return false;
-         if (waitsConsumed && si.waitSemaphoreCount != 0) *waitsConsumed = true;
-@@ -1572,9 +2044,34 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
-         return true;
-     };
- 
-+    if (inLayer) return ProcessInLayer(dc, sc, queue, index, fs, waitCount, waitSemaphores, waitsConsumed, t0);
+-    const auto endAndSubmit = [&](VkFence fence) {
+-        if (!NoteVk(dc, dc->vkEndCommandBuffer(cb), "vkEndCommandBuffer")) return false;
+-        if (!NoteVk(dc, dc->vkQueueSubmit(queue, 1, &si, fence), "vkQueueSubmit")) return false;
+-        if (waitsConsumed && si.waitSemaphoreCount != 0) *waitsConsumed = true;
+-        return true;
+-    };
+-    const auto waitAndReset = [&](VkFence fence) {
+-        if (!NoteVk(dc, dc->vkWaitForFences(d, 1, &fence, VK_TRUE, UINT64_MAX), "vkWaitForFences"))
++    if (inLayer) return ProcessInLayer(dc, sc, queue, index, fs, si, waitsConsumed, t0);
 +    // The daemon imports an exported pair once, before any frame names it. No frame runs on a
 +    // pending offer: until the answer comes, present the game's own. A refusal stages this
 +    // swapchain through host memory from then on; a daemon that stops serving first leaves the
@@ -2725,7 +2763,10 @@ index 4b37520..2bbce33 100644
 +            sc.comp->DisableExport();
 +            break;
 +        case Offer::kWaiting:
-+            return false;
+             return false;
+-        dc->vkResetFences(d, 1, &fence);
+-        return true;
+-    };
 +        case Offer::kLater:
 +            sc.comp->WithdrawOffer();
 +            Log("[shm] daemon stopped before it took the transport offer; offering it again later");
@@ -2733,15 +2774,24 @@ index 4b37520..2bbce33 100644
 +        }
 +    }
 +    const uint32_t transportGen = sc.comp->TransportGeneration();
-+
+ 
      // ---- leg 1: the frame the model is shown ----
-     if (!NoteVk(dc, dc->vkBeginCommandBuffer(cb, &bi), "vkBeginCommandBuffer")) return false;
+-    if (!NoteVk(dc, dc->vkBeginCommandBuffer(cb, &bi), "vkBeginCommandBuffer")) return false;
 -    if (!sc.comp->RecordCapture(cb, swapchainImage, fs)) {
++    if (!BeginLeg(dc, cb)) return false;
 +    if (!sc.comp->RecordCapture(cb, sc.images[index], fs)) {
          dc->vkEndCommandBuffer(cb);
          return false;
      }
-@@ -1588,27 +2085,40 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+     // This one fence is real: the proxy the helper is about to read is written by these commands,
+     // and the sequence number must not outrun the pixels it announces.
+-    if (!endAndSubmit(sc.fenceLeg1)) return false;
+-    if (!waitAndReset(sc.fenceLeg1)) return false;
++    if (!SubmitLeg(dc, queue, si, sc.fenceLeg1, waitsConsumed)) return false;
++    if (!WaitLeg(dc, sc.fenceLeg1)) return false;
+     dropWaits();
+     sc.comp->ConsumeMeter();
+     const double tCapture = time ? NowMs() : 0.0;
  
      // ---- the round trip ----
      if (!ShmProcessFrame(dc->shm, sc.comp->ModelWidth(), sc.comp->ModelHeight(), sc.comp->ModelBytes(),
@@ -2760,8 +2810,9 @@ index 4b37520..2bbce33 100644
      const double tHelper = time ? NowMs() : 0.0;
  
      // ---- leg 2: the answer, composed back ----
-     if (!NoteVk(dc, dc->vkBeginCommandBuffer(cb, &bi), "vkBeginCommandBuffer")) return false;
+-    if (!NoteVk(dc, dc->vkBeginCommandBuffer(cb, &bi), "vkBeginCommandBuffer")) return false;
 -    if (!sc.comp->RecordCompose(cb, swapchainImage, fs)) {
++    if (!BeginLeg(dc, cb)) return false;
 +    if (!sc.comp->RecordCompose(cb, sc.images[index], fs)) {
          dc->vkEndCommandBuffer(cb);
          return false;
@@ -2769,27 +2820,38 @@ index 4b37520..2bbce33 100644
 -    // No wait. The present that follows runs on this same queue behind these commands, so the image
 -    // is composed before it is shown without the CPU ever parking here; the fence is collected at
 -    // the top of the next frame, where the reused surfaces actually need it.
+-    if (!endAndSubmit(sc.fenceLeg2)) return false;
 +    // No CPU wait. The present waits on this semaphore, so the image is composed before it is shown
 +    // without the CPU ever parking here; the fence is collected at the top of the next frame, where
 +    // the reused surfaces actually need it.
 +    si.signalSemaphoreCount = 1;
 +    si.pSignalSemaphores = &sc.leg2Done[index];
-     if (!endAndSubmit(sc.fenceLeg2)) return false;
++    if (!SubmitLeg(dc, queue, si, sc.fenceLeg2, waitsConsumed)) return false;
      sc.leg2Pending = true;
 -    const double tReturn = time ? NowMs() : 0.0;
+-
+-    if (dc->shm.hdr) {
+-        ShmStore64(dc->shm.hdr->layerFramesLo, dc->shm.hdr->layerFramesHi, ++dc->framesComposed);
+-        dc->shm.hdr->layerWidth.store(sc.width);
+-        dc->shm.hdr->layerHeight.store(sc.height);
+-        dc->shm.hdr->layerFormat.store(uint32_t(sc.format));
+-        dc->shm.hdr->layerCompositionUp.store(1);
+-        dc->shm.hdr->layerPid.store(uint32_t(getpid()));
+-        dc->shm.hdr->layerMsBits.store(FloatToBits(float(tReturn - t0)));
+-        dc->shm.hdr->layerMeasuredWhiteBits.store(FloatToBits(sc.comp->MeasuredWhitePoint()));
+-        dc->shm.hdr->layerHeartbeat.fetch_add(1);
+-    }
 +    // A diagnostic request must finish even if a paused application presents
 +    // no subsequent frame. Frames without a recorded pair keep the asynchronous
 +    // leg-2 path, including every frame of a capture whose buffer failed.
 +    // The semaphore is signalled either way, so a failed wait still presents.
-+    if (sc.comp->CaptureRecorded() && waitAndReset(sc.fenceLeg2)) {
-+        sc.leg2Pending = false;
-+        sc.comp->WriteCapturedFrame();
-+    }
++    if (sc.comp->CaptureRecorded()) CollectLeg2(dc, sc);
 +    const double tReturn = NowMs();
++    PublishFrame(dc, sc, tReturn - t0);
  
-     if (dc->shm.hdr) {
-         ShmStore64(dc->shm.hdr->layerFramesLo, dc->shm.hdr->layerFramesHi, ++dc->framesComposed);
-@@ -1650,11 +2160,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+     if (time) {
+         static int frameNo = 0;
+@@ -1650,11 +2141,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
      dc->lastPresentMs.store(NowMs(), std::memory_order_relaxed);
  
      // Whether this call's wait semaphores have already been consumed by a submit of ours. They are
@@ -2804,7 +2866,7 @@ index 4b37520..2bbce33 100644
  
      // Held from here to the present at the end, alongside Hook_QueueSubmit{,2}. Vulkan requires
      // external synchronization for every operation on a queue; the repaint uses the application's
-@@ -1679,6 +2191,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1679,6 +2172,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
                  if (k < 3) Log("[layer] present: swapchain %p is not primary", (void*)pPresentInfo->pSwapchains[i]);
                  continue;
              }
@@ -2814,7 +2876,7 @@ index 4b37520..2bbce33 100644
              sc.queue = queue;
              if (!sc.ready && !dc->shm.dead) {
                  if (!CreateResources(dc, sc, family)) {
-@@ -1700,11 +2215,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1700,11 +2196,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
              }
              const uint32_t waitCount = waitsConsumed ? 0u : pPresentInfo->waitSemaphoreCount;
              bool submittedWaits = false;
@@ -2829,7 +2891,7 @@ index 4b37520..2bbce33 100644
              if (VerboseEnabled()) {
                  Log("[present] swapchain=%p image=%u seq=%u composed=%d",
                      (void*)pPresentInfo->pSwapchains[i], pPresentInfo->pImageIndices[i],
-@@ -1723,13 +2239,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1723,13 +2220,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
          }
      }
  
@@ -2846,7 +2908,7 @@ index 4b37520..2bbce33 100644
      return dc->vkQueuePresentKHR(queue, &pi);
  }
  
-@@ -1766,6 +2282,31 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueWaitIdle(VkQueue queue) {
+@@ -1766,6 +2263,31 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueWaitIdle(VkQueue queue) {
      return dc->vkQueueWaitIdle(queue);
  }
  
@@ -2878,7 +2940,7 @@ index 4b37520..2bbce33 100644
  static VKAPI_ATTR VkResult VKAPI_CALL Hook_AcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain,
                                                                  uint64_t timeout, VkSemaphore semaphore,
                                                                  VkFence fence, uint32_t* pImageIndex) {
-@@ -1793,11 +2334,17 @@ static PFN_vkVoidFunction LookupHook(const char* n) {
+@@ -1793,11 +2315,17 @@ static PFN_vkVoidFunction LookupHook(const char* n) {
      if (!std::strcmp(n, "vkGetDeviceQueue2")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue2;
      if (!std::strcmp(n, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)Hook_CreateSwapchainKHR;
      if (!std::strcmp(n, "vkDestroySwapchainKHR")) return (PFN_vkVoidFunction)Hook_DestroySwapchainKHR;
@@ -2897,7 +2959,7 @@ index 4b37520..2bbce33 100644
      return nullptr;
  }
  
-@@ -1807,11 +2354,17 @@ static PFN_vkVoidFunction LookupDeviceHook(const char* n) {
+@@ -1807,11 +2335,17 @@ static PFN_vkVoidFunction LookupDeviceHook(const char* n) {
      if (!std::strcmp(n, "vkGetDeviceQueue2")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue2;
      if (!std::strcmp(n, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)Hook_CreateSwapchainKHR;
      if (!std::strcmp(n, "vkDestroySwapchainKHR")) return (PFN_vkVoidFunction)Hook_DestroySwapchainKHR;
@@ -2916,7 +2978,7 @@ index 4b37520..2bbce33 100644
      return nullptr;
  }
  
-@@ -1851,7 +2404,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
+@@ -1851,7 +2385,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
      if (*pCount < 1) { *pCount = 1; return VK_INCOMPLETE; }
      std::memset(pProperties, 0, sizeof(*pProperties));
      std::strncpy(pProperties->layerName, VK_LAYER_NAME, VK_MAX_EXTENSION_NAME_SIZE - 1);

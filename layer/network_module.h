@@ -8,6 +8,7 @@
 #include <vulkan/vulkan.h>
 #include <dlfcn.h>
 #include <cstdint>
+#include <string>
 
 struct ShmHeader;
 struct DlsslopNetwork;
@@ -73,19 +74,25 @@ struct NetworkModule {
     decltype(&dlsslop_network_record) record = nullptr;
     decltype(&dlsslop_network_error) error = nullptr;
     decltype(&dlsslop_network_close) close = nullptr;
+    // Why Load failed.
+    std::string failure;
 
-    // Loads the module at PATH, or explains why not in dlerror().
+    // Loads the module at PATH.
     bool Load(const char* path) {
         library = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-        if (!library) return false;
+        if (library) {
 #define FIND(field, name) field = reinterpret_cast<decltype(field)>(dlsym(library, #name))
-        FIND(open, dlsslop_network_open);
-        FIND(prepare, dlsslop_network_prepare);
-        FIND(record, dlsslop_network_record);
-        FIND(error, dlsslop_network_error);
-        FIND(close, dlsslop_network_close);
+            FIND(open, dlsslop_network_open);
+            FIND(prepare, dlsslop_network_prepare);
+            FIND(record, dlsslop_network_record);
+            FIND(error, dlsslop_network_error);
+            FIND(close, dlsslop_network_close);
 #undef FIND
-        return open && prepare && record && error && close;
+            if (open && prepare && record && error && close) return true;
+        }
+        const char* why = dlerror();
+        failure = why ? why : path;
+        return false;
     }
 };
 
