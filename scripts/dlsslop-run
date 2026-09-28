@@ -29,7 +29,7 @@ Options:
   -l, --log PATH   Layer log (default: ${DLSSNR_LOG:-${channel_default%/*}/layer.log}).
   -n, --layer-network
                    Run the network in the layer, on the game's device, for a
-                   Vulkan 1.3 game on a device that can; the worker remains
+                   Vulkan 1.3 game on a device that can; the daemon remains
                    its fallback (default: off; experimental).
   -h, --help       Show this help and exit (default: off).
   --              End launcher options (default: first COMMAND ends options).
