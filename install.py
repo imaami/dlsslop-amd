@@ -20,6 +20,8 @@ MODULE_NAMES = (
 )
 MODULE_DIRECTORY = "share/dlsslop-amd/HIP/gfx1201"
 LAYER_LIBRARY = "lib/dlsslop-amd/libVkLayer_DLSSLOP_amd.so"
+# The in-layer network, which the layer loads from beside itself on demand.
+NETWORK_LIBRARY = "lib/dlsslop-amd/libdlsslop-network.so"
 # Where the Vulkan loader finds it for a ~/.local or /usr/local prefix; the
 # launcher adds this directory to the loader's search for any other prefix.
 LAYER_MANIFEST = "share/vulkan/implicit_layer.d/VK_LAYER_LOCAL_dlsslop_amd.json"
@@ -38,6 +40,7 @@ NATIVE_SOURCES = {
     "bin/dlsslopctl": "dlssnr-shmctl",
     "bin/dlsslop-gui": "gui/dlsslop-gui",
     LAYER_LIBRARY: "libVkLayer_DLSSLOP_amd.so",
+    NETWORK_LIBRARY: "libdlsslop-network.so",
 }
 # Destination: (source, required first line, installed mode).
 SCRIPT_SOURCES = {
@@ -137,9 +140,9 @@ def runtime_files(root, build):
     files = {}
     for destination, source in NATIVE_SOURCES.items():
         path = build / source
-        library = destination == LAYER_LIBRARY
+        library = destination in (LAYER_LIBRARY, NETWORK_LIBRARY)
         check_elf(path, shared=library)
-        # The Vulkan loader maps the layer; nothing executes it.
+        # The Vulkan loader maps the layer, and the layer the network; nothing executes them.
         files[destination] = (path, 0o644 if library else 0o755)
     for destination, (source, first_line, mode) in SCRIPT_SOURCES.items():
         path = root / source

@@ -82,6 +82,9 @@ def installed(prefix, runtime, env):
         assert target.read_bytes() == source.read_bytes(), name
         assert target.stat().st_mode & 0o777 == mode, name
     assert (prefix / INSTALLER.LAYER_LIBRARY).stat().st_mode & 0o777 == 0o644, "the layer library is executable"
+    network = prefix / INSTALLER.NETWORK_LIBRARY
+    assert network.parent == (prefix / INSTALLER.LAYER_LIBRARY).parent, "the network is not beside the layer, which loads it"
+    assert network.stat().st_mode & 0o777 == 0o644, "the network library is executable"
     for name in ("dlsslopd", "dlsslopctl", "dlsslop-gui"):
         assert (prefix / "bin" / name).read_bytes().startswith(b"\x7fELF")
         run([prefix / "bin" / name], env)

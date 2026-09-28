@@ -142,7 +142,7 @@ target_compile_options(dlsslop-vknr PRIVATE -w -fexceptions -frtti)
 # inline function such as std::vector::reserve may come from a file built
 # without exceptions, and a catch around a call to it is then dropped as dead:
 # what the vendored code throws would end the daemon instead of being caught.
-set_target_properties(dlsslop-vknr PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
+set_target_properties(dlsslop-vknr PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF POSITION_INDEPENDENT_CODE ON)
 target_include_directories(dlsslop-vknr PUBLIC "${VKNR_ROOT}/src/core")
 target_link_libraries(dlsslop-vknr PUBLIC vulkan Threads::Threads)
 
@@ -154,9 +154,19 @@ set_target_properties(dlsslop-hip-vendor PROPERTIES CXX_STANDARD 20 INTERPROCEDU
 target_compile_options(dlsslop-hip-vendor PRIVATE -fexceptions -frtti -Wno-deprecated-declarations
     -Wno-misleading-indentation)
 add_library(dlsslop-nr-vendor OBJECT common/nr_vendor.cpp)
-set_target_properties(dlsslop-nr-vendor PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
+set_target_properties(dlsslop-nr-vendor PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF POSITION_INDEPENDENT_CODE ON)
 target_compile_options(dlsslop-nr-vendor PRIVATE -fexceptions -frtti)
 target_link_libraries(dlsslop-nr-vendor PUBLIC dlsslop-vknr)
+# The in-layer network, in a module beside the layer that loads it on demand
+# (layer/network_module.h): vulkan-nr and the libstdc++ it needs stay out of
+# the layer, which every game loads. It exports its C functions only.
+add_library(dlsslop-network MODULE layer/network_module.cpp common/network_recorder.cpp backend/processing.cpp
+    backend/paths.cpp backend/files.cpp)
+target_include_directories(dlsslop-network PRIVATE backend ${LAYER_ROOT}/common)
+target_link_libraries(dlsslop-network PRIVATE dlsslop-nr-vendor ${CMAKE_DL_LIBS})
+target_link_options(dlsslop-network PRIVATE -static-libstdc++ -static-libgcc -Wl,-Bsymbolic
+    "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/layer/network_module.map")
+add_dependencies(dlsslop-network vulkan-nr-shaders)
 # The worker uses a small, versioned HIP ABI loaded with dlopen. The build itself
 # deliberately does not require ROCm headers or a GPU; real inference does.
 add_executable(dlsslopd

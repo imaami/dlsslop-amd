@@ -1,0 +1,4 @@
+{
+    global: dlsslop_network_*;
+    local: *;
+};
