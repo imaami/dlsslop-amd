@@ -183,14 +183,16 @@ class Window final : public QWidget {
         activePath_ = path.constData();
         controls_->setEnabled(true);
         const auto reason = ShmLoadString(h->helperReasonSeq, h->helperReason, kReasonBytes);
+        const auto layer = ShmLoadString(h->layerReasonSeq, h->layerReason, kReasonBytes);
         status_->setPlainText(QString("Snapshot on refresh\n\nProtocol: %1\nWorker state: %2\nModel up: %3\nStop requested: %4\n"
             "Request / response: %5 / %6\nProxy: %7 × %8\nNeural raster limit: %9 × %10\n"
-            "Network: %11 ms\nUpload: %12 ms\nReadback: %13 ms\nReason: %14")
+            "Network: %11 ms\nUpload: %12 ms\nReadback: %13 ms\nReason: %14\nLayer: %15")
             .arg(h->version.load()).arg(h->helperState.load()).arg(h->modelUp.load()).arg(h->quit.load())
             .arg(h->seq_req.load()).arg(h->seq_resp.load()).arg(h->width.load()).arg(h->height.load())
             .arg(h->nativeModelMaxWidth.load()).arg(h->nativeModelMaxHeight.load())
             .arg(BitsToFloat(h->helperEvalMsBits.load())).arg(BitsToFloat(h->helperUploadMsBits.load()))
-            .arg(BitsToFloat(h->helperReadbackMsBits.load())).arg(QString::fromStdString(reason)));
+            .arg(BitsToFloat(h->helperReadbackMsBits.load())).arg(QString::fromStdString(reason))
+            .arg(QString::fromStdString(layer)));
         state_->setText("Channel connected • Changes apply live • Refresh to read changes made elsewhere");
     }
 
