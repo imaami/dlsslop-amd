@@ -3323,20 +3323,19 @@ index 5efa65c..9a87caa 100644
  
 diff --git a/vulkan-nr/shaders/passes/pass_stages.comp b/vulkan-nr/shaders/passes/pass_stages.comp
 new file mode 100644
-index 0000000..20e6ca8
+index 0000000..d383653
 --- /dev/null
 +++ b/vulkan-nr/shaders/passes/pass_stages.comp
-@@ -0,0 +1,50 @@
+@@ -0,0 +1,45 @@
 +#version 460
 +// dlsslop-amd: its stages after every pass (RuntimeConfig::pass_stages), with the
-+// math of its HIP backend (backend/tuning_math.h, backend/color_preserve_math.h).
-+// Mode 0 sharpens the pass's answer into the scratch image: the answer plus
-+// strength times its detail above a 3x3 binomial blur. Mode 1 writes the scratch
-+// back as the answer with strength times the chroma of its broad change from the
-+// frame the first pass saw removed: that change low-passed by the same blur, less
-+// its luma. While luma is in [0,1], the removal is shortened so that no channel
-+// leaves [0,1] or goes further outside it than the pass put it. The filter clamps
-+// to the picture, and strength 0 copies.
++// math of its HIP backend (backend/tuning_math.h, backend/color_preserve_math.h),
++// from the pass's answer into the target. Mode 0 sharpens: the answer plus
++// strength times its detail above a 3x3 binomial blur. Mode 1 removes strength
++// times the chroma of the answer's broad change from the frame the first pass
++// saw: that change low-passed by the same blur, less its luma. While luma is in
++// [0,1], the removal is shortened so that no channel leaves [0,1] or goes further
++// outside it than the pass put it. The filter clamps to the picture.
 +layout(local_size_x=8, local_size_y=8) in;
 +layout(set=0,binding=0,rgba32f) uniform readonly image2D source;
 +layout(set=0,binding=1) uniform sampler2D reference;
@@ -3349,10 +3348,6 @@ index 0000000..20e6ca8
 +    const ivec2 xy = ivec2(gl_GlobalInvocationID.xy);
 +    if (xy.x >= pc.width || xy.y >= pc.height) return;
 +    const vec4 model = imageLoad(source, xy);
-+    if (pc.strength == 0) {
-+        imageStore(target, xy, model);
-+        return;
-+    }
 +    const ivec2 last = ivec2(pc.width, pc.height) - 1;
 +    vec3 low = vec3(0);
 +    for (int dy = -1; dy <= 1; ++dy)
@@ -3378,7 +3373,7 @@ index 0000000..20e6ca8
 +    imageStore(target, xy, vec4(model.rgb - scale * delta, model.a));
 +}
 diff --git a/vulkan-nr/src/core/nr_runtime.cpp b/vulkan-nr/src/core/nr_runtime.cpp
-index b151242..338f865 100644
+index b151242..fe389dd 100644
 --- a/vulkan-nr/src/core/nr_runtime.cpp
 +++ b/vulkan-nr/src/core/nr_runtime.cpp
 @@ -20,6 +20,7 @@ void validate(const Controls& c) {
@@ -3389,29 +3384,31 @@ index b151242..338f865 100644
          c.style < 0 || c.style > 2 || c.passes < 1)
          throw std::invalid_argument("invalid NR controls");
  }
-@@ -279,6 +280,11 @@ struct Runtime::Impl {
+@@ -279,6 +280,12 @@ struct Runtime::Impl {
      int cascade_radius{4};
      nrvk::Context::Image lograt{}, cascade_tmp{}, lowpass{};
      nrvk::Kernel cascade_lograt, cascade_blur_h, cascade_blur_v, cascade_feed;
-+    // dlsslop-amd: RuntimeConfig::pass_stages. Sharpening writes the scratch and
-+    // anchoring writes it back as the answer, both with pass_stages.spv.
++    // dlsslop-amd: RuntimeConfig::pass_stages, pass_stages.spv. The first active
++    // stage writes the answer into the scratch, which then holds the answer, and
++    // a second writes it back; alpha_scratch restores the frame's alpha there.
 +    bool pass_stages{};
 +    nrvk::Context::Image stage_scratch{};
-+    nrvk::Kernel sharpen, anchor;
++    nrvk::Kernel to_scratch, from_scratch, alpha_scratch;
      std::vector<nrvk::Context::Image> history_store;
      // ---- what the pass costs, measured on the GPU ----------------------------
      //
-@@ -542,6 +548,9 @@ struct Runtime::Impl {
+@@ -542,6 +549,10 @@ struct Runtime::Impl {
          if (cascade_blur_h.device) cascade_blur_h.destroy();
          if (cascade_blur_v.device) cascade_blur_v.destroy();
          if (cascade_feed.device) cascade_feed.destroy();
 +        if (stage_scratch.handle) session.ctx.destroy(stage_scratch);
-+        if (sharpen.device) sharpen.destroy();
-+        if (anchor.device) anchor.destroy();
++        if (to_scratch.device) to_scratch.destroy();
++        if (from_scratch.device) from_scratch.destroy();
++        if (alpha_scratch.device) alpha_scratch.destroy();
          for (auto& h : history_store) session.ctx.destroy(h);
          for (auto& f : features) if (f.second.history.handle) session.ctx.destroy(f.second.history);
          for (auto& r : retiring) if (r.first.handle) session.ctx.destroy(r.first);
-@@ -665,13 +674,16 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+@@ -665,13 +676,16 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
      impl_->round_u8 = config.colour_format == VK_FORMAT_R8G8B8A8_UNORM || config.colour_format == VK_FORMAT_R8G8B8A8_SRGB ||
                        config.colour_format == VK_FORMAT_B8G8R8A8_UNORM || config.colour_format == VK_FORMAT_B8G8R8A8_SRGB;
      impl_->colour_format = config.colour_format;
@@ -3432,7 +3429,7 @@ index b151242..338f865 100644
      if (!std::isfinite(config.model_scale) || config.model_scale <= 0.f || config.model_scale > 1.f)
          throw std::invalid_argument("model_scale must be in (0, 1]");
      if (config.max_passes < 1 || config.max_passes > 16)
-@@ -752,11 +764,12 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+@@ -752,11 +766,12 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
          "--spv-dir", network_shaders.string(),
          "--host-boundary", arena_reuse() ? "--reuse" : "--no-reuse", "--source-width", std::to_string(mw),
          "--source-height", std::to_string(mh), "--accumulation", config.accumulation,
@@ -3447,7 +3444,7 @@ index b151242..338f865 100644
          if (!std::filesystem::is_regular_file(pack))
              throw std::runtime_error("missing " + pack.string() + " (run install.sh again)");
          arguments.push_back("--model-pack"); arguments.push_back(pack.string());
-@@ -794,7 +807,7 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+@@ -794,7 +809,7 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
          VkFormatProperties2 f2{VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2, &f3};
          vkGetPhysicalDeviceFormatProperties2(host.physical, unorm, &f2);
          impl_->direct_out = NR_DIRECT_OUT && NR_POST_ALPHA && impl_->direct_in && config.native_compose && store_matches_blit &&
@@ -3456,26 +3453,30 @@ index b151242..338f865 100644
                              (f3.optimalTilingFeatures & VK_FORMAT_FEATURE_2_STORAGE_WRITE_WITHOUT_FORMAT_BIT) &&
                              (f3.optimalTilingFeatures & VK_FORMAT_FEATURE_2_TRANSFER_SRC_BIT);
          nr::logf("[nr] input %s, write-back %s", impl_->direct_in ? "copied in the frame's format"
-@@ -853,6 +866,18 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+@@ -853,6 +868,22 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
                                         {&impl_->shown_keep, &impl_->lograt, &impl_->lowpass, &tex_in_storage});
          }
      }
 +    if (config.pass_stages) {
-+        if (impl_->scaled || config.linear_input || mask_config.width)
-+            throw std::invalid_argument("pass stages need model scale 1, display-encoded input and no control mask");
++        if (!config.native_compose || impl_->scaled || config.linear_input || mask_config.width ||
++            config.cascade_detail_only)
++            throw std::invalid_argument("pass stages need native compose, model scale 1, display-encoded input, "
++                                        "no control mask and no detail-only cascade");
 +        impl_->pass_stages = true;
 +        impl_->stage_scratch = s.ctx.image(mw, mh, VK_FORMAT_R32G32B32A32_SFLOAT, false);
 +        s.ctx.transition(impl_->stage_scratch, VK_IMAGE_LAYOUT_GENERAL);
 +        // What the first pass saw: tex_in is overwritten by every later pass.
 +        nrvk::Context::Image* first = config.max_passes > 1 ? &impl_->shown_keep : &s.tex_in;
 +        const std::string stages = (adapters / "pass_stages.spv").string();
-+        impl_->sharpen.create(s.ctx, stages, {}, 16, {&s.surf0, first, &impl_->stage_scratch});
-+        impl_->anchor.create(s.ctx, stages, {}, 16, {&impl_->stage_scratch, first, &s.surf0});
++        impl_->to_scratch.create(s.ctx, stages, {}, 16, {&s.surf0, first, &impl_->stage_scratch});
++        impl_->from_scratch.create(s.ctx, stages, {}, 16, {&impl_->stage_scratch, first, &s.surf0});
++        impl_->alpha_scratch.create(s.ctx, (adapters / "runtime_alpha.spv").string(), {}, 12,
++                                    {&impl_->stage_scratch, first});
 +    }
      // The alpha pass restores the frame's own alpha onto the answer: the answer
      // is full_out when scaled, and the frame's alpha lives wherever the frame
      // was kept.
-@@ -925,7 +950,8 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+@@ -925,7 +956,8 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
      if (temporal_config.enable) {
          auto& t = impl_->temporal;
          const auto shaders = std::filesystem::canonical(temporal_config.shaders.empty()
@@ -3485,26 +3486,87 @@ index b151242..338f865 100644
              : std::filesystem::path(temporal_config.shaders));
          require_variant_profile(shaders);
          const auto temporal_rel = shaders.lexically_relative(root);
-@@ -1675,6 +1701,17 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
+@@ -1260,7 +1292,7 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
+     const Impl::DirectSrc* ds = nullptr;
+     // post_alpha: native compose, one pass, scale 1, and no alpha pass - after
+     // the network only the write-back touches the frame.
+-    if (NR_DIRECT_SAMPLE && impl_->post_alpha && engine && temporal && !mask && passes == 1 &&
++    if (NR_DIRECT_SAMPLE && impl_->post_alpha && engine && temporal && !mask && passes == 1 && !impl_->pass_stages &&
+         impl_->temporal.pingpong && impl_->transfer != Transfer::Encoded &&
+         (frame.usage & VK_IMAGE_USAGE_SAMPLED_BIT) && frame.width == nw && frame.height == nh &&
+         (!engine->depth.image || (engine->depth.format == VK_FORMAT_R32_SFLOAT &&
+@@ -1579,6 +1611,7 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
+     // store[k] is copied into the bound history image before the pass and
+     // the model's write (surf1) copied back after it. With one pass the
+     // history round trip is the single copy it always was.
++    bool in_scratch = false;  // dlsslop-amd: the answer is in the stage scratch
+     for (uint32_t pass = 0; pass < passes; ++pass) {
+         if (pass > 0 && impl_->cascade_detail) {
+             // Detail only: the first pass's input with the previous pass's
+@@ -1603,7 +1636,8 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
+             compute_barrier(cmd);
+             if (temporal) copy_general(impl_->history_store[pass], t.history);
+         } else if (pass > 0) {
+-            barrier(cmd, s.surf0.handle, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++            const VkImage answer = in_scratch ? impl_->stage_scratch.handle : s.surf0.handle;
++            barrier(cmd, answer, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+                     VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+             barrier(cmd, s.tex_in.handle, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+@@ -1612,12 +1646,12 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
+             VkImageCopy c{};
+             c.srcSubresource = c.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+             c.extent = {nw, nh, 1};
+-            vkCmdCopyImage(cmd, s.surf0.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
++            vkCmdCopyImage(cmd, answer, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                            s.tex_in.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+             barrier(cmd, s.tex_in.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                     VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
+                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT);
+-            barrier(cmd, s.surf0.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
++            barrier(cmd, answer, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL,
+                     VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+                     VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+             if (temporal) copy_general(impl_->history_store[pass], t.history);
+@@ -1675,6 +1709,20 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                      VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
          }
 +        // dlsslop-amd: its stages on this pass's answer, before the next pass
-+        // or the write-back takes it.
-+        if (impl_->pass_stages && (c.sharpness != 0 || c.colour_preserve != 0)) {
-+            struct { uint32_t w, h; float strength; uint32_t anchor; } push{nw, nh, c.sharpness, 0u};
-+            dispatch(cmd, impl_->sharpen, (nw + 7) / 8, (nh + 7) / 8, 1, &push, sizeof push);
-+            compute_barrier(cmd);
-+            push.strength = c.colour_preserve;
-+            push.anchor = 1u;
-+            dispatch(cmd, impl_->anchor, (nw + 7) / 8, (nh + 7) / 8, 1, &push, sizeof push);
-+            compute_barrier(cmd);
++        // or the write-back takes it: one dispatch for each active one.
++        in_scratch = false;
++        if (impl_->pass_stages) {
++            const struct { float strength; uint32_t anchor; } stages[] = {{c.sharpness, 0u}, {c.colour_preserve, 1u}};
++            for (const auto& stage : stages) {
++                if (stage.strength == 0) continue;
++                struct { uint32_t w, h; float strength; uint32_t anchor; } push{nw, nh, stage.strength, stage.anchor};
++                dispatch(cmd, in_scratch ? impl_->from_scratch : impl_->to_scratch, (nw + 7) / 8, (nh + 7) / 8, 1,
++                         &push, sizeof push);
++                compute_barrier(cmd);
++                in_scratch = !in_scratch;
++            }
 +        }
      }
      if (temporal) {
          // Leave the bound history holding the FIRST pass's, which is what the
+@@ -1713,10 +1761,13 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
+             dispatch(cmd, impl_->transfer_pass, (frame.width + 7) / 8, (frame.height + 7) / 8, 1, &push, sizeof push);
+             compute_barrier(cmd);
+         }
+-        const VkImage out = impl_->scaled ? impl_->full_out.handle : s.surf0.handle;
++        const VkImage out = impl_->scaled ? impl_->full_out.handle
++                            : in_scratch  ? impl_->stage_scratch.handle
++                                          : s.surf0.handle;
+         const uint32_t extent[] = {frame.width, frame.height, uint32_t(impl_->round_u8)};
+         if (!impl_->post_alpha || mask)
+-            dispatch(cmd, impl_->alpha, (frame.width + 7) / 8, (frame.height + 7) / 8, 1, extent, sizeof extent);
++            dispatch(cmd, in_scratch ? impl_->alpha_scratch : impl_->alpha, (frame.width + 7) / 8,
++                     (frame.height + 7) / 8, 1, extent, sizeof extent);
+         barrier(cmd, out, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
+                 VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
 diff --git a/vulkan-nr/src/core/nr_runtime.hpp b/vulkan-nr/src/core/nr_runtime.hpp
-index bd29413..b43f64c 100644
+index bd29413..d675bfd 100644
 --- a/vulkan-nr/src/core/nr_runtime.hpp
 +++ b/vulkan-nr/src/core/nr_runtime.hpp
 @@ -45,6 +45,12 @@ struct Controls {
@@ -3520,14 +3582,15 @@ index bd29413..b43f64c 100644
      // Per-pass overrides for passes 2..N; index 0 is pass 2. An entry with
      // `used == false`, or a pass past the end of this, inherits pass 1 with the
      // tone zeroed. Empty is exactly the behaviour that shipped before.
-@@ -109,6 +115,16 @@ struct RuntimeConfig {
+@@ -109,6 +115,17 @@ struct RuntimeConfig {
      // pass, so `colour` and `model_scale` have no effect. What a host that does
      // its own resolve afterwards (OptiScaler) must be given.
      bool native_compose = false;
 +    // dlsslop-amd: record Controls::sharpness and colour_preserve after every
-+    // pass, through a model-sized RGBA32F scratch image. The answer then stays
-+    // RGBA32F instead of the post block storing the frame's format. Requires
-+    // model_scale 1, display-encoded input and no control mask.
++    // pass, into a model-sized RGBA32F scratch image and, with both, back. The
++    // answer then stays RGBA32F instead of the post block storing the frame's
++    // format. Requires native compose, model_scale 1, display-encoded input, no
++    // control mask and no detail-only cascade.
 +    bool pass_stages = false;
 +    // dlsslop-amd: explicit locations instead of `root`'s layout. A nonempty
 +    // model_pack selects them: the network's SPIR-V and markers in
