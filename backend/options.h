@@ -1,6 +1,7 @@
 // dlsslopd's command line and config file.
 // SPDX-License-Identifier: MIT
 #pragma once
+#include "result.h"
 #include "shm_protocol.h"
 
 #include <cstdio>
@@ -26,5 +27,5 @@ struct Options {
 const char* hip_only(const Options& o);
 Options default_options();
 void usage(FILE* out);
-Options parse(int argc, char** argv);
+Result<Options> parse(int argc, char** argv);
 } // namespace dlsslop

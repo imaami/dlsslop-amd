@@ -12,7 +12,12 @@
 int main(int argc, char** argv)
 {
     try {
-        dlsslop::Options o = dlsslop::parse(argc, argv);
+        auto parsed = dlsslop::parse(argc, argv);
+        if (!parsed) {
+            std::fprintf(stderr, "dlsslopd: %s\n", parsed.error().what.c_str());
+            return 1;
+        }
+        dlsslop::Options& o = *parsed;
         const unsigned tier = o.tier.value_or(kNativeDefaultTier);
         if (o.diagnose) {
             std::fprintf(stderr, "selected %s\n", dlsslop::open_backend(o, tier)->device().c_str());

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "options.h"
+#include "files.h"
 #include "paths.h"
 #include "shm_protocol.h"
 #include "vulkan_network.h"
@@ -8,10 +9,8 @@
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <getopt.h>
-#include <stdexcept>
+#include <sys/stat.h>
 #include <vector>
 
 namespace dlsslop {
@@ -35,27 +34,26 @@ Options default_options()
 }
 
 namespace {
-unsigned number(const char* text, const char* name)
+Result<unsigned> number(const char* text, const char* name)
 {
     char* end = nullptr;
     errno = 0;
     unsigned long n = std::strtoul(text, &end, 10);
-    if (errno || !*text || *end || *text == '-' || n > 100000)
-        throw std::runtime_error(std::string("invalid ") + name);
+    if (errno || !*text || *end || *text == '-' || n > 100000) return fail(std::string("invalid ") + name);
     return static_cast<unsigned>(n);
 }
 
-bool flag(const char* value)
+Result<bool> flag(const char* value)
 {
     if (!std::strcmp(value, "true")) return true;
     if (!std::strcmp(value, "false")) return false;
-    throw std::runtime_error("expected true or false");
+    return fail("expected true or false");
 }
 
-unsigned tier(const char* value)
+Result<unsigned> tier(const char* value)
 {
-    const unsigned t = number(value, "tier");
-    if (!ShmNativeTier(t)) throw std::runtime_error("tier must be 720, 900, or 1080");
+    const unsigned t = DLSSLOP_TRY(number(value, "tier"));
+    if (!ShmNativeTier(t)) return fail("tier must be 720, 900, or 1080");
     return t;
 }
 
@@ -67,45 +65,75 @@ struct Spec {
     char letter;
     enum Kind : uint8_t { kFlag, kValue, kPath } kind;
     bool config;
-    void (*apply)(Options&, const char*);
+    Result<void> (*apply)(Options&, const char*);
 };
 
 const Spec kSpecs[] = {
     {"config", 'f', Spec::kPath, false, nullptr}, // Read before the others apply.
-    {"backend", 'b', Spec::kValue, true, [](Options& o, const char* v) {
+    {"backend", 'b', Spec::kValue, true, [](Options& o, const char* v) -> Result<void> {
         if (std::strcmp(v, "auto") && std::strcmp(v, "vulkan") && std::strcmp(v, "hip"))
-            throw std::runtime_error("backend must be auto, vulkan or hip");
+            return fail("backend must be auto, vulkan or hip");
         o.backend = v;
+        return {};
     }},
-    {"vulkan-model", 'M', Spec::kPath, true, [](Options& o, const char* v) { o.vulkan_model = v; }},
-    {"assets", 'a', Spec::kPath, true, [](Options& o, const char* v) { o.assets = v; }},
-    {"modules", 'm', Spec::kPath, true, [](Options& o, const char* v) { o.modules = v; }},
+    {"vulkan-model", 'M', Spec::kPath, true, [](Options& o, const char* v) -> Result<void> { o.vulkan_model = v; return {}; }},
+    {"assets", 'a', Spec::kPath, true, [](Options& o, const char* v) -> Result<void> { o.assets = v; return {}; }},
+    {"modules", 'm', Spec::kPath, true, [](Options& o, const char* v) -> Result<void> { o.modules = v; return {}; }},
     // The channel pairs the worker with its launcher and socket unit.
-    {"shm", 's', Spec::kPath, false, [](Options& o, const char* v) { o.shm = v; }},
-    {"tier", 't', Spec::kValue, true, [](Options& o, const char* v) { o.tier = tier(v); }},
-    {"passes", 'P', Spec::kValue, true, [](Options& o, const char* v) {
-        o.passes = number(v, "passes");
-        if (!*o.passes || *o.passes > kMaxPasses)
-            throw std::runtime_error("--passes must be 1.." + std::to_string(kMaxPasses));
+    {"shm", 's', Spec::kPath, false, [](Options& o, const char* v) -> Result<void> { o.shm = v; return {}; }},
+    {"tier", 't', Spec::kValue, true, [](Options& o, const char* v) -> Result<void> {
+        o.tier = DLSSLOP_TRY(tier(v));
+        return {};
     }},
-    {"device", 'd', Spec::kValue, true, [](Options& o, const char* v) { o.device = static_cast<int>(number(v, "device")); }},
-    {"diagnose", 'D', Spec::kFlag, false, [](Options& o, const char*) { o.diagnose = true; }},
-    {"self-test", 'S', Spec::kFlag, false, [](Options& o, const char*) { o.self_test = true; }},
-    {"self-test-runs", 'r', Spec::kValue, false, [](Options& o, const char* v) { o.self_test_runs = number(v, "self-test runs"); }},
-    {"input", 'i', Spec::kValue, false, [](Options& o, const char* v) { o.input = v; }},
-    {"output", 'o', Spec::kValue, false, [](Options& o, const char* v) { o.output = v; }},
-    {"width", 'W', Spec::kValue, false, [](Options& o, const char* v) { o.width = number(v, "width"); }},
-    {"height", 'H', Spec::kValue, false, [](Options& o, const char* v) { o.height = number(v, "height"); }},
-    {"cpu-compose", 'c', Spec::kFlag, false, [](Options& o, const char*) { o.cpu_compose = o.cpu_codec = true; }},
-    {"cpu-codec", 'C', Spec::kFlag, false, [](Options& o, const char*) { o.cpu_codec = true; }},
-    {"performance", 'p', Spec::kFlag, true, [](Options& o, const char* v) { o.performance = flag(v); }},
-    {"once", '1', Spec::kFlag, false, [](Options& o, const char*) { o.once = true; }},
-    {"idle-exit", 'x', Spec::kValue, true, [](Options& o, const char* v) { o.idle_exit = number(v, "idle-exit seconds"); }},
-    {"trace-dir", 'R', Spec::kValue, false, [](Options& o, const char* v) {
-        if (!*v) throw std::runtime_error("--trace-dir requires a nonempty directory");
+    {"passes", 'P', Spec::kValue, true, [](Options& o, const char* v) -> Result<void> {
+        const unsigned passes = DLSSLOP_TRY(number(v, "passes"));
+        if (!passes || passes > kMaxPasses) return fail("--passes must be 1.." + std::to_string(kMaxPasses));
+        o.passes = passes;
+        return {};
+    }},
+    {"device", 'd', Spec::kValue, true, [](Options& o, const char* v) -> Result<void> {
+        o.device = static_cast<int>(DLSSLOP_TRY(number(v, "device")));
+        return {};
+    }},
+    {"diagnose", 'D', Spec::kFlag, false, [](Options& o, const char*) -> Result<void> { o.diagnose = true; return {}; }},
+    {"self-test", 'S', Spec::kFlag, false, [](Options& o, const char*) -> Result<void> { o.self_test = true; return {}; }},
+    {"self-test-runs", 'r', Spec::kValue, false, [](Options& o, const char* v) -> Result<void> {
+        o.self_test_runs = DLSSLOP_TRY(number(v, "self-test runs"));
+        return {};
+    }},
+    {"input", 'i', Spec::kValue, false, [](Options& o, const char* v) -> Result<void> { o.input = v; return {}; }},
+    {"output", 'o', Spec::kValue, false, [](Options& o, const char* v) -> Result<void> { o.output = v; return {}; }},
+    {"width", 'W', Spec::kValue, false, [](Options& o, const char* v) -> Result<void> {
+        o.width = DLSSLOP_TRY(number(v, "width"));
+        return {};
+    }},
+    {"height", 'H', Spec::kValue, false, [](Options& o, const char* v) -> Result<void> {
+        o.height = DLSSLOP_TRY(number(v, "height"));
+        return {};
+    }},
+    {"cpu-compose", 'c', Spec::kFlag, false, [](Options& o, const char*) -> Result<void> {
+        o.cpu_compose = o.cpu_codec = true;
+        return {};
+    }},
+    {"cpu-codec", 'C', Spec::kFlag, false, [](Options& o, const char*) -> Result<void> { o.cpu_codec = true; return {}; }},
+    {"performance", 'p', Spec::kFlag, true, [](Options& o, const char* v) -> Result<void> {
+        o.performance = DLSSLOP_TRY(flag(v));
+        return {};
+    }},
+    {"once", '1', Spec::kFlag, false, [](Options& o, const char*) -> Result<void> { o.once = true; return {}; }},
+    {"idle-exit", 'x', Spec::kValue, true, [](Options& o, const char* v) -> Result<void> {
+        o.idle_exit = DLSSLOP_TRY(number(v, "idle-exit seconds"));
+        return {};
+    }},
+    {"trace-dir", 'R', Spec::kValue, false, [](Options& o, const char* v) -> Result<void> {
+        if (!*v) return fail("--trace-dir requires a nonempty directory");
         o.trace_dir = v;
+        return {};
     }},
-    {"test-identity", 'T', Spec::kFlag, false, [](Options& o, const char*) { o.test_identity = true; }},
+    {"test-identity", 'T', Spec::kFlag, false, [](Options& o, const char*) -> Result<void> {
+        o.test_identity = true;
+        return {};
+    }},
     {"help", 'h', Spec::kFlag, false, nullptr},
 };
 } // namespace
@@ -230,51 +258,50 @@ std::string trim(const std::string& text)
 
 // A config file's path is absolute or starts with ~/, never relative to
 // wherever the worker was started.
-std::string config_path(const std::string& value)
+Result<std::string> config_path(const std::string& value)
 {
     if (value[0] == '/') return value;
     const std::string home = value.compare(0, 2, "~/") ? std::string() : home_directory();
-    if (home.empty()) throw std::runtime_error("a path must be absolute or start with ~/");
+    if (home.empty()) return fail("a path must be absolute or start with ~/");
     return home + value.substr(1);
 }
 
 // One NAME = VALUE line, NAME a config-settable long option.
-void apply_setting(Options& o, const std::string& text)
+Result<void> apply_setting(Options& o, const std::string& text)
 {
     const auto equals = text.find('=');
-    if (equals == std::string::npos) throw std::runtime_error("expected NAME = VALUE");
+    if (equals == std::string::npos) return fail("expected NAME = VALUE");
     const std::string name = trim(text.substr(0, equals));
     const auto spec = std::find_if(std::begin(kSpecs), std::end(kSpecs),
                                    [&name](const Spec& s) { return s.config && name == s.name; });
-    if (spec == std::end(kSpecs)) throw std::runtime_error("'" + name + "' is not a config setting");
+    if (spec == std::end(kSpecs)) return fail("'" + name + "' is not a config setting");
     const std::string value = trim(text.substr(equals + 1));
-    spec->apply(o, (spec->kind == Spec::kPath ? config_path(value) : value).c_str());
+    if (spec->kind != Spec::kPath) return spec->apply(o, value.c_str());
+    return spec->apply(o, DLSSLOP_TRY(config_path(value)).c_str());
 }
 
 // Settings, one per line; # starts a comment line. A default file that is
 // missing is skipped; one that cannot be inspected or read is an error.
-void read_config(Options& o, const std::string& path, bool given)
+Result<void> read_config(Options& o, const std::string& path, bool given)
 {
-    std::error_code error;
-    if (!given && (path.empty() || (!std::filesystem::exists(path, error) && !error))) return;
-    std::ifstream file(path);
-    std::string line;
-    for (unsigned line_number = 1; std::getline(file, line); ++line_number) {
-        const std::string text = trim(line);
-        if (text.empty() || text[0] == '#') continue;
-        try {
-            apply_setting(o, text);
-        } catch (const std::exception& e) {
-            throw std::runtime_error(path + ":" + std::to_string(line_number) + ": " + e.what());
-        }
+    struct stat st{};
+    if (!given && (path.empty() || (stat(path.c_str(), &st) && errno == ENOENT))) return {};
+    const auto text = read_file(path);
+    if (!text) return fail("cannot read config file " + path + ": " + text.error().what);
+    unsigned line_number = 0;
+    for (size_t start = 0; start < text->size(); ++line_number) {
+        const size_t end = std::min(text->find('\n', start), text->size());
+        const std::string line = trim(text->substr(start, end - start));
+        start = end + 1;
+        if (line.empty() || line[0] == '#') continue;
+        if (auto applied = apply_setting(o, line); !applied)
+            return fail(path + ":" + std::to_string(line_number + 1) + ": " + applied.error().what);
     }
-    // Only a complete read ends at EOF: opening fails for a missing file, and
-    // reading fails for a directory or on a disk error.
-    if (!file.eof()) throw std::runtime_error("cannot read config file " + path + ": " + std::strerror(errno));
+    return {};
 }
 } // namespace
 
-Options parse(int argc, char** argv)
+Result<Options> parse(int argc, char** argv)
 {
     std::string letters;
     std::vector<option> options;
@@ -292,7 +319,7 @@ Options parse(int argc, char** argv)
         const auto spec = std::find_if(std::begin(kSpecs), std::end(kSpecs), [c](const Spec& s) { return s.letter == c; });
         if (spec == std::end(kSpecs)) {
             usage(stderr);
-            throw std::runtime_error("invalid arguments");
+            return fail("invalid arguments");
         }
         if (c == 'h') {
             usage(stdout);
@@ -305,32 +332,32 @@ Options parse(int argc, char** argv)
         }
         given.emplace_back(spec, optarg ? optarg : "true");
     }
-    if (optind != argc) throw std::runtime_error("unexpected positional argument");
+    if (optind != argc) return fail("unexpected positional argument");
     Options o = default_options();
-    read_config(o, config, config_given);
-    for (const auto& [spec, value] : given) spec->apply(o, value);
+    DLSSLOP_TRY(read_config(o, config, config_given));
+    for (const auto& [spec, value] : given) DLSSLOP_TRY(spec->apply(o, value));
     const auto on_command_line = [&given](char letter) {
         return std::any_of(given.begin(), given.end(), [letter](const auto& g) { return g.first->letter == letter; });
     };
     if (o.self_test_runs < 2 || o.self_test_runs > 1000)
-        throw std::runtime_error("--self-test-runs must be 2..1000");
+        return fail("--self-test-runs must be 2..1000");
     if (on_command_line('r') && !o.self_test)
-        throw std::runtime_error("--self-test-runs requires --self-test");
+        return fail("--self-test-runs requires --self-test");
     if (!o.diagnose && !o.test_identity && (o.assets.empty() || o.modules.empty()))
-        throw std::runtime_error("--assets and --modules are required for inference");
+        return fail("--assets and --modules are required for inference");
     if (o.self_test && (o.test_identity || !o.input.empty()))
-        throw std::runtime_error("--self-test requires the real network and generates its own input");
+        return fail("--self-test requires the real network and generates its own input");
     if (!o.self_test && (o.input.empty() != o.output.empty()))
-        throw std::runtime_error("--input and --output must be supplied together");
+        return fail("--input and --output must be supplied together");
     if (!o.input.empty() && (!o.width || !o.height || o.width > kMaxW || o.height > kMaxH))
-        throw std::runtime_error("offline dimensions must be 1..7680 by 1..4320");
+        return fail("offline dimensions must be 1..7680 by 1..4320");
     if (!o.trace_dir.empty() && (o.self_test || !o.input.empty() || o.test_identity || o.diagnose))
-        throw std::runtime_error("--trace-dir requires serving real shared-memory inference");
+        return fail("--trace-dir requires serving real shared-memory inference");
     // A configured idle exit is for serving; only an explicit one is an error.
     if (on_command_line('x') && o.idle_exit && (o.self_test || !o.input.empty() || o.diagnose))
-        throw std::runtime_error("--idle-exit requires serving shared-memory requests");
+        return fail("--idle-exit requires serving shared-memory requests");
     if (const char* hip = hip_only(o); hip && o.backend == "vulkan")
-        throw std::runtime_error(std::string(hip) + " requires --backend hip");
+        return fail(std::string(hip) + " requires --backend hip");
     return o;
 }
 } // namespace dlsslop

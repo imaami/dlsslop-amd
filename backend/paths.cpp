@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MIT
 #include "paths.h"
+#include "files.h"
 
+#include <climits>
 #include <cstdlib>
-#include <filesystem>
 #include <pwd.h>
 #include <unistd.h>
 
 namespace dlsslop {
+
 std::string home_directory()
 {
     const char* home = std::getenv("HOME");
@@ -19,9 +21,9 @@ std::string home_directory()
 
 std::string xdg_path(const char* base, const char* fallback, const char* name)
 {
-    if (const char* root = std::getenv(base); root && *root) return (std::filesystem::path(root) / name).string();
+    if (const char* root = std::getenv(base); root && *root) return join(root, name);
     const std::string home = home_directory();
-    return home.empty() ? home : (std::filesystem::path(home) / fallback / name).string();
+    return home.empty() ? home : join(join(home, fallback), name);
 }
 
 std::string default_assets() { return xdg_path("XDG_DATA_HOME", ".local/share", "dlsslop-amd/model"); }
@@ -30,34 +32,31 @@ std::string default_config() { return xdg_path("XDG_CONFIG_HOME", ".config", "dl
 
 std::string executable_path()
 {
-    std::error_code error;
-    const auto executable = std::filesystem::read_symlink("/proc/self/exe", error);
-    return error ? std::string() : executable.string();
+    char path[PATH_MAX];
+    const ssize_t length = readlink("/proc/self/exe", path, sizeof path);
+    return length > 0 && size_t(length) < sizeof path ? std::string(path, size_t(length)) : std::string();
 }
 
 std::string vulkan_shaders()
 {
-    const std::filesystem::path executable = executable_path();
-    const auto installed = executable.parent_path().parent_path() / "share/dlsslop-amd/vulkan";
-    const auto development = executable.parent_path() / "vulkan-nr/network";
-    std::error_code error;
-    return (std::filesystem::is_directory(development, error) && !std::filesystem::is_directory(installed, error)
-                ? development : installed).string();
+    const std::string bin = parent_path(executable_path());
+    const std::string installed = join(parent_path(bin), "share/dlsslop-amd/vulkan");
+    const std::string development = join(bin, "vulkan-nr/network");
+    return is_directory(development) && !is_directory(installed) ? development : installed;
 }
 
 std::string default_modules()
 {
     if (const char* path = std::getenv("DLSSLOP_MODULES"); path && *path) return path;
-    const std::filesystem::path executable = executable_path();
+    const std::string executable = executable_path();
     if (executable.empty()) return {};
-    const auto prefix = executable.parent_path().parent_path();
-    std::error_code error;
-    const auto installed = prefix / "share/dlsslop-amd/HIP/gfx1201";
-    if (std::filesystem::is_directory(installed, error)) return installed.string();
+    const std::string prefix = parent_path(parent_path(executable));
+    const std::string installed = join(prefix, "share/dlsslop-amd/HIP/gfx1201");
+    if (is_directory(installed)) return installed;
     // A worker run directly from the source tree's build directory uses the
     // same modules as the kernel build script, without an installed launcher.
-    const auto development = prefix / "assets/HIP/gfx1201";
-    if (std::filesystem::is_directory(development, error)) return development.string();
-    return installed.string();
+    const std::string development = join(prefix, "assets/HIP/gfx1201");
+    return is_directory(development) ? development : installed;
 }
+
 } // namespace dlsslop

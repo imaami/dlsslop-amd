@@ -126,8 +126,8 @@ add_library(dlsslop-codec OBJECT backend/codec.cpp)
 add_executable(dlsslopd
     backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.cpp
     backend/open.cpp backend/hip_engine.cpp backend/self_test.cpp backend/offline.cpp
-    backend/vulkan_network.cpp)
-target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
+    backend/files.cpp backend/vulkan_network.cpp)
+target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common common)
 target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-vknr Threads::Threads ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)
 target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
