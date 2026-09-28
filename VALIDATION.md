@@ -94,13 +94,13 @@ frames through host memory instead.
 
 To check the network in the layer, run a Vulkan 1.3 application on the RX 9070
 XT through `dlsslop-run --layer-network`. Its layer log must report `in-layer
-network features enabled` and `in-layer network on the game's device`, and no
-`in-layer network failed`. At the same tier, captures (`dlsslopctl --capture 8`)
-of the same input must match those taken without `--layer-network` byte for
-byte. With `libdlsslop-network.so` moved away from beside the layer, the log
-must say the module is unavailable and frames must go to the daemon. A Vulkan
-1.1 application logs `in-layer network unavailable: needs a Vulkan 1.3
-instance`.
+network features enabled`, `in-layer network on the game's device` and `in-layer
+network running`, and no `in-layer network off`. At the same tier, captures
+(`dlsslopctl --capture 8`) of the same input must match those taken without
+`--layer-network` byte for byte. With `libdlsslop-network.so` moved away from
+beside the layer, the log must say the module is unavailable and frames must go
+to the daemon. A Vulkan 1.1 application logs `in-layer network unavailable:
+needs a Vulkan 1.3 instance`.
 
 ## Game and desktop testing
 
