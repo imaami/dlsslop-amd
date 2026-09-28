@@ -9,7 +9,6 @@
 #include "temporal_gpu.h"
 
 #include <array>
-#include <memory>
 #include <optional>
 #include <vector>
 
@@ -18,6 +17,9 @@ namespace dlsslop {
 // The gfx1201 device that --device names, or the first one; every visible
 // device is listed on the way.
 Result<int> select_device(const hip::Api& api, int requested);
+// The HIP runtime for a HipEngine, with the gfx1201 device o.device names, or
+// the first, selected and recorded there.
+Result<hip::Api> open_hip(Options& o);
 
 class HipEngine : public EngineBase<HipEngine> {
     Options options_;
@@ -61,9 +63,6 @@ public:
 
     HipEngine(Options o, unsigned tier, const hip::Api& api) : options_(std::move(o)), tier_(tier), api_(api) {}
     HipEngine(const HipEngine&) = delete;
-    // The HIP engine on the gfx1201 device o.device names, or the first, which
-    // it records there; not yet prepared.
-    static Result<std::unique_ptr<HipEngine>> open(Options& o, unsigned tier);
     // The members go next, in reverse order: the helpers before the network whose runtime they use.
     ~HipEngine() { release(); }
     const char* name() const { return "HIP"; }

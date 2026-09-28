@@ -46,7 +46,7 @@ void HipEngine::release(Imported& slot)
     slot = {};
 }
 
-Result<std::unique_ptr<HipEngine>> HipEngine::open(Options& o, unsigned tier)
+Result<hip::Api> open_hip(Options& o)
 {
     const auto api = DLSSLOP_TRY(hip::load());
     o.device = DLSSLOP_TRY(select_device(api, o.device));
@@ -56,7 +56,7 @@ Result<std::unique_ptr<HipEngine>> HipEngine::open(Options& o, unsigned tier)
         DLSSLOP_TRY(api.check(api.hipSetDevice(o.device), "select the HIP device"));
         DLSSLOP_TRY(api.check(api.hipSetDeviceFlags(4), "wait for the device without spinning"));
     }
-    return std::make_unique<HipEngine>(o, tier, api);
+    return api;
 }
 
 void HipEngine::release()

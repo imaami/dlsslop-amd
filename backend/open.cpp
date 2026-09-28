@@ -3,7 +3,11 @@
 #include "files.h"
 #include "paths.h"
 
+#include <cstdio>
+
 namespace dlsslop {
+namespace {
+// Where the Vulkan network loads from; the pipeline cache is a convenience.
 VulkanPaths vulkan_paths(const Options& o)
 {
     std::string cache = xdg_path("XDG_CACHE_HOME", ".cache", "dlsslop-amd/vulkan-pipelines.cache");
@@ -11,6 +15,7 @@ VulkanPaths vulkan_paths(const Options& o)
     return {o.vulkan_model, vulkan_shaders(), cache};
 }
 
+// The Vulkan engine, prepared, or why not.
 Result<VulkanEngine> open_vulkan(const Options& o, unsigned tier)
 {
     if (!is_regular_file(o.vulkan_model))
@@ -20,5 +25,25 @@ Result<VulkanEngine> open_vulkan(const Options& o, unsigned tier)
     VulkanEngine engine(std::move(network), tier);
     DLSSLOP_TRY(engine.prepare());
     return engine;
+}
+} // namespace
+
+Result<OpenedEngine> open_engine(Options& o, unsigned tier)
+{
+    OpenedEngine opened;
+    if (o.test_identity) return opened;
+    if (const char* hip = hip_only(o); hip && o.backend == "auto") {
+        std::fprintf(stderr, "%s needs the HIP network; using HIP\n", hip);
+    } else if (o.backend != "hip") {
+        auto vulkan = open_vulkan(o, tier);
+        if (vulkan) {
+            opened.vulkan.emplace(*std::move(vulkan));
+            return opened;
+        }
+        if (o.backend == "vulkan") return forward(std::move(vulkan).error());
+        std::fprintf(stderr, "Vulkan network unavailable (%s); using HIP\n", vulkan.error().what.c_str());
+    }
+    opened.hip = DLSSLOP_TRY(open_hip(o));
+    return opened;
 }
 } // namespace dlsslop
