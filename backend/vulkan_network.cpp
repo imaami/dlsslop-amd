@@ -1,6 +1,7 @@
 // The network on Vulkan: DLSSNR-AMD's runtime (vulkan-nr/) on a device of the daemon's own.
 // SPDX-License-Identifier: MIT
 #include "vulkan_network.h"
+#include "network_requirements.h"
 
 #include "nr_log.hpp"
 #include "nr_vendor.h"
@@ -28,67 +29,20 @@ Result<void> check(VkResult result, const char* what)
 
 void log_line(const char* line) { std::fprintf(stderr, "%s\n", line); }
 
-// Everything the network's shaders use (vulkan-nr/src/core/nrvk.hpp, Context::create),
-// chained for one query or one vkCreateDevice.
-struct Features {
-    VkPhysicalDeviceCooperativeMatrixFeaturesKHR coop{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR};
-    VkPhysicalDeviceShaderFloat8FeaturesEXT fp8{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT};
-    VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR layout{
-        VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR};
-    VkPhysicalDeviceVulkan11Features f11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
-    VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
-    VkPhysicalDeviceVulkan13Features f13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
-    VkPhysicalDeviceFeatures2 all{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-    Features(bool with_layout)
-    {
-        all.pNext = &coop;
-        coop.pNext = &fp8;
-        fp8.pNext = &f11;
-        f11.pNext = &f12;
-        f12.pNext = &f13;
-        f13.pNext = with_layout ? &layout : nullptr;
-    }
-    Features(const Features&) = delete;
-};
-
-bool has_extension(const std::vector<VkExtensionProperties>& list, const char* name)
-{
-    return std::any_of(list.begin(), list.end(), [name](const VkExtensionProperties& e) { return !std::strcmp(e.extensionName, name); });
-}
-
 // What stops the network running on a device, or empty.
 std::string unsuitable(VkPhysicalDevice physical, bool& layout, uint32_t& family)
 {
-    VkPhysicalDeviceSubgroupSizeControlProperties subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES};
-    VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &subgroup};
-    vkGetPhysicalDeviceProperties2(physical, &properties);
-    if (properties.properties.apiVersion < VK_API_VERSION_1_3) return "Vulkan 1.3 unavailable";
+    if (const char* missing = NetworkUnsupported(physical, vkGetPhysicalDeviceProperties2, vkGetPhysicalDeviceFeatures2,
+                                                 vkEnumerateDeviceExtensionProperties, layout))
+        return std::string(missing) + " unavailable";
     uint32_t count = 0;
     vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, nullptr);
     std::vector<VkExtensionProperties> extensions(count);
     vkEnumerateDeviceExtensionProperties(physical, nullptr, &count, extensions.data());
-    for (const char* name : {VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME,
-                             VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME})
-        if (!has_extension(extensions, name)) return std::string(name) + " unavailable";
-    layout = has_extension(extensions, VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME);
-    Features f(layout);
-    vkGetPhysicalDeviceFeatures2(physical, &f.all);
-    layout = layout && f.layout.workgroupMemoryExplicitLayout && f.layout.workgroupMemoryExplicitLayout8BitAccess &&
-             f.layout.workgroupMemoryExplicitLayout16BitAccess;
-    const std::pair<VkBool32, const char*> required[] = {
-        {f.coop.cooperativeMatrix, "cooperativeMatrix"}, {f.fp8.shaderFloat8, "shaderFloat8"},
-        {f.fp8.shaderFloat8CooperativeMatrix, "shaderFloat8CooperativeMatrix"},
-        {f.f11.storageBuffer16BitAccess, "storageBuffer16BitAccess"},
-        {f.f12.storageBuffer8BitAccess, "storageBuffer8BitAccess"}, {f.f12.shaderFloat16, "shaderFloat16"},
-        {f.f12.shaderInt8, "shaderInt8"}, {f.f12.vulkanMemoryModel, "vulkanMemoryModel"},
-        {f.f13.subgroupSizeControl, "subgroupSizeControl"}, {f.f13.synchronization2, "synchronization2"},
-    };
-    for (const auto& [have, name] : required)
-        if (!have) return std::string(name) + " unavailable";
-    // The cooperative-matrix fragments are laid out for 32-lane subgroups.
-    if (subgroup.minSubgroupSize > 32 || subgroup.maxSubgroupSize < 32 ||
-        !(subgroup.requiredSubgroupSizeStages & VK_SHADER_STAGE_COMPUTE_BIT))
-        return "32-lane compute subgroups unavailable";
+    if (!std::any_of(extensions.begin(), extensions.end(), [](const VkExtensionProperties& e) {
+            return !std::strcmp(e.extensionName, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
+        }))
+        return VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME " unavailable";
     // Graphics too: the runtime converts colour formats with blits.
     vkGetPhysicalDeviceQueueFamilyProperties(physical, &count, nullptr);
     std::vector<VkQueueFamilyProperties> queues(count);
@@ -270,25 +224,23 @@ Result<VulkanNetwork> VulkanNetwork::create(const VulkanPaths& paths, int device
     if (!s.physical)
         return fail(device >= 0 && unsigned(device) >= count ? "no Vulkan device " + std::to_string(device)
                                                              : "no Vulkan device can run the network:" + reasons);
-    Features enable(layout);
-    enable.coop.cooperativeMatrix = VK_TRUE;
-    enable.fp8.shaderFloat8 = enable.fp8.shaderFloat8CooperativeMatrix = VK_TRUE;
-    enable.f11.storageBuffer16BitAccess = VK_TRUE;
-    enable.f12.storageBuffer8BitAccess = enable.f12.shaderFloat16 = enable.f12.shaderInt8 = VK_TRUE;
-    enable.f12.vulkanMemoryModel = VK_TRUE;
-    enable.f13.subgroupSizeControl = enable.f13.synchronization2 = VK_TRUE;
-    enable.layout.workgroupMemoryExplicitLayout = enable.layout.workgroupMemoryExplicitLayout8BitAccess =
-        enable.layout.workgroupMemoryExplicitLayout16BitAccess = layout;
-    std::vector<const char*> extensions = {VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, VK_EXT_SHADER_FLOAT8_EXTENSION_NAME,
-                                           VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME};
-    if (layout) extensions.push_back(VK_KHR_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_EXTENSION_NAME);
+    NetworkFeatureChain enable(layout);
+    std::vector<const char*> extensions = {VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME};
+    for (const auto& f : kNetworkFeatures) {
+        if (f.optional && !layout) continue;
+        enable.bit(f) = VK_TRUE;
+        if (f.extension && std::find_if(extensions.begin(), extensions.end(), [&f](const char* e) {
+                               return !std::strcmp(e, f.extension);
+                           }) == extensions.end())
+            extensions.push_back(f.extension);
+    }
     const float priority = 1.0f;
     VkDeviceQueueCreateInfo queue{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
     queue.queueFamilyIndex = s.family;
     queue.queueCount = 1;
     queue.pQueuePriorities = &priority;
     VkDeviceCreateInfo create{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
-    create.pNext = &enable.all;
+    create.pNext = &enable.features2();
     create.queueCreateInfoCount = 1;
     create.pQueueCreateInfos = &queue;
     create.enabledExtensionCount = uint32_t(extensions.size());
