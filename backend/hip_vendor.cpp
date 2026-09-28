@@ -1,7 +1,8 @@
 // The boundary to the vendored HIP network, which throws: every call into it is
-// caught here, and only here, and returned as a Result. Built with exceptions.
+// caught here, and only here, and returned as its failure. Built with
+// exceptions, as C++20 (see hip_vendor.h).
 // SPDX-License-Identifier: MIT
-#include "hip.h"
+#include "hip_vendor.h"
 #include "vendor/LmxxfProductionOptions.h"
 
 #include <dlfcn.h>
@@ -16,31 +17,29 @@ public:
 
 void NetworkDeleter::operator()(Network* network) const noexcept { delete network; }
 
+Handle stream(Network& network) { return network.Stream(); }
+
+namespace vendor {
 namespace {
-// What F returns, or the exception it threw as an Error.
+// Nothing if F returns, else what it threw.
 template <class F>
-auto caught(F&& f) -> Result<decltype(f())>
+std::string caught(F&& f)
 {
     try {
-        if constexpr (std::is_void_v<decltype(f())>) {
-            f();
-            return {};
-        } else {
-            return f();
-        }
+        f();
+        return {};
     } catch (const std::exception& error) {
-        return fail(error.what());
+        return *error.what() ? error.what() : "unnamed failure in the HIP network";
     } catch (...) {
-        return fail("unknown failure in the HIP network");
+        return "unknown failure in the HIP network";
     }
 }
 } // namespace
 
-Result<Api> load()
+std::string load(Entries& api)
 {
-    return caught([] {
+    return caught([&] {
         const hip_probe::Api vendor; // Loads and keeps the runtime for the process.
-        Api api{};
         api.hipGetDevicePropertiesR0600 = vendor.hipGetDevicePropertiesR0600;
         api.hipInit = vendor.hipInit;
         api.hipRuntimeGetVersion = vendor.hipRuntimeGetVersion;
@@ -73,11 +72,10 @@ Result<Api> load()
         api.hipHostFree = reinterpret_cast<decltype(api.hipHostFree)>(dlsym(vendor.dll, "hipHostFree"));
         api.hipHostRegister = reinterpret_cast<decltype(api.hipHostRegister)>(dlsym(vendor.dll, "hipHostRegister"));
         api.hipHostUnregister = reinterpret_cast<decltype(api.hipHostUnregister)>(dlsym(vendor.dll, "hipHostUnregister"));
-        return api;
     });
 }
 
-Result<NetworkHandle> network(const NetworkOptions& options)
+std::string network(const NetworkOptions& options, NetworkHandle& network)
 {
     return caught([&] {
         auto opt = LmxxfProductionOptions(options.width, options.height, options.modules, options.assets);
@@ -89,27 +87,25 @@ Result<NetworkHandle> network(const NetworkOptions& options)
         // Production launches nothing from the WMMA, tiled, wave and fused-C32
         // modules these select; do not load them.
         opt.wmma = opt.tiled = opt.wave = opt.fused_c32 = false;
-        NetworkHandle network(new Network(opt));
+        network.reset(new Network(opt));
         network->SetNoise({}); // Fast prefix uses procedural noise, not noise.f32.
-        return network;
     });
 }
 
-Handle stream(Network& network) { return network.Stream(); }
-
-Result<void> enqueue(Network& network, void* rgba, void* history, void* rgb)
+std::string enqueue(Network& network, void* rgba, void* history, void* rgb)
 {
     return caught([&] { network.Enqueue(rgba, history, rgb, 0); });
 }
 
-Result<void> synchronize(Network& network)
+std::string synchronize(Network& network)
 {
     return caught([&] { network.Synchronize(); });
 }
 
-Result<void> print_memory(Network& network)
+std::string print_memory(Network& network)
 {
     return caught([&] { network.PrintMemory(); });
 }
 
+} // namespace vendor
 } // namespace dlsslop::hip

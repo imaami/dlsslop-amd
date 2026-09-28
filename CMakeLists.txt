@@ -4,6 +4,9 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
+# The project's own code is C++23. The standard also decides how much of
+# libstdc++, std::string above all, is inlined, so upstream code that a newer
+# one grows keeps the older standard that gives it the smallest binary.
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -74,7 +77,7 @@ add_library(dlsslop-layer-objects OBJECT
     ${LAYER_ROOT}/layer_linux/src/shader_vk.cpp ${LAYER_ROOT}/layer_linux/src/dlssnr_pass.cpp
     ${LAYER_ROOT}/layer_linux/src/composition.cpp ${LAYER_ROOT}/layer_linux/src/capture.cpp
     ${LAYER_ROOT}/layer_linux/src/scaler_vk.cpp ${LAYER_ROOT}/layer_linux/src/hotkey.cpp)
-set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
+set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_STANDARD 17)
 add_dependencies(dlsslop-layer-objects layer-shaders)
 target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC
     ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party
@@ -83,6 +86,7 @@ target_link_libraries(dlsslop-layer-objects PUBLIC Threads::Threads ${CMAKE_DL_L
 
 function(add_neural_layer target)
     add_library(${target} SHARED ${LAYER_ROOT}/layer_linux/src/layer.cpp)
+    set_target_properties(${target} PROPERTIES CXX_STANDARD 17)
     target_include_directories(${target} PRIVATE layer)
     target_link_libraries(${target} PRIVATE dlsslop-layer-objects)
     target_link_options(${target} PRIVATE
@@ -123,16 +127,19 @@ target_include_directories(dlsslop-vknr PUBLIC "${VKNR_ROOT}/src/core")
 target_link_libraries(dlsslop-vknr PUBLIC vulkan Threads::Threads)
 
 add_library(dlsslop-codec OBJECT backend/codec.cpp)
+# The boundary to the vendored HIP network, built with exceptions.
+add_library(dlsslop-hip-vendor OBJECT backend/hip_vendor.cpp)
+set_target_properties(dlsslop-hip-vendor PROPERTIES CXX_STANDARD 20)
 # The worker uses a small, versioned HIP ABI loaded with dlopen. The build itself
 # deliberately does not require ROCm headers or a GPU; real inference does.
 add_executable(dlsslopd
     backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.cpp
-    backend/open.cpp backend/hip_engine.cpp backend/hip_vendor.cpp backend/native_kernels.cpp
+    backend/open.cpp backend/hip_engine.cpp backend/native_kernels.cpp
     backend/self_test.cpp
     backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp
     backend/nr_vendor.cpp)
 target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
-target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-vknr Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip-vendor dlsslop-vknr Threads::Threads ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)
 target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 
@@ -168,8 +175,8 @@ if(BUILD_TESTING)
     add_executable(codec-test backend/codec_test.cpp)
     target_link_libraries(codec-test PRIVATE dlsslop-codec)
     add_test(NAME codec COMMAND codec-test)
-    add_executable(color-gpu-test tests/color_gpu_test.cpp backend/hip_vendor.cpp backend/native_kernels.cpp backend/files.cpp)
-    target_link_libraries(color-gpu-test PRIVATE ${CMAKE_DL_LIBS})
+    add_executable(color-gpu-test tests/color_gpu_test.cpp backend/native_kernels.cpp backend/files.cpp)
+    target_link_libraries(color-gpu-test PRIVATE dlsslop-hip-vendor ${CMAKE_DL_LIBS})
     # Uses the GPU when the HIP runtime, a gfx1201 device and the module exist.
     set(HIP_MODULES ${CMAKE_CURRENT_SOURCE_DIR}/assets/HIP/gfx1201)
     add_test(NAME color-gpu COMMAND color-gpu-test --module ${HIP_MODULES}/linux_native.hsaco)
