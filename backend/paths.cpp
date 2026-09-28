@@ -37,12 +37,23 @@ std::string executable_path()
     return length > 0 && size_t(length) < sizeof path ? std::string(path, size_t(length)) : std::string();
 }
 
+std::string vulkan_shaders(const std::string& prefix, const std::string& build)
+{
+    const std::string installed = join(prefix, "share/dlsslop-amd/vulkan");
+    const std::string development = join(build, "vulkan-nr/network");
+    return is_directory(development) && !is_directory(installed) ? development : installed;
+}
+
 std::string vulkan_shaders()
 {
     const std::string bin = parent_path(executable_path());
-    const std::string installed = join(parent_path(bin), "share/dlsslop-amd/vulkan");
-    const std::string development = join(bin, "vulkan-nr/network");
-    return is_directory(development) && !is_directory(installed) ? development : installed;
+    return vulkan_shaders(parent_path(bin), bin);
+}
+
+std::string vulkan_cache()
+{
+    const std::string cache = xdg_path("XDG_CACHE_HOME", ".cache", "dlsslop-amd/vulkan-pipelines.cache");
+    return !cache.empty() && make_directories(parent_path(cache)) ? cache : std::string();
 }
 
 std::string default_modules()

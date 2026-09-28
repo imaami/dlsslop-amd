@@ -8,12 +8,7 @@
 namespace dlsslop {
 namespace {
 // Where the Vulkan network loads from; the pipeline cache is a convenience.
-VulkanPaths vulkan_paths(const Options& o)
-{
-    std::string cache = xdg_path("XDG_CACHE_HOME", ".cache", "dlsslop-amd/vulkan-pipelines.cache");
-    if (!cache.empty() && !make_directories(parent_path(cache))) cache.clear();
-    return {o.vulkan_model, vulkan_shaders(), cache};
-}
+VulkanPaths vulkan_paths(const Options& o) { return {o.vulkan_model, vulkan_shaders(), vulkan_cache()}; }
 
 // The Vulkan engine, prepared, or why not.
 Result<VulkanEngine> open_vulkan(const Options& o, unsigned tier)
