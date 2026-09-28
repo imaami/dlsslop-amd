@@ -291,7 +291,8 @@ void usage(FILE* out)
         "  -P, --passes N          Chained neural evaluations per frame (1..%u)\n"
         "                          Default: %u on a new channel; each pass consumes\n"
         "                          the previous output. Unset here and in FILE, a\n"
-        "                          starting worker keeps the channel's live count\n"
+        "                          starting worker keeps the channel's live count.\n"
+        "                          Vulkan runs at most %u and stores that count\n"
         "  -d, --device INDEX      HIP device, or with Vulkan physical device, index\n"
         "                          Default: auto, the first device that can run\n"
         "                          the network (HIP: gfx1201)\n"
@@ -342,7 +343,7 @@ void usage(FILE* out)
         defaults.assets.empty() ? "unset; required for inference" : defaults.assets.c_str(),
         defaults.modules.empty() ? "unset; required for inference" : defaults.modules.c_str(),
         defaults.shm.c_str(), ShmNativeDefaultPath().c_str(), kNativeDefaultTier,
-        kMaxPasses, kNativeDefaultPasses, defaults.self_test_runs,
+        kMaxPasses, kNativeDefaultPasses, dlsslop::VulkanNetwork::kMaxPasses, defaults.self_test_runs,
         defaults.width, defaults.height, defaults.idle_exit);
 }
 
@@ -567,6 +568,7 @@ public:
                        const ProcessingSettings& settings = {}, dlsslop::FrameTrace* trace = nullptr) = 0;
     virtual void self_test(const Options& o) = 0;
     float upload_ms = 0, inference_ms = 0, readback_ms = 0;
+    unsigned max_passes = kMaxPasses;
 };
 
 class Engine;
@@ -918,7 +920,10 @@ class VulkanEngine : public Backend {
     }
 public:
     VulkanEngine(std::unique_ptr<dlsslop::VulkanNetwork> network, unsigned tier)
-        : network_(std::move(network)), tier_(tier) {}
+        : network_(std::move(network)), tier_(tier)
+    {
+        max_passes = dlsslop::VulkanNetwork::kMaxPasses;
+    }
     const char* name() const override { return "Vulkan"; }
     std::string device() const override
     {
@@ -984,9 +989,9 @@ dlsslop::VulkanPaths vulkan_paths(const Options& o)
     return {o.vulkan_model, vulkan_shaders(), cache};
 }
 
-// The backend --backend selects. auto takes the Vulkan network when its model is
-// there, a device can run it and no option needs HIP, and says why not before
-// taking HIP.
+// The backend --backend selects, prepared. auto takes the Vulkan network when its
+// model is there, a device can run it, it builds and no option needs HIP, and
+// says why not before taking HIP.
 std::unique_ptr<Backend> open_backend(Options& o, unsigned tier)
 {
     if (const char* hip = hip_only(o); hip && o.backend == "auto")
@@ -999,7 +1004,9 @@ std::unique_ptr<Backend> open_backend(Options& o, unsigned tier)
                                          " (dlsslop-setup --dll extracts it from nvngx_dlssnr.dll 310.8.0)");
             auto network = std::make_unique<dlsslop::VulkanNetwork>(vulkan_paths(o), o.device);
             std::fprintf(stderr, "Vulkan network on %s\n", network->device_name().c_str());
-            return std::make_unique<VulkanEngine>(std::move(network), tier);
+            auto engine = std::make_unique<VulkanEngine>(std::move(network), tier);
+            engine->prepare();
+            return engine;
         } catch (const std::exception& e) {
             if (o.backend == "vulkan") throw;
             std::fprintf(stderr, "Vulkan network unavailable (%s); using HIP\n", e.what());
@@ -1012,7 +1019,7 @@ std::unique_ptr<Backend> open_backend(Options& o, unsigned tier)
 // The Vulkan network on a deterministic gradient: finite, repeatable and changed.
 void run_vulkan_self_test(const Options& o, Backend& engine)
 {
-    const unsigned passes = o.passes.value_or(kNativeDefaultPasses);
+    const unsigned passes = std::min(o.passes.value_or(kNativeDefaultPasses), engine.max_passes);
     const auto raster = dlsslop::geometry(1, 1, engine.tier());
     const unsigned w = raster.width, h = engine.tier();
     std::vector<uint8_t> input(size_t(w) * h * 4), output(input.size()), first;
@@ -1148,7 +1155,7 @@ void run_self_test(const Options& o, Engine& engine)
 
 void run_offline(const Options& o, Backend& engine)
 {
-    const unsigned passes = o.passes.value_or(kNativeDefaultPasses);
+    const unsigned passes = std::min(o.passes.value_or(kNativeDefaultPasses), engine.max_passes);
     const size_t bytes = size_t(o.width) * o.height * 4;
     std::ifstream in(o.input, std::ios::binary | std::ios::ate);
     if (!in || in.tellg() != static_cast<std::streamoff>(bytes))
@@ -1418,7 +1425,9 @@ void run_worker(Options o)
                 const size_t bytes = size_t(w) * height * (settings.fp16 ? 8 : 4);
                 // A live control change takes effect on the next request;
                 // never shorten or extend a chain partway through a frame.
-                const unsigned passes = ShmPasses(h);
+                unsigned passes = ShmPasses(h);
+                // A count the backend cannot run is replaced with the most it can, as an unusable tier is.
+                if (passes > engine->max_passes) h->passes.store(passes = engine->max_passes);
                 if (!o.test_identity && passes != previous_passes) {
                     std::fprintf(stderr, "neural passes=%u; one final composition per frame\n", passes);
                     previous_passes = passes;

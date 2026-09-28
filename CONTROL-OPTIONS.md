@@ -14,8 +14,8 @@ channel. The HIP network ignores the Vulkan-only settings and says so once.
 |---|---|---|
 | `enabled` | `-e`, `--enabled` | Enables the rendering pipeline. |
 | `hdrmode` | `-E`, `--hdr-mode` | Proxy precision: automatic, forced 8-bit, or forced binary16. |
-| `sdr16multipass` | `-B`, `--sdr16-multipass` | Selects binary16 or quantized 8-bit SDR feedback between neural passes. |
-| `passes` | `-P`, `--passes` | Runs successive neural evaluations; each consumes the preceding result. |
+| `sdr16multipass` | `-B`, `--sdr16-multipass` | **HIP:** selects binary16 or quantized 8-bit SDR feedback between neural passes. **Vulkan:** passes are always fed 32-bit float. |
+| `passes` | `-P`, `--passes` | Runs successive neural evaluations; each consumes the preceding result. The Vulkan network runs at most 16 and stores that count. |
 | `preset` | `-N`, `--preset` | **Fixed: 0.** Alternate model presets and their weight/parameter mappings are unavailable. |
 | `style` | `-y`, `--style` | **Vulkan only:** the model's own style conditioning, 0..2. |
 | `automask` | `-M`, `--auto-mask` | **Vulkan only:** the model's automatic skin mask; with it, skin takes its own local structure. |
