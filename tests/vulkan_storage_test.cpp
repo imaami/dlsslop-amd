@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <tuple>
 #include <vector>
 
@@ -117,14 +118,14 @@ static void Features() {
 // VkPhysicalDeviceVulkan1xFeatures beside a structure it replaces.
 static bool Valid(const VkDeviceCreateInfo& info) {
     std::vector<VkStructureType> seen;
-    for (auto* node = static_cast<const VkBaseInStructure*>(info.pNext); node; node = node->pNext) {
+    for (const void* node = info.pNext; node; node = dlsslop::NextStructure(node)) {
         for (VkStructureType type : seen)
-            if (type == node->sType) return false;
-        seen.push_back(node->sType);
+            if (type == dlsslop::StructureType(node)) return false;
+        seen.push_back(dlsslop::StructureType(node));
     }
     for (const auto& f : dlsslop::kNetworkFeatures)
-        if (f.core != dlsslop::kNoCore && dlssnr::FindStructure(info.pNext, f.core) &&
-            dlssnr::FindStructure(info.pNext, f.type))
+        if (f.core != dlsslop::kNoCore && dlsslop::FindStructure(info.pNext, f.core) &&
+            dlsslop::FindStructure(info.pNext, f.type))
             return false;
     return true;
 }
@@ -133,7 +134,7 @@ static bool Valid(const VkDeviceCreateInfo& info) {
 static bool AllNetworkBits(const VkDeviceCreateInfo& info) {
     for (const auto& f : dlsslop::kNetworkFeatures) {
         const auto place = dlssnr::NetworkFeatureIn(info.pNext, f);
-        if (!place.first || !dlsslop::FeatureBit(const_cast<VkBaseInStructure*>(place.first), place.second))
+        if (!place.first || !dlsslop::FeatureBit(place.first, place.second))
             return false;
     }
     return true;
@@ -173,15 +174,15 @@ static void NetworkFeatures() {
     Check(request.Enable(info, true), "cannot add the network to a core-structure chain");
     Check(Valid(info) && AllNetworkBits(info) && dlssnr::HasFormatlessStorageWrites(info),
           "network features missing from a core-structure chain");
-    Check(static_cast<const void*>(dlssnr::FindStructure(info.pNext, VK_STRUCTURE_TYPE_APPLICATION_INFO)) == &unknown,
+    Check(dlsslop::FindStructure(info.pNext, VK_STRUCTURE_TYPE_APPLICATION_INFO) == &unknown,
           "the unknown suffix was not left shared");
-    Check(!dlssnr::FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES),
+    Check(!dlsslop::FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES),
           "a core feature was given its own structure beside Vulkan12Features");
-    Check(dlssnr::FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR) &&
-          dlssnr::FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR),
+    Check(dlsslop::FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR) &&
+          dlsslop::FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR),
           "extension structures were not added");
-    const auto* copied13 = reinterpret_cast<const VkPhysicalDeviceVulkan13Features*>(
-        dlssnr::FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES));
+    const auto* copied13 = static_cast<const VkPhysicalDeviceVulkan13Features*>(
+        dlsslop::FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES));
     const auto* copied2 = dlssnr::CoreFeatures2(info);
     Check(copied13 != &v13 && copied13->dynamicRendering && copied2 != &core && copied2->features.robustBufferAccess,
           "the game's own settings were lost in the copies");
@@ -211,7 +212,7 @@ static void NetworkFeatures() {
           dlssnr::HasFormatlessStorageWrites(own) && own.pEnabledFeatures != &legacy,
           "cannot add the network beside the game's own structures");
     Check(!float16.shaderInt8 && !legacy.shaderStorageImageWriteWithoutFormat &&
-          static_cast<const void*>(dlssnr::FindStructure(own.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES)) !=
+          dlsslop::FindStructure(own.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES) !=
               &float16,
           "the game's structures were written");
 
@@ -226,15 +227,107 @@ static void NetworkFeatures() {
     late.storageBuffer8BitAccess = late.shaderFloat16 = late.shaderInt8 = late.vulkanMemoryModel = VK_TRUE;
     dlssnr::DeviceFeatureRequest ahead;
     Check(ahead.Enable(hidden, true) && Valid(hidden) && AllNetworkBits(hidden) &&
-          static_cast<const void*>(dlssnr::FindStructure(hidden.pNext, VK_STRUCTURE_TYPE_APPLICATION_INFO)) == &opaque,
+          dlsslop::FindStructure(hidden.pNext, VK_STRUCTURE_TYPE_APPLICATION_INFO) == &opaque,
           "the network's structures were not put ahead of an uncopyable chain");
     std::puts("device features: network features set in the game's structures or added, never twice, "
               "game chains unwritten, uncopyable prefixes declined, and the ledger");
 }
 
+// A device as NetworkUnsupported sees it through the next layer's functions.
+namespace stub {
+uint32_t api = VK_API_VERSION_1_3;
+uint32_t minimumSubgroup = 32, maximumSubgroup = 64;
+std::vector<std::string> extensions;
+const char* unsupported = nullptr;  // a feature the device lacks
+
+void VKAPI_CALL Properties2(VkPhysicalDevice, VkPhysicalDeviceProperties2* properties) {
+    properties->properties.apiVersion = api;
+    auto* subgroup = static_cast<VkPhysicalDeviceSubgroupSizeControlProperties*>(
+        dlsslop::FindStructure(properties->pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES));
+    if (!subgroup) return;
+    subgroup->minSubgroupSize = minimumSubgroup;
+    subgroup->maxSubgroupSize = maximumSubgroup;
+    subgroup->requiredSubgroupSizeStages = VK_SHADER_STAGE_COMPUTE_BIT;
+}
+
+void VKAPI_CALL Features2(VkPhysicalDevice, VkPhysicalDeviceFeatures2* features) {
+    for (const auto& f : dlsslop::kNetworkFeatures)
+        if (void* node = dlsslop::FindStructure(features->pNext, f.type))
+            dlsslop::FeatureBit(node, f.offset) = !unsupported || std::strcmp(unsupported, f.name);
+}
+
+VkResult VKAPI_CALL Extensions(VkPhysicalDevice, const char*, uint32_t* count, VkExtensionProperties* properties) {
+    if (properties)
+        for (uint32_t i = 0; i < *count && i < extensions.size(); ++i)
+            std::snprintf(properties[i].extensionName, sizeof properties[i].extensionName, "%s", extensions[i].c_str());
+    *count = uint32_t(extensions.size());
+    return VK_SUCCESS;
+}
+
+const char* Unavailable(uint32_t instance) {
+    return dlssnr::NetworkUnavailable(VK_NULL_HANDLE, instance, Properties2, Features2, Extensions);
+}
+}  // namespace stub
+
+static bool Same(const char* a, const char* b) { return a && b && !std::strcmp(a, b); }
+
+static void NetworkAvailability() {
+    const auto all = NetworkExtensions();
+    stub::extensions.assign(all.begin(), all.end());
+    Check(!stub::Unavailable(VK_API_VERSION_1_3), "a capable device was refused the network");
+    Check(Same(stub::Unavailable(VK_API_VERSION_1_2), "a Vulkan 1.3 instance") &&
+          Same(dlssnr::NetworkUnavailable(VK_NULL_HANDLE, VK_API_VERSION_1_3, nullptr, stub::Features2,
+                                          stub::Extensions), "a Vulkan 1.3 instance"),
+          "a Vulkan 1.2 instance, or one without the 1.1 queries, was given the network");
+    stub::api = VK_API_VERSION_1_2;
+    Check(Same(stub::Unavailable(VK_API_VERSION_1_3), "Vulkan 1.3"), "a Vulkan 1.2 device was given the network");
+    stub::api = VK_API_VERSION_1_3;
+    for (const auto& f : dlsslop::kNetworkFeatures) {
+        stub::unsupported = f.name;
+        Check(Same(stub::Unavailable(VK_API_VERSION_1_3), f.name), "a missing feature was not named");
+    }
+    stub::unsupported = nullptr;
+    for (size_t i = 0; i < all.size(); ++i) {
+        stub::extensions.assign(all.begin(), all.end());
+        stub::extensions.erase(stub::extensions.begin() + i);
+        Check(Same(stub::Unavailable(VK_API_VERSION_1_3), all[i]), "a missing extension was not named");
+    }
+    stub::extensions.assign(all.begin(), all.end());
+    stub::minimumSubgroup = 64;
+    Check(Same(stub::Unavailable(VK_API_VERSION_1_3), "32-lane compute subgroups"),
+          "a device without 32-lane subgroups was given the network");
+    stub::minimumSubgroup = 32;
+
+    // The network's extensions join the list once each, behind the game's.
+    const char* game[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME};
+    VkDeviceCreateInfo info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+    info.enabledExtensionCount = 2;
+    info.ppEnabledExtensionNames = game;
+    std::vector<const char*> list;
+    Check(dlssnr::AddNetworkExtensions(info, list) && info.ppEnabledExtensionNames == list.data() &&
+          info.enabledExtensionCount == list.size() && list.size() == 1 + all.size() && list[0] == game[0] &&
+          list[1] == game[1], "the network's extensions were not added once each behind the game's");
+    Check(!dlssnr::AddNetworkExtensions(info, list) && list.size() == 1 + all.size(),
+          "extensions already listed were added again");
+
+    // A request that declined the network still enables formatless storage writes.
+    VkPhysicalDeviceVulkan12Features late{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+    VkBaseOutStructure opaque{VK_STRUCTURE_TYPE_APPLICATION_INFO, reinterpret_cast<VkBaseOutStructure*>(&late)};
+    VkPhysicalDeviceFeatures legacy{};
+    VkDeviceCreateInfo hidden{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &opaque};
+    hidden.pEnabledFeatures = &legacy;
+    dlssnr::DeviceFeatureRequest request;
+    Check(!request.Enable(hidden, true) && request.Enable(hidden, false) &&
+          dlssnr::HasFormatlessStorageWrites(hidden) && hidden.pNext == &opaque && !late.shaderInt8,
+          "a request that declined the network did not fall back to formatless storage alone");
+    std::puts("device features: the network is refused for each missing requirement, its extensions are added "
+              "once, and a declined request falls back");
+}
+
 int main() {
     Features();
     NetworkFeatures();
+    NetworkAvailability();
 #define SHADER(name) Shader(name##_spv, #name)
     SHADER(dlssnr);
     SHADER(bcus);

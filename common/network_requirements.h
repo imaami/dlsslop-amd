@@ -72,49 +72,74 @@ constexpr NetworkFeature kNetworkFeatures[] = {
 #undef DLSSLOP_ALONE
 #undef DLSSLOP_CORE
 
+// A structure chain's links, read and written as bytes. Through
+// VkBaseInStructure or VkBaseOutStructure they would be accesses of another
+// type than the structures', which the compiler may assume never alias.
+inline VkStructureType StructureType(const void* structure)
+{
+    VkStructureType type;
+    std::memcpy(&type, structure, sizeof type);
+    return type;
+}
+inline void* NextStructure(const void* structure)
+{
+    void* next;
+    std::memcpy(&next, static_cast<const unsigned char*>(structure) + offsetof(VkBaseInStructure, pNext), sizeof next);
+    return next;
+}
+inline void LinkStructure(void* structure, const void* next)
+{
+    std::memcpy(static_cast<unsigned char*>(structure) + offsetof(VkBaseOutStructure, pNext), &next, sizeof next);
+}
+// The structure of TYPE in the chain from FIRST, or null.
+template<class Void> Void* FindStructure(Void* first, VkStructureType type)
+{
+    while (first && StructureType(first) != type) first = NextStructure(first);
+    return first;
+}
+
 // The bit at OFFSET in STRUCTURE.
 inline VkBool32& FeatureBit(void* structure, uint32_t offset)
 {
     return *reinterpret_cast<VkBool32*>(static_cast<unsigned char*>(structure) + offset);
 }
+inline VkBool32 FeatureBit(const void* structure, uint32_t offset)
+{
+    return FeatureBit(const_cast<void*>(structure), offset);
+}
 
 // One structure of each type the table names, zeroed and chained behind a
 // VkPhysicalDeviceFeatures2: for a support query or a vkCreateDevice.
 class NetworkFeatureChain {
-    VkPhysicalDeviceCooperativeMatrixFeaturesKHR coop_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR};
-    VkPhysicalDeviceShaderFloat8FeaturesEXT fp8_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT};
-    VkPhysicalDevice16BitStorageFeatures storage16_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES};
-    VkPhysicalDevice8BitStorageFeatures storage8_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES};
-    VkPhysicalDeviceShaderFloat16Int8Features float16_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
-    VkPhysicalDeviceVulkanMemoryModelFeatures memory_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES};
-    VkPhysicalDeviceSubgroupSizeControlFeatures subgroup_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES};
-    VkPhysicalDeviceSynchronization2Features sync2_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES};
+    VkPhysicalDeviceFeatures2 head_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &coop_};
+    VkPhysicalDeviceCooperativeMatrixFeaturesKHR coop_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR,
+                                                       &fp8_};
+    VkPhysicalDeviceShaderFloat8FeaturesEXT fp8_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT, &storage16_};
+    VkPhysicalDevice16BitStorageFeatures storage16_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES, &storage8_};
+    VkPhysicalDevice8BitStorageFeatures storage8_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES, &float16_};
+    VkPhysicalDeviceShaderFloat16Int8Features float16_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES,
+                                                       &memory_};
+    VkPhysicalDeviceVulkanMemoryModelFeatures memory_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES,
+                                                      &subgroup_};
+    VkPhysicalDeviceSubgroupSizeControlFeatures subgroup_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES,
+                                                          &sync2_};
+    VkPhysicalDeviceSynchronization2Features sync2_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES, &layout_};
     VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR layout_{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR};
-    VkPhysicalDeviceFeatures2 head_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-    void* const structures_[9] = {&coop_, &fp8_, &storage16_, &storage8_, &float16_, &memory_, &subgroup_, &sync2_,
-                                  &layout_};
 
 public:
-    NetworkFeatureChain()
-    {
-        void* next = nullptr;
-        for (unsigned i = 9; i-- > 0;) {
-            static_cast<VkBaseOutStructure*>(structures_[i])->pNext = static_cast<VkBaseOutStructure*>(next);
-            next = structures_[i];
-        }
-        head_.pNext = next;
-    }
+    NetworkFeatureChain() = default;
     NetworkFeatureChain(const NetworkFeatureChain&) = delete;
     VkPhysicalDeviceFeatures2& features2() { return head_; }
-    // The structure of TYPE in this chain.
-    void* structure(VkStructureType type) const
+    // The structure of TYPE, whatever a caller has since linked it to.
+    void* structure(VkStructureType type)
     {
-        for (void* s : structures_)
-            if (static_cast<const VkBaseOutStructure*>(s)->sType == type) return s;
+        void* const all[] = {&coop_, &fp8_, &storage16_, &storage8_, &float16_, &memory_, &subgroup_, &sync2_, &layout_};
+        for (void* s : all)
+            if (StructureType(s) == type) return s;
         return nullptr;
     }
-    VkBool32& bit(const NetworkFeature& f) const { return FeatureBit(structure(f.type), f.offset); }
+    VkBool32& bit(const NetworkFeature& f) { return FeatureBit(structure(f.type), f.offset); }
 };
 
 // What stops the network running on PHYSICAL, or null: a feature's or an

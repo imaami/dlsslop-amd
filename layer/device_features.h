@@ -15,10 +15,8 @@
 namespace dlssnr {
 
 inline const VkPhysicalDeviceFeatures2* CoreFeatures2(const VkDeviceCreateInfo& info) {
-    for (auto* node = static_cast<const VkBaseInStructure*>(info.pNext); node; node = node->pNext)
-        if (node->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2)
-            return reinterpret_cast<const VkPhysicalDeviceFeatures2*>(node);
-    return nullptr;
+    return static_cast<const VkPhysicalDeviceFeatures2*>(
+        dlsslop::FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2));
 }
 
 inline bool HasFormatlessStorageWrites(const VkDeviceCreateInfo& info) {
@@ -27,20 +25,12 @@ inline bool HasFormatlessStorageWrites(const VkDeviceCreateInfo& info) {
     return features && features->shaderStorageImageWriteWithoutFormat;
 }
 
-// The structure of TYPE in a pNext chain, or null.
-inline const VkBaseInStructure* FindStructure(const void* chain, VkStructureType type) {
-    for (auto* node = static_cast<const VkBaseInStructure*>(chain); node; node = node->pNext)
-        if (node->sType == type) return node;
-    return nullptr;
-}
-
 // Where a network feature is enabled in a chain: the structure carrying it
 // alone, else the core structure carrying it, and the offset in it.
-inline std::pair<const VkBaseInStructure*, uint32_t> NetworkFeatureIn(const void* chain,
-                                                                      const dlsslop::NetworkFeature& f) {
-    if (const auto* node = FindStructure(chain, f.type)) return {node, f.offset};
+inline std::pair<const void*, uint32_t> NetworkFeatureIn(const void* chain, const dlsslop::NetworkFeature& f) {
+    if (const void* node = dlsslop::FindStructure(chain, f.type)) return {node, f.offset};
     if (f.core == dlsslop::kNoCore) return {nullptr, 0};
-    return {FindStructure(chain, f.core), f.core_offset};
+    return {dlsslop::FindStructure(chain, f.core), f.core_offset};
 }
 
 // The ledger: whether a device created from INFO, the request vkCreateDevice
@@ -52,7 +42,7 @@ inline bool NetworkEnabled(const VkDeviceCreateInfo& info) {
         for (uint32_t i = 0; !extension && i < info.enabledExtensionCount; ++i)
             extension = !std::strcmp(info.ppEnabledExtensionNames[i], f.extension);
         const auto [node, offset] = NetworkFeatureIn(info.pNext, f);
-        return extension && node && dlsslop::FeatureBit(const_cast<VkBaseInStructure*>(node), offset);
+        return extension && node && dlsslop::FeatureBit(node, offset);
     };
     return std::all_of(std::begin(dlsslop::kNetworkFeatures), std::end(dlsslop::kNetworkFeatures), enabled);
 }
@@ -104,15 +94,15 @@ class DeviceFeatureRequest {
     std::vector<std::shared_ptr<void>> copies_;
     dlsslop::NetworkFeatureChain added_;
 
-    template<class T> VkBaseOutStructure* Copy(const VkBaseInStructure* node) {
-        auto copy = std::make_shared<T>(*reinterpret_cast<const T*>(node));
-        auto* result = reinterpret_cast<VkBaseOutStructure*>(copy.get());
+    template<class T> void* Copy(const void* node) {
+        auto copy = std::make_shared<T>(*static_cast<const T*>(node));
+        void* result = copy.get();
         copies_.push_back(std::move(copy));
         return result;
     }
 
-    VkBaseOutStructure* CopyNode(const VkBaseInStructure* node) {
-        switch (node->sType) {
+    void* CopyNode(const void* node) {
+        switch (dlsslop::StructureType(node)) {
 #define COPY(type, tag) case tag: return Copy<type>(node)
             COPY(VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO);
             COPY(VkPhysicalDeviceFeatures2, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
@@ -149,31 +139,31 @@ public:
     // cannot copy.
     bool Enable(VkDeviceCreateInfo& info, bool network) {
         // The bits to set in the game's structures, and the network's that none carries.
-        std::vector<std::pair<const VkBaseInStructure*, uint32_t>> changes;
+        std::vector<std::pair<const void*, uint32_t>> changes;
         std::vector<const dlsslop::NetworkFeature*> missing;
-        const auto* features2 = FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
+        const void* features2 = dlsslop::FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
         constexpr uint32_t kFormatless = offsetof(VkPhysicalDeviceFeatures2, features.shaderStorageImageWriteWithoutFormat);
         if (features2 && !HasFormatlessStorageWrites(info)) changes.emplace_back(features2, kFormatless);
         if (network)
             for (const auto& f : dlsslop::kNetworkFeatures) {
                 const auto place = NetworkFeatureIn(info.pNext, f);
                 if (!place.first) missing.push_back(&f);
-                else if (!dlsslop::FeatureBit(const_cast<VkBaseInStructure*>(place.first), place.second))
+                else if (!dlsslop::FeatureBit(place.first, place.second))
                     changes.push_back(place);
             }
         // Private copies of the chain up to the last structure changed. The
         // last copy's pNext still leads to the rest of the game's chain.
-        auto* head = const_cast<VkBaseOutStructure*>(static_cast<const VkBaseOutStructure*>(info.pNext));
-        const VkBaseInStructure* node = static_cast<const VkBaseInStructure*>(info.pNext);
-        VkBaseOutStructure* previous = nullptr;
-        for (size_t left = changes.size(); left; node = node->pNext) {
-            auto* copy = CopyNode(node);
+        const void* head = info.pNext;
+        const void* node = info.pNext;
+        void* previous = nullptr;
+        for (size_t left = changes.size(); left; node = dlsslop::NextStructure(node)) {
+            void* copy = CopyNode(node);
             if (!copy) {
                 copies_.clear();
                 return false;
             }
             if (previous)
-                previous->pNext = copy;
+                dlsslop::LinkStructure(previous, copy);
             else
                 head = copy;
             previous = copy;
@@ -184,14 +174,14 @@ public:
                 }
         }
         // Structures of its own, at the head, for the network features no game structure carries.
-        std::vector<VkBaseOutStructure*> own;
+        std::vector<void*> own;
         for (const auto* f : missing) {
-            auto* structure = static_cast<VkBaseOutStructure*>(added_.structure(f->type));
+            void* structure = added_.structure(f->type);
             dlsslop::FeatureBit(structure, f->offset) = VK_TRUE;
             if (std::find(own.begin(), own.end(), structure) == own.end()) own.push_back(structure);
         }
         for (auto it = own.rbegin(); it != own.rend(); ++it) {
-            (*it)->pNext = head;
+            dlsslop::LinkStructure(*it, head);
             head = *it;
         }
         info.pNext = head;
