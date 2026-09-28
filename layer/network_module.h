@@ -81,16 +81,24 @@ struct NetworkModule {
     // Loads the module at PATH.
     bool Load(const char* path) {
         library = dlopen(path, RTLD_NOW | RTLD_LOCAL);
-        if (library) {
+        if (!library) return Refuse(path);
 #define FIND(field, name) field = reinterpret_cast<decltype(field)>(dlsym(library, #name))
-            FIND(open, dlsslop_network_open);
-            FIND(prepare, dlsslop_network_prepare);
-            FIND(record, dlsslop_network_record);
-            FIND(error, dlsslop_network_error);
-            FIND(close, dlsslop_network_close);
+        FIND(open, dlsslop_network_open);
+        FIND(prepare, dlsslop_network_prepare);
+        FIND(record, dlsslop_network_record);
+        FIND(error, dlsslop_network_error);
+        FIND(close, dlsslop_network_close);
 #undef FIND
-            if (open && prepare && record && error && close) return true;
-        }
+        if (open && prepare && record && error && close) return true;
+        Refuse(path);
+        // A module without the functions stays out of the game's process.
+        dlclose(library);
+        library = nullptr;
+        return false;
+    }
+
+    // Records why Load failed, before anything else can reset dlerror().
+    bool Refuse(const char* path) {
         const char* why = dlerror();
         failure = why ? why : path;
         return false;
