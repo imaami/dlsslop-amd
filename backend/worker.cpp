@@ -534,12 +534,11 @@ public:
 class Backend {
 public:
     virtual ~Backend() = default;
-    // A request's frames: host memory, or an imported device-local pair of a
-    // nonzero generation.
+    // A request's frames: host memory, or the device-local pair in an import slot.
     struct Frames {
         const uint8_t* proxy = nullptr;
         uint8_t* answer = nullptr;
-        uint32_t generation = 0;
+        int slot = -1;
     };
     virtual const char* name() const = 0;
     // The device it runs on, as --device names it, for --diagnose.
@@ -556,11 +555,26 @@ public:
     virtual void reshape(unsigned, unsigned, unsigned, const ProcessingSettings&) {}
     // Serving only: DMA the channel's frame slots directly.
     virtual void pin(uint8_t*, uint8_t*, size_t) {}
-    // Serving, between frames: imports an offered proxy/answer pair. The backend
-    // owns each descriptor it imported; fds keeps the rest to close.
-    virtual bool import(const ShmTransportOffer&, dlsslop::Descriptor (&)[2]) = 0;
-    // The imported pair of a generation that holds bytes; generation 0 when none does.
-    virtual Frames frames(uint32_t generation, size_t bytes) const = 0;
+    // Serving, between frames: imports an offered proxy/answer pair into the slot of
+    // its generation, or else the oldest one. The backend owns each descriptor it
+    // imported; fds keeps the rest to close.
+    bool import(const ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2])
+    {
+        if (!offer.generation) return false;
+        unsigned slot = 0;
+        while (slot < kSlots && held_[slot].generation != offer.generation) ++slot;
+        if (slot == kSlots) slot = next_slot_++ % kSlots;
+        if (!import_into(slot, offer, fds)) return false;
+        held_[slot] = {offer.generation, size_t(std::min(offer.size[0], offer.size[1]))};
+        return true;
+    }
+    // The imported pair of a generation that holds bytes, or none (slot -1).
+    Frames frames(uint32_t generation, size_t bytes) const
+    {
+        for (unsigned slot = 0; slot < kSlots; ++slot)
+            if (held_[slot].generation == generation && held_[slot].bytes >= bytes) return frames_of(slot);
+        return {};
+    }
     // Diagnostics: copies host or device memory, such as an imported frame, to the host.
     virtual void read_back(void* host, const void* source, size_t bytes) = 0;
     // w * h RGBA8 frames, or RGBA16F with settings.fp16.
@@ -569,6 +583,21 @@ public:
     virtual void self_test(const Options& o) = 0;
     float upload_ms = 0, inference_ms = 0, readback_ms = 0;
     unsigned max_passes = kMaxPasses;
+protected:
+    // Device-local frames the layer exported (ShmTransportOffer): one pair per producer
+    // generation, in as many slots, the oldest replaced first.
+    static constexpr unsigned kSlots = 4;
+    // Imports an offer into a slot, releasing the pair it held once the new one is in.
+    virtual bool import_into(unsigned slot, const ShmTransportOffer&, dlsslop::Descriptor (&)[2]) = 0;
+    // A slot's frames; the slot alone for a backend that finds them itself.
+    virtual Frames frames_of(unsigned slot) const { return {nullptr, nullptr, int(slot)}; }
+private:
+    struct Held {
+        uint32_t generation = 0;
+        size_t bytes = 0;
+    };
+    std::array<Held, kSlots> held_{};
+    unsigned next_slot_ = 0;
 };
 
 class Engine;
@@ -593,16 +622,12 @@ class Engine : public Backend {
     // Stream events: frame start, uploaded, evaluated, answered. Timing never
     // stalls the stream; the intervals are read once the answer is complete.
     hip_probe::Handle marks_[4]{};
-    // Device-local frames the layer exported (ShmTransportOffer), one per
-    // producer generation, the oldest replaced first.
+    // The pair in each import slot.
     struct Imported {
-        uint32_t generation = 0;
-        size_t bytes = 0;
         hip_probe::Handle memory[2]{};
         void* frame[2]{}; // proxy, answer
     };
-    std::array<Imported, 4> imported_{};
-    unsigned next_import_ = 0;
+    std::array<Imported, kSlots> imported_{};
 
     void release(Imported& slot)
     {
@@ -683,11 +708,11 @@ public:
     {
         if (gpu_codec_) gpu_codec_->pin(input, output, bytes);
     }
-    bool import(const ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2]) override
+    bool import_into(unsigned slot, const ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2]) override
     {
-        if (!gpu_codec_ || !offer.generation) return false;
+        if (!gpu_codec_) return false;
         auto& api = network_->Runtime();
-        Imported next{offer.generation, size_t(std::min(offer.size[0], offer.size[1]))};
+        Imported next;
         for (unsigned i = 0; i < 2; ++i) {
             hip_probe::MemoryDesc memory{};
             memory.type = 1; // hipExternalMemoryHandleTypeOpaqueFd
@@ -705,20 +730,14 @@ public:
                 return false;
             }
         }
-        Imported* slot = nullptr;
-        for (auto& imported : imported_)
-            if (imported.generation == offer.generation) slot = &imported;
-        if (!slot) slot = &imported_[next_import_++ % imported_.size()];
-        release(*slot);
-        *slot = next;
+        release(imported_[slot]);
+        imported_[slot] = next;
         return true;
     }
-    Frames frames(uint32_t generation, size_t bytes) const override
+    Frames frames_of(unsigned slot) const override
     {
-        for (const auto& imported : imported_)
-            if (imported.generation == generation && imported.bytes >= bytes)
-                return {static_cast<const uint8_t*>(imported.frame[0]), static_cast<uint8_t*>(imported.frame[1]), generation};
-        return {};
+        const Imported& pair = imported_[slot];
+        return {static_cast<const uint8_t*>(pair.frame[0]), static_cast<uint8_t*>(pair.frame[1]), int(slot)};
     }
     void read_back(void* host, const void* source, size_t bytes) override
     {
@@ -951,17 +970,14 @@ public:
     {
         network_->shape(frame(w, h, passes, settings));
     }
-    bool import(const ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2]) override
+    static_assert(kSlots == dlsslop::VulkanNetwork::kImportSlots);
+    bool import_into(unsigned slot, const ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2]) override
     {
         int raw[2] = {fds[0].fd, fds[1].fd};
-        const bool imported = network_->import(offer, raw);
+        const bool imported = network_->import(slot, offer, raw);
         fds[0].fd = raw[0];
         fds[1].fd = raw[1];
         return imported;
-    }
-    Frames frames(uint32_t generation, size_t bytes) const override
-    {
-        return network_->holds(generation, bytes) ? Frames{nullptr, nullptr, generation} : Frames{};
     }
     // Only HIP traces (hip_only).
     void read_back(void*, const void*, size_t) override
@@ -971,7 +987,7 @@ public:
     void infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
                dlsslop::FrameTrace* = nullptr) override
     {
-        network_->infer(frame(w, h, passes, settings), io.generation, io.proxy, io.answer);
+        network_->infer(frame(w, h, passes, settings), io.slot, io.proxy, io.answer);
         upload_ms = network_->upload_ms;
         inference_ms = network_->inference_ms;
         readback_ms = network_->readback_ms;
@@ -1436,7 +1452,7 @@ void run_worker(Options o)
                 Backend::Frames io{mapping.input, mapping.output};
                 if (const uint32_t generation = h->transportGen.load()) {
                     io = engine->frames(generation, bytes);
-                    if (!io.generation) {
+                    if (io.slot < 0) {
                         h->transportMiss.store(generation);
                         throw std::range_error("request names device-local frames this worker has not imported");
                     }

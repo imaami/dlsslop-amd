@@ -144,14 +144,12 @@ struct VulkanNetwork::Impl {
     Shape shape;
     std::unique_ptr<nr::Runtime> runtime;
     std::optional<VulkanFrame> last;  // the history's frame; none since a build
-    // Device-local frames the layer exported, one per producer generation, the oldest replaced first.
+    // Device-local frames the layer exported, a proxy/answer pair per import slot.
     struct Imported {
-        uint32_t generation = 0;
         size_t bytes = 0;
         Buffer frame[2];  // proxy, answer
     };
-    std::array<Imported, 4> imported{};
-    unsigned next_import = 0;
+    std::array<Imported, kImportSlots> imported{};
 
     uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags want) const
     {
@@ -371,26 +369,23 @@ bool VulkanNetwork::shape(const VulkanFrame& frame)
     return true;
 }
 
-bool VulkanNetwork::import(const ShmTransportOffer& offer, int fds[2])
+bool VulkanNetwork::import(unsigned slot, const ShmTransportOffer& offer, int fds[2])
 {
     auto& s = *impl_;
-    const uint64_t* allocation = offer.allocation;
-    const uint64_t* size = offer.size;
-    const uint32_t generation = offer.generation;
-    if (!generation) return false;
+    if (slot >= kImportSlots) return false;
     if (std::memcmp(offer.deviceUuid, s.ids.deviceUUID, VK_UUID_SIZE) ||
         std::memcmp(offer.driverUuid, s.ids.driverUUID, VK_UUID_SIZE)) {
         std::fprintf(stderr, "device-local transport: the game's frames are on another device or driver\n");
         return false;
     }
-    Impl::Imported next{generation, size_t(std::min(size[0], size[1]))};
+    Impl::Imported next;
     for (unsigned i = 0; i < 2; ++i) {
         Buffer& b = next.frame[i];
         VkExternalMemoryBufferCreateInfo external{VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO};
         external.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
         // The layer's buffer, repeated: a dedicated import must name an identical one.
         VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, &external};
-        info.size = size[i];
+        info.size = offer.size[i];
         info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
         VkMemoryRequirements req{};
         uint32_t type = s.memory.memoryTypeCount;
@@ -409,9 +404,9 @@ bool VulkanNetwork::import(const ShmTransportOffer& offer, int fds[2])
         fd.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
         fd.fd = fds[i];
         VkMemoryAllocateInfo alloc{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, &fd};
-        alloc.allocationSize = allocation[i];
+        alloc.allocationSize = offer.allocation[i];
         alloc.memoryTypeIndex = type;
-        if (!b.buffer || type == s.memory.memoryTypeCount || req.size != allocation[i] ||
+        if (!b.buffer || type == s.memory.memoryTypeCount || req.size != offer.allocation[i] ||
             vkAllocateMemory(s.device, &alloc, nullptr, &b.memory) != VK_SUCCESS) {
             s.release(next);
             return false;
@@ -421,39 +416,26 @@ bool VulkanNetwork::import(const ShmTransportOffer& offer, int fds[2])
             s.release(next);
             return false;
         }
-        b.size = size[i];
+        b.size = offer.size[i];
     }
-    Impl::Imported* slot = nullptr;
-    for (auto& imported : s.imported)
-        if (imported.generation == generation) slot = &imported;
-    if (!slot) slot = &s.imported[s.next_import++ % s.imported.size()];
     // An earlier frame may still be reading the slot's old import.
     check(vkQueueWaitIdle(s.queue), "wait for the queue");
-    s.release(*slot);
-    *slot = std::move(next);
+    s.release(s.imported[slot]);
+    s.imported[slot] = next;
     return true;
 }
 
-bool VulkanNetwork::holds(uint32_t generation, size_t bytes) const
-{
-    return generation && std::any_of(impl_->imported.begin(), impl_->imported.end(), [&](const Impl::Imported& i) {
-               return i.generation == generation && i.bytes >= bytes;
-           });
-}
-
-void VulkanNetwork::infer(const VulkanFrame& frame, uint32_t generation, const uint8_t* input, uint8_t* output)
+void VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint8_t* input, uint8_t* output)
 {
     auto& s = *impl_;
     shape(frame);
     const VkDeviceSize bytes = VkDeviceSize(frame.width) * frame.height * (frame.fp16 ? 8 : 4);
+    const bool exported = slot >= 0;  // the layer's device-local pair
     VkBuffer source = VK_NULL_HANDLE, target = VK_NULL_HANDLE;
-    for (const auto& imported : s.imported)
-        if (generation && imported.generation == generation && imported.bytes >= bytes) {
-            source = imported.frame[0].buffer;
-            target = imported.frame[1].buffer;
-        }
-    if (generation && !source) throw std::range_error("request names device-local frames this daemon has not imported");
-    if (!generation) {
+    if (exported) {
+        source = s.imported.at(size_t(slot)).frame[0].buffer;
+        target = s.imported[size_t(slot)].frame[1].buffer;
+    } else {
         s.host_buffer(s.upload, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 0);
         s.host_buffer(s.download, bytes, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
         std::memcpy(s.upload.mapped, input, bytes);
@@ -508,7 +490,7 @@ void VulkanNetwork::infer(const VulkanFrame& frame, uint32_t generation, const u
         dependency.pBufferMemoryBarriers = b;
         vkCmdPipelineBarrier2(cmd, &dependency);
     };
-    if (generation) own(true);
+    if (exported) own(true);
     VkBufferImageCopy region{};
     region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
     region.imageExtent = {frame.width, frame.height, 1};
@@ -581,7 +563,7 @@ void VulkanNetwork::infer(const VulkanFrame& frame, uint32_t generation, const u
         answer_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     }
     vkCmdCopyImageToBuffer(cmd, answer, answer_layout, target, 1, &region);
-    if (generation) {
+    if (exported) {
         own(false);
     } else {
         VkBufferMemoryBarrier b{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
@@ -611,7 +593,7 @@ void VulkanNetwork::infer(const VulkanFrame& frame, uint32_t generation, const u
         inference_ms = ms(1, 2);
         readback_ms = ms(2, 3);
     }
-    if (!generation) std::memcpy(output, s.download.mapped, bytes);
+    if (!exported) std::memcpy(output, s.download.mapped, bytes);
 }
 
 }  // namespace dlsslop

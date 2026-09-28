@@ -45,6 +45,7 @@ class VulkanNetwork {
 public:
     static constexpr unsigned kMaxPasses = 16;
     static constexpr float kMaxControl = 2;
+    static constexpr unsigned kImportSlots = 4;
     // device < 0: the first physical device the network can run on.
     VulkanNetwork(const VulkanPaths& paths, int device);
     ~VulkanNetwork();
@@ -59,14 +60,14 @@ public:
     bool shape(const VulkanFrame& frame);
     // True when shape() would build.
     bool shape_differs(const VulkanFrame& frame) const;
-    // Imports an offered proxy/answer pair, declining one of another device or driver.
-    // Takes ownership of each descriptor it imports and sets it to -1; the caller
-    // closes the rest.
-    bool import(const ShmTransportOffer& offer, int fds[2]);
-    bool holds(uint32_t generation, size_t bytes) const;
-    // Generation 0: the frame and answer are host memory at input and output.
-    // Otherwise they are the imported pair of that generation (holds() first).
-    void infer(const VulkanFrame& frame, uint32_t generation, const uint8_t* input, uint8_t* output);
+    // Imports an offered proxy/answer pair into a slot (below kImportSlots), releasing
+    // the pair it held once the new one is in, and declines one of another device or
+    // driver. Takes ownership of each descriptor it imports and sets it to -1; the
+    // caller closes the rest.
+    bool import(unsigned slot, const ShmTransportOffer& offer, int fds[2]);
+    // Slot -1: the frame and answer are host memory at input and output. Otherwise
+    // they are the pair imported into that slot, which the caller knows holds them.
+    void infer(const VulkanFrame& frame, int slot, const uint8_t* input, uint8_t* output);
 
     float upload_ms = 0, inference_ms = 0, readback_ms = 0;
 
