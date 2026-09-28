@@ -16,6 +16,15 @@
 #include <sys/mman.h>
 
 namespace {
+// The model and the pipeline cache resolve under a directory of the test's own.
+char directory[] = "/tmp/dlsslop-network-XXXXXX";
+
+void remove_directory()
+{
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
+}
+
 void require(bool value, const char* message)
 {
     if (value) return;
@@ -27,13 +36,13 @@ void require(bool value, const char* message)
 int main(int argc, char** argv)
 {
     require(argc == 2, "usage: network-module-test MODULE");
-    // The model and the pipeline cache under a directory of the test's own.
-    char directory[] = "/tmp/dlsslop-network-XXXXXX";
+    dlssnr::NetworkModule module;
+    const bool loaded = module.Load(argv[1]);
+    require(loaded, module.failure.c_str());
     require(mkdtemp(directory), "cannot make a temporary directory");
+    std::atexit(remove_directory);
     setenv("XDG_DATA_HOME", directory, 1);
     setenv("XDG_CACHE_HOME", directory, 1);
-    dlssnr::NetworkModule module;
-    require(module.Load(argv[1]), module.failure.c_str());
     // No device: nothing here reaches Vulkan.
     DlsslopNetworkDevice device{};
     DlsslopNetwork* network = module.open(&device);
@@ -56,7 +65,5 @@ int main(int argc, char** argv)
                 "a missing model did not fail the network for good, naming it");
     module.close(network);
     munmap(memory, kHeaderBytes);
-    std::error_code ignored;
-    std::filesystem::remove_all(directory, ignored);
     std::puts("network module: out-of-range settings rejected, a missing model fails for good");
 }
