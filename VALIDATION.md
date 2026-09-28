@@ -92,6 +92,16 @@ stay in video memory. A game on another GPU, or a worker whose channel path is
 too long for a Unix socket, logs `device-local transport declined` and stages
 frames through host memory instead.
 
+To check the network in the layer, run a Vulkan 1.3 application on the RX 9070
+XT through `dlsslop-run --layer-network`. Its layer log must report `in-layer
+network features enabled` and `in-layer network on the game's device`, and no
+`in-layer network failed`. At the same tier, captures (`dlsslopctl --capture 8`)
+of the same input must match those taken without `--layer-network` byte for
+byte. With `libdlsslop-network.so` moved away from beside the layer, the log
+must say the module is unavailable and frames must go to the daemon. A Vulkan
+1.1 application logs `in-layer network unavailable: needs a Vulkan 1.3
+instance`.
+
 ## Game and desktop testing
 
 Run the worker and launch the game using the instructions in
@@ -108,6 +118,9 @@ model coefficients.
 - Switch tiers with `dlsslopctl --tier` during play. The game must keep
   presenting its own frames through the rebuild, then show the edit at the new
   raster, with `device-local transport ready` logged again.
+- With `--layer-network`, repeat for a DXVK and a vkd3d-proton game. The layer
+  log must report the network in the layer, frame pacing must stay even, and a
+  tier switch must rebuild it while the game presents its own frames.
 - Open the Qt controller in the desktop session and check rendering, input,
   connection, live controls and channel replacement behaviour.
 

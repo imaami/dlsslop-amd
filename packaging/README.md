@@ -226,6 +226,20 @@ GPU, frames cross between the layer and the daemon in VRAM; otherwise frames
 are staged through host memory. `dlsslopd` doesn't generate new intermediate
 frames.
 
+### The network in the layer (experimental)
+
+`dlsslop-run --layer-network -- %command%` runs the Vulkan network inside the
+layer, on the game's own device, instead of in the daemon. Each frame is then
+one GPU submission, capture, network and composition, and the game's present
+returns without waiting for it. It needs a Vulkan 1.3 game (DXVK and
+vkd3d-proton games are) on a device that runs the network, and the daemon's
+model. The layer log reports `in-layer network on the game's device` when it
+runs. While it builds, at the start and after a tier change, the game presents
+its own frames. If it cannot run, the log says why and frames go to the daemon
+as before, so keep the daemon available. It adds the network's features to the
+game's device and runs in the game's process: remove the option if a game
+misbehaves with it.
+
 The daemon, launcher and controllers use `/tmp/dlsslop-amd-UID/shm.bin`, where
 `UID` is your numeric user ID. The launcher writes the layer log beside that
 file. To run separate sessions, give each session's daemon, launcher and
