@@ -292,6 +292,8 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
             (locked / 'dlsslop-amd').chmod(0o700)
         assert f"cannot read config file {locked / 'dlsslop-amd/dlsslopd.conf'}: Permission denied" in result.stderr, \
             result.stderr
+    # A default path below a file names no config file: it is skipped, not an error.
+    run(binary, '-T', '-D', env=dict(env, XDG_CONFIG_HOME=str(config)), cwd=cwd)
     assert not channel.exists(), 'a rejected config file created a channel'
     configured = dict(env, XDG_CONFIG_HOME=str(xdg))
     (xdg / 'dlsslop-amd').mkdir(parents=True)

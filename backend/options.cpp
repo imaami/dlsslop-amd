@@ -285,7 +285,7 @@ Result<void> apply_setting(Options& o, const std::string& text)
 Result<void> read_config(Options& o, const std::string& path, bool given)
 {
     struct stat st{};
-    if (!given && (path.empty() || (stat(path.c_str(), &st) && errno == ENOENT))) return {};
+    if (!given && (path.empty() || (stat(path.c_str(), &st) && (errno == ENOENT || errno == ENOTDIR)))) return {};
     const auto text = read_file(path);
     if (!text) return fail("cannot read config file " + path + ": " + text.error().what);
     unsigned line_number = 0;
