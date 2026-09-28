@@ -1,7 +1,12 @@
 #pragma once
 
+#include "../common/network_requirements.h"
+
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
+#include <algorithm>
+#include <cstddef>
+#include <cstring>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -21,13 +26,55 @@ inline bool HasFormatlessStorageWrites(const VkDeviceCreateInfo& info) {
     return features && features->shaderStorageImageWriteWithoutFormat;
 }
 
-// Copy only the prefix ending at Features2, keeping all unknown trailing nodes
-// untouched. Never write through the application's const pNext chain. Loader
-// nodes and core feature nodes cover the usual Proton chains; an unknown prefix
-// fails safely so the application can create its device and present untouched.
-class FormatlessStorageFeatures {
+// The structure of TYPE in a pNext chain, or null.
+inline const VkBaseInStructure* FindStructure(const void* chain, VkStructureType type) {
+    for (auto* node = static_cast<const VkBaseInStructure*>(chain); node; node = node->pNext)
+        if (node->sType == type) return node;
+    return nullptr;
+}
+
+// Where a network feature is enabled in a chain: the structure carrying it
+// alone, else the core structure carrying it, and the offset in it.
+inline std::pair<const VkBaseInStructure*, uint32_t> NetworkFeatureIn(const void* chain,
+                                                                      const dlsslop::NetworkFeature& f) {
+    if (const auto* node = FindStructure(chain, f.type)) return {node, f.offset};
+    if (f.core == dlsslop::kNoCore) return {nullptr, 0};
+    return {FindStructure(chain, f.core), f.core_offset};
+}
+
+// The ledger: whether a device created from INFO, the request vkCreateDevice
+// accepted, has every feature and extension the in-layer network needs.
+// LAYOUT says whether the optional ones are enabled too. A device's supported
+// features are no proof: only what was enabled may be used.
+inline bool NetworkEnabled(const VkDeviceCreateInfo& info, bool& layout) {
+    const auto enabled = [&info](const dlsslop::NetworkFeature& f) {
+        bool extension = !f.extension;
+        for (uint32_t i = 0; !extension && i < info.enabledExtensionCount; ++i)
+            extension = !std::strcmp(info.ppEnabledExtensionNames[i], f.extension);
+        const auto [node, offset] = NetworkFeatureIn(info.pNext, f);
+        return extension && node && dlsslop::FeatureBit(const_cast<VkBaseInStructure*>(node), offset);
+    };
+    layout = true;
+    for (const auto& f : dlsslop::kNetworkFeatures) {
+        if (enabled(f)) continue;
+        if (!f.optional) return false;
+        layout = false;
+    }
+    return true;
+}
+
+// What the layer adds to a game's vkCreateDevice: formatless storage writes
+// for the composition, and on request the in-layer network's features. A bit
+// is set in the structure the game chains that carries it, else in a
+// structure of its own put at the head of the chain. The structures up to the
+// last one changed are private copies: the game's const chain is never written.
+// Loader nodes and core feature nodes cover the usual Proton chains; a
+// structure to change behind one this cannot copy fails safely, and the game
+// then creates its device as it asked.
+class DeviceFeatureRequest {
     VkPhysicalDeviceFeatures legacy_{};
     std::vector<std::shared_ptr<void>> copies_;
+    dlsslop::NetworkFeatureChain added_{true};
 
     template<class T> VkBaseOutStructure* Copy(const VkBaseInStructure* node) {
         auto copy = std::make_shared<T>(*reinterpret_cast<const T*>(node));
@@ -36,7 +83,7 @@ class FormatlessStorageFeatures {
         return result;
     }
 
-    VkBaseOutStructure* CopyPrefix(const VkBaseInStructure* node) {
+    VkBaseOutStructure* CopyNode(const VkBaseInStructure* node) {
         switch (node->sType) {
 #define COPY(type, tag) case tag: return Copy<type>(node)
             COPY(VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO);
@@ -50,39 +97,82 @@ class FormatlessStorageFeatures {
             COPY(VkDeviceGroupDeviceCreateInfo, VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO);
             COPY(VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT,
                  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT);
+            // The network's own structures, which a game may chain itself.
+            COPY(VkPhysicalDeviceCooperativeMatrixFeaturesKHR,
+                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR);
+            COPY(VkPhysicalDeviceShaderFloat8FeaturesEXT, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT8_FEATURES_EXT);
+            COPY(VkPhysicalDevice16BitStorageFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES);
+            COPY(VkPhysicalDevice8BitStorageFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES);
+            COPY(VkPhysicalDeviceShaderFloat16Int8Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES);
+            COPY(VkPhysicalDeviceVulkanMemoryModelFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES);
+            COPY(VkPhysicalDeviceSubgroupSizeControlFeatures,
+                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES);
+            COPY(VkPhysicalDeviceSynchronization2Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES);
+            COPY(VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR,
+                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR);
 #undef COPY
             default: return nullptr;
         }
     }
 
 public:
-    bool Enable(VkDeviceCreateInfo& info) {
-        if (HasFormatlessStorageWrites(info)) return true;
-        if (!CoreFeatures2(info)) {
-            legacy_ = info.pEnabledFeatures ? *info.pEnabledFeatures : VkPhysicalDeviceFeatures{};
-            legacy_.shaderStorageImageWriteWithoutFormat = VK_TRUE;
-            info.pEnabledFeatures = &legacy_;
-            return true;
+    // Adds the features to INFO: with NETWORK the in-layer network's, with
+    // LAYOUT its optional ones too. False, leaving INFO as it was, when a
+    // structure to change follows one this cannot copy.
+    bool Enable(VkDeviceCreateInfo& info, bool network, bool layout) {
+        // The bits to set in the game's structures, and the network's that none carries.
+        std::vector<std::pair<const VkBaseInStructure*, uint32_t>> changes;
+        std::vector<const dlsslop::NetworkFeature*> missing;
+        const auto* features2 = FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
+        constexpr uint32_t kFormatless = offsetof(VkPhysicalDeviceFeatures2, features.shaderStorageImageWriteWithoutFormat);
+        if (features2 && !HasFormatlessStorageWrites(info)) changes.emplace_back(features2, kFormatless);
+        for (const auto& f : dlsslop::kNetworkFeatures) {
+            if (!network || (f.optional && !layout)) continue;
+            const auto place = NetworkFeatureIn(info.pNext, f);
+            if (!place.first) missing.push_back(&f);
+            else if (!dlsslop::FeatureBit(const_cast<VkBaseInStructure*>(place.first), place.second))
+                changes.push_back(place);
         }
-        VkBaseOutStructure* first = nullptr;
+        // Private copies of the chain up to the last structure changed. The
+        // last copy's pNext still leads to the rest of the game's chain.
+        auto* head = const_cast<VkBaseOutStructure*>(static_cast<const VkBaseOutStructure*>(info.pNext));
+        const VkBaseInStructure* node = static_cast<const VkBaseInStructure*>(info.pNext);
         VkBaseOutStructure* previous = nullptr;
-        for (auto* node = static_cast<const VkBaseInStructure*>(info.pNext); node; node = node->pNext) {
-            auto* copy = CopyPrefix(node);
+        for (size_t left = changes.size(); left; node = node->pNext) {
+            auto* copy = CopyNode(node);
             if (!copy) {
                 copies_.clear();
                 return false;
             }
-            if (!first) first = copy;
-            if (previous) previous->pNext = copy;
+            if (previous)
+                previous->pNext = copy;
+            else
+                head = copy;
             previous = copy;
-            if (node->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2) {
-                reinterpret_cast<VkPhysicalDeviceFeatures2*>(copy)->features
-                    .shaderStorageImageWriteWithoutFormat = VK_TRUE;
-                info.pNext = first;
-                return true;
-            }
+            for (const auto& change : changes)
+                if (change.first == node) {
+                    dlsslop::FeatureBit(copy, change.second) = VK_TRUE;
+                    --left;
+                }
         }
-        return false;
+        // Structures of its own, at the head, for the network features no game structure carries.
+        std::vector<VkBaseOutStructure*> own;
+        for (const auto* f : missing) {
+            auto* structure = static_cast<VkBaseOutStructure*>(added_.structure(f->type));
+            dlsslop::FeatureBit(structure, f->offset) = VK_TRUE;
+            if (std::find(own.begin(), own.end(), structure) == own.end()) own.push_back(structure);
+        }
+        for (auto it = own.rbegin(); it != own.rend(); ++it) {
+            (*it)->pNext = head;
+            head = *it;
+        }
+        info.pNext = head;
+        if (!features2 && !HasFormatlessStorageWrites(info)) {
+            legacy_ = info.pEnabledFeatures ? *info.pEnabledFeatures : VkPhysicalDeviceFeatures{};
+            legacy_.shaderStorageImageWriteWithoutFormat = VK_TRUE;
+            info.pEnabledFeatures = &legacy_;
+        }
+        return true;
     }
 };
 

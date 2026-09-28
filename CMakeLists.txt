@@ -89,8 +89,11 @@ set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE
     INTERPROCEDURAL_OPTIMIZATION OFF)
 add_dependencies(dlsslop-layer-objects layer-shaders)
 target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC
-    ${LAYER_ROOT}/layer_linux/src ${LAYER_ROOT}/standalone_runner/third_party
-    ${X11_HEADERS} ${XINPUT_HEADERS})
+    ${LAYER_ROOT}/layer_linux/src ${X11_HEADERS} ${XINPUT_HEADERS})
+# Upstream's bundled third-party headers come after the system's: the layer
+# gets the system Vulkan headers, which the network's features need, and still
+# finds stb_image.h.
+target_compile_options(dlsslop-layer-objects PUBLIC -idirafter ${LAYER_ROOT}/standalone_runner/third_party)
 target_link_libraries(dlsslop-layer-objects PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 
 function(add_neural_layer target)
@@ -198,8 +201,7 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging_test.py)
     add_executable(vulkan-storage-test tests/vulkan_storage_test.cpp)
     add_dependencies(vulkan-storage-test layer-shaders)
-    target_include_directories(vulkan-storage-test PRIVATE ${SHADER_DIR} layer
-        ${LAYER_ROOT}/standalone_runner/third_party)
+    target_include_directories(vulkan-storage-test PRIVATE ${SHADER_DIR} layer)
     add_test(NAME vulkan-storage COMMAND vulkan-storage-test)
     add_executable(codec-test backend/codec_test.cpp)
     target_link_libraries(codec-test PRIVATE dlsslop-codec)

@@ -1670,7 +1670,7 @@ index 0941c93..b544124 100644
      // present only because Vulkan will not accept an unwritten binding.
      VkImage _dummyImage = VK_NULL_HANDLE;
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..131d393 100644
+index 4b37520..a036abb 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -2076,13 +2076,13 @@ index 4b37520..131d393 100644
 +    // capability is optional, so request it explicitly before creating a device.
 +    // The helper owns private copies of Features2 and its known pNext prefix;
 +    // unknown prefixes are left untouched and disable composition safely.
-+    dlssnr::FormatlessStorageFeatures storageFeatures;
++    dlssnr::DeviceFeatureRequest storageFeatures;
 +    if (LayerEnabled()) {
 +        VkPhysicalDeviceFeatures supported{};
 +        auto query = ic ? ic->table.vkGetPhysicalDeviceFeatures : nullptr;
 +        if (query) query(physicalDevice, &supported);
 +        if (supported.shaderStorageImageWriteWithoutFormat) {
-+            if (storageFeatures.Enable(modified)) effective = &modified;
++            if (storageFeatures.Enable(modified, false, false)) effective = &modified;
 +            else Log("[layer] cannot safely clone the Features2 prefix; compositor disabled");
 +        } else {
 +            Log("[layer] formatless storage writes unsupported; compositor disabled");
