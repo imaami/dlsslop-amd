@@ -8,12 +8,43 @@
 #include <cstring>
 #include <fcntl.h>
 #include <poll.h>
-#include <stdexcept>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
 
 namespace dlsslop {
+Result<TransportListener> TransportListener::open(const std::string& channel, bool wanted)
+{
+    TransportListener listener(ShmTransportPath(channel));
+    const char* pid = std::getenv("LISTEN_PID");
+    const char* count = std::getenv("LISTEN_FDS");
+    if (pid && count && std::strtol(pid, nullptr, 10) == getpid() && !std::strcmp(count, "1")) {
+        listener.socket.fd = 3; // SD_LISTEN_FDS_START
+        fcntl(listener.socket.fd, F_SETFL, fcntl(listener.socket.fd, F_GETFL) | O_NONBLOCK);
+        fcntl(listener.socket.fd, F_SETFD, FD_CLOEXEC);
+        return listener;
+    }
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    if (!wanted) return listener;
+    const std::string& path = listener.path;
+    errno = ENAMETOOLONG;
+    if (path.size() < sizeof address.sun_path) {
+        std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
+        listener.socket.fd = ::socket(AF_UNIX, SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+        listener.bound = listener.socket.fd >= 0 &&
+                         !bind(listener.socket.fd, reinterpret_cast<const sockaddr*>(&address), sizeof address);
+        // Never replace a socket someone else owns: systemd's, left listening by
+        // an idle dlsslop.socket, would be gone for good once this worker exits.
+        if (!listener.bound && errno == EADDRINUSE)
+            return fail(path + " exists: stop dlsslop.socket before starting dlsslopd "
+                               "by hand, or remove the file if nothing uses it");
+        if (listener.bound && !listen(listener.socket.fd, 4)) return listener;
+    }
+    std::fprintf(stderr, "device-local transport unavailable (%s): %s\n", path.c_str(), std::strerror(errno));
+    return listener;
+}
+
 bool receive_offer(int peer, ShmTransportOffer& offer, dlsslop::Descriptor (&fds)[2])
 {
     pollfd ready{peer, POLLIN, 0};

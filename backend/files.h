@@ -5,8 +5,27 @@
 
 #include <string>
 #include <string_view>
+#include <utility>
+#include <unistd.h>
 
 namespace dlsslop {
+
+// Owns a descriptor, and with it any flock on the file.
+struct Descriptor {
+    int fd = -1;
+    Descriptor() = default;
+    explicit Descriptor(int fd) : fd(fd) {}
+    Descriptor(Descriptor&& other) noexcept : fd(std::exchange(other.fd, -1)) {}
+    Descriptor& operator=(Descriptor&& other) noexcept
+    {
+        std::swap(fd, other.fd);
+        return *this;
+    }
+    ~Descriptor()
+    {
+        if (fd >= 0) close(fd);
+    }
+};
 
 bool is_directory(const std::string& path);
 bool is_regular_file(const std::string& path);
@@ -14,7 +33,15 @@ bool is_regular_file(const std::string& path);
 std::string parent_path(std::string_view path);
 // A and B joined by one slash; B alone when A is empty.
 std::string join(std::string_view a, std::string_view b);
+// PATH, relative to the working directory unless it is absolute.
+std::string absolute(const std::string& path);
 // The whole file, or strerror of what stopped it.
 Result<std::string> read_file(const std::string& path);
+// All of DATA to FD.
+Result<void> write_all(int fd, const void* data, size_t bytes);
+// Creates DIR, with any missing parents, as 0700, or accepts an existing real
+// directory the current user owns with exactly that mode, so no other user can
+// plant or swap files in it. WHAT names it in errors.
+Result<void> private_directory(const std::string& directory, const char* what);
 
 } // namespace dlsslop

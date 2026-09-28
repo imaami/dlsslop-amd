@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "files.h"
 
+#include <climits>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -31,6 +32,13 @@ std::string join(std::string_view a, std::string_view b)
     return joined += b;
 }
 
+std::string absolute(const std::string& path)
+{
+    if (path.starts_with('/')) return path;
+    char cwd[PATH_MAX];
+    return getcwd(cwd, sizeof cwd) ? join(cwd, path) : path;
+}
+
 Result<std::string> read_file(const std::string& path)
 {
     const int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
@@ -43,6 +51,37 @@ Result<std::string> read_file(const std::string& path)
     close(fd);
     if (got < 0) return fail(std::strerror(error));
     return text;
+}
+
+Result<void> write_all(int fd, const void* data, size_t bytes)
+{
+    for (auto* at = static_cast<const char*>(data); bytes;) {
+        const ssize_t wrote = write(fd, at, bytes);
+        if (wrote < 0 && errno == EINTR) continue;
+        if (wrote <= 0) return fail(std::strerror(wrote ? errno : EIO));
+        at += wrote;
+        bytes -= size_t(wrote);
+    }
+    return {};
+}
+
+Result<void> private_directory(const std::string& path, const char* what)
+{
+    const std::string directory = path.substr(0, path.find_last_not_of('/') + 1);
+    // mkdir -p: each missing component, the last one private.
+    bool created = false;
+    for (size_t end = directory.find('/', 1);; end = directory.find('/', end + 1)) {
+        const std::string component = directory.substr(0, end);
+        created = !mkdir(component.c_str(), 0777);
+        if (!created && errno != EEXIST) return fail(std::string("create ") + what + " directory: " + std::strerror(errno));
+        if (end == std::string::npos) break;
+    }
+    struct stat st{};
+    if (lstat(directory.c_str(), &st) || !S_ISDIR(st.st_mode) || st.st_uid != getuid())
+        return fail(std::string(what) + " directory must be owned by the current user and not a symlink");
+    if (created ? chmod(directory.c_str(), 0700) != 0 : (st.st_mode & 0777) != 0700)
+        return fail(std::string(what) + " directory must be private (mode 0700): " + directory);
+    return {};
 }
 
 } // namespace dlsslop

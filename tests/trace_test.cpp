@@ -1,6 +1,15 @@
 // SPDX-License-Identifier: MIT
 #include "../backend/trace.h"
 #include <array>
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <unistd.h>
+#include <vector>
+#include <filesystem>
+#include <fstream>
 #include <cstdlib>
 #include <initializer_list>
 #include <iterator>
@@ -12,6 +21,15 @@ void require(bool yes, const char* message) {
 std::string read_text(const std::filesystem::path& file) {
     std::ifstream in(file, std::ios::binary);
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+// The next claimed trace; failing to claim one fails the test.
+std::unique_ptr<dlsslop::FrameTrace> taken(dlsslop::TraceRequests& requests) {
+    auto trace = requests.take();
+    require(bool(trace), "claim a trace request");
+    return std::move(*trace);
+}
+void write_text(const std::filesystem::path& file, const std::string& text) {
+    require(bool(dlsslop::trace_write_text(file.string(), text)), "write a text file");
 }
 // The client parses every file with Python's json module; nan, inf and a
 // missing separator must fail here, not in a diagnostic run.
@@ -41,7 +59,7 @@ int main(int argc, char** argv)
             const unsigned p = (y * 4 + x) * 4;
             rgba[p] = float(y); rgba[p + 1] = float(x); rgba[p + 2] = -0.5f;
         }
-        dlsslop::trace_write_pfm(directory / "test.pfm", rgba.data(), g, 4);
+        require(bool(dlsslop::trace_write_pfm((directory / "test.pfm").string(), rgba.data(), g, 4)), "write a PFM");
         std::ifstream pfm(directory / "test.pfm", std::ios::binary);
         std::string line;
         std::getline(pfm, line); require(line == "PF", "RGB PFM magic");
@@ -61,11 +79,8 @@ int main(int argc, char** argv)
         // Other users must not be able to plant files (such as a symlinked
         // owner.json.tmp) in the root, so only a private one is accepted.
         const auto rejected = [&](const std::filesystem::path& root) {
-            try { dlsslop::TraceRequests loose(root.string(), "/tmp/example-shm"); }
-            catch (const std::runtime_error&) {
-                return !std::filesystem::exists(root / ".worker-lock") && !std::filesystem::exists(root / "owner.json");
-            }
-            return false;
+            return !dlsslop::TraceRequests::open(root.string(), "/tmp/example-shm") &&
+                   !std::filesystem::exists(root / ".worker-lock") && !std::filesystem::exists(root / "owner.json");
         };
         for (const auto mode : {std::filesystem::perms::all, std::filesystem::perms::owner_all |
                                 std::filesystem::perms::group_read | std::filesystem::perms::group_exec |
@@ -78,26 +93,25 @@ int main(int argc, char** argv)
         require(rejected(directory / "link"), "reject a symlinked trace root");
         std::filesystem::remove(directory / "link");
         {
-            dlsslop::TraceRequests created((directory / "new/nested").string(), "/tmp/example-shm");
-            require((std::filesystem::status(directory / "new/nested").permissions() & std::filesystem::perms::all) ==
+            const auto created = dlsslop::TraceRequests::open((directory / "new/nested").string(), "/tmp/example-shm");
+            require(bool(created) && (std::filesystem::status(directory / "new/nested").permissions() & std::filesystem::perms::all) ==
                     std::filesystem::perms::owner_all, "a created trace root is private");
         }
         std::filesystem::remove_all(directory / "new");
         {
-            dlsslop::TraceRequests requests(directory.string(), "/tmp/example-shm");
+            auto opened = dlsslop::TraceRequests::open(directory.string(), "/tmp/example-shm");
+            require(bool(opened), "open a private trace root");
+            dlsslop::TraceRequests& requests = *opened;
             const auto owner = read_text(directory / "owner.json");
             require(owner.find("\"pid\":" + std::to_string(getpid()) + ",") != std::string::npos &&
                     owner.find("\"shm\":\"/tmp/example-shm\"") != std::string::npos, "owner discovery metadata");
             require(read_text(directory / "owner.json").find("\"trace_metadata_schema\":2") != std::string::npos,
                     "owner must advertise frozen-input evidence before capture");
-            bool locked = false;
-            try { dlsslop::TraceRequests duplicate(directory.string(), "/tmp/other"); }
-            catch (const std::runtime_error&) { locked = true; }
-            require(locked, "one worker per trace directory");
-            require(!requests.take(), "no request means no trace");
-            dlsslop::trace_write_text(directory / "request", "frame_1\n");
-            auto frame = requests.take();
-            require(frame && !requests.take(), "request consumed exactly once");
+            require(!dlsslop::TraceRequests::open(directory.string(), "/tmp/other"), "one worker per trace directory");
+            require(!taken(requests), "no request means no trace");
+            write_text(directory / "request", "frame_1\n");
+            auto frame = taken(requests);
+            require(frame && !taken(requests), "request consumed exactly once");
             require((std::filesystem::status(directory / "frame_1").permissions() & std::filesystem::perms::all) ==
                     std::filesystem::perms::owner_all, "a token directory is private");
             frame->image("pass-01-input", rgba.data(), g, 4);
@@ -142,31 +156,27 @@ int main(int argc, char** argv)
                     "\"sharpness\":0",
                     "\"file\":\"pass-01-input.pfm\"", "\"file\":\"pass-01-raw.pfm\""})
                 require(summary.find(field) != std::string::npos, field);
-            dlsslop::trace_write_text(directory / "request", "frame_1\n");
-            bool duplicate = false;
-            try { requests.take(); } catch (const std::runtime_error&) { duplicate = true; }
+            write_text(directory / "request", "frame_1\n");
+            const bool duplicate = !requests.take();
             require(duplicate && read_text(directory / "frame_1/summary.json") == summary,
                     "duplicate token must never overwrite evidence");
-            dlsslop::trace_write_text(directory / "request", "../escape\n");
-            bool traversal = false;
-            try { requests.take(); } catch (const std::runtime_error&) { traversal = true; }
+            write_text(directory / "request", "../escape\n");
+            const bool traversal = !requests.take();
             require(traversal, "reject path traversal");
             // The protocol file's own name would make the evidence directory
             // DIR/request, which the next claim would take as a request.
-            dlsslop::trace_write_text(directory / "request", "request\n");
-            bool reserved = false;
-            try { requests.take(); } catch (const std::runtime_error&) { reserved = true; }
+            write_text(directory / "request", "request\n");
+            const bool reserved = !requests.take();
             require(reserved && !std::filesystem::exists(directory / "request"), "reject the reserved token");
             std::filesystem::create_directory(directory / "request");
-            bool stray = false;
-            try { requests.take(); } catch (const std::runtime_error&) { stray = true; }
+            const bool stray = !requests.take();
             require(stray && !std::filesystem::exists(directory / "request") &&
                     !std::filesystem::exists(directory / (".request-" + std::to_string(getpid()))),
                     "a stray empty request directory is cleared, not left to block claims");
             // A failed frame still publishes its summary and root marker, with
             // its error escaped and no stage recorded after a failed stage.
-            dlsslop::trace_write_text(directory / "request", "frame_2\n");
-            auto failed = requests.take();
+            write_text(directory / "request", "frame_2\n");
+            auto failed = taken(requests);
             require(bool(failed), "later requests are claimed");
             failed->image("pass-01-input", rgba.data(), g, 4);
             failed->image("pass-01-tuned", rgba.data(), g, 2);
@@ -185,8 +195,8 @@ int main(int argc, char** argv)
                     "no stage from or after a failed stage");
             // A trace dropped unfinished, as when the worker stops after the
             // claim, still publishes a failed summary and its root marker.
-            dlsslop::trace_write_text(directory / "request", "frame_3\n");
-            requests.take()->image("pass-01-input", rgba.data(), g, 4);
+            write_text(directory / "request", "frame_3\n");
+            taken(requests)->image("pass-01-input", rgba.data(), g, 4);
             require(read_text(directory / "frame_3.done") == "frame_3/summary.json\n", "abandoned trace marker");
             const auto abandoned = read_text(directory / "frame_3/summary.json");
             for (const char* field : {"\"status\":\"failed\"", "\"metadata\":{}",
@@ -194,8 +204,8 @@ int main(int argc, char** argv)
                                       "\"file\":\"pass-01-input.pfm\""})
                 require(abandoned.find(field) != std::string::npos, field);
             // A stage failure recorded but not finished keeps its own error.
-            dlsslop::trace_write_text(directory / "request", "frame_4\n");
-            requests.take()->image("pass-01-input", rgba.data(), g, 2);
+            write_text(directory / "request", "frame_4\n");
+            taken(requests)->image("pass-01-input", rgba.data(), g, 2);
             const auto unfinished = read_text(directory / "frame_4/summary.json");
             require(unfinished.find("\"status\":\"failed\"") != std::string::npos &&
                     unfinished.find("\"error\":\"invalid diagnostic image geometry\"") != std::string::npos,

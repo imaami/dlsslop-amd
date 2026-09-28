@@ -126,7 +126,7 @@ add_library(dlsslop-codec OBJECT backend/codec.cpp)
 add_executable(dlsslopd
     backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.cpp
     backend/open.cpp backend/hip_engine.cpp backend/self_test.cpp backend/offline.cpp
-    backend/files.cpp backend/vulkan_network.cpp)
+    backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp)
 target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common common)
 target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-vknr Threads::Threads ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)
@@ -181,7 +181,8 @@ if(BUILD_TESTING)
     add_executable(temporal-test tests/temporal_test.cpp)
     target_include_directories(temporal-test PRIVATE backend)
     add_test(NAME temporal COMMAND temporal-test)
-    add_executable(trace-test tests/trace_test.cpp)
+    add_executable(trace-test tests/trace_test.cpp backend/trace.cpp backend/files.cpp)
+    target_include_directories(trace-test PRIVATE common)
     add_test(NAME trace COMMAND trace-test ${Python3_EXECUTABLE})
     add_executable(capture-writer-test tests/capture_writer_test.cpp)
     target_link_libraries(capture-writer-test PRIVATE dlsslop-layer-objects)

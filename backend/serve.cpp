@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <linux/futex.h>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <sys/syscall.h>
@@ -94,11 +95,16 @@ bool retire(ShmHeader* h, uint32_t request)
 
 void run_worker(Options o)
 {
-    Mapping mapping(o.shm);
+    auto opened = Mapping::open(o.shm);
+    if (!opened) throw std::runtime_error(opened.error().what);
+    Mapping& mapping = *opened;
     auto* h = mapping.h;
-    std::unique_ptr<dlsslop::TraceRequests> traces;
-    if (!o.trace_dir.empty())
-        traces = std::make_unique<dlsslop::TraceRequests>(o.trace_dir, o.shm);
+    std::optional<TraceRequests> traces;
+    if (!o.trace_dir.empty()) {
+        auto requests = TraceRequests::open(o.trace_dir, o.shm);
+        if (!requests) throw std::runtime_error(requests.error().what);
+        traces.emplace(std::move(*requests));
+    }
     std::unique_ptr<dlsslop::FrameTrace> pending_trace;
     // An explicit tier replaces the channel's; otherwise a usable live one stays.
     const unsigned live = h->nativeTier.load();
@@ -123,7 +129,9 @@ void run_worker(Options o)
     } stop_heartbeat{heartbeat_stop, heartbeat};
     try {
         mapping.reason(o.test_identity ? "IDENTITY TEST: inference disabled" : "initializing the network");
-        const TransportListener transport(o.shm, !o.test_identity && !o.cpu_codec);
+        auto listener = TransportListener::open(o.shm, !o.test_identity && !o.cpu_codec);
+        if (!listener) throw std::runtime_error(listener.error().what);
+        const TransportListener& transport = *listener;
         std::unique_ptr<Backend> engine = open_backend(o, tier);
         engine->prepare();
         // Only serving stops gracefully, from the ready announcement on.
@@ -149,12 +157,10 @@ void run_worker(Options o)
         while (!stopping && !h->quit.load(std::memory_order_relaxed)) {
             accept_offers(transport, *engine);
             if (traces && !pending_trace) {
-                try {
-                    pending_trace = traces->take();
-                    if (pending_trace) h->controlSeq.fetch_add(1);
-                } catch (const std::exception& error) {
-                    std::fprintf(stderr, "diagnostic request rejected: %s\n", error.what());
-                }
+                if (auto taken = traces->take(); !taken)
+                    std::fprintf(stderr, "diagnostic request rejected: %s\n", taken.error().what.c_str());
+                else if ((pending_trace = std::move(*taken)))
+                    h->controlSeq.fetch_add(1);
             }
             const uint32_t request = h->seq_req.load(std::memory_order_acquire);
             if (request == last) {
