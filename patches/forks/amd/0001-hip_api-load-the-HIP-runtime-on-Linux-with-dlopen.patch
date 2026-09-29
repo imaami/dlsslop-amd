@@ -1,0 +1,57 @@
+From 1ec5d844105da7289fe4c76c66b9fd809660f3b1 Mon Sep 17 00:00:00 2001
+From: Juuso Alasuutari <juuso.alasuutari@gmail.com>
+Date: Tue, 29 Sep 2026 09:53:17 +0300
+Subject: [PATCH 1/5] hip_api: load the HIP runtime on Linux with dlopen
+
+Before this commit, hip_api.h loaded amdhip64 with the Windows loader
+API. This commit loads libamdhip64.so.7, libamdhip64.so.6 or the
+unversioned library, also from /opt/rocm/lib or from the path in
+DLSSLOP_HIP_LIBRARY, with dlopen and dlsym.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+---
+ Development/HIP/hip_api.h | 14 ++++++++++----
+ 1 file changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/Development/HIP/hip_api.h b/Development/HIP/hip_api.h
+index 1893e2c..0a95a22 100644
+--- a/Development/HIP/hip_api.h
++++ b/Development/HIP/hip_api.h
+@@ -12,7 +12,8 @@
+ // NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+ // DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-#include <windows.h>
++#include <dlfcn.h>
++#include <cstdlib>
+ #include <filesystem>
+ #include <fstream>
+ #include <vector>
+@@ -33,7 +34,7 @@ struct MemAllocationProp {unsigned type;unsigned requestedHandleType;struct {uns
+ struct MemAccessDesc {struct {unsigned type;int id;} location;unsigned flags;};
+ static_assert(sizeof(MemoryDesc)==104&&sizeof(BufferDesc)==88&&sizeof(SemaphoreDesc)==96&&sizeof(SignalParams)==144&&sizeof(WaitParams)==144,"HIP external resource ABI");
+ struct Api {
+- HMODULE dll{};
++ void* dll{};
+  #define HIP_FN(name,args) using name##Fn=int(*)args;name##Fn name{}
+  HIP_FN(hipGetDevicePropertiesR0600,(DevicePropertiesR0600*,int));HIP_FN(hipModuleLoadData,(Handle*,const void*));
+  HIP_FN(hipInit,(unsigned));HIP_FN(hipRuntimeGetVersion,(int*));HIP_FN(hipGetDeviceCount,(int*));HIP_FN(hipDeviceGetName,(char*,int,int));HIP_FN(hipSetDevice,(int));
+@@ -51,8 +52,13 @@ struct Api {
+  HIP_FN(hipModuleLoad,(Handle*,const char*));HIP_FN(hipModuleGetFunction,(Handle*,Handle,const char*));HIP_FN(hipModuleLaunchKernel,(Handle,unsigned,unsigned,unsigned,unsigned,unsigned,unsigned,unsigned,Handle,void**,void**));HIP_FN(hipModuleUnload,(Handle));
+  #undef HIP_FN
+  using ErrorNameFn=const char*(*)(int);ErrorNameFn hipGetErrorName{};
+- template<class T>void Load(T&f,const char*n){f=reinterpret_cast<T>(GetProcAddress(dll,n));if(!f)throw std::runtime_error(std::string("missing HIP export ")+n);}
+- explicit Api(unsigned version=7){const wchar_t*name=version==6?L"amdhip64_6.dll":L"amdhip64_7.dll";dll=LoadLibraryExW(name,nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);if(!dll)throw std::runtime_error("HIP runtime not found in System32");
++ template<class T>void Load(T&f,const char*n){f=reinterpret_cast<T>(dlsym(dll,n));if(!f)throw std::runtime_error(std::string("missing HIP export ")+n);}
++ explicit Api(unsigned version=7){
++  // A set DLSSLOP_HIP_LIBRARY is the only candidate. Report every candidate's loader error.
++  const char*names[]={std::getenv("DLSSLOP_HIP_LIBRARY"),"libamdhip64.so.7","libamdhip64.so.6","libamdhip64.so","/opt/rocm/lib/libamdhip64.so.7","/opt/rocm/lib/libamdhip64.so.6","/opt/rocm/lib/libamdhip64.so"};
++  std::string errors;
++  for(const char*name:names){if(!name||!*name)continue;if((dll=dlopen(name,RTLD_NOW|RTLD_LOCAL)))break;errors+=std::string("\n  ")+dlerror();if(name==names[0])break;}
++  if(!dll)throw std::runtime_error("Linux HIP runtime not found; install gfx1201-capable ROCm userspace (libamdhip64), or set DLSSLOP_HIP_LIBRARY:"+errors);
+  #define LOAD(name) Load(name,#name)
+  LOAD(hipGetDevicePropertiesR0600);LOAD(hipModuleLoadData);LOAD(hipEventCreate);LOAD(hipEventRecord);LOAD(hipEventElapsedTime);LOAD(hipEventDestroy);LOAD(hipEventSynchronize);LOAD(hipHostMalloc);LOAD(hipInit);LOAD(hipRuntimeGetVersion);LOAD(hipGetDeviceCount);LOAD(hipDeviceGetName);LOAD(hipSetDevice);LOAD(hipMemGetInfo);LOAD(hipMalloc);LOAD(hipFree);LOAD(hipMemcpy);LOAD(hipMemcpyAsync);LOAD(hipMemsetAsync);LOAD(hipDeviceSynchronize);LOAD(hipStreamCreate);LOAD(hipStreamSynchronize);LOAD(hipStreamDestroy);LOAD(hipImportExternalMemory);LOAD(hipExternalMemoryGetMappedBuffer);LOAD(hipDestroyExternalMemory);LOAD(hipImportExternalSemaphore);LOAD(hipSignalExternalSemaphoresAsync);LOAD(hipWaitExternalSemaphoresAsync);LOAD(hipDestroyExternalSemaphore);LOAD(hipModuleLoad);LOAD(hipModuleGetFunction);LOAD(hipModuleLaunchKernel);LOAD(hipModuleUnload);LOAD(hipGetErrorName);
+  #undef LOAD
+-- 
+2.55.0
+

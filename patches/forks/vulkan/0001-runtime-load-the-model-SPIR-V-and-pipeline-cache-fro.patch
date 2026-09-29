@@ -1,0 +1,86 @@
+From 5a6f1e4f09b08eb83bb11dff3fde93215b3e5d71 Mon Sep 17 00:00:00 2001
+From: Juuso Alasuutari <juuso.alasuutari@gmail.com>
+Date: Tue, 29 Sep 2026 09:53:17 +0300
+Subject: [PATCH 1/3] runtime: load the model, SPIR-V and pipeline cache from
+ given paths
+
+Before this commit, the runtime found its model, shaders and pipeline
+cache only in the layout under RuntimeConfig::root. This commit adds
+RuntimeConfig::model_pack, network_shaders and pipeline_cache. A
+nonempty model_pack selects them.
+
+Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>
+---
+ linux/src/core/nr_runtime.cpp | 19 ++++++++++++-------
+ linux/src/core/nr_runtime.hpp |  5 +++++
+ 2 files changed, 17 insertions(+), 7 deletions(-)
+
+diff --git a/linux/src/core/nr_runtime.cpp b/linux/src/core/nr_runtime.cpp
+index 4adf340..85f3877 100644
+--- a/linux/src/core/nr_runtime.cpp
++++ b/linux/src/core/nr_runtime.cpp
+@@ -915,13 +915,16 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+     impl_->round_u8 = config.colour_format == VK_FORMAT_R8G8B8A8_UNORM || config.colour_format == VK_FORMAT_R8G8B8A8_SRGB ||
+                       config.colour_format == VK_FORMAT_B8G8R8A8_UNORM || config.colour_format == VK_FORMAT_B8G8R8A8_SRGB;
+     impl_->colour_format = config.colour_format;
+-    const auto root = std::filesystem::canonical(config.root);
++    // dlsslop-amd: explicit locations (RuntimeConfig::model_pack) stand in for
++    // an installed copy whose shaders are network_shaders.
++    const bool given = !config.model_pack.empty();
++    const auto root = std::filesystem::canonical(given ? config.network_shaders : config.root);
+     // An installed copy keeps everything it loads in dlssnr-amd/ beside the DLL:
+     // the model pack and shaders/ (network, runtime/ passes, temporal/). A
+     // development tree has build/ and artifacts/ at its root instead.
+-    const auto data = std::filesystem::is_directory(root / "dlssnr-amd") ? root / "dlssnr-amd" : root;
+-    const bool installed = data != root;
+-    const auto network_shaders = installed ? data / "shaders" : root / "build";
++    const auto data = !given && std::filesystem::is_directory(root / "dlssnr-amd") ? root / "dlssnr-amd" : root;
++    const bool installed = given || data != root;
++    const auto network_shaders = given ? root : installed ? data / "shaders" : root / "build";
+     if (!std::isfinite(config.model_scale) || config.model_scale <= 0.f || config.model_scale > 1.f)
+         throw std::invalid_argument("model_scale must be in (0, 1]");
+     if (config.max_passes < 1 || config.max_passes > 16)
+@@ -1002,11 +1005,12 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+         "--spv-dir", network_shaders.string(),
+         "--host-boundary", arena_reuse() ? "--reuse" : "--no-reuse", "--source-width", std::to_string(mw),
+         "--source-height", std::to_string(mh), "--accumulation", config.accumulation,
+-        "--pipeline-cache", (installed ? data / "pipeline.cache" : root / "dlssnr-amd.pipelinecache").string()};
++        "--pipeline-cache", given ? config.pipeline_cache
++                                  : (installed ? data / "pipeline.cache" : root / "dlssnr-amd.pipelinecache").string()};
+     // The weights as one file (linux/package/model-tools/pack_model.py); the names inside are
+     // the relative paths the graph asks for under --unpacked.
+     if (installed) {
+-        const auto pack = data / "dlssnr.bin";
++        const auto pack = given ? std::filesystem::path(config.model_pack) : data / "dlssnr.bin";
+         if (!std::filesystem::is_regular_file(pack))
+             throw std::runtime_error("missing " + pack.string() + " (run install.sh again)");
+         arguments.push_back("--model-pack"); arguments.push_back(pack.string());
+@@ -1206,7 +1210,8 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+     if (temporal_config.enable) {
+         auto& t = impl_->temporal;
+         const auto shaders = std::filesystem::canonical(temporal_config.shaders.empty()
+-            ? (installed ? data / "shaders/temporal" : root / "build/linux/rdna4/network/temporal")
++            ? (given ? network_shaders / "temporal" : installed ? data / "shaders/temporal"
++                                                              : root / "build/linux/rdna4/network/temporal")
+             : std::filesystem::path(temporal_config.shaders));
+         require_variant_profile(shaders);
+         const auto temporal_rel = shaders.lexically_relative(root);
+diff --git a/linux/src/core/nr_runtime.hpp b/linux/src/core/nr_runtime.hpp
+index 1f48cd6..4c70232 100644
+--- a/linux/src/core/nr_runtime.hpp
++++ b/linux/src/core/nr_runtime.hpp
+@@ -149,6 +149,11 @@ struct RuntimeConfig {
+     // (its linear-HDR encode, or linear_input's own): the preprocess undoes the
+     // knee first, so its curve is the only one. False for an SDR frame.
+     bool preprocess_unknee = false;
++    // dlsslop-amd: explicit locations instead of `root`'s layout. A nonempty
++    // model_pack selects them: the network's SPIR-V and markers in
++    // network_shaders, with runtime/ and temporal/ below it, and a writable
++    // pipeline cache (empty: none).
++    std::string model_pack, network_shaders, pipeline_cache;
+ };
+ 
+ // SDR encoded RGB, source-sized and upright. Accepts RGBA32F and 8-bit RGBA/BGRA
+-- 
+2.55.0
+
