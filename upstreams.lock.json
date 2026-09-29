@@ -17,7 +17,6 @@
         "layer_linux/src/composition.h",
         "layer_linux/src/dlssnr/DlssNr_Common.h",
         "layer_linux/src/dlssnr/DlssNr_Layout.h",
-        "layer_linux/src/dlssnr/dlssnr.hlsl",
         "layer_linux/src/dlssnr_pass.cpp",
         "layer_linux/src/dlssnr_pass.h",
         "layer_linux/src/hotkey.cpp",

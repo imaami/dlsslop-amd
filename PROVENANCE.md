@@ -20,8 +20,8 @@ including local additions and inherited interfaces in the same patched source
 file.
 
 Upstream repository names, URLs, authorship, source filenames (except the GLSL
-ports in `layer/scaling/`) and attribution remain unchanged, as do references
-to NVIDIA DLSS and OptiScaler_DLSSNR.
+ports in `layer/dlssnr/` and `layer/scaling/`) and attribution remain unchanged,
+as do references to NVIDIA DLSS and OptiScaler_DLSSNR.
 
 `.gitmodules` declares dlsslop-amd's forks of three repositories: each fork's
 `dlsslop-amd` branch holds the Linux integration as commits on top of the
@@ -34,6 +34,11 @@ and the files fetched from each repository; the build uses them in place under
 | Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) `ab722b091071d6d59df56f10d86d4f3005bcad86` | [imaami/DLSS5VKLayer](https://github.com/imaami/DLSS5VKLayer/tree/dlsslop-amd) `125debdc8e9e5227f5dc4d800cb17d2773487e14` | AGPL-3.0; embedded dependencies keep their notices |
 | Vulkan network runtime, SPIR-V sources and model extractor | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) `743326d15f56c93ca757b18ca4d6b0d81d654113` | [imaami/DLSSNR-AMD](https://github.com/imaami/DLSSNR-AMD/tree/dlsslop-amd) `3dfdddc7c06b888685c8be4275d1eb5e8edc7334` | MIT |
 | AMD neural scheduler and HIP kernels | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) `ad499a8199c9ce3678d83c9be58fe3bc1bef3498` | [imaami/dlss5-on-amd-9070xt-porting](https://github.com/imaami/dlss5-on-amd-9070xt-porting/tree/dlsslop-amd) `c1908317fb7e7ee9fe4884feba4a67220d93461f` | MIT |
+
+The layer's composition shader `layer/dlssnr/dlssnr.comp` is a GLSL port of the
+layer fork's `layer_linux/src/dlssnr/dlssnr.hlsl` (AGPL-3.0). Its RenoDX-derived
+composition is MIT; the notice is
+`external/layer/third_party/optiscaler/RenoDX_ATTRIBUTION.txt`.
 
 The eight scaling filters in `layer/scaling/` are GLSL ports of
 `OptiScaler/shaders/output_scaling/precompile/*.hlsl` from

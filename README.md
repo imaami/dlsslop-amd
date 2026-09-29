@@ -69,20 +69,17 @@ on Ubuntu 26.04. Its build dependencies are:
 ```bash
 sudo apt-get update
 sudo apt-get install --no-install-recommends \
-    ca-certificates git curl build-essential cmake ninja-build \
+    ca-certificates git build-essential cmake ninja-build \
     python3 python3-numpy python3-pil qt6-base-dev libx11-dev libxi-dev \
     libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers glslang-tools \
     spirv-tools clang-22 lld-22 llvm-22
 ```
 
-Install DXC 1.9.2607 using the exact download URL and SHA-256 in the workflow.
-Set `DXC_DIR` to the extracted directory containing `bin/` and `lib/` (inside
-the archive's top-level directory), then build from the fetched checkout:
+Then build from the fetched checkout:
 
 ```bash
 python3 scripts/build-kernels.py --compiler clang++-22 --linker /usr/bin/ld.lld-22
-cmake -S . -B build -G Ninja -DDXC="$DXC_DIR/bin/dxc" \
-    -DPython3_EXECUTABLE=/usr/bin/python3
+cmake -S . -B build -G Ninja -DPython3_EXECUTABLE=/usr/bin/python3
 cmake --build build --parallel 2
 ctest --test-dir build --output-on-failure
 ```
@@ -91,9 +88,8 @@ This compiles and validates ten Vulkan shaders, compiles the Vulkan network's
 SPIR-V with `glslang` and the `gfx1201` HIP modules (the HIP network's and
 `linux_native`, its codec, tuning, color and motion kernels), and builds the
 daemon, layer, CLI, Qt GUI and tests.
-CMake compiles the layer's `dlssnr.hlsl` with DXC and its other shaders,
-including the GLSL scaling filters in `layer/scaling/`, with glslang; `-DDXC`
-defaults to `dxc` on `PATH`.
+CMake compiles the layer's shaders, the composition shader in `layer/dlssnr/`
+and the scaling filters in `layer/scaling/`, with glslang.
 Compilation does not require a GPU, ROCm runtime or model weights. Qt uses the
 distribution's shared Qt 6 libraries; the worker and layer have no Qt dependency.
 For an independent GUI build, see [gui/README.md](gui/README.md).

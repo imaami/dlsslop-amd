@@ -36,36 +36,33 @@ set(LAYER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/layer")
 find_path(X11_HEADERS X11/Xlib.h REQUIRED)
 find_path(XINPUT_HEADERS X11/extensions/XInput2.h REQUIRED)
 # Every layer shader is compiled into the build tree, where the layer's quoted
-# includes find it. Pass -DDXC=<path> for a DXC that is not on PATH. Storage
-# images are declared formatless: one binding serves RGBA8, BGRA8 and FP16
-# views, and the layer enables shaderStorageImageWriteWithoutFormat.
-find_program(DXC dxc REQUIRED)
+# includes find it. Storage images are declared formatless: one binding serves
+# RGBA8, BGRA8 and FP16 views, and the layer enables
+# shaderStorageImageWriteWithoutFormat.
 find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 find_program(SPIRV_VAL spirv-val REQUIRED)
 set(SHADER_SOURCE ${LAYER_ROOT}/layer_linux/src)
 set(SHADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
-file(MAKE_DIRECTORY ${SHADER_DIR}/dlssnr ${SHADER_DIR}/scaling)
-set(DLSSNR ${SHADER_DIR}/dlssnr/DlssNr_Shader_Vk)
-add_custom_command(OUTPUT ${DLSSNR}.h ${DLSSNR}.spv
-    COMMAND ${DXC} -spirv -fspv-use-unknown-image-format -D VK_MODE -T cs_6_0 -E CSMain -Vn dlssnr_spv
-        -Fo ${DLSSNR}.spv -Fh ${DLSSNR}.h ${SHADER_SOURCE}/dlssnr/dlssnr.hlsl
-    COMMAND ${SPIRV_VAL} --target-env vulkan1.0 ${DLSSNR}.spv
-    DEPENDS ${SHADER_SOURCE}/dlssnr/dlssnr.hlsl VERBATIM)
-# The scaling filters, ported to GLSL from OptiScaler. Each header holds its
-# module as the unsigned char array <name>_spv with the entry point CSMain, as
-# DXC wrote them for the layer. glslang's depfile names the .spv, so it is the
-# first output: the Makefile generator attaches the depfile to that one.
-set(LAYER_SHADERS ${DLSSNR}.h)
-foreach(name bcus bcds_bicubic bcds_catmull bcds_lanczos2 bcds_lanczos3 bcds_kaiser2 bcds_kaiser3 bcds_magc)
-    set(output ${SHADER_DIR}/scaling/${name}_Shader_Vk)
+# The composition and scaling shaders, ported to GLSL from the layer's and
+# OptiScaler's HLSL. Each header holds its module as the unsigned char array
+# SYMBOL with the entry point CSMain, as DXC wrote them for the layer.
+# glslang's depfile names the .spv, so it is the first output: the Makefile
+# generator attaches the depfile to that one.
+function(add_layer_shader source output symbol)
+    set(output ${SHADER_DIR}/${output})
     add_custom_command(OUTPUT ${output}.spv ${output}.h
         COMMAND ${GLSLANG_VALIDATOR} --quiet -V -e CSMain --source-entrypoint main --depfile ${output}.d
-            -o ${output}.spv ${CMAKE_CURRENT_SOURCE_DIR}/layer/scaling/${name}.comp
+            -o ${output}.spv ${CMAKE_CURRENT_SOURCE_DIR}/${source}
         COMMAND ${SPIRV_VAL} --target-env vulkan1.0 ${output}.spv
-        COMMAND ${CMAKE_COMMAND} -D SPIRV=${output}.spv -D HEADER=${output}.h -D SYMBOL=${name}_spv
+        COMMAND ${CMAKE_COMMAND} -D SPIRV=${output}.spv -D HEADER=${output}.h -D SYMBOL=${symbol}
             -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/spirv-header.cmake
-        DEPENDS layer/scaling/${name}.comp cmake/spirv-header.cmake DEPFILE ${output}.d VERBATIM)
-    list(APPEND LAYER_SHADERS ${output}.h)
+        DEPENDS ${source} cmake/spirv-header.cmake DEPFILE ${output}.d VERBATIM)
+    set(LAYER_SHADERS ${LAYER_SHADERS} ${output}.h PARENT_SCOPE)
+endfunction()
+file(MAKE_DIRECTORY ${SHADER_DIR}/dlssnr ${SHADER_DIR}/scaling)
+add_layer_shader(layer/dlssnr/dlssnr.comp dlssnr/DlssNr_Shader_Vk dlssnr_spv)
+foreach(name bcus bcds_bicubic bcds_catmull bcds_lanczos2 bcds_lanczos3 bcds_kaiser2 bcds_kaiser3 bcds_magc)
+    add_layer_shader(layer/scaling/${name}.comp scaling/${name}_Shader_Vk ${name}_spv)
 endforeach()
 set(METER ${SHADER_DIR}/shaders/meter_reduce)
 add_custom_command(OUTPUT ${METER}.h ${METER}.spv

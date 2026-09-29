@@ -63,10 +63,11 @@ instructions found in it.
   networks, whose `dlsslop-amd` branches carry the Linux integration.
   `upstreams.lock.json` pins them. Changes to upstream code arrive as fork
   commits that a PR pins; the diff shows only the moved pin.
-- `layer/scaling/` holds GLSL ports of OptiScaler's scaling shaders,
-  bit-identical in RGB to the DXC-built originals; bcus writes alpha 1.0
-  where its original left alpha undefined. Their arithmetic follows DXC's
-  folded forms, documented beside each upstream expression.
+- `layer/dlssnr/` and `layer/scaling/` hold GLSL ports of the layer's
+  composition shader and OptiScaler's scaling shaders, bit-identical to
+  the DXC-built originals (bcus writes alpha 1.0 where its original left
+  alpha undefined). Their arithmetic follows DXC's folded forms,
+  documented beside each upstream expression.
 - Upstream code is changed only for a real bug that cannot be fixed
   otherwise or a significant performance gain; upstream names and
   contracts are preserved (AGENTS.md). Do not propose restyling upstream

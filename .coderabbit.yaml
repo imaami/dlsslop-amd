@@ -47,12 +47,13 @@ reviews:
         upstream names and contracts are preserved. Never suggest
         restyling upstream or vendored code, including the densely
         formatted vendored HIP network.
-    - path: "layer/scaling/**"
+    - path: "layer/**/*.{comp,glsl}"
       instructions: >-
-        GLSL ports of OptiScaler's scaling HLSL, bit-identical in RGB to
-        the DXC-built originals (bcus writes alpha 1.0 where its original
-        left alpha undefined). The arithmetic follows DXC's folded forms,
-        documented beside each upstream expression; upstream names and
+        GLSL ports of the layer's composition HLSL and OptiScaler's
+        scaling HLSL, bit-identical to the DXC-built originals (except
+        that bcus writes alpha 1.0 where its original left alpha
+        undefined). The arithmetic follows DXC's folded forms, documented
+        beside each upstream expression; upstream names, comments and
         quirks are kept on purpose. A change that alters output must say
         so.
     - path: "gui/**"
@@ -102,8 +103,8 @@ reviews:
     - path: "**/CMakeLists.txt"
       instructions: >-
         Shader headers and SPIR-V are generated at build time from the
-        submodule sources and layer/scaling/ with DXC, glslangValidator
-        and cmake/spirv-header.cmake and are never committed;
+        submodule sources and layer/ with glslangValidator and
+        cmake/spirv-header.cmake and are never committed;
         do not suggest committing them.
   tools:
     # clang-tidy's default checks (readability-identifier-length,
