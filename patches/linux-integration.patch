@@ -1,3 +1,24 @@
+diff --git a/backend/vendor/LmxxfProductionOptions.h b/backend/vendor/LmxxfProductionOptions.h
+index b1ebb38..7aa2c37 100644
+--- a/backend/vendor/LmxxfProductionOptions.h
++++ b/backend/vendor/LmxxfProductionOptions.h
+@@ -1,6 +1,5 @@
+ #pragma once
+ #include "hip_reference_network.h"
+-#include "native_hip_env_options.h"
+ #include <string>
+ 
+ /* Production HIP flags (HIP_FAST=1, graph off, skip 42,43,46) = the 0.31 regular package template. Since 2026-09-26 the
+@@ -68,8 +67,6 @@ inline hip_reference::Options LmxxfProductionOptions(unsigned processing_w, unsi
+     o.mh_feature_byte = o.mh_proj_diag_fb = o.mh_byte_stream = o.decoder_byte = o.mh_ffn_frag256 = true;
+     // 0.31 template defaults (hip-game-flags.txt): one-head-per-wave, C512 32 tokens, ViT projection 64 columns, chain flags.
+     o.wave_owned = o.c512_m32 = o.vit_proj_n64 = o.pdl = true;
+-    if (const char *skip = std::getenv("DLSS5_SKIP_BLOCKS"))
+-        o.skip_blocks = hip_reference::ParseSkipBlocks(skip);
+-    NativeApplyHipEnvironment(o, true);
++    // dlsslop-amd: no DLSS5_* environment overrides; dlsslopd's own options apply.
+     return o;
+ }
 diff --git a/backend/vendor/hip_api.h b/backend/vendor/hip_api.h
 index 1893e2c..0a95a22 100644
 --- a/backend/vendor/hip_api.h
@@ -38,10 +59,10 @@ index 1893e2c..0a95a22 100644
   LOAD(hipGetDevicePropertiesR0600);LOAD(hipModuleLoadData);LOAD(hipEventCreate);LOAD(hipEventRecord);LOAD(hipEventElapsedTime);LOAD(hipEventDestroy);LOAD(hipEventSynchronize);LOAD(hipHostMalloc);LOAD(hipInit);LOAD(hipRuntimeGetVersion);LOAD(hipGetDeviceCount);LOAD(hipDeviceGetName);LOAD(hipSetDevice);LOAD(hipMemGetInfo);LOAD(hipMalloc);LOAD(hipFree);LOAD(hipMemcpy);LOAD(hipMemcpyAsync);LOAD(hipMemsetAsync);LOAD(hipDeviceSynchronize);LOAD(hipStreamCreate);LOAD(hipStreamSynchronize);LOAD(hipStreamDestroy);LOAD(hipImportExternalMemory);LOAD(hipExternalMemoryGetMappedBuffer);LOAD(hipDestroyExternalMemory);LOAD(hipImportExternalSemaphore);LOAD(hipSignalExternalSemaphoresAsync);LOAD(hipWaitExternalSemaphoresAsync);LOAD(hipDestroyExternalSemaphore);LOAD(hipModuleLoad);LOAD(hipModuleGetFunction);LOAD(hipModuleLaunchKernel);LOAD(hipModuleUnload);LOAD(hipGetErrorName);
   #undef LOAD
 diff --git a/backend/vendor/hip_reference_network.h b/backend/vendor/hip_reference_network.h
-index eee312c..78542b8 100644
+index 2a835c0..b627a7e 100644
 --- a/backend/vendor/hip_reference_network.h
 +++ b/backend/vendor/hip_reference_network.h
-@@ -308,8 +308,6 @@ class Network {
+@@ -420,8 +420,6 @@ class Network {
   bool adaptive_active=false;U adaptive_n=0;std::chrono::steady_clock::time_point adaptive_last{};
   Tensor AdaptiveVitGroup(Tensor input,U n){
    const char*mode_s=std::getenv("DLSS5_VIT_ADAPTIVE");U mode=mode_s?U(std::stoul(mode_s)):0;
@@ -50,7 +71,7 @@ index eee312c..78542b8 100644
    AdaptivePreviewState.store(mode?1:0);if(mode!=adaptive_last_mode){adaptive_dirty=true;adaptive_last_mode=mode;}
    if(!mode){Tensor full=input;for(U b=31;b<=38;b++)full=Vit(full,n,b);return full;}++adaptive_frame;
    if(mode>3||opt.graph||!opt.fast_deep||!opt.pooled||opt.vit_byte_stream||std::any_of(opt.skip_blocks.begin(),opt.skip_blocks.end(),[](U b){return b>=31&&b<=38;}))throw std::runtime_error("adaptive ViT requires fast pooled graph-off non-byte-stream unskipped network, mode1..3");
-@@ -377,16 +375,16 @@ if(opt.fast_c32){const char*f[][2]={{"c32_fast_ffn","c32_fast.hsaco"},{"c32_fast
+@@ -506,7 +504,7 @@ if(opt.fast_c32){const char*f[][2]={{"c32_fast_ffn","c32_fast.hsaco"},{"c32_fast
    for(auto&e:p)std::fprintf(f,"hip_memory pool   %10.2f MiB %s\n",e.first/1048576.,e.second.c_str());}
   void SetStageObserver(std::function<void(const std::string&,void*,size_t)>f){observer=std::move(f);}
   void SetProgress(std::function<void(const std::string&)>f){progress=std::move(f);}
@@ -59,7 +80,9 @@ index eee312c..78542b8 100644
   for(U b=1;b<=4;b++){if(opt.skip_blocks.count(b)){if(!opt.raw_chain)throw std::runtime_error("C32 skip needs the raw chain");if(b==4)SkipChainFinish(last,W/2,H/2,true);if(last.main)source=last.main;continue;}last=opt.raw_chain?C32Chain(source,last.raw?&last:nullptr,W/2,H/2,shifts[b-1],Block(b,"ffn"),Block(b,"attention"),b==4,b==4):C32(source,W/2,H/2,shifts[b-1],Block(b,"ffn"),Block(b,"attention"));source=last.main;if(source)Stage("block"+std::to_string(b),source);}Stage("block4-down",last.down);skips[0]=source;Tensor poolcrop;if(last.down_cropped)poolcrop=last.down;else{poolcrop=New(size_t(W/4)*(H/4)*32);Run("mh","mh_shift_crop",size_t(W/4)*(H/4)*32,P(last.down),P(poolcrop),W/4,H/4,last.workw/2,last.sx/2,last.sy/2,U(32));}source=New(size_t(W/4)*(H/4)*64);if(opt.pool32_h16w&&opt.fast_mh)Run("mh_fast","mh_pool_project_production_h16w",size_t(W/4)*(H/4)*64,P(poolcrop),PackedDsWeightCast("block4-ds.f32",32),P(source),W/4,H/4,U(0),U(0),U(32));else Run(opt.fast_mh?"mh_fast":"mh",opt.fast_mh?"mh_pool_project_production":"mh_pool_project",size_t(W/4)*(H/4)*64,P(poolcrop),Weight("block4-ds.f32"),P(source),W/4,H/4,U(0),U(0),U(32));poolcrop.reset();last={};
   U starts[]={5,9,15},counts[]={4,6,8},channels[]={64,128,256};for(U g=0;g<3;g++){U w=W/(4u<<g),h=H/(4u<<g);for(U j=0;j<counts[g];j++)source=Body(source,w,h,channels[g],shifts[j],starts[g]+j,j+1==counts[g],opt.mh_byte_stream&&j>0,opt.mh_byte_stream&&j+1<counts[g]);skips[g+1]=source;source=Down(source,w,h,channels[g],Block(starts[g]+counts[g]-1,"ds"));}
   for(U j=0;j<8;j++){source=Body(source,W/32,H/32,512,shifts[j],23+j,j==7);}skips[4]=source;source=Down(source,W/32,H/32,512,"head-matrix.f32",true);U vw=W==1920?32:W/64,vh=W==1920?20:H/64;if(W!=1920&&(vw*vh)%16)vh++;/* 2026-09-17: token grid padded to a multiple of 16 tokens by one row of zero tokens (1600x960: 25x15 real -> 25x16), the way 1920x1152 pads 30x18 -> 32x20 */U n=vw*vh;Stage("head",source);source=Gather(source,n,false);source=AdaptiveVitGroup(source,n);source=Gather(source,n,true);source=Up(source,skips[4],vw,vh,W/32,H/32,1024,512,"decoder39-weights.f32");skips[4].reset();Stage("block39",source);for(U b=40;b<=47;b++)source=Body(source,W/32,H/32,512,Shift(b),b,false);
-  U ups[]={48,56,62},cs[]={256,128,64},ends[]={55,61,65};for(U g=0;g<3;g++){U ow=W/(16u>>g),oh=H/(16u>>g);const bool byte_up=opt.decoder_byte&&opt.mh_byte_stream&&opt.decoder_h16w&&opt.fast_deep;source=Up(source,skips[3-g],ow/2,oh/2,ow,oh,cs[g]*2,cs[g],Block(ups[g],"weights"),byte_up);skips[3-g].reset();for(U b=ups[g];b<=ends[g];b++)source=Body(source,ow,oh,cs[g],Shift(b),b,false,opt.mh_byte_stream&&(b>ups[g]||byte_up),opt.mh_byte_stream&&b<ends[g]);}source=Up(source,skips[0],W/4,H/4,W/2,H/2,64,32,"block66-weights.f32");skips[0].reset();C32Result chain{};for(U b=66;b<=69;b++){if(opt.skip_blocks.count(b)){if(!opt.raw_chain)throw std::runtime_error("C32 skip needs the raw chain");if(b==69)SkipChainFinish(chain,W/2,H/2,false);if(chain.main)source=chain.main;continue;}chain=opt.raw_chain?C32Chain(source,chain.raw?&chain:nullptr,W/2,H/2,Shift(b),Block(b,"ffn"),Block(b,"attention"),b==69,false):C32(source,W/2,H/2,Shift(b),Block(b,"ffn"),Block(b,"attention"));source=chain.main;if(source)Stage("block"+std::to_string(b),source);}chain={};
+@@ -518,10 +516,10 @@ if(opt.fast_c32){const char*f[][2]={{"c32_fast_ffn","c32_fast.hsaco"},{"c32_fast
+  else
+  source=Up(source,skips[0],W/4,H/4,W/2,H/2,64,32,"block66-weights.f32");skips[0].reset();for(U b=c32_begin;b<=69;b++){if(opt.skip_blocks.count(b)){if(!opt.raw_chain)throw std::runtime_error("C32 skip needs the raw chain");if(b==69)SkipChainFinish(chain,W/2,H/2,false);if(chain.main)source=chain.main;continue;}chain=opt.raw_chain?C32Chain(source,chain.raw?&chain:nullptr,W/2,H/2,Shift(b),Block(b,"ffn"),Block(b,"attention"),b==69,false):C32(source,W/2,H/2,Shift(b),Block(b,"ffn"),Block(b,"attention"));source=chain.main;if(source)Stage("block"+std::to_string(b),source);}chain={};
   C32Result post{};
 - if(opt.post_merge_fold){U sx=(opt.post_shift&1)?4:0,sy=(opt.post_shift&2)?4:0,ww=W+2*sx,hh=H+2*sy,windows=ww*hh/64;if(opt.post_head_fused){auto out=New(size_t(W)*H*3);Run("c32_fused_ffn","c32_post_merge_head_half",windows,P(source),P(skip0),Weight("post70-scales.f32"),PackedC32Weight("post70-ffn.f32",false),PackedC32Weight("post70-attention.f32",true),P(color),Weight("post70-head.f32"),P(out),windows,W,H,sx,sy,.03125f);source.reset();skip0.reset();Stage("block70",out);return out;}
 + if(opt.post_merge_fold){U sx=(opt.post_shift&1)?4:0,sy=(opt.post_shift&2)?4:0,ww=W+2*sx,hh=H+2*sy,windows=ww*hh/64;if(opt.post_head_fused){auto out=target?std::make_shared<Allocation>(api,target,size_t(W)*H*12):New(size_t(W)*H*3);Run("c32_fused_ffn","c32_post_merge_head_half",windows,P(source),P(skip0),Weight("post70-scales.f32"),PackedC32Weight("post70-ffn.f32",false),PackedC32Weight("post70-attention.f32",true),P(color),Weight("post70-head.f32"),P(out),windows,W,H,sx,sy,.03125f);source.reset();skip0.reset();Stage("block70",out);return out;}
@@ -70,7 +93,7 @@ index eee312c..78542b8 100644
   std::vector<float> Infer(const std::vector<float>&rgba,const std::vector<float>&noise,const std::vector<float>*history=nullptr){
    if(rgba.size()!=size_t(W)*H*4||noise.size()!=50331648||(history&&history->size()!=rgba.size()))throw std::runtime_error("network input sizes");
    if(opt.graph){Synchronize();ClearGraph();graph_warmed=false;}auto color=Upload(rgba.data(),rgba.size()*4),noisegpu=opt.fast_prefix?Tensor{}:Upload(noise.data(),noise.size()*4),hist=history?Upload(history->data(),history->size()*4):Tensor{};
-@@ -421,7 +419,7 @@ if(opt.fast_c32){const char*f[][2]={{"c32_fast_ffn","c32_fast.hsaco"},{"c32_fast
+@@ -560,7 +558,7 @@ if(opt.fast_c32){const char*f[][2]={{"c32_fast_ffn","c32_fast.hsaco"},{"c32_fast
   private:
   void EnqueueRaw(void*rgba,void*history,void*rgb_output,U seed){
    opt.seed=seed;auto color=std::make_shared<Allocation>(api,rgba,size_t(W)*H*16);auto hist=history?std::make_shared<Allocation>(api,history,size_t(W)*H*16):Tensor{};
@@ -80,7 +103,7 @@ index eee312c..78542b8 100644
  };
  }
 diff --git a/upstream-layer/common/shm_protocol.h b/upstream-layer/common/shm_protocol.h
-index fd7c1cd..66f83e2 100644
+index aebfd9b..b9af1aa 100644
 --- a/upstream-layer/common/shm_protocol.h
 +++ b/upstream-layer/common/shm_protocol.h
 @@ -14,11 +14,11 @@
@@ -1698,7 +1721,7 @@ index 0941c93..b544124 100644
      // present only because Vulkan will not accept an unwritten binding.
      VkImage _dummyImage = VK_NULL_HANDLE;
 diff --git a/upstream-layer/layer_linux/src/layer.cpp b/upstream-layer/layer_linux/src/layer.cpp
-index 4b37520..a105d2d 100644
+index 582bf22..848ad4b 100644
 --- a/upstream-layer/layer_linux/src/layer.cpp
 +++ b/upstream-layer/layer_linux/src/layer.cpp
 @@ -1,6 +1,6 @@
@@ -1741,8 +1764,8 @@ index 4b37520..a105d2d 100644
  #define VK_LAYER_NAME "VK_LAYER_NV_dlssnr_32"
  #else
  #define VK_LAYER_NAME "VK_LAYER_NV_dlssnr"
-@@ -56,7 +65,8 @@
- static void Log(const char* fmt, ...) {
+@@ -68,7 +77,8 @@ static void Log(const char* fmt, ...) {
+     if (!LayerRequestedForLogging()) return;
      static FILE* f = [] {
          const char* p = getenv("DLSSNR_LOG");
 -        return p && *p ? fopen(p, "a") : stderr;
@@ -1751,7 +1774,7 @@ index 4b37520..a105d2d 100644
      }();
      char buf[2048];
      va_list args;
-@@ -95,6 +105,10 @@ static bool VerboseEnabled() {
+@@ -107,6 +117,10 @@ static bool VerboseEnabled() {
      return v;
  }
  
@@ -1762,7 +1785,7 @@ index 4b37520..a105d2d 100644
  static inline double NowMs() {
      return std::chrono::duration<double, std::milli>(
          std::chrono::steady_clock::now().time_since_epoch()).count();
-@@ -132,11 +146,43 @@ struct ShmMap {
+@@ -144,11 +158,43 @@ struct ShmMap {
      uint32_t firstHeartbeat = 0;
      bool everAnswered = false;
      double retryAfterMs = 0.0;
@@ -1806,7 +1829,7 @@ index 4b37520..a105d2d 100644
  };
  
  // The directory now lives under /tmp, which is world-writable, so it is worth checking that what we
-@@ -226,7 +272,7 @@ static bool ShmOpen(ShmMap& s) {
+@@ -238,7 +284,7 @@ static bool ShmOpen(ShmMap& s) {
      const char* path = getenv("DLSSNR_SHM");
      std::string p = (path && *path) ? path : ShmDefaultPath();
      if (!EnsureParentDir(p)) return false;
@@ -1815,7 +1838,7 @@ index 4b37520..a105d2d 100644
      if (fd < 0) { Log("[shm] open %s failed", p.c_str()); return false; }
      // The file still spans the whole protocol -- the offsets are fixed and both sides agree on them --
      // but it is sparse, so the size on disk is what has actually been written.
-@@ -325,6 +371,7 @@ static int AdoptPeerFd(uint32_t pid, uint32_t fd) {
+@@ -337,6 +383,7 @@ static int AdoptPeerFd(uint32_t pid, uint32_t fd) {
  // The exchange is on unless the environment says off; the helper and driver get the final say by
  // what they publish.
  static bool DmaBufEnabled() {
@@ -1823,7 +1846,7 @@ index 4b37520..a105d2d 100644
      static const bool on = [] {
          const char* v = getenv("DLSSNR_DMABUF");
          return !(v && !strcmp(v, "0"));
-@@ -332,8 +379,20 @@ static bool DmaBufEnabled() {
+@@ -344,8 +391,20 @@ static bool DmaBufEnabled() {
      return on;
  }
  
@@ -1845,7 +1868,7 @@ index 4b37520..a105d2d 100644
      if (s.dead) return false;
      if (!ShmOpen(s)) { s.dead = true; return false; }
      if (w > kMaxW || h > kMaxH || w < kMinW || h < kMinH) return false;
-@@ -354,6 +413,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -366,6 +425,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
      // Say what the bytes ARE before announcing them: the helper sizes its read by this, never by
      // what it hopes the layer has switched to. The release fence below covers it like the pixels.
      s.hdr->hdrEncode.store(hdrEncode ? 1u : 0u);
@@ -1853,7 +1876,7 @@ index 4b37520..a105d2d 100644
      uint32_t req = s.hdr->seq_req.load() + 1;
      // The release pairs with the helper's acquire on seq_resp: everything this process wrote --
      // the proxy, whether by the GPU into the imported region or by the memcpy above -- is visible
-@@ -361,6 +421,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -373,6 +433,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
      // by leg 1's vkWaitForFences; this fence covers the host-visible ordering across processes.)
      std::atomic_thread_fence(std::memory_order_release);
      s.hdr->seq_req.store(req);
@@ -1861,7 +1884,7 @@ index 4b37520..a105d2d 100644
  
      // How long this frame may wait, which is a question about whether anyone is listening.
      //
-@@ -378,12 +439,18 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -390,12 +451,18 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
      // once it is warm. Timing that out and giving up is how a working helper gets abandoned before it
      // has answered once.
      const bool warmingUp = !s.everAnswered;
@@ -1882,7 +1905,7 @@ index 4b37520..a105d2d 100644
              s.timeouts = 0;
              s.everAnswered = true;
              // The helper's GPU wrote the answer into this region (or the memcpy below reads the
-@@ -396,7 +463,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -408,7 +475,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
              // the meantime, and seq_resp only counts. Composing that answer here would copy a
              // different number of bytes into these surfaces -- the row-shifted colour garbage this
              // check exists to refuse.
@@ -1891,7 +1914,7 @@ index 4b37520..a105d2d 100644
                              s.hdr->answeredH.load() == h;
              if (!ok) Log("[shm] helper could not use frame %u (ok=%u)", req, s.hdr->seq_ok.load());
              if (ok && !answerFromFd && modelOut != (void*) s.outPixels) std::memcpy(modelOut, s.outPixels, bytes);
-@@ -413,9 +480,25 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -425,9 +492,25 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
          if (s.hdr->quit.load()) { s.dead = true; return false; }
          const double elapsed = NowMs() - tSignal;
          if (elapsed >= budgetMs) break;
@@ -1919,7 +1942,7 @@ index 4b37520..a105d2d 100644
      // Four rather than eight, and with a pause before the next attempt, so giving up costs a
      // fraction of a second and retrying costs that again only every few seconds.
      if (++s.timeouts >= 4) {
-@@ -429,12 +512,94 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
+@@ -441,12 +524,94 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
      return false;
  }
  
@@ -2014,7 +2037,7 @@ index 4b37520..a105d2d 100644
  
      // The instance-level entry points the composition needs, resolved once. Kept here rather than on
      // the device chain because this is where the VkInstance handle is in scope.
-@@ -445,6 +610,8 @@ struct InstanceChain {
+@@ -457,6 +622,8 @@ struct InstanceChain {
      PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties = nullptr;
      PFN_vkEnumerateDeviceExtensionProperties vkEnumerateDeviceExtensionProperties = nullptr;
      PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties = nullptr;
@@ -2023,7 +2046,7 @@ index 4b37520..a105d2d 100644
  };
  
  #define DEVICE_FN_LIST(X) \
-@@ -457,7 +624,7 @@ struct InstanceChain {
+@@ -469,7 +636,7 @@ struct InstanceChain {
      X(vkMapMemory) X(vkUnmapMemory) X(vkCreateBuffer) X(vkDestroyBuffer) \
      X(vkGetBufferMemoryRequirements) X(vkBindBufferMemory) X(vkCmdCopyBufferToImage) \
      X(vkCmdCopyImageToBuffer) X(vkCmdPipelineBarrier) X(vkDeviceWaitIdle) \
@@ -2032,7 +2055,7 @@ index 4b37520..a105d2d 100644
  
  struct SwapchainState {
      std::vector<VkImage> images;
-@@ -466,6 +633,10 @@ struct SwapchainState {
+@@ -478,6 +645,10 @@ struct SwapchainState {
      // the one the application itself uses.
      VkQueue queue = VK_NULL_HANDLE;
      VkFence repaintFence = VK_NULL_HANDLE;
@@ -2043,7 +2066,7 @@ index 4b37520..a105d2d 100644
      // The repaint gave up on this swapchain. Its own switch, not passThrough: passThrough turns the
      // layer off for the swapchain entirely, so using it here stopped the composition for good over a
      // convenience that had merely run out of road.
-@@ -477,13 +648,19 @@ struct SwapchainState {
+@@ -489,13 +660,19 @@ struct SwapchainState {
      uint32_t width = 0, height = 0;
      // Two fences, not one. Leg 1's must be waited on before the proxy is handed to the helper --
      // the sequence number is the helper's only ordering signal, and it may not be bumped ahead of
@@ -2067,7 +2090,7 @@ index 4b37520..a105d2d 100644
      VkCommandPool pool = VK_NULL_HANDLE;
      VkCommandBuffer cb = VK_NULL_HANDLE;
      // Reused by the present path; resizing only occurs when an unusual caller supplies more waits.
-@@ -513,6 +690,9 @@ struct DeviceChain {
+@@ -525,6 +702,9 @@ struct DeviceChain {
  #undef X
      std::atomic<bool> inert{false};
      std::mutex lock;
@@ -2077,7 +2100,7 @@ index 4b37520..a105d2d 100644
  
      // Composing a still frame again when the settings move under it. See the thread in
      // Hook_CreateDevice.
-@@ -542,6 +722,19 @@ struct DeviceChain {
+@@ -554,6 +734,19 @@ struct DeviceChain {
      double repaintNextMs = 0.0;
      bool repaintWasEnabled = true;   // so switching the effect off is itself a change to answer
      bool releaseImages = false;      // VK_EXT_swapchain_maintenance1 was enabled
@@ -2097,7 +2120,7 @@ index 4b37520..a105d2d 100644
      std::unordered_map<VkSwapchainKHR, SwapchainState> swapchains;
      std::unordered_map<VkQueue, uint32_t> queueFamilies;
      ShmMap shm;
-@@ -557,6 +750,9 @@ static std::unordered_map<VkInstance, InstanceChain> g_instances;
+@@ -569,6 +762,9 @@ static std::unordered_map<VkInstance, InstanceChain> g_instances;
  static std::unordered_map<VkPhysicalDevice, InstanceChain*> g_phys;
  static std::unordered_map<VkDevice, DeviceChain*> g_devices;
  static std::mutex g_stateMutex;
@@ -2107,7 +2130,7 @@ index 4b37520..a105d2d 100644
  
  // The one swapchain allowed to drive the neural round trip, chosen as the largest in the process.
  //
-@@ -693,6 +889,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateInstance(
+@@ -706,6 +902,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateInstance(
      if (res != VK_SUCCESS) return res;
  
      InstanceChain chain{};
@@ -2115,7 +2138,7 @@ index 4b37520..a105d2d 100644
      chain.next_gipa = next_gipa;
      for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i) {
          if (!std::strcmp(pCreateInfo->ppEnabledExtensionNames[i],
-@@ -706,6 +903,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateInstance(
+@@ -719,6 +916,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateInstance(
      chain.vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)next_gipa(*pInstance, "vkGetPhysicalDeviceProperties");
      chain.vkEnumerateDeviceExtensionProperties = (PFN_vkEnumerateDeviceExtensionProperties)next_gipa(*pInstance, "vkEnumerateDeviceExtensionProperties");
      chain.vkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)next_gipa(*pInstance, "vkGetPhysicalDeviceMemoryProperties");
@@ -2126,7 +2149,7 @@ index 4b37520..a105d2d 100644
  
      chain.table.next_gipa = next_gipa;
      chain.table.Load(*pInstance);
-@@ -751,7 +952,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_EnumeratePhysicalDevices(
+@@ -764,7 +965,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_EnumeratePhysicalDevices(
  // ---------------------------------------------------------------------------
  // Both declared here for the idle repaint, which draws a frame the application did not ask for.
  static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
@@ -2135,7 +2158,7 @@ index 4b37520..a105d2d 100644
                             bool repaint, bool* waitsConsumed);
  
  // Put the captured frame back, for when the effect is switched off while the picture is still.
-@@ -759,12 +960,19 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -772,12 +973,19 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
  // No model and no round trip: the composed result is replaced by the frame it was made from, which
  // is what the application drew and what it would draw again if it were running. Without this,
  // switching the effect off while paused leaves the edit on screen until something else redraws.
@@ -2157,7 +2180,7 @@ index 4b37520..a105d2d 100644
          dc->vkEndCommandBuffer(sc.cb);
          return false;
      }
-@@ -772,12 +980,12 @@ static bool RestorePresent(DeviceChain* dc, SwapchainState& sc, VkImage swapchai
+@@ -785,12 +993,12 @@ static bool RestorePresent(DeviceChain* dc, SwapchainState& sc, VkImage swapchai
      VkSubmitInfo si{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
      si.commandBufferCount = 1;
      si.pCommandBuffers = &sc.cb;
@@ -2175,7 +2198,7 @@ index 4b37520..a105d2d 100644
      {
          static std::once_flag said;
          std::call_once(said, [] { Log("[layer] idle repaint: put the captured frame back"); });
-@@ -851,6 +1059,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -864,6 +1072,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              for (size_t k = 0; k < kWantCount; ++k)
                      if (!std::strcmp(pCreateInfo->ppEnabledExtensionNames[i], kWantExts[k])) enabled[k] = true;
          for (size_t k = 0; k < kWantCount; ++k) {
@@ -2186,7 +2209,7 @@ index 4b37520..a105d2d 100644
              if (!ic->surfaceMaintenance1 &&
                  !std::strcmp(kWantExts[k], VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME))
                  continue;
-@@ -874,6 +1086,14 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -887,6 +1099,14 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              effective = &modified;
          }
      }
@@ -2201,7 +2224,7 @@ index 4b37520..a105d2d 100644
      // The extension does nothing unless its feature is asked for.
      VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT swapMaint{};
      if (addedSwapMaint) {
-@@ -886,6 +1106,28 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -899,6 +1119,28 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
  
      link->u.pLayerInfo = link->u.pLayerInfo->pNext;
      auto* const nextLayerInfo = link->u.pLayerInfo;
@@ -2230,7 +2253,7 @@ index 4b37520..a105d2d 100644
      VkResult res = create(physicalDevice, effective, pAllocator, pDevice);
      if (res != VK_SUCCESS && effective != pCreateInfo) {
          // Nothing added here is worth failing a device creation over.
-@@ -893,6 +1135,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -906,6 +1148,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
              (int) res);
          link->u.pLayerInfo = nextLayerInfo;
          addedSwapMaint = false;
@@ -2238,7 +2261,7 @@ index 4b37520..a105d2d 100644
          res = create(physicalDevice, pCreateInfo, pAllocator, pDevice);
      }
      if (res != VK_SUCCESS) return res;
-@@ -909,10 +1152,21 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -922,10 +1165,21 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
      dc->table.next_dpa = next_dpa;
      dc->table.Load(*pDevice);
      dc->releaseImages = addedSwapMaint && dc->vkReleaseSwapchainImagesEXT != nullptr;
@@ -2262,7 +2285,7 @@ index 4b37520..a105d2d 100644
      // Hybrid machines are the case that matters: an implicit layer is loaded for every device the
      // loader builds, including the integrated one a game may well be running on.
      char deviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE] = "?";
-@@ -920,9 +1174,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -933,9 +1187,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
          VkPhysicalDeviceProperties props{};
          ic->vkGetPhysicalDeviceProperties(physicalDevice, &props);
          std::snprintf(deviceName, sizeof(deviceName), "%s", props.deviceName);
@@ -2280,7 +2303,7 @@ index 4b37520..a105d2d 100644
          }
      }
  
-@@ -950,11 +1210,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -963,11 +1223,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
      // was enabled and no helper was running.
      //
      // DLSSNR_IDLE_REPAINT=0 turns it off.
@@ -2293,7 +2316,7 @@ index 4b37520..a105d2d 100644
          dc->repaintThread = std::thread([dc] {
              while (dc->repaintRun.load(std::memory_order_relaxed)) {
                  std::this_thread::sleep_for(std::chrono::milliseconds(60));
-@@ -1089,11 +1345,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
+@@ -1102,11 +1358,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
                  }
  
                  const bool drew =
@@ -2309,7 +2332,7 @@ index 4b37520..a105d2d 100644
                      pi.swapchainCount = 1;
                      pi.pSwapchains = &swapchain;
                      pi.pImageIndices = &index;
-@@ -1133,7 +1390,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
+@@ -1146,7 +1403,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
      {
          std::lock_guard<std::mutex> lk(g_stateMutex);
          auto it = g_devices.find(device);
@@ -2318,7 +2341,7 @@ index 4b37520..a105d2d 100644
      }
      if (!dc) return;
      // Before anything it touches is destroyed, and outside the lock it takes.
-@@ -1150,8 +1407,20 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
+@@ -1163,8 +1420,20 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
      if (dc->shm.hdr && dc->shm.hdr->layerPid.load() == uint32_t(getpid())) {
          dc->shm.hdr->layerPid.store(0);
          dc->shm.hdr->layerCompositionUp.store(0);
@@ -2340,7 +2363,7 @@ index 4b37520..a105d2d 100644
      {
          std::lock_guard<std::mutex> lk(dc->lock);
          for (auto& kv : dc->swapchains) {
-@@ -1159,6 +1428,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
+@@ -1172,6 +1441,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
              sc.comp.reset();
              if (sc.fenceLeg1) dc->vkDestroyFence(device, sc.fenceLeg1, nullptr);
              if (sc.fenceLeg2) dc->vkDestroyFence(device, sc.fenceLeg2, nullptr);
@@ -2348,7 +2371,7 @@ index 4b37520..a105d2d 100644
              if (sc.repaintFence) dc->vkDestroyFence(device, sc.repaintFence, nullptr);
              if (sc.pool) dc->vkDestroyCommandPool(device, sc.pool, nullptr);
          }
-@@ -1250,8 +1520,26 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
+@@ -1263,8 +1533,26 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
      }
      if (!dc || !dc->vkCreateSwapchainKHR) return VK_ERROR_INITIALIZATION_FAILED;
  
@@ -2376,7 +2399,7 @@ index 4b37520..a105d2d 100644
          m.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
  
      VkResult res = dc->vkCreateSwapchainKHR(device, &m, pAllocator, pSwapchain);
-@@ -1269,14 +1557,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
+@@ -1282,14 +1570,17 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
      sc.width = pCreateInfo->imageExtent.width;
      sc.height = pCreateInfo->imageExtent.height;
      const bool tooSmall = sc.width < kMinW || sc.height < kMinH;
@@ -2396,7 +2419,7 @@ index 4b37520..a105d2d 100644
                            : tooSmall ? " (too small)" : " (too large)") : "");
      dc->swapchains[*pSwapchain] = std::move(sc);
      return VK_SUCCESS;
-@@ -1297,14 +1588,19 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
+@@ -1310,14 +1601,19 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
      auto it = dc->swapchains.find(swapchain);
      if (it != dc->swapchains.end()) {
          lk.unlock();
@@ -2417,7 +2440,7 @@ index 4b37520..a105d2d 100644
          dc->swapchains.erase(it);
      }
      lk.unlock();
-@@ -1335,6 +1631,17 @@ static bool SetLoaderData(DeviceChain* dc, void* object) {
+@@ -1348,6 +1644,17 @@ static bool SetLoaderData(DeviceChain* dc, void* object) {
  static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family) {
      VkDevice d = dc->self;
  
@@ -2435,7 +2458,7 @@ index 4b37520..a105d2d 100644
      VkCommandPoolCreateInfo cpci{};
      cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
      cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-@@ -1352,6 +1659,11 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
+@@ -1365,6 +1672,11 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
      fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
      if (dc->vkCreateFence(d, &fci, nullptr, &sc.fenceLeg1) != VK_SUCCESS) return false;
      if (dc->vkCreateFence(d, &fci, nullptr, &sc.fenceLeg2) != VK_SUCCESS) return false;
@@ -2447,7 +2470,7 @@ index 4b37520..a105d2d 100644
  
      if (!dc->instance) return false;
      sc.comp = std::make_unique<dlssnr::Composition>(&dc->table, &dc->instance->table, d, dc->physical);
-@@ -1360,6 +1672,9 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
+@@ -1373,6 +1685,9 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
          sc.comp.reset();
          return false;
      }
@@ -2457,7 +2480,7 @@ index 4b37520..a105d2d 100644
      return true;
  }
  
-@@ -1383,43 +1698,241 @@ static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
+@@ -1396,43 +1711,241 @@ static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
      return false;
  }
  
@@ -2715,7 +2738,7 @@ index 4b37520..a105d2d 100644
  
      dlssnr::FrameSettings fs = dlssnr::FrameSettings::Read(dc->shm.hdr);
      // A repaint holds the captured frame, whatever the setting says.
-@@ -1437,19 +1950,21 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1450,19 +1963,21 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // frame on the 8-bit path it has always used. hdrActive doubles as the echo the helper reads, so
      // it builds the float images only for a layer that has said it will feed them.
      const uint32_t hdrMode = dc->shm.hdr ? dc->shm.hdr->hdrMode.load() : kHdrAuto;
@@ -2744,7 +2767,7 @@ index 4b37520..a105d2d 100644
          uint32_t mw = 0, mh = 0;
          dlssnr::Composition::ModelExtent(sc.width, sc.height, fs, mw, mh);
          if (ShmMapFrames(dc->shm, size_t(mw) * mh * (hdrProxy ? 8 : 4)))
-@@ -1468,7 +1983,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1481,7 +1996,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
      // or imported leaves that direction on the shared-memory transport, which is the arrangement
      // that shipped before. The flags written below say which surfaces this frame's bytes travel
      // through, and the helper honours them on exactly the frame they were set for.
@@ -2753,7 +2776,7 @@ index 4b37520..a105d2d 100644
  
      if (!sc.comp->Prepare(sc.width, sc.height, sc.format, fs, linearHdr, hdrProxy, hdrTransfer)) {
          Log("[layer] composition cannot run here: %s", sc.comp->Reason());
-@@ -1533,14 +2048,12 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1546,14 +2061,12 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
  
      // A capture is asked for by writing a frame count into the header; taking it clears the request,
      // so one press produces one run rather than one per frame for as long as nobody clears it.
@@ -2771,7 +2794,7 @@ index 4b37520..a105d2d 100644
      VkSubmitInfo si{};
      si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
      si.commandBufferCount = 1;
-@@ -1559,68 +2072,79 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+@@ -1572,68 +2085,79 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
          si.pWaitDstStageMask = nullptr;
      };
  
@@ -2887,7 +2910,7 @@ index 4b37520..a105d2d 100644
  
      if (time) {
          static int frameNo = 0;
-@@ -1650,11 +2174,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1663,11 +2187,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
      dc->lastPresentMs.store(NowMs(), std::memory_order_relaxed);
  
      // Whether this call's wait semaphores have already been consumed by a submit of ours. They are
@@ -2902,7 +2925,7 @@ index 4b37520..a105d2d 100644
  
      // Held from here to the present at the end, alongside Hook_QueueSubmit{,2}. Vulkan requires
      // external synchronization for every operation on a queue; the repaint uses the application's
-@@ -1679,6 +2205,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1692,6 +2218,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
                  if (k < 3) Log("[layer] present: swapchain %p is not primary", (void*)pPresentInfo->pSwapchains[i]);
                  continue;
              }
@@ -2912,7 +2935,7 @@ index 4b37520..a105d2d 100644
              sc.queue = queue;
              if (!sc.ready && !dc->shm.dead) {
                  if (!CreateResources(dc, sc, family)) {
-@@ -1700,11 +2229,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1713,11 +2242,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
              }
              const uint32_t waitCount = waitsConsumed ? 0u : pPresentInfo->waitSemaphoreCount;
              bool submittedWaits = false;
@@ -2927,7 +2950,7 @@ index 4b37520..a105d2d 100644
              if (VerboseEnabled()) {
                  Log("[present] swapchain=%p image=%u seq=%u composed=%d",
                      (void*)pPresentInfo->pSwapchains[i], pPresentInfo->pImageIndices[i],
-@@ -1723,13 +2253,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+@@ -1736,13 +2266,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
          }
      }
  
@@ -2944,7 +2967,7 @@ index 4b37520..a105d2d 100644
      return dc->vkQueuePresentKHR(queue, &pi);
  }
  
-@@ -1766,6 +2296,31 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueWaitIdle(VkQueue queue) {
+@@ -1779,6 +2309,31 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueWaitIdle(VkQueue queue) {
      return dc->vkQueueWaitIdle(queue);
  }
  
@@ -2976,7 +2999,7 @@ index 4b37520..a105d2d 100644
  static VKAPI_ATTR VkResult VKAPI_CALL Hook_AcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain,
                                                                  uint64_t timeout, VkSemaphore semaphore,
                                                                  VkFence fence, uint32_t* pImageIndex) {
-@@ -1793,11 +2348,17 @@ static PFN_vkVoidFunction LookupHook(const char* n) {
+@@ -1806,11 +2361,17 @@ static PFN_vkVoidFunction LookupHook(const char* n) {
      if (!std::strcmp(n, "vkGetDeviceQueue2")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue2;
      if (!std::strcmp(n, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)Hook_CreateSwapchainKHR;
      if (!std::strcmp(n, "vkDestroySwapchainKHR")) return (PFN_vkVoidFunction)Hook_DestroySwapchainKHR;
@@ -2995,7 +3018,7 @@ index 4b37520..a105d2d 100644
      return nullptr;
  }
  
-@@ -1807,11 +2368,17 @@ static PFN_vkVoidFunction LookupDeviceHook(const char* n) {
+@@ -1820,11 +2381,17 @@ static PFN_vkVoidFunction LookupDeviceHook(const char* n) {
      if (!std::strcmp(n, "vkGetDeviceQueue2")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue2;
      if (!std::strcmp(n, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)Hook_CreateSwapchainKHR;
      if (!std::strcmp(n, "vkDestroySwapchainKHR")) return (PFN_vkVoidFunction)Hook_DestroySwapchainKHR;
@@ -3014,7 +3037,7 @@ index 4b37520..a105d2d 100644
      return nullptr;
  }
  
-@@ -1851,7 +2418,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
+@@ -1866,7 +2433,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t* pCou
      if (*pCount < 1) { *pCount = 1; return VK_INCOMPLETE; }
      std::memset(pProperties, 0, sizeof(*pProperties));
      std::strncpy(pProperties->layerName, VK_LAYER_NAME, VK_MAX_EXTENSION_NAME_SIZE - 1);
@@ -3720,7 +3743,7 @@ index 4e16702..5639d49 100644
 +    return 0;
  }
 diff --git a/vulkan-nr/build/build_network.py b/vulkan-nr/build/build_network.py
-index 5efa65c..9a87caa 100644
+index 7af5897..d3a75c7 100644
 --- a/vulkan-nr/build/build_network.py
 +++ b/vulkan-nr/build/build_network.py
 @@ -1,7 +1,7 @@
@@ -3737,11 +3760,11 @@ index 5efa65c..9a87caa 100644
  from pathlib import Path
  
 -R = Path(__file__).resolve().parents[2]
--RUNTIME = ['runtime_alpha', 'runtime_encode', 'runtime_transfer', 'runtime_depth', 'cascade_lograt', 'cascade_blur', 'cascade_feed']
+-RUNTIME = ['runtime_alpha', 'runtime_encode', 'runtime_transfer', 'runtime_prep', 'runtime_depth', 'cascade_lograt', 'cascade_blur', 'cascade_feed']
 +R = Path(__file__).resolve().parents[1]  # dlsslop-amd: the prepared vulkan-nr/ tree
 +GLSLANG = [shutil.which('glslang') or 'glslang']
-+RUNTIME = ['runtime_alpha', 'runtime_encode', 'runtime_transfer', 'runtime_depth', 'cascade_lograt', 'cascade_blur', 'cascade_feed',
-+           'pass_stages']
++RUNTIME = ['runtime_alpha', 'runtime_encode', 'runtime_transfer', 'runtime_prep', 'runtime_depth', 'cascade_lograt',
++           'cascade_blur', 'cascade_feed', 'pass_stages']
  MOTION = ['motion_luma', 'motion_estimate']
  
  
@@ -3843,10 +3866,10 @@ index 0000000..d383653
 +    imageStore(target, xy, vec4(model.rgb - scale * delta, model.a));
 +}
 diff --git a/vulkan-nr/src/core/nr_runtime.cpp b/vulkan-nr/src/core/nr_runtime.cpp
-index b151242..fe389dd 100644
+index 4adf340..572b40e 100644
 --- a/vulkan-nr/src/core/nr_runtime.cpp
 +++ b/vulkan-nr/src/core/nr_runtime.cpp
-@@ -20,6 +20,7 @@ void validate(const Controls& c) {
+@@ -21,6 +21,7 @@ void validate(const Controls& c) {
      if (!range(c.intensity, 0, 2) || !range(c.detail_strength, 0, 2) || !range(c.colour_strength, 0, 4) ||
          !range(c.max_ratio, 1, 8) || !range(c.local_tone, 0, 2) ||
          !range(c.local_structure, 0, 2) || !range(c.skin_structure, -1, 2) ||
@@ -3854,7 +3877,7 @@ index b151242..fe389dd 100644
          c.style < 0 || c.style > 2 || c.passes < 1)
          throw std::invalid_argument("invalid NR controls");
  }
-@@ -279,6 +280,12 @@ struct Runtime::Impl {
+@@ -337,6 +338,12 @@ struct Runtime::Impl {
      int cascade_radius{4};
      nrvk::Context::Image lograt{}, cascade_tmp{}, lowpass{};
      nrvk::Kernel cascade_lograt, cascade_blur_h, cascade_blur_v, cascade_feed;
@@ -3867,7 +3890,7 @@ index b151242..fe389dd 100644
      std::vector<nrvk::Context::Image> history_store;
      // ---- what the pass costs, measured on the GPU ----------------------------
      //
-@@ -542,6 +549,10 @@ struct Runtime::Impl {
+@@ -791,6 +798,10 @@ struct Runtime::Impl {
          if (cascade_blur_h.device) cascade_blur_h.destroy();
          if (cascade_blur_v.device) cascade_blur_v.destroy();
          if (cascade_feed.device) cascade_feed.destroy();
@@ -3878,7 +3901,7 @@ index b151242..fe389dd 100644
          for (auto& h : history_store) session.ctx.destroy(h);
          for (auto& f : features) if (f.second.history.handle) session.ctx.destroy(f.second.history);
          for (auto& r : retiring) if (r.first.handle) session.ctx.destroy(r.first);
-@@ -665,13 +676,16 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+@@ -915,13 +926,16 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
      impl_->round_u8 = config.colour_format == VK_FORMAT_R8G8B8A8_UNORM || config.colour_format == VK_FORMAT_R8G8B8A8_SRGB ||
                        config.colour_format == VK_FORMAT_B8G8R8A8_UNORM || config.colour_format == VK_FORMAT_B8G8R8A8_SRGB;
      impl_->colour_format = config.colour_format;
@@ -3899,7 +3922,7 @@ index b151242..fe389dd 100644
      if (!std::isfinite(config.model_scale) || config.model_scale <= 0.f || config.model_scale > 1.f)
          throw std::invalid_argument("model_scale must be in (0, 1]");
      if (config.max_passes < 1 || config.max_passes > 16)
-@@ -752,11 +766,12 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+@@ -1002,11 +1016,12 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
          "--spv-dir", network_shaders.string(),
          "--host-boundary", arena_reuse() ? "--reuse" : "--no-reuse", "--source-width", std::to_string(mw),
          "--source-height", std::to_string(mh), "--accumulation", config.accumulation,
@@ -3914,7 +3937,7 @@ index b151242..fe389dd 100644
          if (!std::filesystem::is_regular_file(pack))
              throw std::runtime_error("missing " + pack.string() + " (run install.sh again)");
          arguments.push_back("--model-pack"); arguments.push_back(pack.string());
-@@ -794,7 +809,7 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+@@ -1045,7 +1060,7 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
          VkFormatProperties2 f2{VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2, &f3};
          vkGetPhysicalDeviceFormatProperties2(host.physical, unorm, &f2);
          impl_->direct_out = NR_DIRECT_OUT && NR_POST_ALPHA && impl_->direct_in && config.native_compose && store_matches_blit &&
@@ -3923,7 +3946,7 @@ index b151242..fe389dd 100644
                              (f3.optimalTilingFeatures & VK_FORMAT_FEATURE_2_STORAGE_WRITE_WITHOUT_FORMAT_BIT) &&
                              (f3.optimalTilingFeatures & VK_FORMAT_FEATURE_2_TRANSFER_SRC_BIT);
          nr::logf("[nr] input %s, write-back %s", impl_->direct_in ? "copied in the frame's format"
-@@ -853,6 +868,22 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+@@ -1104,6 +1119,22 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
                                         {&impl_->shown_keep, &impl_->lograt, &impl_->lowpass, &tex_in_storage});
          }
      }
@@ -3946,7 +3969,7 @@ index b151242..fe389dd 100644
      // The alpha pass restores the frame's own alpha onto the answer: the answer
      // is full_out when scaled, and the frame's alpha lives wherever the frame
      // was kept.
-@@ -925,7 +956,8 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
+@@ -1206,7 +1237,8 @@ Runtime::Runtime(const HostDevice& host, const RuntimeConfig& config, const Cont
      if (temporal_config.enable) {
          auto& t = impl_->temporal;
          const auto shaders = std::filesystem::canonical(temporal_config.shaders.empty()
@@ -3956,16 +3979,15 @@ index b151242..fe389dd 100644
              : std::filesystem::path(temporal_config.shaders));
          require_variant_profile(shaders);
          const auto temporal_rel = shaders.lexically_relative(root);
-@@ -1260,7 +1292,7 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
-     const Impl::DirectSrc* ds = nullptr;
+@@ -1543,6 +1575,7 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
      // post_alpha: native compose, one pass, scale 1, and no alpha pass - after
      // the network only the write-back touches the frame.
--    if (NR_DIRECT_SAMPLE && impl_->post_alpha && engine && temporal && !mask && passes == 1 &&
-+    if (NR_DIRECT_SAMPLE && impl_->post_alpha && engine && temporal && !mask && passes == 1 && !impl_->pass_stages &&
+     if (NR_DIRECT_SAMPLE && impl_->post_alpha && !impl_->prep && engine && temporal && !mask && passes == 1 &&
++        !impl_->pass_stages &&
          impl_->temporal.pingpong && impl_->transfer != Transfer::Encoded &&
          (frame.usage & VK_IMAGE_USAGE_SAMPLED_BIT) && frame.width == nw && frame.height == nh &&
          (!engine->depth.image || (engine->depth.format == VK_FORMAT_R32_SFLOAT &&
-@@ -1579,6 +1611,7 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
+@@ -1898,6 +1931,7 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
      // store[k] is copied into the bound history image before the pass and
      // the model's write (surf1) copied back after it. With one pass the
      // history round trip is the single copy it always was.
@@ -3973,7 +3995,7 @@ index b151242..fe389dd 100644
      for (uint32_t pass = 0; pass < passes; ++pass) {
          if (pass > 0 && impl_->cascade_detail) {
              // Detail only: the first pass's input with the previous pass's
-@@ -1603,7 +1636,8 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
+@@ -1922,7 +1956,8 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
              compute_barrier(cmd);
              if (temporal) copy_general(impl_->history_store[pass], t.history);
          } else if (pass > 0) {
@@ -3983,7 +4005,7 @@ index b151242..fe389dd 100644
                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
                      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
              barrier(cmd, s.tex_in.handle, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-@@ -1612,12 +1646,12 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
+@@ -1931,12 +1966,12 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
              VkImageCopy c{};
              c.srcSubresource = c.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
              c.extent = {nw, nh, 1};
@@ -3998,7 +4020,7 @@ index b151242..fe389dd 100644
                      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT,
                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
              if (temporal) copy_general(impl_->history_store[pass], t.history);
-@@ -1675,6 +1709,20 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
+@@ -1996,6 +2031,20 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
                      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                      VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
          }
@@ -4019,8 +4041,8 @@ index b151242..fe389dd 100644
      }
      if (temporal) {
          // Leave the bound history holding the FIRST pass's, which is what the
-@@ -1713,10 +1761,13 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
-             dispatch(cmd, impl_->transfer_pass, (frame.width + 7) / 8, (frame.height + 7) / 8, 1, &push, sizeof push);
+@@ -2056,10 +2105,13 @@ ControlMaskResult Runtime::record_all(VkCommandBuffer cmd, const ColourFrame& fr
+             dispatch(cmd, transfer, (frame.width + 7) / 8, (frame.height + 7) / 8, 1, &push, sizeof push);
              compute_barrier(cmd);
          }
 -        const VkImage out = impl_->scaled ? impl_->full_out.handle : s.surf0.handle;
@@ -4036,10 +4058,10 @@ index b151242..fe389dd 100644
                  VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_ACCESS_SHADER_WRITE_BIT,
                  VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_READ_BIT);
 diff --git a/vulkan-nr/src/core/nr_runtime.hpp b/vulkan-nr/src/core/nr_runtime.hpp
-index bd29413..d675bfd 100644
+index 1f48cd6..71a7c52 100644
 --- a/vulkan-nr/src/core/nr_runtime.hpp
 +++ b/vulkan-nr/src/core/nr_runtime.hpp
-@@ -45,6 +45,12 @@ struct Controls {
+@@ -75,6 +75,12 @@ struct Controls {
      float local_structure = 1.0f;
      float skin_structure = -1.0f;
      bool automatic_mask = true;
@@ -4052,10 +4074,10 @@ index bd29413..d675bfd 100644
      // Per-pass overrides for passes 2..N; index 0 is pass 2. An entry with
      // `used == false`, or a pass past the end of this, inherits pass 1 with the
      // tone zeroed. Empty is exactly the behaviour that shipped before.
-@@ -109,6 +115,17 @@ struct RuntimeConfig {
-     // pass, so `colour` and `model_scale` have no effect. What a host that does
-     // its own resolve afterwards (OptiScaler) must be given.
-     bool native_compose = false;
+@@ -149,6 +155,17 @@ struct RuntimeConfig {
+     // (its linear-HDR encode, or linear_input's own): the preprocess undoes the
+     // knee first, so its curve is the only one. False for an SDR frame.
+     bool preprocess_unknee = false;
 +    // dlsslop-amd: record Controls::sharpness and colour_preserve after every
 +    // pass, into a model-sized RGBA32F scratch image and, with both, back. The
 +    // answer then stays RGBA32F instead of the post block storing the frame's

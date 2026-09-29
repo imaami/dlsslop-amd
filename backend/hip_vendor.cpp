@@ -82,12 +82,12 @@ std::string network(const NetworkOptions& options, NetworkHandle& network)
         auto opt = LmxxfProductionOptions(options.width, options.height, options.modules, options.assets);
         opt.device = options.device;
         if (!options.performance) opt.skip_blocks.clear();
-        // Upstream's shipped HIP configurations (scripts/hip-*-flags.txt) add
-        // these bit-exact byte residual and fragment paths to the snapshot.
-        opt.mh_feature_byte = opt.mh_proj_diag_fb = opt.mh_byte_stream = opt.decoder_byte = opt.mh_ffn_frag256 = true;
         // Production launches nothing from the WMMA, tiled, wave and fused-C32
         // modules these select; do not load them.
         opt.wmma = opt.tiled = opt.wave = opt.fused_c32 = false;
+        // scripts/build-kernels.py has no recipe yet for the modules these
+        // select (c32-wave1, c64-wave2, c512-m32-*, vit-*, wave-pointwise).
+        opt.wave_owned = opt.c512_m32 = opt.vit_proj_n64 = opt.pdl = false;
         network.reset(new Network(opt));
         network->SetNoise({}); // Fast prefix uses procedural noise, not noise.f32.
     });

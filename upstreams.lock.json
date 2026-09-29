@@ -4,22 +4,22 @@
     "layer": {
       "path": "external/layer",
       "url": "https://github.com/bmitch87/DLSS5VKLayer.git",
-      "commit": "117c9530834d37ef8dc7b371e36cc3fb507e6b6b"
+      "commit": "ab722b091071d6d59df56f10d86d4f3005bcad86"
     },
     "amd": {
       "path": "external/amd",
       "url": "https://github.com/lmxxf/dlss5-on-amd-9070xt-porting.git",
-      "commit": "7ef24e7c1498bce59738277e174249866608c4ed"
+      "commit": "ad499a8199c9ce3678d83c9be58fe3bc1bef3498"
     },
     "optiscaler": {
       "path": "external/optiscaler",
       "url": "https://github.com/optiscaler/OptiScaler.git",
-      "commit": "6ded74bfa4fbb932fda7184c1263fc45380d5b1d"
+      "commit": "fb41e3e6361ca9ae55b30a821a40c2b4b346f330"
     },
     "vulkan": {
       "path": "external/vulkan",
       "url": "https://github.com/mochizuki0323/DLSSNR-AMD.git",
-      "commit": "4f663b5d0262efedbfb87394ad59665664c2dd7b"
+      "commit": "743326d15f56c93ca757b18ca4d6b0d81d654113"
     }
   },
   "files": {
@@ -36,7 +36,7 @@
     "upstream-layer/common/shm_protocol.h": {
       "repository": "layer",
       "source": "common/shm_protocol.h",
-      "sha256": "2198cca22404234fb2df1af88ed934a1756bc08ac95d705d9f4cc1009be680a3"
+      "sha256": "dbe332427d205a6bae612848621b539da93a037cf49ed743399c43f2de3709c0"
     },
     "upstream-layer/core/stb_image_write.h": {
       "repository": "layer",
@@ -106,12 +106,12 @@
     "upstream-layer/layer_linux/src/layer.cpp": {
       "repository": "layer",
       "source": "layer_linux/src/layer.cpp",
-      "sha256": "50692f6a7bfa037a23aeae1c97b5e42488541ed6ea86bb6c8f9f920d13ab3bdb"
+      "sha256": "7dc0dabf791fb78a3e4cc47141bf13dcbe2678a42f8f8767ccbf8ae5f37d7288"
     },
     "upstream-layer/layer_linux/src/log.h": {
       "repository": "layer",
       "source": "layer_linux/src/log.h",
-      "sha256": "6d72ae8e93ecf529d15f74a030475a460dcd13735e23f47d784ef53c919d3223"
+      "sha256": "3ebe8627a1f1ce1ed1517023aa44d99db9cf565351e21dce24fbf71dcae9aaf1"
     },
     "upstream-layer/layer_linux/src/scaler_vk.cpp": {
       "repository": "layer",
@@ -318,10 +318,15 @@
       "source": "hip/boundary_reference.hip",
       "sha256": "29cfe6378b966f8b7bbd30d04ebd3f927e95bc75845e6d3e5a6540dca44244dd"
     },
+    "kernels/c512_head_group.inc": {
+      "repository": "amd",
+      "source": "hip/c512_head_group.inc",
+      "sha256": "cac4e3b2947fb0bbcf8a128841d5642006b6cb16a36f4465960b498a2b3c1540"
+    },
     "kernels/c32_fast.hip": {
       "repository": "amd",
       "source": "hip/c32_fast.hip",
-      "sha256": "f8ae35cce9a0ae2c0e0b60d9023aa8ecef01eb1d0832acdbe6c6bb03293da8f4"
+      "sha256": "f8296da6e299bdf4cef10096058deef44a20ede146d4f070f60cf86ef06d45a4"
     },
     "kernels/c32_fast_attention.hip": {
       "repository": "amd",
@@ -331,7 +336,7 @@
     "kernels/c32_fused_ffn_attention.hip": {
       "repository": "amd",
       "source": "hip/c32_fused_ffn_attention.hip",
-      "sha256": "6276332fcd0532796beeaef9a450b6a889a99a70fae5fa6de594344319cd04f3"
+      "sha256": "be9613a4f8cf1ee5352d2150ec2a03bed39f12b69bb78c10730ae41343aabbab"
     },
     "kernels/c32_reference.hip": {
       "repository": "amd",
@@ -341,7 +346,7 @@
     "kernels/deep_fast.hip": {
       "repository": "amd",
       "source": "hip/deep_fast.hip",
-      "sha256": "fe84985dc06fbce3d07de680fa27f2f21c7ef06ba7233df119fe66c553117d50"
+      "sha256": "73c4b88c41a49404a17a303b2d2a08f6dbaad40f200e5e4adf2979e6db49657f"
     },
     "kernels/deep_reference.hip": {
       "repository": "amd",
@@ -351,12 +356,12 @@
     "kernels/multihead_fast_padded.hip": {
       "repository": "amd",
       "source": "hip/multihead_fast_padded.hip",
-      "sha256": "530e8ee0a76ff6d8cedd687c218e95eca0439f10ed4551dc5f1568236f039dec"
+      "sha256": "73611dda6b6ca0fd07ff0252b4c0adde3f1536d27e7d407d4ff89de93ae27dda"
     },
     "kernels/multihead_fused_attention.hip": {
       "repository": "amd",
       "source": "hip/multihead_fused_attention.hip",
-      "sha256": "b9020b4b851e3c599e826a2bd50d54cd6ed6faf51b45d2982637d2712364bd80"
+      "sha256": "e1dd323428a97315c2e415b8f16be20b8726af792fdc49b96550da93b3ee73d0"
     },
     "kernels/multihead_reference.hip": {
       "repository": "amd",
@@ -381,7 +386,7 @@
     "backend/vendor/LmxxfProductionOptions.h": {
       "repository": "amd",
       "source": "src/LmxxfProductionOptions.h",
-      "sha256": "fb507617edde6d86744fd962f90d58d1b61404df592b46fa67aa3fddf40edef7"
+      "sha256": "085e6f9328403454111bd38990bab3b3f88349f1823920e754b3b6b9dfd61ed3"
     },
     "backend/vendor/hip_api.h": {
       "repository": "amd",
@@ -396,7 +401,7 @@
     "backend/vendor/hip_reference_network.h": {
       "repository": "amd",
       "source": "Development/HIP/hip_reference_network.h",
-      "sha256": "93d80a12250d9e54bfc3081019a1ec13acb77ce25c340153cf9325c3b01edb34"
+      "sha256": "05ecb42cb434849b5df618f59c11fe1c558524214726d8691ca33fb6d688f904"
     },
     "backend/vendor/packed_weights.h": {
       "repository": "amd",
@@ -451,12 +456,12 @@
     "vulkan-nr/build/arch/rdna4.sh": {
       "repository": "vulkan",
       "source": "linux/build/arch/rdna4.sh",
-      "sha256": "54b7947822057e9e776a6103b4f7ee5192bf9fdce308c146955f0a187ab430f3"
+      "sha256": "f955106994137eb503ffa50fce8e9acafc1efeb3987cbaf2f604d5d853d4215e"
     },
     "vulkan-nr/build/build_network.py": {
       "repository": "vulkan",
       "source": "linux/build/build_network.py",
-      "sha256": "439294c42e0d064305860f575fa456ed117dca518caea5240c1a3143edf70a0b"
+      "sha256": "9c17de7c5910296e467d6effdf205718de309464f4bac664613dadcf0c4095bb"
     },
     "vulkan-nr/package/model-tools/descriptor.json": {
       "repository": "vulkan",
@@ -553,6 +558,11 @@
       "source": "linux/shaders/passes/runtime_encode.comp",
       "sha256": "f485687350585ea1fdafa4b49aca519e972537fe1b34f3f8458610d07367c7a5"
     },
+    "vulkan-nr/shaders/passes/runtime_prep.comp": {
+      "repository": "vulkan",
+      "source": "linux/shaders/passes/runtime_prep.comp",
+      "sha256": "6388fa0ec32c0ffafdcee250d51bc2dcdbc91f2dd35ae010ca44f6138bf42c94"
+    },
     "vulkan-nr/shaders/passes/runtime_transfer.comp": {
       "repository": "vulkan",
       "source": "linux/shaders/passes/runtime_transfer.comp",
@@ -561,7 +571,7 @@
     "vulkan-nr/shaders/rdna4/attn.comp": {
       "repository": "vulkan",
       "source": "linux/shaders/rdna4/attn.comp",
-      "sha256": "2ecf7d0ce29b2b8449a241805d85b28aa9a8a55b3ba616f1783b7d0aff8ea8c9"
+      "sha256": "3c5ed22912bb0704cd279b384c636880eee4448d8761e204850ef95cad5e1628"
     },
     "vulkan-nr/shaders/rdna4/decoder_upsample.comp": {
       "repository": "vulkan",
@@ -571,22 +581,27 @@
     "vulkan-nr/shaders/rdna4/ffwd3_t.comp": {
       "repository": "vulkan",
       "source": "linux/shaders/rdna4/ffwd3_t.comp",
-      "sha256": "c37ca288c1519c580f0a7538b367845ef4def869692326ede1bfa83bac93cd35"
+      "sha256": "8aa2327d09511f9bb0b30e0ad156458af2863b49b3a3c7e97cb6083bd76b4631"
     },
     "vulkan-nr/shaders/rdna4/fswin_t.comp": {
       "repository": "vulkan",
       "source": "linux/shaders/rdna4/fswin_t.comp",
-      "sha256": "0f84e171bcd857921ec9872b293503d2b398b992e9ea6b9cd6c083bb4c3ae9d7"
+      "sha256": "509415cfb44dcb78dc28dc609e17d96b18d7684758205dc30cf3ac60aee11074"
     },
     "vulkan-nr/shaders/rdna4/gemm1x1.comp": {
       "repository": "vulkan",
       "source": "linux/shaders/rdna4/gemm1x1.comp",
-      "sha256": "e4c47a354eb2b0f55085001d09c87c02c6338c8b4a8a6b6af0a45bf536785364"
+      "sha256": "21f520df38fbd0a5cf02f3399d8f95f4344f03c0b1b5283df7b61a30f2c31781"
     },
     "vulkan-nr/shaders/rdna4/include/attn_qkv_epi.glsl": {
       "repository": "vulkan",
       "source": "linux/shaders/rdna4/include/attn_qkv_epi.glsl",
       "sha256": "d3c58e591c4b782abb1678594b8a7dd39f762366ceac1c0ac5e965bbbd1e46b1"
+    },
+    "vulkan-nr/shaders/rdna4/include/occ_pad.glsl": {
+      "repository": "vulkan",
+      "source": "linux/shaders/rdna4/include/occ_pad.glsl",
+      "sha256": "81878d2f80bd6459cc6b0268836a5cc5889646e0a15bc5d407c39be9905fccb5"
     },
     "vulkan-nr/shaders/rdna4/include/coherent_act.glsl": {
       "repository": "vulkan",
@@ -601,7 +616,7 @@
     "vulkan-nr/shaders/rdna4/include/fswin_body.glsl": {
       "repository": "vulkan",
       "source": "linux/shaders/rdna4/include/fswin_body.glsl",
-      "sha256": "76b00a90be8e9e9e5b0c806c862e2bc39a4262406c2859d6b9a0cd4acfdcba05"
+      "sha256": "b04bd24fe07be59722189d3425c1fc514072463eb43df0b09cbbed41b6ce66b0"
     },
     "vulkan-nr/shaders/rdna4/include/image_input.glsl": {
       "repository": "vulkan",
@@ -616,7 +631,7 @@
     "vulkan-nr/shaders/rdna4/include/nr_chain.glsl": {
       "repository": "vulkan",
       "source": "linux/shaders/rdna4/include/nr_chain.glsl",
-      "sha256": "7b092704187f65ea399d01778c8876ea99b6b935922a6c8e74fbe51a28bdf40b"
+      "sha256": "5d5d1d8076f3f0d13115ad4b9aa83f0ec1b9164fca04b955dc0a70dd8d136317"
     },
     "vulkan-nr/shaders/rdna4/include/nr_prof.glsl": {
       "repository": "vulkan",
@@ -636,7 +651,7 @@
     "vulkan-nr/shaders/rdna4/include/vit_attn_vt_chunk.glsl": {
       "repository": "vulkan",
       "source": "linux/shaders/rdna4/include/vit_attn_vt_chunk.glsl",
-      "sha256": "aee56b26abbbb622c4bb4e49fb274344666087df81599811a51e5043345117a6"
+      "sha256": "14536bb3d6c22b5386e23cddf1da1111f147ba0772995d16031b98d6a1ba0cf3"
     },
     "vulkan-nr/shaders/rdna4/noise_field.comp": {
       "repository": "vulkan",
@@ -646,7 +661,7 @@
     "vulkan-nr/shaders/rdna4/pipelines.json": {
       "repository": "vulkan",
       "source": "linux/shaders/rdna4/pipelines.json",
-      "sha256": "bf7ff228cbe9030945536a365c1410711abdfc87d91cb9a937c379d714c07841"
+      "sha256": "d7c5d3601001b34ef7b4a37b9a53b33b7b02e50aa407aa28ec4af48ca3e35424"
     },
     "vulkan-nr/shaders/rdna4/repack_tokens.comp": {
       "repository": "vulkan",
@@ -661,7 +676,7 @@
     "vulkan-nr/shaders/rdna4/vit_attn.comp": {
       "repository": "vulkan",
       "source": "linux/shaders/rdna4/vit_attn.comp",
-      "sha256": "bfb2bb9e9902931526fc9cef3ca60cc4508ce80d6d5c904ed356cd117d672284"
+      "sha256": "7fdd8294d3ed619ceb73931a2ebe349b8915d6d6c989b6bf223a802e348b99f6"
     },
     "vulkan-nr/src/core/nr_activation_lut.hpp": {
       "repository": "vulkan",
@@ -681,7 +696,7 @@
     "vulkan-nr/src/core/nr_graph.cpp": {
       "repository": "vulkan",
       "source": "linux/src/core/nr_graph.cpp",
-      "sha256": "c4cec90bc1d08a62604e8368a17fc8ea9dc5635cb5fcc0dcefb6304a6e9ec804"
+      "sha256": "ea102f46651173cab63207bfa9165d2bf4ef604dbe0515eef116c62a51ac9754"
     },
     "vulkan-nr/src/core/nr_log.hpp": {
       "repository": "vulkan",
@@ -706,12 +721,12 @@
     "vulkan-nr/src/core/nr_runtime.cpp": {
       "repository": "vulkan",
       "source": "linux/src/core/nr_runtime.cpp",
-      "sha256": "366c4eab5d117a2166db2b94cf6119fe2dd33a8f02423d431a2118fb9e40a62a"
+      "sha256": "5af0281817fb891ce00e85e9e48bb8e6687c4e712210c4dfcfa6ef763c344611"
     },
     "vulkan-nr/src/core/nr_runtime.hpp": {
       "repository": "vulkan",
       "source": "linux/src/core/nr_runtime.hpp",
-      "sha256": "4a47e5747c89796253cc2e9c76aba3efd18e791a6601fbcfc8fe377d03e89b98"
+      "sha256": "2ac68c351166e23520ccb4374164fe07438fbbe7feb933dd57be28d3b492c197"
     },
     "vulkan-nr/src/core/nr_runtime_dispatch.hpp": {
       "repository": "vulkan",
@@ -721,12 +736,12 @@
     "vulkan-nr/src/core/nr_shader_manifest.hpp": {
       "repository": "vulkan",
       "source": "linux/src/core/nr_shader_manifest.hpp",
-      "sha256": "24d3570d2743fa959c68fe004dd3c57539dc44e36d4b54fdd20b2ea1b1794539"
+      "sha256": "71c8951e183e4fecafa79014686aa717b93beb71567ad31b8dd7ee63fda851f6"
     },
     "vulkan-nr/src/core/nrvk.hpp": {
       "repository": "vulkan",
       "source": "linux/src/core/nrvk.hpp",
-      "sha256": "18b937f520410ead9adc6ee2f121ccf8c418c07ba51f0fb8081fc062498e0af6"
+      "sha256": "78d2bb21355812518c6c41873b7ac9b537c81184c5c4c0d48d1d88316271e020"
     },
     "vulkan-nr/src/core/telemetry.hpp": {
       "repository": "vulkan",

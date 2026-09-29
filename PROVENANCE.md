@@ -28,10 +28,10 @@ integration patches and local source, not complete upstream copies.
 
 | Component | Upstream | Pinned commit | License |
 |---|---|---|---|
-| Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) | `117c9530834d37ef8dc7b371e36cc3fb507e6b6b` | AGPL-3.0; embedded dependencies keep their notices |
-| Vulkan network runtime, SPIR-V sources and model extractor | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) | `4f663b5d0262efedbfb87394ad59665664c2dd7b` | MIT |
-| AMD neural scheduler and HIP kernels | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) | `7ef24e7c1498bce59738277e174249866608c4ed` | MIT |
-| Eight scaling shader sources | [optiscaler/OptiScaler](https://github.com/optiscaler/OptiScaler) | `6ded74bfa4fbb932fda7184c1263fc45380d5b1d` | GPL-3.0; individual files retain additional notices |
+| Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) | `ab722b091071d6d59df56f10d86d4f3005bcad86` | AGPL-3.0; embedded dependencies keep their notices |
+| Vulkan network runtime, SPIR-V sources and model extractor | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) | `743326d15f56c93ca757b18ca4d6b0d81d654113` | MIT |
+| AMD neural scheduler and HIP kernels | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) | `ad499a8199c9ce3678d83c9be58fe3bc1bef3498` | MIT |
+| Eight scaling shader sources | [optiscaler/OptiScaler](https://github.com/optiscaler/OptiScaler) | `fb41e3e6361ca9ae55b30a821a40c2b4b346f330` | GPL-3.0; individual files retain additional notices |
 
 `prepare-sources.py` verifies selected originals against their recorded hashes,
 projects them into `upstream-layer/`, `kernels/`, `backend/vendor/` and `vulkan-nr/`, and
@@ -46,14 +46,15 @@ In `backend/vendor/`, the patch makes `hip_api.h` load the Linux HIP runtime
 F8 hotkey option (`DLSS5_VIT_REUSE_HOTKEY`) instead of calling Win32 keyboard
 APIs, and makes device `Enqueue` write the final RGB straight into the caller's
 buffer instead of copying it from a pooled tensor on every pass. The scheduler
-and the network mathematics are otherwise unchanged. The
-worker clears the production options' block-skip set unless `--performance`
-restores upstream's skipped blocks 42, 43 and 46. Like upstream's shipped HIP
-configurations (`scripts/hip-*-flags.txt`), it also enables the bit-exact byte
-residual stream, byte features and their diagonal projections, byte decoder
-output and C256 FFN fragments. It also clears the WMMA, tiled, wave and
-fused-C32 flags: production launches nothing from their modules, so the build
-ships only the 12 of upstream's 24 modules that the network loads.
+and the network mathematics are otherwise unchanged. The patch also drops the
+`DLSS5_*` environment overrides from `LmxxfProductionOptions.h`: upstream's
+`native_hip_env_options.h` needs Windows headers, and dlsslopd's own options
+apply. The worker clears the production options' block-skip set unless
+`--performance` restores upstream's skipped blocks 42, 43 and 46. It also clears
+the WMMA, tiled, wave and fused-C32 flags: production launches nothing from their
+modules, so the build ships only the 12 of upstream's 29 modules that the network
+loads. It clears the wave-owned, C512 M32, ViT N64 and PDL flags as well:
+`scripts/build-kernels.py` has no recipe yet for their modules.
 In `vulkan-nr/`, the patch lets the runtime load its model, SPIR-V and pipeline
 cache from explicit paths, lets the network build take its glslang, and adds
 dlsslop-amd's per-pass sharpening and color preservation

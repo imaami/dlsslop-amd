@@ -152,7 +152,7 @@ add_library(dlsslop-hip-vendor OBJECT backend/hip_vendor.cpp)
 set_target_properties(dlsslop-hip-vendor PROPERTIES CXX_STANDARD 20 INTERPROCEDURAL_OPTIMIZATION OFF)
 # The vendored network's own warnings are not this project's to fix.
 target_compile_options(dlsslop-hip-vendor PRIVATE -fexceptions -frtti -Wno-deprecated-declarations
-    -Wno-misleading-indentation)
+    -Wno-misleading-indentation -Wno-parentheses)
 add_library(dlsslop-nr-vendor OBJECT common/nr_vendor.cpp)
 set_target_properties(dlsslop-nr-vendor PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF POSITION_INDEPENDENT_CODE ON)
 target_compile_options(dlsslop-nr-vendor PRIVATE -fexceptions -frtti)

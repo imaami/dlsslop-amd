@@ -28,11 +28,12 @@ MODULES = [
     ("c32_fast", [], ["c32_fast.hip"]),
     ("c32_fast_attention", [], ["c32_fast_attention.hip"]),
     ("boundary-fast", [], ["c32_fast_attention.hip", "boundary_fast.hip"]),
-    ("c32_fused_ffn_attention-packed", ["HIP_C32_DIAG_WEIGHTS 1"], ["c32_fused_ffn_attention.hip"]),
+    ("c32_fused_ffn_attention-packed", ["HIP_C32_DIAG_WEIGHTS 1", "HIP_FP8_SAT_MODE 3"], ["c32_fused_ffn_attention.hip"]),
     ("prefix_fast", [], ["prefix_fast.hip"]),
     ("multihead_fused_attention", ["HIP_MH_RTZ_ISA 1"], ["multihead_fused_attention.hip"]),
-    ("deep_fast-packed", ["HIP_BRANCHLESS_F 1"], ["deep_fast.hip"]),
-    ("multihead-fast-padded-wave-packed", ["HIP_FFN_HOIST_RES 2"], ["multihead_fast_padded.hip"]),
+    ("deep_fast-packed", ["HIP_VIT_ATTN_TRANSPOSED_SCORE 1", "HIP_BRANCHLESS_F 1"], ["deep_fast.hip"]),
+    ("multihead-fast-padded-wave-packed", ["C512_HEAD_GROUP 1", "HIP_FFN_HOIST_RES 2", "HIP_FFN_LINE_STORES 1", "HIP_FMED3_CLAMP 1"],
+     ["multihead_fast_padded.hip", "c512_head_group.inc"]),
     ("linux_native", [], ["codec_gpu.hip", "tuning_gpu.hip", "color_gpu.hip", "temporal_gpu.hip"]),
 ]
 ROOT = Path(__file__).resolve().parents[1]
