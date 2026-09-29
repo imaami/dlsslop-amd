@@ -310,47 +310,13 @@ Result<void> VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint
     DLSSLOP_TRY(vk_check(vkBeginCommandBuffer(cmd, &begin), "begin command buffer"));
     vkCmdResetQueryPool(cmd, s.queries, 0, 4);
     vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, s.queries, 0);
-
-    // The layer's buffers change hands at every frame: both are acquired from the layer before
-    // the copies, the proxy read and the answer written, and released back to it after them.
-    auto own = [&](bool acquire) {
-        const VkBuffer buffers[2] = {source, target};
-        const VkAccessFlags2 access[2] = {VK_ACCESS_2_TRANSFER_READ_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT};
-        VkBufferMemoryBarrier2 b[2]{};
-        for (unsigned i = 0; i < 2; ++i) {
-            b[i].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2;
-            if (acquire) {
-                b[i].dstStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
-                b[i].dstAccessMask = access[i];
-                b[i].srcQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
-                b[i].dstQueueFamilyIndex = s.family;
-            } else {
-                b[i].srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
-                b[i].srcAccessMask = access[i];
-                b[i].srcQueueFamilyIndex = s.family;
-                b[i].dstQueueFamilyIndex = VK_QUEUE_FAMILY_EXTERNAL;
-            }
-            b[i].buffer = buffers[i];
-            b[i].size = VK_WHOLE_SIZE;
-        }
-        VkDependencyInfo dependency{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-        dependency.bufferMemoryBarrierCount = 2;
-        dependency.pBufferMemoryBarriers = b;
-        vkCmdPipelineBarrier2(cmd, &dependency);
-    };
-    if (exported) own(true);
-    DLSSLOP_TRY(s.recorder->record(cmd, source, target, frame, s.queries, 1));
-    if (exported) {
-        own(false);
-    } else {
-        VkBufferMemoryBarrier b{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
-        b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        b.dstAccessMask = VK_ACCESS_HOST_READ_BIT;
-        b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        b.buffer = target;
-        b.size = VK_WHOLE_SIZE;
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 0, nullptr, 1, &b, 0,
-                             nullptr);
+    // The layer's exported buffers change hands at every frame.
+    DLSSLOP_TRY(s.recorder->record(cmd, source, target, frame, s.family, exported, s.queries, 1));
+    if (!exported) {
+        static constexpr VkMemoryBarrier kToHost{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_TRANSFER_WRITE_BIT,
+                                                 VK_ACCESS_HOST_READ_BIT};
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &kToHost, 0, nullptr,
+                             0, nullptr);
     }
     vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, s.queries, 3);
     DLSSLOP_TRY(vk_check(vkEndCommandBuffer(cmd), "end command buffer"));

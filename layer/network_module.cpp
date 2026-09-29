@@ -126,27 +126,7 @@ int dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader* channel, uint32_
 int dlsslop_network_record(DlsslopNetwork* n, VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, uint32_t family,
                            int exported)
 {
-    // The composition's copies wrote the proxy and read the last answer; the
-    // network's read the proxy and write the answer. Exported, the pair
-    // belongs to VK_QUEUE_FAMILY_EXTERNAL between uses: taken for the
-    // network's copies and given back after them, whatever they recorded.
-    const uint32_t outside = exported ? VK_QUEUE_FAMILY_EXTERNAL : VK_QUEUE_FAMILY_IGNORED;
-    const uint32_t inside = exported ? family : VK_QUEUE_FAMILY_IGNORED;
-    VkBufferMemoryBarrier take[2] = {
-        {VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER, nullptr, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
-         outside, inside, proxy, 0, VK_WHOLE_SIZE},
-        {VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER, nullptr, VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
-         outside, inside, answer, 0, VK_WHOLE_SIZE},
-    };
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 2, take, 0,
-                         nullptr);
-    auto recorded = n->recorder.record(cmd, proxy, answer, n->prepared);
-    for (auto& b : take) {
-        std::swap(b.srcAccessMask, b.dstAccessMask);
-        std::swap(b.srcQueueFamilyIndex, b.dstQueueFamilyIndex);
-    }
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 2, take, 0,
-                         nullptr);
+    auto recorded = n->recorder.record(cmd, proxy, answer, n->prepared, family, exported != 0);
     return recorded ? kDlsslopNetworkReady : n->fail(std::move(recorded).error().what);
 }
 

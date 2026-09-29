@@ -27,7 +27,8 @@ Result<uint32_t> memory_type(const VkPhysicalDeviceMemoryProperties& memory, uin
                              VkMemoryPropertyFlags want);
 
 // The network on one device: its runtime, built for one frame shape at a time,
-// and the image it works in.
+// and the frame's image, in the proxy's own format, which the runtime reads
+// and writes back.
 class NetworkRecorder {
 public:
     static constexpr unsigned kMaxPasses = 16;
@@ -47,17 +48,16 @@ public:
     // recorder's work.
     Result<bool> shape(const VulkanFrame& frame);
     // Records one frame of the shape it has: from PROXY, w x h RGBA8 or RGBA16F,
-    // through the network, into ANSWER in the same form. Both buffers are read
-    // and written by transfers. With QUERIES, writes timestamps QUERY, once the
-    // frame is in the network's image, and QUERY + 1, once the network is done.
+    // through the network, into ANSWER in the same form. Transfers on FAMILY's
+    // queue wrote the proxy and read the last answer before, and do after.
+    // EXPORTED: both belong to VK_QUEUE_FAMILY_EXTERNAL between frames, and are
+    // given back even when recording fails. With QUERIES, writes timestamps
+    // QUERY, once the frame is in the network's image, and QUERY + 1, once the
+    // network is done.
     Result<void> record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const VulkanFrame& frame,
-                        VkQueryPool queries = VK_NULL_HANDLE, uint32_t query = 0);
+                        uint32_t family, bool exported, VkQueryPool queries = VK_NULL_HANDLE, uint32_t query = 0);
 
 private:
-    struct Image {
-        VkImage image = VK_NULL_HANDLE;
-        VkDeviceMemory memory = VK_NULL_HANDLE;
-    };
     // What a built runtime serves; a frame of anything else rebuilds it.
     struct Shape {
         unsigned width = 0, height = 0;
@@ -69,13 +69,13 @@ private:
     nr::HostDevice host_;
     VkPhysicalDeviceMemoryProperties memory_;
     VulkanPaths paths_;
-    Image colour_, half_;  // the network's frame; with FP16 frames, the FP16 staging image
+    VkImage image_ = VK_NULL_HANDLE;
+    VkDeviceMemory image_memory_ = VK_NULL_HANDLE;
     Shape shape_;
     std::unique_ptr<nr::Runtime> runtime_;
     std::optional<VulkanFrame> last_;  // the history's frame; none since a build
 
-    Result<void> image(Image& i, VkFormat format, unsigned w, unsigned h, VkImageUsageFlags usage);
-    void drop(Image& i);
+    void drop();
 };
 
 }  // namespace dlsslop
