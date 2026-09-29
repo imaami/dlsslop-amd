@@ -5,7 +5,6 @@
 
 #include "nr_log.hpp"
 
-#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
@@ -160,14 +159,9 @@ Result<VulkanNetwork> VulkanNetwork::create(const VulkanPaths& paths, int device
         return fail(device >= 0 && unsigned(device) >= count ? "no Vulkan device " + std::to_string(device)
                                                              : "no Vulkan device can run the network:" + reasons);
     NetworkFeatureChain enable;
+    for (const auto& f : kNetworkFeatures) enable.bit(f) = VK_TRUE;
     std::vector<const char*> extensions = {VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME};
-    for (const auto& f : kNetworkFeatures) {
-        enable.bit(f) = VK_TRUE;
-        if (f.extension && std::find_if(extensions.begin(), extensions.end(), [&f](const char* e) {
-                               return !std::strcmp(e, f.extension);
-                           }) == extensions.end())
-            extensions.push_back(f.extension);
-    }
+    AppendNetworkExtensions(extensions);
     const float priority = 1.0f;
     VkDeviceQueueCreateInfo queue{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
     queue.queueFamilyIndex = s.family;

@@ -70,12 +70,7 @@ inline const char* NetworkUnavailable(VkPhysicalDevice physical, uint32_t instan
 inline bool AddNetworkExtensions(VkDeviceCreateInfo& info, std::vector<const char*>& extensions) {
     if (extensions.empty())
         extensions.assign(info.ppEnabledExtensionNames, info.ppEnabledExtensionNames + info.enabledExtensionCount);
-    const size_t before = extensions.size();
-    for (const auto& f : dlsslop::kNetworkFeatures)
-        if (f.extension && std::none_of(extensions.begin(), extensions.end(),
-                                        [&f](const char* name) { return !std::strcmp(name, f.extension); }))
-            extensions.push_back(f.extension);
-    if (extensions.size() == before) return false;
+    if (!dlsslop::AppendNetworkExtensions(extensions)) return false;
     info.enabledExtensionCount = uint32_t(extensions.size());
     info.ppEnabledExtensionNames = extensions.data();
     return true;

@@ -5,6 +5,7 @@
 #pragma once
 #include <vulkan/vulkan.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -146,6 +147,17 @@ public:
     }
     VkBool32& bit(const NetworkFeature& f) { return FeatureBit(structure(f.type), f.offset); }
 };
+
+// Appends the network's extensions that LIST lacks: true if any was added.
+inline bool AppendNetworkExtensions(std::vector<const char*>& list)
+{
+    const size_t before = list.size();
+    for (const auto& f : kNetworkFeatures)
+        if (f.extension &&
+            std::none_of(list.begin(), list.end(), [&f](const char* name) { return !std::strcmp(name, f.extension); }))
+            list.push_back(f.extension);
+    return list.size() != before;
+}
 
 // What stops the network running on PHYSICAL, or null: a feature's or an
 // extension's name, "Vulkan 1.3" or "32-lane compute subgroups". ALSO names an
