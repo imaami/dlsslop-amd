@@ -6,7 +6,7 @@
 #if defined(HIP_LOADER_STUB_DEPENDENCY)
 int hip_loader_stub_dependency() { return 0; }
 #elif defined(HIP_FAKE_RUNTIME)
-#include "../backend/vendor/hip_device_properties.h"
+#include "../external/amd/Development/HIP/hip_device_properties.h"
 #include <cstdio>
 #include <cstdlib>
 #include <sstream>

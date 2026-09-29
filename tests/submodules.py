@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Exercise source-only imports and filtered submodules with local Git servers."""
 import argparse
-import hashlib
 import importlib.util
 import json
 import os
@@ -34,7 +33,7 @@ def git(*args, cwd, check=True):
 
 
 class SubmodulesTest(unittest.TestCase):
-    def test_offline_import_filtered_checkout_and_prepare(self):
+    def test_offline_import_and_filtered_checkout(self):
         with tempfile.TemporaryDirectory(prefix='dlsslop-amd-submodules-') as temporary:
             base = Path(temporary)
             upstream = base / 'upstream'
@@ -65,28 +64,15 @@ class SubmodulesTest(unittest.TestCase):
 
             project = base / 'source-import'
             (project / 'scripts').mkdir(parents=True)
-            for name in ('init-repo.py', 'fetch-submodules.py', 'submodule_support.py', 'prepare-sources.py',
-                         'update-source-patch.py'):
+            for name in ('init-repo.py', 'fetch-submodules.py', 'submodule_support.py'):
                 shutil.copyfile(ROOT / 'scripts' / name, project / 'scripts' / name)
             (project / '.gitmodules').write_text('[submodule "amd"]\n\tpath = external/amd\n'
                                                 f'\turl = {mirror}\n')
-            (project / '.gitignore').write_text('__pycache__/\n/upstream-layer/\n/kernels/\n/backend/vendor/\n'
-                                                '/.prepared-sources.json\n')
-            targets = {'upstream-layer/example.txt': 'src/layer.txt',
-                       'kernels/example.hip': 'src/kernel.hip', 'backend/vendor/api.h': 'vendor/api.h'}
-            files = {name: {'repository': 'amd', 'source': source,
-                            'sha256': hashlib.sha256(sources[source]).hexdigest()}
-                     for name, source in targets.items()}
-            lock = {'version': 1, 'repositories': {'amd': {'path': 'external/amd',
-                    'url': 'https://original-provenance.invalid/upstream.git', 'commit': pin}},
-                    'files': files}
+            (project / '.gitignore').write_text('__pycache__/\n')
+            lock = {'version': 2, 'repositories': {'amd': {'path': 'external/amd',
+                    'url': 'https://original-provenance.invalid/upstream.git', 'commit': pin,
+                    'sources': sorted(sources)}}}
             (project / 'upstreams.lock.json').write_text(json.dumps(lock))
-            (project / 'patches').mkdir()
-            (project / 'patches/linux-integration.patch').write_text(
-                'diff --git a/upstream-layer/example.txt b/upstream-layer/example.txt\n'
-                'old mode 100644\nnew mode 100755\n'
-                '--- a/upstream-layer/example.txt\n+++ b/upstream-layer/example.txt\n'
-                '@@ -1 +1 @@\n-original\n+patched\n')
 
             # No network or upstream objects are needed to create and push the
             # superproject. Move the server away to prove initialization is offline.
@@ -110,13 +96,6 @@ class SubmodulesTest(unittest.TestCase):
             self.assertEqual(git('ls-tree', 'HEAD', 'external/amd', cwd=clone),
                              f'160000 commit {pin}\texternal/amd')
             self.assertFalse((clone / '.git/modules').exists())
-            # Before the fetch, both staging tools stop, name the missing step
-            # and leave the prepared tree and the patch alone.
-            for script in ('prepare-sources.py', 'update-source-patch.py'):
-                unfetched = command(sys.executable, 'scripts/' + script, cwd=clone, check=False)
-                self.assertNotEqual(unfetched.returncode, 0)
-                self.assertIn('run python3 scripts/fetch-submodules.py', unfetched.stderr)
-            self.assertFalse((clone / 'upstream-layer').exists())
             self.assertEqual(git('status', '--porcelain', cwd=clone), '')
             offline_server.rename(server)
 
@@ -158,109 +137,6 @@ class SubmodulesTest(unittest.TestCase):
             self.assertLess(sum(path.stat().st_size for path in (clone / '.git/modules/amd/objects').rglob('*.pack')),
                             128 * 1024)
             self.assertEqual(git('config', '--get', 'remote.origin.url', cwd=module), mirror)
-            # User Git configuration, attributes and GIT_* variables must not
-            # reach the staging repository, where they break or corrupt the patch.
-            hostile_home = base / 'hostile-home'
-            (hostile_home / 'git').mkdir(parents=True)
-            (hostile_home / 'git/attributes').write_text('* text eol=crlf -diff\n')
-            (hostile_home / 'gitconfig').write_text('[core]\n\tautocrlf = true\n[diff]\n\tnoprefix = true\n'
-                                                    '[color]\n\tui = always\n[apply]\n\twhitespace = error\n'
-                                                    '[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n')
-            hostile_index = base / 'hostile-index'
-            # A temporary directory inside the work tree must not let the outer
-            # repository capture the staging repository's Git commands.
-            nested_temporary = clone / 'nested-temporary'
-            nested_temporary.mkdir()
-            hostile = {'GIT_CONFIG_GLOBAL': str(hostile_home / 'gitconfig'), 'XDG_CONFIG_HOME': str(hostile_home),
-                       'GIT_CONFIG_PARAMETERS': "'diff.noprefix'='true' 'core.autocrlf'='true'",
-                       'GIT_INDEX_FILE': str(hostile_index), 'TMPDIR': str(nested_temporary)}
-            command(sys.executable, 'scripts/prepare-sources.py', cwd=clone, env=hostile)
-            self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched\n')
-            self.assertEqual((clone / 'kernels/example.hip').read_bytes(), b'kernel\n')
-            self.assertEqual((clone / 'backend/vendor/api.h').read_bytes(), b'api\n')
-            # The patch alone carries file modes into the prepared tree.
-            self.assertTrue(os.access(clone / 'upstream-layer/example.txt', os.X_OK))
-            self.assertFalse(os.access(clone / 'kernels/example.hip', os.X_OK))
-            committed = {name: (clone / name).read_bytes()
-                         for name in ('upstreams.lock.json', 'patches/linux-integration.patch')}
-            command(sys.executable, 'scripts/update-source-patch.py', cwd=clone, env=hostile)
-            patch = (clone / 'patches/linux-integration.patch').read_text()
-            self.assertTrue(patch.startswith('diff --git a/upstream-layer/example.txt b/upstream-layer/example.txt\n'
-                                             'old mode 100644\nnew mode 100755\n'))
-            self.assertNotIn('\x1b', patch)
-            self.assertIn('\n-original\n+patched\n', patch)
-            self.assertFalse(hostile_index.exists())
-            nested_temporary.rmdir()
-            self.assertEqual((clone / 'upstreams.lock.json').read_bytes(), committed['upstreams.lock.json'])
-            # A symlink would be recorded as its target's content.
-            (clone / 'kernels/link.hip').symlink_to('example.hip')
-            linked = command(sys.executable, 'scripts/update-source-patch.py', cwd=clone, check=False)
-            self.assertNotEqual(linked.returncode, 0)
-            self.assertIn('symlink in prepared source', linked.stderr)
-            self.assertEqual((clone / 'patches/linux-integration.patch').read_text(), patch)
-            (clone / 'kernels/link.hip').unlink()
-            # So would a linked prepared directory's contents, wherever it points.
-            moved = clone.parent / 'kernels-moved'
-            (clone / 'kernels').rename(moved)
-            (clone / 'kernels').symlink_to(moved)
-            linked = command(sys.executable, 'scripts/update-source-patch.py', cwd=clone, check=False)
-            self.assertNotEqual(linked.returncode, 0)
-            self.assertIn('symlink in prepared source', linked.stderr)
-            self.assertEqual((clone / 'patches/linux-integration.patch').read_text(), patch)
-            (clone / 'kernels').unlink()
-            moved.rename(clone / 'kernels')
-            command(sys.executable, 'scripts/prepare-sources.py', cwd=clone)
-            self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched\n')
-            for name, data in committed.items():
-                (clone / name).write_bytes(data)
-
-            # A changed patch and lock update an unmodified prepared tree and
-            # remove the files they no longer produce; local edits stay refused.
-            changed = json.loads(json.dumps(lock))
-            del changed['files']['backend/vendor/api.h']
-            (clone / 'upstreams.lock.json').write_text(json.dumps(changed))
-            (clone / 'patches/linux-integration.patch').write_bytes(
-                committed['patches/linux-integration.patch'].replace(b'+patched\n', b'+patched again\n'))
-            (clone / 'backend/vendor/api.h').write_text('local edit\n')
-            edited = command(sys.executable, 'scripts/prepare-sources.py', cwd=clone, check=False)
-            self.assertNotEqual(edited.returncode, 0)
-            self.assertIn('local changes', edited.stderr)
-            self.assertEqual((clone / 'backend/vendor/api.h').read_text(), 'local edit\n')
-            (clone / 'backend/vendor/api.h').write_bytes(sources['vendor/api.h'])
-            command(sys.executable, 'scripts/prepare-sources.py', cwd=clone)
-            self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched again\n')
-            self.assertEqual((clone / 'kernels/example.hip').read_bytes(), b'kernel\n')
-            self.assertFalse((clone / 'backend/vendor/api.h').exists())
-            for name, data in committed.items():
-                (clone / name).write_bytes(data)
-            (clone / 'kernels/example.hip').write_text('local edit\n')
-            edited = command(sys.executable, 'scripts/prepare-sources.py', cwd=clone, check=False)
-            self.assertNotEqual(edited.returncode, 0)
-            self.assertIn('local changes', edited.stderr)
-            self.assertEqual((clone / 'kernels/example.hip').read_text(), 'local edit\n')
-            self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched again\n')
-            (clone / 'kernels/example.hip').write_bytes(sources['src/kernel.hip'])
-            command(sys.executable, 'scripts/prepare-sources.py', cwd=clone)
-            self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched\n')
-            self.assertEqual((clone / 'backend/vendor/api.h').read_bytes(), b'api\n')
-            # A symlink in a prepared tree is refused, never written through, even
-            # when its target holds exactly what the record says was prepared.
-            outside = clone.parent / 'outside.txt'
-            outside.write_bytes(b'patched\n')
-            (clone / 'upstream-layer/example.txt').unlink()
-            (clone / 'upstream-layer/example.txt').symlink_to(outside)
-            (clone / 'patches/linux-integration.patch').write_bytes(
-                committed['patches/linux-integration.patch'].replace(b'+patched\n', b'+patched again\n'))
-            linked = command(sys.executable, 'scripts/prepare-sources.py', cwd=clone, check=False)
-            self.assertNotEqual(linked.returncode, 0)
-            self.assertIn('symlink in prepared source', linked.stderr)
-            self.assertEqual(outside.read_bytes(), b'patched\n')
-            (clone / 'upstream-layer/example.txt').unlink()
-            (clone / 'upstream-layer/example.txt').write_bytes(b'patched\n')
-            (clone / 'patches/linux-integration.patch').write_bytes(committed['patches/linux-integration.patch'])
-            command(sys.executable, 'scripts/prepare-sources.py', cwd=clone)
-            self.assertEqual((clone / 'upstream-layer/example.txt').read_bytes(), b'patched\n')
-
             # Local URL overrides take precedence over .gitmodules and do not
             # alter provenance recorded in the lock. Repeated fetches are safe.
             second_mirror = base / 'second-mirror.git'

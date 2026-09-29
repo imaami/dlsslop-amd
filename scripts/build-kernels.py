@@ -41,22 +41,6 @@ BACKEND = ROOT / "backend"  # The linux_ modules' sources and headers.
 ARCH = "gfx1201"  # The worker accepts only gfx1201 devices.
 
 
-# Upstream separates LDS phases in these sources with bare execution barriers,
-# which gfx12 signals with DS operations still outstanding. Add the LDS-only
-# release/acquire of __syncthreads() so global loads need not drain; the
-# lds-barriers test checks the result.
-# https://llvm.org/docs/AMDGPUUsage.html#execution-barriers
-LDS_BARRIER = ('#define __builtin_amdgcn_s_barrier() (__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local"), '
-               '__builtin_amdgcn_s_barrier(), __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local"))\n')
-PRELUDES = {
-    # Upstream's byte-output attention template calls byte_F before its later
-    # definition; standard C++ lookup needs a declaration.
-    "deep_fast.hip": LDS_BARRIER + "__attribute__((device)) __attribute__((always_inline)) unsigned char byte_F(float);\n",
-    "multihead_fast_padded.hip": LDS_BARRIER,
-    "prefix_fast.hip": LDS_BARRIER,
-}
-
-
 # Auto-detection order. Before Clang 22, every gfx12 workgroup barrier also
 # drains global loads and stores.
 MIN_CLANG = 22
@@ -124,7 +108,6 @@ def build(args):
         # The Windows COMGR frontend supplies size_t implicitly. Linux's
         # headerless HIP frontend needs its builtin type spelling explicitly.
         source = "typedef __SIZE_TYPE__ size_t;\n" + "".join(f"#define {d}\n" for d in defines)
-        source += "".join(PRELUDES.get(filename, "") for filename in sources)
         source_hashes = {}
         for filename in sources:
             path = (BACKEND if name.startswith("linux_") else args.source) / filename
@@ -174,7 +157,7 @@ def main():
     compiler_help = "compiler executable, used whatever its Clang version (default: " + (
         "%(default)s from HIP_CLANG" if compiler_default else "HIP_CLANG if set, else auto: " + AUTO_COMPILERS) + ")"
     parser = argparse.ArgumentParser(description=__doc__, add_help=False, allow_abbrev=False)
-    parser.add_argument("-s", "--source", type=Path, default=ROOT / "kernels",
+    parser.add_argument("-s", "--source", type=Path, default=ROOT / "external/amd/hip",
                         help="directory containing upstream production *.hip (default: %(default)s)")
     parser.add_argument("-o", "--output", type=Path, default=ROOT / "assets/HIP" / ARCH,
                         help="output directory (default: %(default)s)")

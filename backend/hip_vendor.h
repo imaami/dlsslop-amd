@@ -5,7 +5,7 @@
 // it failed, or nothing.
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "vendor/hip_device_properties.h"
+#include "../external/amd/Development/HIP/hip_device_properties.h"
 
 #include <cstddef>
 #include <memory>

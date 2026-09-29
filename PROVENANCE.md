@@ -22,45 +22,44 @@ file.
 Upstream repository names, URLs, authorship, source filenames and attribution
 remain unchanged, as do references to NVIDIA DLSS and OptiScaler_DLSSNR.
 
-`.gitmodules` declares these repositories; `upstreams.lock.json` records their
-exact commits, selected source paths and hashes. The parent repository stores
-integration patches and local source, not complete upstream copies.
+`.gitmodules` declares these repositories. Three are dlsslop-amd's forks: each
+fork's `dlsslop-amd` branch holds the Linux integration as commits on top of the
+upstream commit listed below. OptiScaler is used unchanged from upstream.
+`upstreams.lock.json` records the pinned commits and the files fetched from each
+repository; the build uses them in place under `external/`. The parent
+repository stores no upstream code.
 
-| Component | Upstream | Pinned commit | License |
+| Component | Upstream and base commit | Fork and pinned commit | License |
 |---|---|---|---|
-| Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) | `ab722b091071d6d59df56f10d86d4f3005bcad86` | AGPL-3.0; embedded dependencies keep their notices |
-| Vulkan network runtime, SPIR-V sources and model extractor | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) | `743326d15f56c93ca757b18ca4d6b0d81d654113` | MIT |
-| AMD neural scheduler and HIP kernels | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) | `ad499a8199c9ce3678d83c9be58fe3bc1bef3498` | MIT |
-| Eight scaling shader sources | [optiscaler/OptiScaler](https://github.com/optiscaler/OptiScaler) | `fb41e3e6361ca9ae55b30a821a40c2b4b346f330` | GPL-3.0; individual files retain additional notices |
+| Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) `ab722b091071d6d59df56f10d86d4f3005bcad86` | [imaami/DLSS5VKLayer](https://github.com/imaami/DLSS5VKLayer/tree/dlsslop-amd) `125debdc8e9e5227f5dc4d800cb17d2773487e14` | AGPL-3.0; embedded dependencies keep their notices |
+| Vulkan network runtime, SPIR-V sources and model extractor | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) `743326d15f56c93ca757b18ca4d6b0d81d654113` | [imaami/DLSSNR-AMD](https://github.com/imaami/DLSSNR-AMD/tree/dlsslop-amd) `3dfdddc7c06b888685c8be4275d1eb5e8edc7334` | MIT |
+| AMD neural scheduler and HIP kernels | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) `ad499a8199c9ce3678d83c9be58fe3bc1bef3498` | [imaami/dlss5-on-amd-9070xt-porting](https://github.com/imaami/dlss5-on-amd-9070xt-porting/tree/dlsslop-amd) `c1908317fb7e7ee9fe4884feba4a67220d93461f` | MIT |
+| Eight scaling shader sources | [optiscaler/OptiScaler](https://github.com/optiscaler/OptiScaler) `fb41e3e6361ca9ae55b30a821a40c2b4b346f330` | none | GPL-3.0; individual files retain additional notices |
 
-`prepare-sources.py` verifies selected originals against their recorded hashes,
-projects them into `upstream-layer/`, `kernels/`, `backend/vendor/` and `vulkan-nr/`, and
-applies `patches/linux-integration.patch`. The patch adapts Linux loading and
-transport and extends controls and composition. It leaves the upstream working
-trees and HIP kernels unchanged; `scripts/build-kernels.py` wraps the bare
-workgroup barriers of three kernel sources in LDS-only release/acquire fences.
-In `backend/vendor/`, the patch makes `hip_api.h` load the Linux HIP runtime
+The layer fork adapts Linux loading and transport and extends controls and
+composition. In the AMD fork, `hip_api.h` loads the Linux HIP runtime
 (`libamdhip64.so.7`, `.so.6` or the unversioned soname, also from
 `/opt/rocm/lib` or an explicit `DLSSLOP_HIP_LIBRARY` path) with
-`dlopen`/`dlsym`. It makes `hip_reference_network.h` ignore the Windows-only
-F8 hotkey option (`DLSS5_VIT_REUSE_HOTKEY`) instead of calling Win32 keyboard
-APIs, and makes device `Enqueue` write the final RGB straight into the caller's
-buffer instead of copying it from a pooled tensor on every pass. The scheduler
-and the network mathematics are otherwise unchanged. The patch also drops the
-`DLSS5_*` environment overrides from `LmxxfProductionOptions.h`: upstream's
+`dlopen`/`dlsym`. `hip_reference_network.h` ignores the Windows-only F8 hotkey
+option (`DLSS5_VIT_REUSE_HOTKEY`) instead of calling Win32 keyboard APIs, and
+device `Enqueue` writes the final RGB straight into the caller's buffer instead
+of copying it from a pooled tensor on every pass. `LmxxfProductionOptions.h`
+drops the `DLSS5_*` environment overrides: upstream's
 `native_hip_env_options.h` needs Windows headers, and dlsslopd's own options
-apply. The worker clears the production options' block-skip set unless
+apply. Three kernel sources wrap their bare workgroup barriers in LDS-only
+release/acquire fences. The scheduler and the network mathematics are otherwise
+unchanged. The worker clears the production options' block-skip set unless
 `--performance` restores upstream's skipped blocks 42, 43 and 46. It also clears
 the WMMA, tiled, wave and fused-C32 flags: production launches nothing from their
 modules, so the build ships only the 12 of upstream's 29 modules that the network
 loads. It clears the wave-owned, C512 M32, ViT N64 and PDL flags as well:
 `scripts/build-kernels.py` has no recipe yet for their modules.
-In `vulkan-nr/`, the patch lets the runtime load its model, SPIR-V and pipeline
-cache from explicit paths, lets the network build take its glslang, and adds
+The DLSSNR-AMD fork lets the runtime load its model, SPIR-V and pipeline cache
+from explicit paths, lets the network build take its glslang, and adds
 dlsslop-amd's per-pass sharpening and color preservation
-(`shaders/passes/pass_stages.comp`); the network mathematics are unchanged.
+(`linux/shaders/passes/pass_stages.comp`); the network mathematics are unchanged.
 
-Preserve `upstream-layer/ATTRIBUTION.md` and all inherited notices of projected
+Preserve `external/layer/ATTRIBUTION.md` and all inherited notices of upstream
 code. The layer's shader/dispatch lineage includes OptiScaler and
 Dagherbou/OptiScaler_DLSSNR, with RenoDX color-composition attribution. Khronos
 Vulkan/video headers and stb retain their own licenses. The BCUS shader also

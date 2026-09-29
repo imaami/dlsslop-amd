@@ -33,7 +33,7 @@ itself, on the game's own device (`dlsslop-run --layer-network`). The
 standalone Qt 6 Widgets controller exposes all 41 settings. Worker, layer, CLI
 and GUI use shared-memory protocol **28**.
 
-This repository contains source, patches and build tools. **No compiled binaries
+This repository contains source and build tools. **No compiled binaries
 or model weights are included.** See [VALIDATION.md](VALIDATION.md) for automated
 tests and hardware testing instructions.
 
@@ -44,21 +44,18 @@ these commands from the repository root:
 
 ```bash
 python3 scripts/fetch-submodules.py
-python3 scripts/prepare-sources.py
 ```
 
 The fetch helper uses exact commits, filtered downloads and selected working-tree
 paths, avoiding upstream binary payloads. A shallow clone alone does not omit
-those files. The helper fails if the server cannot provide blob filtering. The
-preparation script verifies the hashes of the pinned inputs and applies
-`patches/linux-integration.patch`. It generates `upstream-layer/`, `kernels/` and
-`backend/vendor/`; those directories are not tracked in the parent repository.
-Run it again after a pull: it updates files it prepared, deletes those the patch
-no longer produces and refuses to overwrite local edits. It knows what it
-prepared from `.prepared-sources.json`; a tree prepared before that record
-existed reads as local edits: keep any edits you made there, then remove
-those three directories once.
-Pins, file mappings and hashes are in `upstreams.lock.json`; attribution is in
+those files. The helper fails if the server cannot provide blob filtering.
+The layer and both networks come from dlsslop-amd's forks of their upstreams,
+whose `dlsslop-amd` branches carry the Linux integration; the build reads the
+fetched sources in place under `external/`.
+A checkout prepared before the forks needs `git submodule sync` once, so that
+the fetch uses the forks, and the generated `upstream-layer/`, `kernels/`,
+`backend/vendor/`, `vulkan-nr/` and `.prepared-sources.json` can be deleted.
+Pins and fetched paths are in `upstreams.lock.json`; attribution is in
 [PROVENANCE.md](PROVENANCE.md).
 
 ## Build
@@ -77,7 +74,7 @@ sudo apt-get install --no-install-recommends \
 
 Install DXC 1.9.2607 using the exact download URL and SHA-256 in the workflow.
 Set `DXC_DIR` to the extracted directory containing `bin/` and `lib/` (inside
-the archive's top-level directory), then build from the prepared checkout:
+the archive's top-level directory), then build from the fetched checkout:
 
 ```bash
 python3 scripts/build-kernels.py --compiler clang++-22 --linker /usr/bin/ld.lld-22
@@ -91,7 +88,7 @@ This compiles and validates ten Vulkan shaders, compiles the Vulkan network's
 SPIR-V with `glslang` and the `gfx1201` HIP modules (the HIP network's and
 `linux_native`, its codec, tuning, color and motion kernels), and builds the
 daemon, layer, CLI, Qt GUI and tests.
-CMake builds the shaders from their prepared sources; `-DDXC` defaults to `dxc`
+CMake builds the shaders from their submodule sources; `-DDXC` defaults to `dxc`
 on `PATH`.
 Compilation does not require a GPU, ROCm runtime or model weights. Qt uses the
 distribution's shared Qt 6 libraries; the worker and layer have no Qt dependency.
@@ -155,6 +152,6 @@ Normal inference never substitutes an identity filter; `dlsslopd
 --test-identity` is an explicit transport-test mode. If no valid worker result
 arrives, the layer presents the original frame.
 
-When changing prepared upstream sources, use `scripts/update-source-patch.py`
-to update the local patch, then review it before committing.
+Changes to upstream sources are commits on a fork's `dlsslop-amd` branch; pin
+the new commit in the submodule and in `upstreams.lock.json`.
 Keep the pins and all license/attribution notices intact.

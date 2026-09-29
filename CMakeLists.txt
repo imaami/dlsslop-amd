@@ -32,10 +32,10 @@ include_directories(common)
 find_package(Threads REQUIRED)
 include(CTest)
 
-set(LAYER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/upstream-layer")
+set(LAYER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/layer")
 find_path(X11_HEADERS X11/Xlib.h REQUIRED)
 find_path(XINPUT_HEADERS X11/extensions/XInput2.h REQUIRED)
-# Every layer shader is compiled from its prepared source into the build tree,
+# Every layer shader is compiled from its submodule source into the build tree,
 # where the layer's quoted includes find it. Pass -DDXC=<path> for a DXC that
 # is not on PATH. Storage images are declared formatless: one binding serves
 # RGBA8, BGRA8 and FP16 views, and the layer enables
@@ -44,24 +44,21 @@ find_program(DXC dxc REQUIRED)
 find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 find_program(SPIRV_VAL spirv-val REQUIRED)
 set(SHADER_SOURCE ${LAYER_ROOT}/layer_linux/src)
+set(SCALING_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/external/optiscaler/OptiScaler/shaders/output_scaling/precompile)
 set(SHADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
-if(EXISTS ${SHADER_SOURCE}/dlssnr/DlssNr_Shader_Vk.h)
-    message(FATAL_ERROR "Stale prepared shader headers would shadow the generated ones; "
-        "delete upstream-layer/ and run scripts/prepare-sources.py again.")
-endif()
 file(MAKE_DIRECTORY ${SHADER_DIR}/dlssnr ${SHADER_DIR}/scaling)
 macro(add_hlsl source output)
     get_filename_component(symbol ${source} NAME_WE)
     add_custom_command(OUTPUT ${SHADER_DIR}/${output}.h ${SHADER_DIR}/${output}.spv
         COMMAND ${DXC} -spirv -fspv-use-unknown-image-format -D VK_MODE -T cs_6_0 -E CSMain -Vn ${symbol}_spv
-            -Fo ${SHADER_DIR}/${output}.spv -Fh ${SHADER_DIR}/${output}.h ${SHADER_SOURCE}/${source}
+            -Fo ${SHADER_DIR}/${output}.spv -Fh ${SHADER_DIR}/${output}.h ${source}
         COMMAND ${SPIRV_VAL} --target-env vulkan1.0 ${SHADER_DIR}/${output}.spv
-        DEPENDS ${SHADER_SOURCE}/${source} VERBATIM)
+        DEPENDS ${source} VERBATIM)
     list(APPEND LAYER_SHADERS ${SHADER_DIR}/${output}.h)
 endmacro()
-add_hlsl(dlssnr/dlssnr.hlsl dlssnr/DlssNr_Shader_Vk)
+add_hlsl(${SHADER_SOURCE}/dlssnr/dlssnr.hlsl dlssnr/DlssNr_Shader_Vk)
 foreach(name bcus bcds_bicubic bcds_catmull bcds_lanczos2 bcds_lanczos3 bcds_kaiser2 bcds_kaiser3 bcds_magc)
-    add_hlsl(scaling/${name}.hlsl scaling/${name}_Shader_Vk)
+    add_hlsl(${SCALING_SOURCE}/${name}.hlsl scaling/${name}_Shader_Vk)
 endforeach()
 set(METER ${SHADER_DIR}/shaders/meter_reduce)
 add_custom_command(OUTPUT ${METER}.h ${METER}.spv
@@ -114,12 +111,12 @@ set_target_properties(dlssnr-shmctl PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
 # A command that runs once: its code is built for size.
 target_compile_options(dlssnr-shmctl PRIVATE -Os)
 
-# The Vulkan network, prepared into vulkan-nr/ from DLSSNR-AMD: its SPIR-V and
-# the host library dlsslopd runs it with. The host must be compiled with the
-# constants its shaders were built with, which vulkan-nr/build/arch/rdna4.sh
+# The Vulkan network from DLSSNR-AMD's linux/ tree: its SPIR-V and the host
+# library dlsslopd runs it with. The host must be compiled with the constants
+# its shaders were built with, which linux/build/arch/rdna4.sh
 # lists; the runtime refuses shaders whose markers disagree.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
-set(VKNR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/vulkan-nr")
+set(VKNR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/vulkan/linux")
 file(STRINGS "${VKNR_ROOT}/build/arch/rdna4.sh" VKNR_ARCH REGEX "^ +-DNR_")
 string(REGEX MATCHALL "NR_[A-Z0-9_]+=[0-9]+" VKNR_DEFINES "${VKNR_ARCH}")
 if(NOT VKNR_DEFINES)
@@ -150,6 +147,7 @@ add_library(dlsslop-codec OBJECT backend/codec.cpp)
 # The boundaries to the vendored networks, built with exceptions to catch theirs.
 add_library(dlsslop-hip-vendor OBJECT backend/hip_vendor.cpp)
 set_target_properties(dlsslop-hip-vendor PROPERTIES CXX_STANDARD 20 INTERPROCEDURAL_OPTIMIZATION OFF)
+target_include_directories(dlsslop-hip-vendor PRIVATE external/amd/src external/amd/Development/HIP)
 # The vendored network's own warnings are not this project's to fix.
 target_compile_options(dlsslop-hip-vendor PRIVATE -fexceptions -frtti -Wno-deprecated-declarations
     -Wno-misleading-indentation -Wno-parentheses)

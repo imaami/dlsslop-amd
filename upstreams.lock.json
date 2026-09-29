@@ -1,757 +1,179 @@
 {
-  "version": 1,
+  "version": 2,
   "repositories": {
     "layer": {
       "path": "external/layer",
-      "url": "https://github.com/bmitch87/DLSS5VKLayer.git",
-      "commit": "ab722b091071d6d59df56f10d86d4f3005bcad86"
+      "url": "https://github.com/imaami/DLSS5VKLayer.git",
+      "commit": "125debdc8e9e5227f5dc4d800cb17d2773487e14",
+      "sources": [
+        "ATTRIBUTION.md",
+        "LICENSE",
+        "common/shm_protocol.h",
+        "core/stb_image_write.h",
+        "layer_linux/dlssnr.map",
+        "layer_linux/src/capture.cpp",
+        "layer_linux/src/capture.h",
+        "layer_linux/src/composition.cpp",
+        "layer_linux/src/composition.h",
+        "layer_linux/src/dlssnr/DlssNr_Common.h",
+        "layer_linux/src/dlssnr/DlssNr_Layout.h",
+        "layer_linux/src/dlssnr/dlssnr.hlsl",
+        "layer_linux/src/dlssnr_pass.cpp",
+        "layer_linux/src/dlssnr_pass.h",
+        "layer_linux/src/hotkey.cpp",
+        "layer_linux/src/hotkey.h",
+        "layer_linux/src/layer.cpp",
+        "layer_linux/src/log.h",
+        "layer_linux/src/scaler_vk.cpp",
+        "layer_linux/src/scaler_vk.h",
+        "layer_linux/src/shader_vk.cpp",
+        "layer_linux/src/shader_vk.h",
+        "layer_linux/src/shaders/meter_reduce.comp",
+        "layer_linux/src/vk_table.h",
+        "standalone_runner/third_party/stb_image.h",
+        "standalone_runner/third_party/vk_video/vulkan_video_codec_av1std.h",
+        "standalone_runner/third_party/vk_video/vulkan_video_codec_av1std_decode.h",
+        "standalone_runner/third_party/vk_video/vulkan_video_codec_h264std.h",
+        "standalone_runner/third_party/vk_video/vulkan_video_codec_h264std_decode.h",
+        "standalone_runner/third_party/vk_video/vulkan_video_codec_h264std_encode.h",
+        "standalone_runner/third_party/vk_video/vulkan_video_codec_h265std.h",
+        "standalone_runner/third_party/vk_video/vulkan_video_codec_h265std_decode.h",
+        "standalone_runner/third_party/vk_video/vulkan_video_codec_h265std_encode.h",
+        "standalone_runner/third_party/vk_video/vulkan_video_codecs_common.h",
+        "standalone_runner/third_party/vulkan/vk_layer.h",
+        "standalone_runner/third_party/vulkan/vk_platform.h",
+        "standalone_runner/third_party/vulkan/vulkan.h",
+        "standalone_runner/third_party/vulkan/vulkan_android.h",
+        "standalone_runner/third_party/vulkan/vulkan_beta.h",
+        "standalone_runner/third_party/vulkan/vulkan_core.h",
+        "standalone_runner/third_party/vulkan/vulkan_directfb.h",
+        "standalone_runner/third_party/vulkan/vulkan_fuchsia.h",
+        "standalone_runner/third_party/vulkan/vulkan_ggp.h",
+        "standalone_runner/third_party/vulkan/vulkan_ios.h",
+        "standalone_runner/third_party/vulkan/vulkan_macos.h",
+        "standalone_runner/third_party/vulkan/vulkan_metal.h",
+        "standalone_runner/third_party/vulkan/vulkan_screen.h",
+        "standalone_runner/third_party/vulkan/vulkan_vi.h",
+        "standalone_runner/third_party/vulkan/vulkan_wayland.h",
+        "standalone_runner/third_party/vulkan/vulkan_win32.h",
+        "standalone_runner/third_party/vulkan/vulkan_xcb.h",
+        "standalone_runner/third_party/vulkan/vulkan_xlib.h",
+        "standalone_runner/third_party/vulkan/vulkan_xlib_xrandr.h",
+        "third_party/optiscaler/LICENSE",
+        "third_party/optiscaler/RenoDX_ATTRIBUTION.txt",
+        "tools/shmctl.cpp"
+      ]
     },
     "amd": {
       "path": "external/amd",
-      "url": "https://github.com/lmxxf/dlss5-on-amd-9070xt-porting.git",
-      "commit": "ad499a8199c9ce3678d83c9be58fe3bc1bef3498"
+      "url": "https://github.com/imaami/dlss5-on-amd-9070xt-porting.git",
+      "commit": "c1908317fb7e7ee9fe4884feba4a67220d93461f",
+      "sources": [
+        "Development/HIP/hip_api.h",
+        "Development/HIP/hip_device_properties.h",
+        "Development/HIP/hip_reference_network.h",
+        "Development/HIP/packed_weights.h",
+        "LICENSE",
+        "hip/boundary_fast.hip",
+        "hip/boundary_reference.hip",
+        "hip/c32_fast.hip",
+        "hip/c32_fast_attention.hip",
+        "hip/c32_fused_ffn_attention.hip",
+        "hip/c32_reference.hip",
+        "hip/c512_head_group.inc",
+        "hip/deep_fast.hip",
+        "hip/deep_reference.hip",
+        "hip/multihead_fast_padded.hip",
+        "hip/multihead_fused_attention.hip",
+        "hip/multihead_reference.hip",
+        "hip/prefix_fast.hip",
+        "hip/prefix_reference.hip",
+        "src/LmxxfProductionOptions.h"
+      ]
     },
     "optiscaler": {
       "path": "external/optiscaler",
       "url": "https://github.com/optiscaler/OptiScaler.git",
-      "commit": "fb41e3e6361ca9ae55b30a821a40c2b4b346f330"
+      "commit": "fb41e3e6361ca9ae55b30a821a40c2b4b346f330",
+      "sources": [
+        "OptiScaler/shaders/output_scaling/precompile/bcds_bicubic.hlsl",
+        "OptiScaler/shaders/output_scaling/precompile/bcds_catmull.hlsl",
+        "OptiScaler/shaders/output_scaling/precompile/bcds_kaiser2.hlsl",
+        "OptiScaler/shaders/output_scaling/precompile/bcds_kaiser3.hlsl",
+        "OptiScaler/shaders/output_scaling/precompile/bcds_lanczos2.hlsl",
+        "OptiScaler/shaders/output_scaling/precompile/bcds_lanczos3.hlsl",
+        "OptiScaler/shaders/output_scaling/precompile/bcds_magc.hlsl",
+        "OptiScaler/shaders/output_scaling/precompile/bcus.hlsl"
+      ]
     },
     "vulkan": {
       "path": "external/vulkan",
-      "url": "https://github.com/mochizuki0323/DLSSNR-AMD.git",
-      "commit": "743326d15f56c93ca757b18ca4d6b0d81d654113"
-    }
-  },
-  "files": {
-    "upstream-layer/ATTRIBUTION.md": {
-      "repository": "layer",
-      "source": "ATTRIBUTION.md",
-      "sha256": "9318b9aea64ae314667beac0dff7267d59508113025cbecfd9a6049bfc63cdfc"
-    },
-    "upstream-layer/LICENSE": {
-      "repository": "layer",
-      "source": "LICENSE",
-      "sha256": "8486a10c4393cee1c25392769ddd3b2d6c242d6ec7928e1414efff7dfb2f07ef"
-    },
-    "upstream-layer/common/shm_protocol.h": {
-      "repository": "layer",
-      "source": "common/shm_protocol.h",
-      "sha256": "dbe332427d205a6bae612848621b539da93a037cf49ed743399c43f2de3709c0"
-    },
-    "upstream-layer/core/stb_image_write.h": {
-      "repository": "layer",
-      "source": "core/stb_image_write.h",
-      "sha256": "fe31f93135df4ce3fa3107b744c73f13939c104aa378932018f69124c5114b50"
-    },
-    "upstream-layer/layer_linux/dlssnr.map": {
-      "repository": "layer",
-      "source": "layer_linux/dlssnr.map",
-      "sha256": "4dc4e55f59d62456441d5a69c0c0bdff51fb7c85d6e4205df8919f71082a4ab4"
-    },
-    "upstream-layer/layer_linux/src/capture.cpp": {
-      "repository": "layer",
-      "source": "layer_linux/src/capture.cpp",
-      "sha256": "585835c47c37ce2f9db754d07031ec1dadeff431e011df8159a9176642d48417"
-    },
-    "upstream-layer/layer_linux/src/capture.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/capture.h",
-      "sha256": "d341382162e73a7c4642608fc82c70e8e18fd9986c1cea78016f53b6980a157e"
-    },
-    "upstream-layer/layer_linux/src/composition.cpp": {
-      "repository": "layer",
-      "source": "layer_linux/src/composition.cpp",
-      "sha256": "d7f29ebb41e1ae12fb92855776fab8226a338c884ea11d923b9a1c91c7ce6a72"
-    },
-    "upstream-layer/layer_linux/src/composition.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/composition.h",
-      "sha256": "2a27790e2534b4783bc80ebedd1908bde1aad76d5ffbded1672ada8080107e6d"
-    },
-    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Common.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/dlssnr/DlssNr_Common.h",
-      "sha256": "c978a66d9fe6aac9ce6f82d1e0f58b002608262bbcafc261bd82427323115444"
-    },
-    "upstream-layer/layer_linux/src/dlssnr/DlssNr_Layout.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/dlssnr/DlssNr_Layout.h",
-      "sha256": "c15948312e20559102284ed6c05754e001cf1b2a463073e7717b1ba70750d3b8"
-    },
-    "upstream-layer/layer_linux/src/dlssnr/dlssnr.hlsl": {
-      "repository": "layer",
-      "source": "layer_linux/src/dlssnr/dlssnr.hlsl",
-      "sha256": "30154d7e697d396ec9ce209523c6b3a471eecce1be580e709136b0de4b797c68"
-    },
-    "upstream-layer/layer_linux/src/dlssnr_pass.cpp": {
-      "repository": "layer",
-      "source": "layer_linux/src/dlssnr_pass.cpp",
-      "sha256": "a6a5ca738f6a5e87fb63ac883540e99cb304cbe41da54ac075299ba07e434269"
-    },
-    "upstream-layer/layer_linux/src/dlssnr_pass.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/dlssnr_pass.h",
-      "sha256": "84c521a917f682ced54942e7402839fd1e1622e9cf64b92d7225ca650b5fc568"
-    },
-    "upstream-layer/layer_linux/src/hotkey.cpp": {
-      "repository": "layer",
-      "source": "layer_linux/src/hotkey.cpp",
-      "sha256": "fcf4641231687c88f2e1fd234619fd60374a076188ffac6f35dc1c320b7437de"
-    },
-    "upstream-layer/layer_linux/src/hotkey.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/hotkey.h",
-      "sha256": "1c131407aaaa39b0e65cecd933ccefc66411646dc73186d8a3d10a4a506aa8fb"
-    },
-    "upstream-layer/layer_linux/src/layer.cpp": {
-      "repository": "layer",
-      "source": "layer_linux/src/layer.cpp",
-      "sha256": "7dc0dabf791fb78a3e4cc47141bf13dcbe2678a42f8f8767ccbf8ae5f37d7288"
-    },
-    "upstream-layer/layer_linux/src/log.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/log.h",
-      "sha256": "3ebe8627a1f1ce1ed1517023aa44d99db9cf565351e21dce24fbf71dcae9aaf1"
-    },
-    "upstream-layer/layer_linux/src/scaler_vk.cpp": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaler_vk.cpp",
-      "sha256": "498681ea2715ae9da4a0bd0009db952923cf61c0c7ae8b7bd5e1c73bef0cff42"
-    },
-    "upstream-layer/layer_linux/src/scaler_vk.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/scaler_vk.h",
-      "sha256": "b80938043f9a2a175e7cf1ea93e7576189c60dc4bb8e3bda6fecfa5527262b5a"
-    },
-    "upstream-layer/layer_linux/src/shader_vk.cpp": {
-      "repository": "layer",
-      "source": "layer_linux/src/shader_vk.cpp",
-      "sha256": "9b07286de872b3f70e8d4287a3e4e5390f27fa1db03a5bb042541d964714cd28"
-    },
-    "upstream-layer/layer_linux/src/shader_vk.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/shader_vk.h",
-      "sha256": "8538f531c1d3ca806a1fc020469b88bae42b261a4e2d84230eca368a34906933"
-    },
-    "upstream-layer/layer_linux/src/shaders/meter_reduce.comp": {
-      "repository": "layer",
-      "source": "layer_linux/src/shaders/meter_reduce.comp",
-      "sha256": "ad8048f747a709a859e0f7f2ce856c225267f271147ba465c455759bc5a412aa"
-    },
-    "upstream-layer/layer_linux/src/vk_table.h": {
-      "repository": "layer",
-      "source": "layer_linux/src/vk_table.h",
-      "sha256": "1518365a26deb0b873d4481dcf275f5966c7a54012edd5848cd2b1580455cc06"
-    },
-    "upstream-layer/standalone_runner/third_party/stb_image.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/stb_image.h",
-      "sha256": "594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3"
-    },
-    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_av1std.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_av1std.h",
-      "sha256": "f3ab53dbfdeb36a349f674656d50bd507f2e4b3c883343da74aace0df4f02a02"
-    },
-    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_av1std_decode.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_av1std_decode.h",
-      "sha256": "96f923dc01cd3e266c081d88fa020525a20d63ffe4ce09a4c807a04ef3aaf97e"
-    },
-    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h264std.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_h264std.h",
-      "sha256": "072ee6eac80e73d93bb4bfe0059f99e581fc8b55b1437236185bb4ff377914b1"
-    },
-    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h264std_decode.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_h264std_decode.h",
-      "sha256": "e1708b3996a740eeedb79f51d0f0e379f9bcae13566538375acaf73301023b58"
-    },
-    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h264std_encode.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_h264std_encode.h",
-      "sha256": "052a6e357be8d88bf4be0db1b3da5a9cc1a6011cf4b3533759ff588e1e26f9f1"
-    },
-    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h265std.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_h265std.h",
-      "sha256": "0cbdfd6c45ee8ca902e9c961cd7e49a4d601d443ea0ef2a60a8496b127ed397c"
-    },
-    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h265std_decode.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_h265std_decode.h",
-      "sha256": "800946aa19d83d305d504e2e4141bc938f989e0cf8872cef97480238eefef1ea"
-    },
-    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codec_h265std_encode.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vk_video/vulkan_video_codec_h265std_encode.h",
-      "sha256": "7239f9f4e811546639111e562a8be1ec73ad5bef1c23d5fad80889f35e125e9c"
-    },
-    "upstream-layer/standalone_runner/third_party/vk_video/vulkan_video_codecs_common.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vk_video/vulkan_video_codecs_common.h",
-      "sha256": "78cf3c99d3d57afa7ab1782ec6018b4bcdbe273f2843d76e3375282db875b71e"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vk_layer.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vk_layer.h",
-      "sha256": "861cd0ea24c7d81b935e5726520d184dbbc00e571f9089e17a723ccbbc1944e2"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vk_platform.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vk_platform.h",
-      "sha256": "c4cabbcf699c90cde344095ae54da9435d117951aad114ba3a540c5997d7906f"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan.h",
-      "sha256": "52297513cc6b6cc8db2921aa849f72e3f55d678b3a58a2c3eb297c02ded7a837"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_android.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_android.h",
-      "sha256": "f815593b7d20f291850b8d85e21e3d47fb123932805ba3606df631bdff4cb1e7"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_beta.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_beta.h",
-      "sha256": "fd7eaa882fb01dd0b798f3d11aeba0f20fc7de1b27dff50cae0a2b8ceb3ed373"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_core.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_core.h",
-      "sha256": "24b258dbfc5f177206fbffcf35f3a87cf756ee6f883167b92ecaeab16a5aa005"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_directfb.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_directfb.h",
-      "sha256": "dad1fe7c78d6d3113bc4416ee85530da221708bc2d505609e118115bf03b903f"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_fuchsia.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_fuchsia.h",
-      "sha256": "780e5d646ecc21e8884e8860be3c1afc0ac4aa165f5aaeca7cbd6238061d4a36"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_ggp.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_ggp.h",
-      "sha256": "fe67e4ff5d3442f4749096391a30bd4b7866f6ebf773739b06fe99a435013da5"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_ios.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_ios.h",
-      "sha256": "341027604524623c7c8d9433b75d75e520f151fe691bd1bd92b212989391173b"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_macos.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_macos.h",
-      "sha256": "5a2ac88f5ac809dab80a6353240302fac1d2fd7010eb377560996a12d392b030"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_metal.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_metal.h",
-      "sha256": "ed0fb6ba231ec5e363487c062255667371914d7b79eb12eb39649bce0757b0d7"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_screen.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_screen.h",
-      "sha256": "71bff61ec120bb60efdccf2fe7d40e64b52336232c32fbd85ae435ad23b43e54"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_vi.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_vi.h",
-      "sha256": "73f34c7d87515ad6caf6d91bfad17d5d11959261f99386c14978ec7aba4d1f5a"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_wayland.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_wayland.h",
-      "sha256": "ebf1981d5b6cf3119f9945759e11f900918d911724bdd25ddf1706f1e323ac09"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_win32.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_win32.h",
-      "sha256": "fa3a9263d1764b82b634180ec5d3010adc216108bae11c02b157f733073f87f8"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_xcb.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_xcb.h",
-      "sha256": "3d9c38165d2ffa24f585ae1b287ee89e32b54cc49bc28ac142f3ab92d00c8818"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_xlib.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_xlib.h",
-      "sha256": "e8878c1efe85ce965d3e5019c1ca48043671e1a782804c4ec68eb460d45f7042"
-    },
-    "upstream-layer/standalone_runner/third_party/vulkan/vulkan_xlib_xrandr.h": {
-      "repository": "layer",
-      "source": "standalone_runner/third_party/vulkan/vulkan_xlib_xrandr.h",
-      "sha256": "b33d51ee2feb28890cb5b2db3cd4c8b0553553d81c71d6057ed91bb5029d844e"
-    },
-    "upstream-layer/third_party/optiscaler/LICENSE": {
-      "repository": "layer",
-      "source": "third_party/optiscaler/LICENSE",
-      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
-    },
-    "upstream-layer/third_party/optiscaler/RenoDX_ATTRIBUTION.txt": {
-      "repository": "layer",
-      "source": "third_party/optiscaler/RenoDX_ATTRIBUTION.txt",
-      "sha256": "40db841188178fa6871e4b435f1cf25cf46a7b52070f973cbbbc999ec020d7f2"
-    },
-    "upstream-layer/tools/shmctl.cpp": {
-      "repository": "layer",
-      "source": "tools/shmctl.cpp",
-      "sha256": "27ad9df5a04a4da20ab2e49e0fbbb1786a2b6bebb30bce568c3512dfa34de57b"
-    },
-    "kernels/LICENSE": {
-      "repository": "amd",
-      "source": "LICENSE",
-      "sha256": "e289f704a22be5bb836eca345831b81e383ff9ffab443ecd1e436347515bf111"
-    },
-    "kernels/boundary_fast.hip": {
-      "repository": "amd",
-      "source": "hip/boundary_fast.hip",
-      "sha256": "c8439f7999f5431afbac7b6b0251e417d9beb80d222644d4aae3fa7e58a203cf"
-    },
-    "kernels/boundary_reference.hip": {
-      "repository": "amd",
-      "source": "hip/boundary_reference.hip",
-      "sha256": "29cfe6378b966f8b7bbd30d04ebd3f927e95bc75845e6d3e5a6540dca44244dd"
-    },
-    "kernels/c512_head_group.inc": {
-      "repository": "amd",
-      "source": "hip/c512_head_group.inc",
-      "sha256": "cac4e3b2947fb0bbcf8a128841d5642006b6cb16a36f4465960b498a2b3c1540"
-    },
-    "kernels/c32_fast.hip": {
-      "repository": "amd",
-      "source": "hip/c32_fast.hip",
-      "sha256": "f8296da6e299bdf4cef10096058deef44a20ede146d4f070f60cf86ef06d45a4"
-    },
-    "kernels/c32_fast_attention.hip": {
-      "repository": "amd",
-      "source": "hip/c32_fast_attention.hip",
-      "sha256": "516fdd90f22b8549aa1258949f04415544b9ea2a9ce7c5924bfbc25c5b06645a"
-    },
-    "kernels/c32_fused_ffn_attention.hip": {
-      "repository": "amd",
-      "source": "hip/c32_fused_ffn_attention.hip",
-      "sha256": "be9613a4f8cf1ee5352d2150ec2a03bed39f12b69bb78c10730ae41343aabbab"
-    },
-    "kernels/c32_reference.hip": {
-      "repository": "amd",
-      "source": "hip/c32_reference.hip",
-      "sha256": "6c6c3078a9b7893e58dd8b9732dbe74b01e23edb275ba0a43761acf8bad4fcc9"
-    },
-    "kernels/deep_fast.hip": {
-      "repository": "amd",
-      "source": "hip/deep_fast.hip",
-      "sha256": "73c4b88c41a49404a17a303b2d2a08f6dbaad40f200e5e4adf2979e6db49657f"
-    },
-    "kernels/deep_reference.hip": {
-      "repository": "amd",
-      "source": "hip/deep_reference.hip",
-      "sha256": "0be0b196fe90eeed4c6acd3214898a79ff79c8f3ee51bcda9ae6fb31363bdc85"
-    },
-    "kernels/multihead_fast_padded.hip": {
-      "repository": "amd",
-      "source": "hip/multihead_fast_padded.hip",
-      "sha256": "73611dda6b6ca0fd07ff0252b4c0adde3f1536d27e7d407d4ff89de93ae27dda"
-    },
-    "kernels/multihead_fused_attention.hip": {
-      "repository": "amd",
-      "source": "hip/multihead_fused_attention.hip",
-      "sha256": "e1dd323428a97315c2e415b8f16be20b8726af792fdc49b96550da93b3ee73d0"
-    },
-    "kernels/multihead_reference.hip": {
-      "repository": "amd",
-      "source": "hip/multihead_reference.hip",
-      "sha256": "cdc6e06f5e23231a3c73ccd6affc3612bc22f49b4c3f427aed7b2d8fb7561a27"
-    },
-    "kernels/prefix_fast.hip": {
-      "repository": "amd",
-      "source": "hip/prefix_fast.hip",
-      "sha256": "0bbe76496496060e3e835afb3fdba41529bf5c127fa8323bd9dcd6f3648bc36e"
-    },
-    "kernels/prefix_reference.hip": {
-      "repository": "amd",
-      "source": "hip/prefix_reference.hip",
-      "sha256": "59985f984c43ac0d1d7d247776448f7a719bba761e8065ca25d8d3ad0c6de0ac"
-    },
-    "backend/vendor/LICENSE.lmxxf": {
-      "repository": "amd",
-      "source": "LICENSE",
-      "sha256": "e289f704a22be5bb836eca345831b81e383ff9ffab443ecd1e436347515bf111"
-    },
-    "backend/vendor/LmxxfProductionOptions.h": {
-      "repository": "amd",
-      "source": "src/LmxxfProductionOptions.h",
-      "sha256": "085e6f9328403454111bd38990bab3b3f88349f1823920e754b3b6b9dfd61ed3"
-    },
-    "backend/vendor/hip_api.h": {
-      "repository": "amd",
-      "source": "Development/HIP/hip_api.h",
-      "sha256": "7517108c5bf4550b3045d433c001895834597a14c15b47cc6f7e6fe39f788db2"
-    },
-    "backend/vendor/hip_device_properties.h": {
-      "repository": "amd",
-      "source": "Development/HIP/hip_device_properties.h",
-      "sha256": "bcda817fe03bc7084f9d3a2c23f52567651a92a15838a0092cd9dc451132d254"
-    },
-    "backend/vendor/hip_reference_network.h": {
-      "repository": "amd",
-      "source": "Development/HIP/hip_reference_network.h",
-      "sha256": "05ecb42cb434849b5df618f59c11fe1c558524214726d8691ca33fb6d688f904"
-    },
-    "backend/vendor/packed_weights.h": {
-      "repository": "amd",
-      "source": "Development/HIP/packed_weights.h",
-      "sha256": "4aa0a3a8b014cb0c517d7c9e4811a1af5e3f92f7165a5b90c4e3d0edced99d35"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_bicubic.hlsl": {
-      "repository": "optiscaler",
-      "source": "OptiScaler/shaders/output_scaling/precompile/bcds_bicubic.hlsl",
-      "sha256": "426a9fb342dd469e5b5e81c65435a9935c8095204725bacea817090db5cf29ca"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_catmull.hlsl": {
-      "repository": "optiscaler",
-      "source": "OptiScaler/shaders/output_scaling/precompile/bcds_catmull.hlsl",
-      "sha256": "f5b2ca7ff84da9462d289069a0e6a95e4ff0f33f8bc81700c8808e92fd942403"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_kaiser2.hlsl": {
-      "repository": "optiscaler",
-      "source": "OptiScaler/shaders/output_scaling/precompile/bcds_kaiser2.hlsl",
-      "sha256": "cb09cd0899109cb5cf24b51787dc7647626c6f5f7327de24b74e2c79b1c3f86e"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_kaiser3.hlsl": {
-      "repository": "optiscaler",
-      "source": "OptiScaler/shaders/output_scaling/precompile/bcds_kaiser3.hlsl",
-      "sha256": "9289c946c2a63ee2233cdffbf24b93934a1a7d049919175245c36939ea9ac870"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_lanczos2.hlsl": {
-      "repository": "optiscaler",
-      "source": "OptiScaler/shaders/output_scaling/precompile/bcds_lanczos2.hlsl",
-      "sha256": "8c1248e510f2019ac43c62db5e0e93ff408bb035c0f2733ccb19ae3cc7e854f0"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_lanczos3.hlsl": {
-      "repository": "optiscaler",
-      "source": "OptiScaler/shaders/output_scaling/precompile/bcds_lanczos3.hlsl",
-      "sha256": "d50d850bd9819c3755fab3fe4404c3b117490c00270e02bb7436fdb6ba6619f9"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcds_magc.hlsl": {
-      "repository": "optiscaler",
-      "source": "OptiScaler/shaders/output_scaling/precompile/bcds_magc.hlsl",
-      "sha256": "bc9d1bf5bde9855cd36a085beaa772891e1c40999926cbd39c673a49465ab3f1"
-    },
-    "upstream-layer/layer_linux/src/scaling/bcus.hlsl": {
-      "repository": "optiscaler",
-      "source": "OptiScaler/shaders/output_scaling/precompile/bcus.hlsl",
-      "sha256": "a2c0d83a34dff92ad02fbc53c5a4733201d107823b550ab8777ec4a4319fc57b"
-    },
-    "vulkan-nr/LICENSE": {
-      "repository": "vulkan",
-      "source": "LICENSE",
-      "sha256": "729c77c3b5ca38587835df4c18803dcfa1dff7ab5c207e22d88aa333a5703592"
-    },
-    "vulkan-nr/build/arch/rdna4.sh": {
-      "repository": "vulkan",
-      "source": "linux/build/arch/rdna4.sh",
-      "sha256": "f955106994137eb503ffa50fce8e9acafc1efeb3987cbaf2f604d5d853d4215e"
-    },
-    "vulkan-nr/build/build_network.py": {
-      "repository": "vulkan",
-      "source": "linux/build/build_network.py",
-      "sha256": "9c17de7c5910296e467d6effdf205718de309464f4bac664613dadcf0c4095bb"
-    },
-    "vulkan-nr/package/model-tools/descriptor.json": {
-      "repository": "vulkan",
-      "source": "linux/package/model-tools/descriptor.json",
-      "sha256": "fa8dd12b1ba4047f1b6bea1184a71a8c94b8a9bf3f836bcf97da7e23d953d8ff"
-    },
-    "vulkan-nr/package/model-tools/extract_model.sh": {
-      "repository": "vulkan",
-      "source": "linux/package/model-tools/extract_model.sh",
-      "sha256": "a058e06ee627f7206f2b89b073ac367e440d3343ac9ec727f5d66aaeb4f90504"
-    },
-    "vulkan-nr/package/model-tools/inspect_nr.py": {
-      "repository": "vulkan",
-      "source": "linux/package/model-tools/inspect_nr.py",
-      "sha256": "54df29600b82c4076941b117e7379f4d1c4cb9b4358a35100154d094e724f150"
-    },
-    "vulkan-nr/package/model-tools/model-files.sha256": {
-      "repository": "vulkan",
-      "source": "linux/package/model-tools/model-files.sha256",
-      "sha256": "e0bedcd56d7aac5639c71749abb521b08de1a84e86d0ac532d1eae3de5870d56"
-    },
-    "vulkan-nr/package/model-tools/model-files.txt": {
-      "repository": "vulkan",
-      "source": "linux/package/model-tools/model-files.txt",
-      "sha256": "c07dcb2cab91a7270847f60dede38d01e6deb3757afbf2dab3ad203f06757e49"
-    },
-    "vulkan-nr/package/model-tools/pack_model.py": {
-      "repository": "vulkan",
-      "source": "linux/package/model-tools/pack_model.py",
-      "sha256": "7c4c3f314077484dc6a6c53b82b091218712599f4b5105fd22bdf213756f2369"
-    },
-    "vulkan-nr/package/model-tools/unpack_postblock.py": {
-      "repository": "vulkan",
-      "source": "linux/package/model-tools/unpack_postblock.py",
-      "sha256": "1d8703309db1b895a17c49911a6cb40c2d78c54c568fb03ed42deebcc19d2554"
-    },
-    "vulkan-nr/package/model-tools/unpack_preblock.py": {
-      "repository": "vulkan",
-      "source": "linux/package/model-tools/unpack_preblock.py",
-      "sha256": "fca425cf388a564d3f478ab6f35e7d2490427af68369e49a7486f135cd27562f"
-    },
-    "vulkan-nr/package/model-tools/unpack_splitswin.py": {
-      "repository": "vulkan",
-      "source": "linux/package/model-tools/unpack_splitswin.py",
-      "sha256": "1715f3bd453485745301336d79c9f161be008863bc4c323ae9e67f3577769569"
-    },
-    "vulkan-nr/package/model-tools/unpack_swin_family.py": {
-      "repository": "vulkan",
-      "source": "linux/package/model-tools/unpack_swin_family.py",
-      "sha256": "90f11283d20d3c51c1800d9a3a59ef20d4305f1bf6a9997c6a856a10b36ba1f6"
-    },
-    "vulkan-nr/package/model-tools/unpack_vit.py": {
-      "repository": "vulkan",
-      "source": "linux/package/model-tools/unpack_vit.py",
-      "sha256": "cb7cb0520b743d5d8b2a5e0c4f2cb8e1b80143f4eff4eb034b1ac5d322bdbfb3"
-    },
-    "vulkan-nr/shaders/passes/cascade_blur.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/passes/cascade_blur.comp",
-      "sha256": "e4b9f8b18ad9b8a0f5508d5b04b5bd695725fba639131afa85920779cc105cd6"
-    },
-    "vulkan-nr/shaders/passes/cascade_feed.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/passes/cascade_feed.comp",
-      "sha256": "ff4049ff6639fa15e5762aee78cba9805b4673f9841b42637e571bd561eb7b08"
-    },
-    "vulkan-nr/shaders/passes/cascade_lograt.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/passes/cascade_lograt.comp",
-      "sha256": "39c6fa44456a25da182012500fdc687400e77d45baad29cb961e6372ac9a5065"
-    },
-    "vulkan-nr/shaders/passes/motion_estimate.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/passes/motion_estimate.comp",
-      "sha256": "fd47363b60229cf6cff8f779ff5dbb463e5da6e6e058dd84b324f37475c00fdb"
-    },
-    "vulkan-nr/shaders/passes/motion_luma.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/passes/motion_luma.comp",
-      "sha256": "deddfa736c810e93195ea0b8d3579c46edc136168291dfa70fede6ee4b72a846"
-    },
-    "vulkan-nr/shaders/passes/runtime_alpha.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/passes/runtime_alpha.comp",
-      "sha256": "aa951a7c4e66b37a8acc88f80eadd1f075bc26c31dfba27795be2e231e3d3f68"
-    },
-    "vulkan-nr/shaders/passes/runtime_depth.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/passes/runtime_depth.comp",
-      "sha256": "c125f3ae31ff3e97ba60486d0b0552fc813098db4805d5f1af0d2ad6996a8ac3"
-    },
-    "vulkan-nr/shaders/passes/runtime_encode.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/passes/runtime_encode.comp",
-      "sha256": "f485687350585ea1fdafa4b49aca519e972537fe1b34f3f8458610d07367c7a5"
-    },
-    "vulkan-nr/shaders/passes/runtime_prep.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/passes/runtime_prep.comp",
-      "sha256": "6388fa0ec32c0ffafdcee250d51bc2dcdbc91f2dd35ae010ca44f6138bf42c94"
-    },
-    "vulkan-nr/shaders/passes/runtime_transfer.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/passes/runtime_transfer.comp",
-      "sha256": "a1f9fa46021241aebc0df8567e5a0750f285c808f64e38fa3b5f67ce733e8200"
-    },
-    "vulkan-nr/shaders/rdna4/attn.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/attn.comp",
-      "sha256": "3c5ed22912bb0704cd279b384c636880eee4448d8761e204850ef95cad5e1628"
-    },
-    "vulkan-nr/shaders/rdna4/decoder_upsample.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/decoder_upsample.comp",
-      "sha256": "3b0d997a1387cdf4a26c3d037ddaebb254240f45f122033a919c3aeb2786d50e"
-    },
-    "vulkan-nr/shaders/rdna4/ffwd3_t.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/ffwd3_t.comp",
-      "sha256": "8aa2327d09511f9bb0b30e0ad156458af2863b49b3a3c7e97cb6083bd76b4631"
-    },
-    "vulkan-nr/shaders/rdna4/fswin_t.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/fswin_t.comp",
-      "sha256": "509415cfb44dcb78dc28dc609e17d96b18d7684758205dc30cf3ac60aee11074"
-    },
-    "vulkan-nr/shaders/rdna4/gemm1x1.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/gemm1x1.comp",
-      "sha256": "21f520df38fbd0a5cf02f3399d8f95f4344f03c0b1b5283df7b61a30f2c31781"
-    },
-    "vulkan-nr/shaders/rdna4/include/attn_qkv_epi.glsl": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/include/attn_qkv_epi.glsl",
-      "sha256": "d3c58e591c4b782abb1678594b8a7dd39f762366ceac1c0ac5e965bbbd1e46b1"
-    },
-    "vulkan-nr/shaders/rdna4/include/occ_pad.glsl": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/include/occ_pad.glsl",
-      "sha256": "81878d2f80bd6459cc6b0268836a5cc5889646e0a15bc5d407c39be9905fccb5"
-    },
-    "vulkan-nr/shaders/rdna4/include/coherent_act.glsl": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/include/coherent_act.glsl",
-      "sha256": "2c20818d305450341004cb9e24c191bf290aaba8fa462137df4f880f785c6bdb"
-    },
-    "vulkan-nr/shaders/rdna4/include/coopmm.glsl": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/include/coopmm.glsl",
-      "sha256": "4e76872f176863e9b116da0d5c531e298688c302eb26126740f0ed543d8f10c4"
-    },
-    "vulkan-nr/shaders/rdna4/include/fswin_body.glsl": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/include/fswin_body.glsl",
-      "sha256": "b04bd24fe07be59722189d3425c1fc514072463eb43df0b09cbbed41b6ce66b0"
-    },
-    "vulkan-nr/shaders/rdna4/include/image_input.glsl": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/include/image_input.glsl",
-      "sha256": "28fd8f361adaa659d91b57d6acdb0f44dad492447179e33ca47eb2de324f9fea"
-    },
-    "vulkan-nr/shaders/rdna4/include/image_noise.glsl": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/include/image_noise.glsl",
-      "sha256": "29e308e0f9ae7a6fe228b933814fada1167f2706af065e6e403da8add33b05c1"
-    },
-    "vulkan-nr/shaders/rdna4/include/nr_chain.glsl": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/include/nr_chain.glsl",
-      "sha256": "5d5d1d8076f3f0d13115ad4b9aa83f0ec1b9164fca04b955dc0a70dd8d136317"
-    },
-    "vulkan-nr/shaders/rdna4/include/nr_prof.glsl": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/include/nr_prof.glsl",
-      "sha256": "531b4cda66f866aa0e874ac259a3b92823e221dd6fdaa4a54261c2cf5011e0d9"
-    },
-    "vulkan-nr/shaders/rdna4/include/swin_math.glsl": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/include/swin_math.glsl",
-      "sha256": "923586c2316e6cc7e1ab069f5b01e5804d2257dfef99544ea9924b753c477f30"
-    },
-    "vulkan-nr/shaders/rdna4/include/temporal_history.glsl": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/include/temporal_history.glsl",
-      "sha256": "c467ff5fe489bfc0b6fa9b1bca742a8216f57606a048a370f9edbc7251eff3fe"
-    },
-    "vulkan-nr/shaders/rdna4/include/vit_attn_vt_chunk.glsl": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/include/vit_attn_vt_chunk.glsl",
-      "sha256": "14536bb3d6c22b5386e23cddf1da1111f147ba0772995d16031b98d6a1ba0cf3"
-    },
-    "vulkan-nr/shaders/rdna4/noise_field.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/noise_field.comp",
-      "sha256": "46a199e1385beac03573a40dc2527e7512763fd33e644290883223299fcb1f1f"
-    },
-    "vulkan-nr/shaders/rdna4/pipelines.json": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/pipelines.json",
-      "sha256": "d7c5d3601001b34ef7b4a37b9a53b33b7b02e50aa407aa28ec4af48ca3e35424"
-    },
-    "vulkan-nr/shaders/rdna4/repack_tokens.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/repack_tokens.comp",
-      "sha256": "0606f553ae12e47f8b18b4e97f32b606501be7bed5dbae17f39310fa49dcdd7a"
-    },
-    "vulkan-nr/shaders/rdna4/upsample_view.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/upsample_view.comp",
-      "sha256": "98b7c773a9043f88ce443dbd6111132614ccc0749fdea01aba23e5f7ab8da3fc"
-    },
-    "vulkan-nr/shaders/rdna4/vit_attn.comp": {
-      "repository": "vulkan",
-      "source": "linux/shaders/rdna4/vit_attn.comp",
-      "sha256": "7fdd8294d3ed619ceb73931a2ebe349b8915d6d6c989b6bf223a802e348b99f6"
-    },
-    "vulkan-nr/src/core/nr_activation_lut.hpp": {
-      "repository": "vulkan",
-      "source": "linux/src/core/nr_activation_lut.hpp",
-      "sha256": "cf289d3fed9bba211fa5b7b49e0699aa2eaf168c4c180f654acb8f4806def193"
-    },
-    "vulkan-nr/src/core/nr_device_features.hpp": {
-      "repository": "vulkan",
-      "source": "linux/src/core/nr_device_features.hpp",
-      "sha256": "89f8f0d64d6e2d3ee5342391954779800f53236f0434a01132a819601fe4a37e"
-    },
-    "vulkan-nr/src/core/nr_frame.txt": {
-      "repository": "vulkan",
-      "source": "linux/src/core/nr_frame.txt",
-      "sha256": "7e00807181c1f8ad62abe64087cb65a3993ec25f45d423e4c3def48e27c1cb80"
-    },
-    "vulkan-nr/src/core/nr_graph.cpp": {
-      "repository": "vulkan",
-      "source": "linux/src/core/nr_graph.cpp",
-      "sha256": "ea102f46651173cab63207bfa9165d2bf4ef604dbe0515eef116c62a51ac9754"
-    },
-    "vulkan-nr/src/core/nr_log.hpp": {
-      "repository": "vulkan",
-      "source": "linux/src/core/nr_log.hpp",
-      "sha256": "f75fe29dce7db53b84de657b14badf528cbe33d4a66668e7ead6261317646294"
-    },
-    "vulkan-nr/src/core/nr_native_plan.cpp": {
-      "repository": "vulkan",
-      "source": "linux/src/core/nr_native_plan.cpp",
-      "sha256": "2146e00db84cc3ff0f0f2bb1b7b14589ccc7e5dac08dc4d10eae272370e14059"
-    },
-    "vulkan-nr/src/core/nr_native_plan.hpp": {
-      "repository": "vulkan",
-      "source": "linux/src/core/nr_native_plan.hpp",
-      "sha256": "0a2f3f32d2c04c054a4c41cbe3ffaa282693dcd8ad5a7946fd02b217f863b75f"
-    },
-    "vulkan-nr/src/core/nr_native_plan_data.hpp": {
-      "repository": "vulkan",
-      "source": "linux/src/core/nr_native_plan_data.hpp",
-      "sha256": "e7327c0615a46ef94762e41ea4919c60c3f029f0b90e58b603e879ca8ce1f4ad"
-    },
-    "vulkan-nr/src/core/nr_runtime.cpp": {
-      "repository": "vulkan",
-      "source": "linux/src/core/nr_runtime.cpp",
-      "sha256": "5af0281817fb891ce00e85e9e48bb8e6687c4e712210c4dfcfa6ef763c344611"
-    },
-    "vulkan-nr/src/core/nr_runtime.hpp": {
-      "repository": "vulkan",
-      "source": "linux/src/core/nr_runtime.hpp",
-      "sha256": "2ac68c351166e23520ccb4374164fe07438fbbe7feb933dd57be28d3b492c197"
-    },
-    "vulkan-nr/src/core/nr_runtime_dispatch.hpp": {
-      "repository": "vulkan",
-      "source": "linux/src/core/nr_runtime_dispatch.hpp",
-      "sha256": "13f40b179dfc53811ba98c1136df16a63f2fdee127651d578514fde803d3612c"
-    },
-    "vulkan-nr/src/core/nr_shader_manifest.hpp": {
-      "repository": "vulkan",
-      "source": "linux/src/core/nr_shader_manifest.hpp",
-      "sha256": "71c8951e183e4fecafa79014686aa717b93beb71567ad31b8dd7ee63fda851f6"
-    },
-    "vulkan-nr/src/core/nrvk.hpp": {
-      "repository": "vulkan",
-      "source": "linux/src/core/nrvk.hpp",
-      "sha256": "78d2bb21355812518c6c41873b7ac9b537c81184c5c4c0d48d1d88316271e020"
-    },
-    "vulkan-nr/src/core/telemetry.hpp": {
-      "repository": "vulkan",
-      "source": "linux/src/core/telemetry.hpp",
-      "sha256": "9c0f9d9f791aaed5fc52280a81aa55ac976ce76d5f3b5a0db5df8fb9a897fb2d"
-    },
-    "vulkan-nr/src/core/tinlayout.hpp": {
-      "repository": "vulkan",
-      "source": "linux/src/core/tinlayout.hpp",
-      "sha256": "913437acef687c43c7f28b8033ee13fa5ea83323615f0d54aa55db7f9716f0bd"
+      "url": "https://github.com/imaami/DLSSNR-AMD.git",
+      "commit": "3dfdddc7c06b888685c8be4275d1eb5e8edc7334",
+      "sources": [
+        "LICENSE",
+        "linux/build/arch/rdna4.sh",
+        "linux/build/build_network.py",
+        "linux/package/model-tools/descriptor.json",
+        "linux/package/model-tools/extract_model.sh",
+        "linux/package/model-tools/inspect_nr.py",
+        "linux/package/model-tools/model-files.sha256",
+        "linux/package/model-tools/model-files.txt",
+        "linux/package/model-tools/pack_model.py",
+        "linux/package/model-tools/unpack_postblock.py",
+        "linux/package/model-tools/unpack_preblock.py",
+        "linux/package/model-tools/unpack_splitswin.py",
+        "linux/package/model-tools/unpack_swin_family.py",
+        "linux/package/model-tools/unpack_vit.py",
+        "linux/shaders/passes/cascade_blur.comp",
+        "linux/shaders/passes/cascade_feed.comp",
+        "linux/shaders/passes/cascade_lograt.comp",
+        "linux/shaders/passes/motion_estimate.comp",
+        "linux/shaders/passes/motion_luma.comp",
+        "linux/shaders/passes/pass_stages.comp",
+        "linux/shaders/passes/runtime_alpha.comp",
+        "linux/shaders/passes/runtime_depth.comp",
+        "linux/shaders/passes/runtime_encode.comp",
+        "linux/shaders/passes/runtime_prep.comp",
+        "linux/shaders/passes/runtime_transfer.comp",
+        "linux/shaders/rdna4/attn.comp",
+        "linux/shaders/rdna4/decoder_upsample.comp",
+        "linux/shaders/rdna4/ffwd3_t.comp",
+        "linux/shaders/rdna4/fswin_t.comp",
+        "linux/shaders/rdna4/gemm1x1.comp",
+        "linux/shaders/rdna4/include/attn_qkv_epi.glsl",
+        "linux/shaders/rdna4/include/coherent_act.glsl",
+        "linux/shaders/rdna4/include/coopmm.glsl",
+        "linux/shaders/rdna4/include/fswin_body.glsl",
+        "linux/shaders/rdna4/include/image_input.glsl",
+        "linux/shaders/rdna4/include/image_noise.glsl",
+        "linux/shaders/rdna4/include/nr_chain.glsl",
+        "linux/shaders/rdna4/include/nr_prof.glsl",
+        "linux/shaders/rdna4/include/occ_pad.glsl",
+        "linux/shaders/rdna4/include/swin_math.glsl",
+        "linux/shaders/rdna4/include/temporal_history.glsl",
+        "linux/shaders/rdna4/include/vit_attn_vt_chunk.glsl",
+        "linux/shaders/rdna4/noise_field.comp",
+        "linux/shaders/rdna4/pipelines.json",
+        "linux/shaders/rdna4/repack_tokens.comp",
+        "linux/shaders/rdna4/upsample_view.comp",
+        "linux/shaders/rdna4/vit_attn.comp",
+        "linux/src/core/nr_activation_lut.hpp",
+        "linux/src/core/nr_device_features.hpp",
+        "linux/src/core/nr_frame.txt",
+        "linux/src/core/nr_graph.cpp",
+        "linux/src/core/nr_log.hpp",
+        "linux/src/core/nr_native_plan.cpp",
+        "linux/src/core/nr_native_plan.hpp",
+        "linux/src/core/nr_native_plan_data.hpp",
+        "linux/src/core/nr_runtime.cpp",
+        "linux/src/core/nr_runtime.hpp",
+        "linux/src/core/nr_runtime_dispatch.hpp",
+        "linux/src/core/nr_shader_manifest.hpp",
+        "linux/src/core/nrvk.hpp",
+        "linux/src/core/telemetry.hpp",
+        "linux/src/core/tinlayout.hpp"
+      ]
     }
   }
 }

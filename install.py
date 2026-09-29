@@ -26,7 +26,7 @@ NETWORK_LIBRARY = "lib/dlsslop-amd/libdlsslop-network.so"
 # launcher adds this directory to the loader's search for any other prefix.
 LAYER_MANIFEST = "share/vulkan/implicit_layer.d/VK_LAYER_LOCAL_dlsslop_amd.json"
 DOC_DIRECTORY = "share/doc/dlsslop-amd"
-# The Vulkan network's SPIR-V, as vulkan-nr/build/build_network.py writes it into
+# The Vulkan network's SPIR-V, as DLSSNR-AMD's build_network.py writes it into
 # the build tree, and the extractor dlsslop-setup --dll runs.
 VULKAN_DIRECTORY = "share/dlsslop-amd/vulkan"
 MODEL_TOOLS_DIRECTORY = "libexec/dlsslop-amd/model-tools"
@@ -51,12 +51,12 @@ SCRIPT_SOURCES = {
 }
 LICENSE_SOURCES = {
     "licenses/AGPL-3.0.txt": "LICENSE",
-    "licenses/GPL-3.0.txt": "upstream-layer/third_party/optiscaler/LICENSE",
+    "licenses/GPL-3.0.txt": "external/layer/third_party/optiscaler/LICENSE",
     "licenses/Apache-2.0.txt": "packaging/Apache-2.0.txt",
     "licenses/MIT-integration.txt": "LICENSE.integration",
-    "licenses/MIT-amd.txt": "kernels/LICENSE",
-    "licenses/MIT-DLSSNR-AMD.txt": "vulkan-nr/LICENSE",
-    "licenses/RenoDX.txt": "upstream-layer/third_party/optiscaler/RenoDX_ATTRIBUTION.txt",
+    "licenses/MIT-amd.txt": "external/amd/LICENSE",
+    "licenses/MIT-DLSSNR-AMD.txt": "external/vulkan/LICENSE",
+    "licenses/RenoDX.txt": "external/layer/third_party/optiscaler/RenoDX_ATTRIBUTION.txt",
     "licenses/THIRD-PARTY.txt": "packaging/THIRD-PARTY.txt",
 }
 DOCUMENT_SOURCES = {"README.md": "packaging/README.md", **LICENSE_SOURCES}
@@ -125,11 +125,11 @@ def validate_modules(directory):
 def vulkan_shader_names(root):
     """The SPIR-V and markers the network's shader build writes, named as it names them."""
     # Its RUNTIME and MOTION lists, read rather than imported: nothing runs, nothing is cached.
-    script = ast.parse((root / "vulkan-nr/build/build_network.py").read_text(encoding="utf-8"))
+    script = ast.parse((root / "external/vulkan/linux/build/build_network.py").read_text(encoding="utf-8"))
     lists = {node.targets[0].id: ast.literal_eval(node.value) for node in script.body
              if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
              and node.targets[0].id in ("RUNTIME", "MOTION")}
-    table = json.loads((root / "vulkan-nr/shaders/rdna4/pipelines.json").read_text(encoding="utf-8"))
+    table = json.loads((root / "external/vulkan/linux/shaders/rdna4/pipelines.json").read_text(encoding="utf-8"))
     return ([f"g_{name}.spv" for name in table["pipelines"]] + list(table["markers"]) +
             [f"temporal/{name}.spv" for name in [*table["variants"], *lists["MOTION"]]] +
             ["temporal/shader-constants.txt"] + [f"runtime/{name}.spv" for name in lists["RUNTIME"]])
@@ -155,7 +155,7 @@ def runtime_files(root, build):
         require_file(path)
         files[f"{VULKAN_DIRECTORY}/{name}"] = (path, 0o644)
     for name in MODEL_TOOLS:
-        path = root / "vulkan-nr/package/model-tools" / name
+        path = root / "external/vulkan/linux/package/model-tools" / name
         require_file(path)
         files[f"{MODEL_TOOLS_DIRECTORY}/{name}"] = (path, 0o644)
     module_source = root / "assets/HIP/gfx1201"

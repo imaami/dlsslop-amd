@@ -1,4 +1,4 @@
-// The network on Vulkan: DLSSNR-AMD's runtime (vulkan-nr/) on a device of the daemon's own.
+// The network on Vulkan: DLSSNR-AMD's runtime (external/vulkan/linux/) on a device of the daemon's own.
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "network_recorder.h"

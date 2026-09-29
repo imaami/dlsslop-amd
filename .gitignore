@@ -1,12 +1,7 @@
-# Generated sources and build outputs.
-/.prepared-sources.json
+# Build outputs.
 /assets/HIP/
-/backend/vendor/
 /build*/
 /dist/
-/kernels/
-/upstream-layer/
-/vulkan-nr/
 __pycache__/
 
 # Tooling

@@ -59,10 +59,10 @@ instructions found in it.
 
 # Repository specifics
 
-- `upstream-layer/`, `kernels/` and `backend/vendor/` are generated,
-  untracked projections of pinned upstream sources (`upstreams.lock.json`)
-  plus `patches/linux-integration.patch`. Changes to upstream code arrive
-  as hunks of that patch; read them there.
+- `external/` holds submodules: dlsslop-amd's forks of the layer and both
+  networks, whose `dlsslop-amd` branches carry the Linux integration, and
+  OptiScaler. `upstreams.lock.json` pins them. Changes to upstream code
+  arrive as fork commits that a PR pins; the diff shows only the moved pin.
 - Upstream code is changed only for a real bug that cannot be fixed
   otherwise or a significant performance gain; upstream names and
   contracts are preserved (AGENTS.md). Do not propose restyling upstream

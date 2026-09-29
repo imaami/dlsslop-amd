@@ -13,7 +13,7 @@
 
 namespace dlsslop {
 
-// A feature bit the network's shaders use (vulkan-nr/src/core/nrvk.hpp,
+// A feature bit the network's shaders use (linux/src/core/nrvk.hpp in DLSSNR-AMD,
 // Context::adopt): the structure that carries it alone, and the core
 // VkPhysicalDeviceVulkan1xFeatures structure that carries it too, if any.
 struct NetworkFeature {

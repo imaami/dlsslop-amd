@@ -39,8 +39,8 @@ def fixture(root):
     root.mkdir()
     paths = {"install.py", *INSTALLER.DOCUMENT_SOURCES.values(), *INSTALLER.UNIT_SOURCES.values(),
              *(source for source, *_ in INSTALLER.SCRIPT_SOURCES.values()),
-             "vulkan-nr/build/build_network.py", "vulkan-nr/shaders/rdna4/pipelines.json",
-             *(f"vulkan-nr/package/model-tools/{name}" for name in INSTALLER.MODEL_TOOLS)}
+             "external/vulkan/linux/build/build_network.py", "external/vulkan/linux/shaders/rdna4/pipelines.json",
+             *(f"external/vulkan/linux/package/model-tools/{name}" for name in INSTALLER.MODEL_TOOLS)}
     for name in paths:
         target = root / name
         target.parent.mkdir(parents=True, exist_ok=True)

@@ -81,9 +81,9 @@ def validate_asset_dir(path):
 
 
 def model_tools():
-    """The Vulkan model extractor: installed beside this program, or in the prepared source tree."""
+    """The Vulkan model extractor: installed beside this program, or in the source tree's DLSSNR-AMD submodule."""
     here = Path(__file__).resolve().parent
-    for tools in (here.parent / "libexec/dlsslop-amd/model-tools", here.parent / "vulkan-nr/package/model-tools"):
+    for tools in (here.parent / "libexec/dlsslop-amd/model-tools", here.parent / "external/vulkan/linux/package/model-tools"):
         if (tools / "extract_model.sh").is_file():
             return tools
     raise ValueError("the Vulkan model extractor is not installed (libexec/dlsslop-amd/model-tools)")

@@ -24,7 +24,7 @@ def require_filter(url, timeout):
 
 
 def sparse_pattern(path):
-    # Non-cone patterns select the exact mapped files, including dotfiles,
+    # Non-cone patterns select the exact listed files, including dotfiles,
     # without fetching every sibling in large upstream directories.
     return '/' + ''.join('\\' + char if char in '\\*?[]!#' else char for char in path)
 
@@ -62,7 +62,7 @@ def fetch(name, row, initialized, timeout):
         raise RuntimeError(f'wrong pinned checkout for {name}')
     missing = [source for source in row['sources'] if not (path / source).is_file()]
     if missing:
-        raise RuntimeError(f'missing mapped source files in {name}: {missing}')
+        raise RuntimeError(f'missing listed source files in {name}: {missing}')
     print(f'{name}: ready', flush=True)
 
 
@@ -89,7 +89,7 @@ def main():
             initialized[name] = inspect_worktree(name, row, timeout=args.timeout)
         for name, row in repositories.items():
             fetch(name, row, initialized[name], args.timeout)
-        print('Pinned source dependencies are ready. Run python3 scripts/prepare-sources.py.')
+        print('Pinned source dependencies are ready.')
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.TimeoutExpired) as exc:
         print(f'fetch-submodules: {exc}', file=sys.stderr)
         return 1

@@ -37,17 +37,17 @@ reviews:
         output bit for bit and the GPU codec matches its CPU reference
         exactly; flag changes that alter output without saying so.
         Qt never enters the worker or the layer.
-    - path: "patches/linux-integration.patch"
+    - path: "external/**"
       instructions: >-
-        Project hunks applied to pinned upstream sources
-        (upstreams.lock.json); upstream-layer/, kernels/ and
-        backend/vendor/ are generated projections and not tracked.
-        Upstream lines change only for a real bug that cannot be
-        fixed otherwise or a significant performance gain, and the
-        commit says why; upstream names and contracts are preserved.
-        Review the changed hunks, not the surrounding upstream code;
-        never suggest restyling upstream or vendored code, including
-        the densely formatted vendored HIP network.
+        Submodules: dlsslop-amd's forks of the layer and both networks
+        (their dlsslop-amd branches) and OptiScaler, pinned in
+        upstreams.lock.json. A PR changes only their pinned commits;
+        review the fork commits a pin moves to, not the surrounding
+        upstream code. Upstream lines change only for a real bug that
+        cannot be fixed otherwise or a significant performance gain;
+        upstream names and contracts are preserved. Never suggest
+        restyling upstream or vendored code, including the densely
+        formatted vendored HIP network.
     - path: "gui/**"
       instructions: >-
         Qt 6 Widgets controller; Qt stays at this boundary. The
@@ -94,7 +94,7 @@ reviews:
         exception to the AGENTS.md shell rule.
     - path: "**/CMakeLists.txt"
       instructions: >-
-        Shader headers and SPIR-V are generated from the prepared
+        Shader headers and SPIR-V are generated from the submodule
         sources with DXC and glslangValidator and are never committed;
         do not suggest committing them.
   tools:

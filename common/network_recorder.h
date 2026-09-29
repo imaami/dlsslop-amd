@@ -1,4 +1,4 @@
-// DLSSNR-AMD's Vulkan network (vulkan-nr/) recorded into a caller's command
+// DLSSNR-AMD's Vulkan network (external/vulkan/linux/) recorded into a caller's command
 // buffers on a caller's device: dlsslopd's own device, or a game's device in
 // the layer. Vulkan calls go through the loader.
 // SPDX-License-Identifier: MIT

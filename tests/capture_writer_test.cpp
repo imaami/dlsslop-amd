@@ -1,5 +1,5 @@
 #include "capture.h"
-#include "../upstream-layer/common/shm_protocol.h"
+#include "../external/layer/common/shm_protocol.h"
 #include <vulkan/vulkan.h>
 
 #define STB_IMAGE_IMPLEMENTATION

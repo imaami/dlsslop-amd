@@ -3,7 +3,7 @@
 // exceptions, as C++20 (see hip_vendor.h).
 // SPDX-License-Identifier: MIT
 #include "hip_vendor.h"
-#include "vendor/LmxxfProductionOptions.h"
+#include "LmxxfProductionOptions.h"
 
 #include <dlfcn.h>
 #include <exception>
