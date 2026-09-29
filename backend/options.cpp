@@ -43,20 +43,6 @@ Result<unsigned> number(const char* text, const char* name)
     return static_cast<unsigned>(n);
 }
 
-Result<bool> flag(const char* value)
-{
-    if (!std::strcmp(value, "true")) return true;
-    if (!std::strcmp(value, "false")) return false;
-    return fail("expected true or false");
-}
-
-Result<unsigned> tier(const char* value)
-{
-    const unsigned t = DLSSLOP_TRY(number(value, "tier"));
-    if (!ShmNativeTier(t)) return fail("tier must be 720, 900, or 1080");
-    return t;
-}
-
 // Every option once: its getopt spelling, whether the config file may set it
 // (and whether that value is a path), and where a value lands. A flag gets
 // "true" from the command line, or true or false from the config file.
@@ -82,7 +68,8 @@ const Spec kSpecs[] = {
     // The channel pairs the worker with its launcher and socket unit.
     {"shm", 's', Spec::kPath, false, [](Options& o, const char* v) -> Result<void> { o.shm = v; return {}; }},
     {"tier", 't', Spec::kValue, true, [](Options& o, const char* v) -> Result<void> {
-        o.tier = DLSSLOP_TRY(tier(v));
+        o.tier = DLSSLOP_TRY(number(v, "tier"));
+        if (!ShmNativeTier(*o.tier)) return fail("tier must be 720, 900, or 1080");
         return {};
     }},
     {"passes", 'P', Spec::kValue, true, [](Options& o, const char* v) -> Result<void> {
@@ -117,7 +104,8 @@ const Spec kSpecs[] = {
     }},
     {"cpu-codec", 'C', Spec::kFlag, false, [](Options& o, const char*) -> Result<void> { o.cpu_codec = true; return {}; }},
     {"performance", 'p', Spec::kFlag, true, [](Options& o, const char* v) -> Result<void> {
-        o.performance = DLSSLOP_TRY(flag(v));
+        o.performance = !std::strcmp(v, "true");
+        if (!o.performance && std::strcmp(v, "false")) return fail("expected true or false");
         return {};
     }},
     {"once", '1', Spec::kFlag, false, [](Options& o, const char*) -> Result<void> { o.once = true; return {}; }},

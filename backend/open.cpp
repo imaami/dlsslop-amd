@@ -6,14 +6,11 @@
 
 namespace dlsslop {
 namespace {
-// Where the Vulkan network loads from; the pipeline cache is a convenience.
-VulkanPaths vulkan_paths(const Options& o) { return {o.vulkan_model, vulkan_shaders(), vulkan_cache()}; }
-
-// The Vulkan engine, prepared, or why not.
+// The Vulkan engine, prepared, or why not. The pipeline cache is a convenience.
 Result<VulkanEngine> open_vulkan(const Options& o, unsigned tier)
 {
     DLSSLOP_TRY(require_vulkan_model(o.vulkan_model));
-    auto network = DLSSLOP_TRY(VulkanNetwork::create(vulkan_paths(o), o.device));
+    auto network = DLSSLOP_TRY(VulkanNetwork::create({o.vulkan_model, vulkan_shaders(), vulkan_cache()}, o.device));
     std::fprintf(stderr, "Vulkan network on %s\n", network.device_name().c_str());
     VulkanEngine engine(std::move(network), tier);
     DLSSLOP_TRY(engine.prepare());

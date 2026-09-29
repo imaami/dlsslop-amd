@@ -19,6 +19,21 @@ std::string ppm(const std::vector<uint8_t>& rgba, unsigned w, unsigned h)
     for (size_t p = 0; p < rgba.size(); p += 4) image.append(reinterpret_cast<const char*>(&rgba[p]), 3);
     return image;
 }
+
+// W x H opaque RGBA8: red and green ramps over 32-pixel blue checks of ON and OFF.
+std::vector<uint8_t> gradient(unsigned w, unsigned h, uint8_t on, uint8_t off)
+{
+    std::vector<uint8_t> rgba(size_t(w) * h * 4);
+    for (unsigned y = 0; y < h; ++y)
+        for (unsigned x = 0; x < w; ++x) {
+            uint8_t* p = &rgba[(size_t(y) * w + x) * 4];
+            p[0] = uint8_t(x * 255 / (w - 1));
+            p[1] = uint8_t(y * 255 / (h - 1));
+            p[2] = ((x / 32 ^ y / 32) & 1) ? on : off;
+            p[3] = 255;
+        }
+    return rgba;
+}
 } // namespace
 
 // The Vulkan network on a deterministic gradient: finite, repeatable and changed.
@@ -26,15 +41,8 @@ Result<void> run_self_test(const Options& o, VulkanEngine& engine)
 {
     const unsigned passes = std::min(o.passes.value_or(kNativeDefaultPasses), VulkanEngine::max_passes);
     const unsigned w = ShmNativeTier(engine.tier())->width, h = engine.tier();
-    std::vector<uint8_t> input(size_t(w) * h * 4), output(input.size()), first;
-    for (unsigned y = 0; y < h; ++y)
-        for (unsigned x = 0; x < w; ++x) {
-            uint8_t* p = &input[(size_t(y) * w + x) * 4];
-            p[0] = uint8_t(x * 255 / (w - 1));
-            p[1] = uint8_t(y * 255 / (h - 1));
-            p[2] = uint8_t(((x / 32 + y / 32) & 1) ? 200 : 60);
-            p[3] = 255;
-        }
+    const std::vector<uint8_t> input = gradient(w, h, 200, 60);
+    std::vector<uint8_t> output(input.size()), first;
     for (unsigned run = 0; run < o.self_test_runs; ++run) {
         DLSSLOP_TRY(engine.infer({input.data(), output.data()}, w, h, passes));
         if (!run) first = output;
@@ -55,14 +63,8 @@ Result<void> run_self_test(const Options& o, HipEngine& engine)
 {
     const unsigned passes = o.passes.value_or(kNativeDefaultPasses);
     constexpr unsigned w = 640, h = 360;
-    std::vector<uint8_t> input(size_t(w) * h * 4), output(input.size());
-    for (unsigned y = 0; y < h; ++y) for (unsigned x = 0; x < w; ++x) {
-        const size_t p = (size_t(y) * w + x) * 4;
-        input[p] = static_cast<uint8_t>(x * 255 / (w - 1));
-        input[p + 1] = static_cast<uint8_t>(y * 255 / (h - 1));
-        input[p + 2] = static_cast<uint8_t>((((x / 32) ^ (y / 32)) & 1) ? 192 : 64);
-        input[p + 3] = 255;
-    }
+    const std::vector<uint8_t> input = gradient(w, h, 192, 64);
+    std::vector<uint8_t> output(input.size());
     const unsigned repeats = o.self_test_runs;
     const auto g = DLSSLOP_TRY(dlsslop::geometry(w, h, engine.tier()));
     std::vector<float> first_raw;

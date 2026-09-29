@@ -2,7 +2,6 @@
 #include "hip_engine.h"
 #include "codec.h"
 #include "control_selftest.h"
-#include "tuning.h"
 
 #include <algorithm>
 #include <cstdio>

@@ -38,9 +38,7 @@ struct Failure {
 
 [[nodiscard]] inline Failure<const char*> fail(const char* what) { return {what, false}; }
 [[nodiscard]] inline Failure<std::string&&> fail(std::string&& what) { return {std::move(what), false}; }
-[[nodiscard]] inline Failure<const std::string&> fail(const std::string& what) { return {what, false}; }
 [[nodiscard]] inline Failure<const char*> reject(const char* what) { return {what, true}; }
-[[nodiscard]] inline Failure<std::string&&> reject(std::string&& what) { return {std::move(what), true}; }
 // ACTION: strerror(errno).
 [[nodiscard, gnu::cold, gnu::noinline]] inline Failure<std::string> fail_errno(const char* action)
 {
