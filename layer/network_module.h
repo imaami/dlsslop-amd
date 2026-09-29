@@ -28,7 +28,8 @@ struct DlsslopNetworkDevice {
     void (*lockQueue)(void* context);
     void (*unlockQueue)(void* context);
     void* context;
-    // The next layer's, for physical-device queries through the layer's handles.
+    // The next layer's, for physical-device queries through the layer's
+    // handles. The module looks up its functions only in open().
     PFN_vkGetInstanceProcAddr physicalDispatch;
     VkPhysicalDeviceMemoryProperties memory;
     // Where the network's own log lines go.

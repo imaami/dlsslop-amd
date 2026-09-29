@@ -27,6 +27,8 @@ void remove_directory()
     std::filesystem::remove_all(directory, ignored);
 }
 
+PFN_vkVoidFunction VKAPI_PTR no_functions(VkInstance, const char*) { return nullptr; }
+
 void require(bool value, const char* message)
 {
     if (value) return;
@@ -42,6 +44,7 @@ std::string failure_with(const dlssnr::NetworkModule& module, const ShmHeader* h
     std::FILE* file = std::fopen(config.c_str(), "w");
     require(file && std::fputs(text.c_str(), file) >= 0 && !std::fclose(file), "cannot write the config file");
     DlsslopNetworkDevice device{};
+    device.physicalDispatch = no_functions;
     DlsslopNetwork* network = module.open(&device);
     require(network, "the module did not open");
     const bool failed = module.prepare(network, header, 1280, 720, 0) == kDlsslopNetworkFailed;
@@ -64,6 +67,7 @@ int main(int argc, char** argv)
     setenv("XDG_CONFIG_HOME", directory, 1);
     // No device: nothing here reaches Vulkan.
     DlsslopNetworkDevice device{};
+    device.physicalDispatch = no_functions;
     DlsslopNetwork* network = module.open(&device);
     require(network, "the module did not open");
     void* memory = mmap(nullptr, kHeaderBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);

@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <iterator>
 #include <new>
 #include <pthread.h>
 #include <string>
@@ -30,6 +31,32 @@ dlsslop::VulkanPaths module_paths(const std::string& model)
             dlsslop::vulkan_cache()};
 }
 
+// The physical-device functions vulkan-nr looks up while it builds. The network resolves them
+// when it opens. A lookup on the build thread goes through the loader, which takes the loader's
+// lock, and vkDestroyDevice holds that lock while the layer waits for the build to end.
+constexpr const char* kPhysicalFunctions[] = {
+    "vkGetPhysicalDeviceFeatures2",
+    "vkGetPhysicalDeviceProperties",
+    "vkGetPhysicalDeviceProperties2",
+    "vkGetPhysicalDeviceMemoryProperties",
+    "vkGetPhysicalDeviceQueueFamilyProperties",
+    "vkGetPhysicalDeviceFormatProperties",
+    "vkGetPhysicalDeviceFormatProperties2",
+    "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR",
+};
+
+// The build thread's resolved functions, in kPhysicalFunctions order.
+thread_local const PFN_vkVoidFunction* t_physical = nullptr;
+
+// vulkan-nr's physical_dispatch on the build thread: a resolved function, or null for a name
+// outside kPhysicalFunctions, which fails the build with that name.
+PFN_vkVoidFunction VKAPI_PTR physical_dispatch(VkInstance, const char* name)
+{
+    for (size_t i = 0; i < std::size(kPhysicalFunctions); ++i)
+        if (!std::strcmp(name, kPhysicalFunctions[i])) return t_physical[i];
+    return nullptr;
+}
+
 nr::HostDevice host_device(const DlsslopNetworkDevice& d)
 {
     nr::HostDevice host;
@@ -38,7 +65,7 @@ nr::HostDevice host_device(const DlsslopNetworkDevice& d)
     host.device = d.device;
     host.queue = d.queue;
     host.queue_family = d.family;
-    host.physical_dispatch = d.physicalDispatch;
+    host.physical_dispatch = physical_dispatch;
     host.queue_lock = [lock = d.lockQueue, context = d.context] { lock(context); };
     host.queue_unlock = [unlock = d.unlockQueue, context = d.context] { unlock(context); };
     return host;
@@ -49,6 +76,7 @@ struct DlsslopNetwork {
     // The model dlsslopd loads, as its config file names it; or why that is unknown, which fails
     // the network.
     dlsslop::Result<std::string> model;
+    PFN_vkVoidFunction physical[std::size(kPhysicalFunctions)];
     NetworkRecorder recorder;
     dlsslop::VulkanFrame prepared;
     // A build in the background: its frame, and whether it still runs. The
@@ -64,6 +92,8 @@ struct DlsslopNetwork {
         : model(dlsslop::configured_vulkan_model()),
           recorder(host_device(d), d.memory, module_paths(model.value_or(std::string())))
     {
+        for (size_t i = 0; i < std::size(kPhysicalFunctions); ++i)
+            physical[i] = d.physicalDispatch(d.instance, kPhysicalFunctions[i]);
         if (!model) fail(model.error().what);
     }
 
@@ -78,6 +108,7 @@ struct DlsslopNetwork {
     static void* build(void* self)
     {
         auto& n = *static_cast<DlsslopNetwork*>(self);
+        t_physical = n.physical;
         if (auto built = n.recorder.shape(n.target); !built) n.fail(std::move(built).error().what);
         n.building.store(false, std::memory_order_release);
         return nullptr;
