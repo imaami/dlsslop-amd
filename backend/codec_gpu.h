@@ -14,7 +14,9 @@ class GpuCodec {
     const NativeKernels& kernels_;
     const hip::Api& api_;
     const hip::Handle stream_;
-    void* proxy_ = nullptr;
+    void* proxy_ = nullptr;        // A host frame's upload, which decode overwrites before its readback.
+    const void* source_ = nullptr; // The latest encode's proxy: proxy_, or the caller's device frame.
+    bool device_ = false;          // The latest encode's frames are the caller's device memory.
     std::uint32_t* invalid_ = nullptr; // Pinned host status word; kernels only ever store 1.
     std::size_t capacity_ = 0;
     bool pinning_ = api_.hipHostRegister && api_.hipHostUnregister;
@@ -88,29 +90,34 @@ public:
     // The caller keeps the HIP device current and the network's stream alive
     // and idle here: a frame ends before encode or after finish(). Upload and
     // encode are queued on the inference stream; input must stay unchanged
-    // until the stream reaches them (pageable input is staged). Input and
-    // decode's output may be host memory or imported device frames: the
-    // copies infer their direction.
-    Result<void> encode(const std::uint8_t* input, const Geometry& g, void* device_rgba, bool fp16 = false)
+    // until decode is done (pageable input is staged). Input and decode's
+    // output are host memory, copied through the codec's own proxy, or with
+    // DEVICE the caller's device frames, which the kernels read and write.
+    Result<void> encode(const std::uint8_t* input, const Geometry& g, void* device_rgba, bool fp16, bool device = false)
     {
         DLSSLOP_TRY(validate(g));
         if (!device_rgba) return fail("null GPU encode output");
         format_ = &kFormats[fp16];
-        const std::size_t bytes = std::size_t(g.source_width) * g.source_height * format_->bytes;
-        DLSSLOP_TRY(reserve(bytes));
-        DLSSLOP_TRY(api_.check(api_.hipMemcpyAsync(proxy_, input, bytes, 4, stream_), "upload codec proxy"));
+        source_ = input;
+        device_ = device;
+        if (!device) {
+            const std::size_t bytes = std::size_t(g.source_width) * g.source_height * format_->bytes;
+            DLSSLOP_TRY(reserve(bytes));
+            DLSSLOP_TRY(api_.check(api_.hipMemcpyAsync(proxy_, input, bytes, 1, stream_), "upload codec proxy"));
+            source_ = proxy_;
+        }
         *invalid_ = 0;
         uploaded_ = g;
-        void* args[] = {&proxy_, &device_rgba, &invalid_, &uploaded_};
+        void* args[] = {&source_, &device_rgba, &invalid_, &uploaded_};
         return kernels_.launch(format_->encode, g.width * g.height, args);
     }
 
     // A subsequent pass consumes the preceding raw RGB output at the latest
     // encode's neural extent, without a host round-trip or an RGBA8 conversion.
     // Buffers must be distinct. Invalid samples remain recorded until final decode.
-    Result<void> feedback(void* neural_rgb, void* device_rgba, bool precision16 = true)
+    Result<void> feedback(void* neural_rgb, void* device_rgba, bool precision16)
     {
-        if (!proxy_ || !neural_rgb || !device_rgba || neural_rgb == device_rgba)
+        if (!source_ || !neural_rgb || !device_rgba || neural_rgb == device_rgba)
             return fail("GPU feedback without an encode or distinct buffers");
         std::uint32_t precision = precision16 ? 1 : 0;
         void* args[] = {&neural_rgb, &device_rgba, &invalid_, &uploaded_, &precision};
@@ -118,15 +125,18 @@ public:
     }
 
     // decode belongs to the latest encode. Both execute on the network stream;
-    // output holds the proxy-sized answer once finish() returns. The answer's
-    // RGB overwrites the uploaded proxy in place; its alpha passes through.
+    // output holds the proxy-sized answer once finish() returns: the answer's
+    // RGB with the proxy's alpha. A host frame's is written over the upload,
+    // then read back.
     Result<void> decode(void* neural_rgb, std::uint8_t* output)
     {
-        if (!proxy_ || !neural_rgb) return fail("GPU decode without an encode");
+        if (!source_ || !neural_rgb) return fail("GPU decode without an encode");
         const unsigned pixels = uploaded_.source_width * uploaded_.source_height;
-        void* args[] = {&proxy_, &neural_rgb, &invalid_, &uploaded_};
+        void* target = device_ ? output : proxy_;
+        void* args[] = {&source_, &target, &neural_rgb, &invalid_, &uploaded_};
         DLSSLOP_TRY(kernels_.launch(format_->decode, pixels, args));
-        return api_.check(api_.hipMemcpyAsync(output, proxy_, std::size_t(pixels) * format_->bytes, 4, stream_),
+        if (device_) return {};
+        return api_.check(api_.hipMemcpyAsync(output, proxy_, std::size_t(pixels) * format_->bytes, 2, stream_),
                           "read codec proxy");
     }
 

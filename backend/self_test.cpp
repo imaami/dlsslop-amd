@@ -70,7 +70,7 @@ Result<void> run_self_test(const Options& o, HipEngine& engine)
     // Only the first run checks the codec against the CPU reference, so the
     // later runs time the production path; each must reproduce the first.
     for (unsigned run = 0; run < repeats; ++run) {
-        DLSSLOP_TRY(engine.infer(input.data(), w, h, output.data(), passes, {}, nullptr, !run));
+        DLSSLOP_TRY(engine.infer({input.data(), output.data()}, w, h, passes, {}, nullptr, !run));
         const auto& raw = *DLSSLOP_TRY(engine.raw_result());
         if (!run) {
             first_raw = raw;

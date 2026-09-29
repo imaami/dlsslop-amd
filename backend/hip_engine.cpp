@@ -154,9 +154,11 @@ Result<void> HipEngine::trace_image(FrameTrace* trace, const Geometry& g, unsign
     return {};
 }
 
-Result<void> HipEngine::infer(const uint8_t* input, unsigned w, unsigned h, uint8_t* output, unsigned passes,
+Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned passes,
                               const ProcessingSettings& settings, FrameTrace* trace, bool verify)
 {
+    const uint8_t* const input = io.proxy;
+    uint8_t* const output = io.answer;
     if (passes > 1 || options_.self_test || settings.motion) {
         // The optional upstream approximate cache has one history, not
         // one history per pass. Do not silently mix those states.
@@ -181,7 +183,7 @@ Result<void> HipEngine::infer(const uint8_t* input, unsigned w, unsigned h, uint
                                "allocate inter-pass feedback"));
     DLSSLOP_TRY(mark(0));
     if (gpu_codec_) {
-        DLSSLOP_TRY(gpu_codec_->encode(input, g, device_input_, settings.fp16));
+        DLSSLOP_TRY(gpu_codec_->encode(input, g, device_input_, settings.fp16, io.slot >= 0));
         if (verify) {
             std::vector<float> reference;
             DLSSLOP_TRY(encode_proxy(input, g, settings.fp16, reference));
@@ -287,7 +289,8 @@ Result<void> HipEngine::infer(const uint8_t* input, unsigned w, unsigned h, uint
         DLSSLOP_TRY(mark(3));
     }
     previous_settings_ = settings;
-    DLSSLOP_TRY(api_.check(api_.hipEventSynchronize(marks_[3]), "timing event completion"));
+    // finish() waited for the GPU codec's stream already.
+    if (!gpu_codec_) DLSSLOP_TRY(api_.check(api_.hipEventSynchronize(marks_[3]), "timing event completion"));
     DLSSLOP_TRY(api_.check(api_.hipEventElapsedTime(&upload_ms, marks_[0], marks_[1]), "upload interval"));
     DLSSLOP_TRY(api_.check(api_.hipEventElapsedTime(&inference_ms, marks_[1], marks_[2]), "inference interval"));
     return api_.check(api_.hipEventElapsedTime(&readback_ms, marks_[2], marks_[3]), "readback interval");

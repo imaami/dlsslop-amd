@@ -132,26 +132,27 @@ DEV Rgb answer(const float* __restrict__ neural_rgb, Geometry g, uint pixel, uin
                                  g, pixel % g.source_width, pixel / g.source_width), invalid);
 }
 
-// Decode replaces RGB in the uploaded proxy and keeps its alpha. Each pixel is
-// one whole-word read-modify-write: a partial-word store makes the readback slower.
-KERNEL void dlsslop_decode_rgba8(uint* __restrict__ proxy, const float* __restrict__ neural_rgb,
+// Decode writes the answer's RGB with the proxy's alpha into target, which may
+// be the proxy itself. Each pixel is one whole-word store: a partial-word store
+// makes the readback slower.
+KERNEL void dlsslop_decode_rgba8(const uint* proxy, uint* target, const float* __restrict__ neural_rgb,
                               uint* __restrict__ invalid, Geometry g)
 {
     const uint pixel = thread_index();
     if (pixel >= g.source_width * g.source_height)
         return;
     const Rgb c = answer(neural_rgb, g, pixel, invalid);
-    proxy[pixel] = (proxy[pixel] & 0xff000000u) | dlsslop::unorm8(c.r) | uint(dlsslop::unorm8(c.g)) << 8 |
-                   uint(dlsslop::unorm8(c.b)) << 16;
+    target[pixel] = (proxy[pixel] & 0xff000000u) | dlsslop::unorm8(c.r) | uint(dlsslop::unorm8(c.g)) << 8 |
+                    uint(dlsslop::unorm8(c.b)) << 16;
 }
 
-KERNEL void dlsslop_decode_rgba16f(unsigned long long* __restrict__ proxy, const float* __restrict__ neural_rgb,
-                                uint* __restrict__ invalid, Geometry g)
+KERNEL void dlsslop_decode_rgba16f(const unsigned long long* proxy, unsigned long long* target,
+                                const float* __restrict__ neural_rgb, uint* __restrict__ invalid, Geometry g)
 {
     const uint pixel = thread_index();
     if (pixel >= g.source_width * g.source_height)
         return;
     const Rgb c = answer(neural_rgb, g, pixel, invalid);
-    proxy[pixel] = (proxy[pixel] & 0xffff000000000000ull) | dlsslop_pack_binary16(c.r) |
-                   uint(dlsslop_pack_binary16(c.g)) << 16 | (unsigned long long)dlsslop_pack_binary16(c.b) << 32;
+    target[pixel] = (proxy[pixel] & 0xffff000000000000ull) | dlsslop_pack_binary16(c.r) |
+                    uint(dlsslop_pack_binary16(c.g)) << 16 | (unsigned long long)dlsslop_pack_binary16(c.b) << 32;
 }

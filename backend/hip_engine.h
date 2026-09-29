@@ -98,16 +98,12 @@ public:
     {
         return api_.check(api_.hipMemcpy(host, source, bytes, 4), "read diagnostic frame");
     }
-    Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
-                       FrameTrace* trace = nullptr)
-    {
-        return infer(io.proxy, w, h, io.answer, passes, settings, trace);
-    }
     Result<void> self_test(const Options& o) { return run_self_test(o, *this); }
-    // Input and output are w * h RGBA8, or RGBA16F with settings.fp16. verify
-    // checks the GPU codec against the CPU reference inside the timed frame.
-    Result<void> infer(const uint8_t* input, unsigned w, unsigned h, uint8_t* output, unsigned passes,
-                       const ProcessingSettings& settings = {}, FrameTrace* trace = nullptr, bool verify = false);
+    // Proxy and answer are w * h RGBA8, or RGBA16F with settings.fp16: host
+    // memory, or an import slot's device frames. verify checks the GPU codec
+    // of host frames against the CPU reference inside the timed frame.
+    Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
+                       FrameTrace* trace = nullptr, bool verify = false);
     // The latest infer()'s raw network answer, read back outside its timing.
     Result<const std::vector<float>*> raw_result();
 };
