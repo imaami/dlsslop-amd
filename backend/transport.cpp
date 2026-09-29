@@ -42,6 +42,7 @@ Result<TransportListener> TransportListener::open(const std::string& channel, bo
         if (listener.bound && !listen(listener.socket.fd, 4)) return listener;
     }
     std::fprintf(stderr, "device-local transport unavailable (%s): %s\n", path.c_str(), std::strerror(errno));
+    listener.socket = Descriptor(); // Nothing to accept on.
     return listener;
 }
 

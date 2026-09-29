@@ -40,6 +40,7 @@ bool receive_offer(int peer, ShmTransportOffer& offer, dlsslop::Descriptor (&fds
 template <class E>
 void accept_offers(const TransportListener& listener, E& engine)
 {
+    if (listener.socket.fd < 0) return;
     for (int peer; (peer = accept4(listener.socket.fd, nullptr, nullptr, SOCK_CLOEXEC)) >= 0; close(peer)) {
         ShmTransportOffer offer{};
         Descriptor fds[2];
