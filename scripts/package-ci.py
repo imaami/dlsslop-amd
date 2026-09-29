@@ -50,9 +50,9 @@ def package(root, build, output, source_url):
         "dlsslop-amd corresponding source\n"
         "==============================\n\n"
         f"Exact source for this release: {source_url}\n\n"
-        "This source includes the integration code, patches, dependency pins and\n"
-        "build instructions. The pinned dependencies are available through the\n"
-        "upstream URLs recorded in upstreams.lock.json at that revision. See\n"
+        "This source includes the integration code, dependency pins and build\n"
+        "instructions. The pinned dependencies are available through the\n"
+        "repository URLs recorded in upstreams.lock.json at that revision. See\n"
         "THIRD-PARTY.txt and the accompanying licenses for component attribution.\n"
         "Model weights are a separate dependency and are not included.\n"))
     # The archive root is the installation prefix. It holds no directory
