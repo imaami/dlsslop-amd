@@ -1,0 +1,15 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// Ported to GLSL in 2026 from OptiScaler/shaders/output_scaling/precompile/bcds_catmull.hlsl
+// in OptiScaler (GPL-3.0; see PROVENANCE.md).
+
+#include "bcds.glsl"
+
+// Catmull-Rom = Keys bicubic with A = -0.5
+const float A = -0.5;
+
+// Subtracted from dst * scale to give srcPos.
+// Upstream uses 0.45 here where bcds_bicubic uses 0.5.
+const float SRC_OFFSET = 0.45;
+
+#include "bcds_cubic.glsl"

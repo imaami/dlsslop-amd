@@ -19,22 +19,28 @@ final fallback. This distinction follows the origin of each identifier,
 including local additions and inherited interfaces in the same patched source
 file.
 
-Upstream repository names, URLs, authorship, source filenames and attribution
-remain unchanged, as do references to NVIDIA DLSS and OptiScaler_DLSSNR.
+Upstream repository names, URLs, authorship, source filenames (except the GLSL
+ports in `layer/scaling/`) and attribution remain unchanged, as do references
+to NVIDIA DLSS and OptiScaler_DLSSNR.
 
-`.gitmodules` declares these repositories. Three are dlsslop-amd's forks: each
-fork's `dlsslop-amd` branch holds the Linux integration as commits on top of the
-upstream commit listed below. OptiScaler is used unchanged from upstream.
-`upstreams.lock.json` records the pinned commits and the files fetched from each
-repository; the build uses them in place under `external/`. The parent
-repository stores no upstream code.
+`.gitmodules` declares dlsslop-amd's forks of three repositories: each fork's
+`dlsslop-amd` branch holds the Linux integration as commits on top of the
+upstream commit listed below. `upstreams.lock.json` records the pinned commits
+and the files fetched from each repository; the build uses them in place under
+`external/`.
 
 | Component | Upstream and base commit | Fork and pinned commit | License |
 |---|---|---|---|
 | Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) `ab722b091071d6d59df56f10d86d4f3005bcad86` | [imaami/DLSS5VKLayer](https://github.com/imaami/DLSS5VKLayer/tree/dlsslop-amd) `125debdc8e9e5227f5dc4d800cb17d2773487e14` | AGPL-3.0; embedded dependencies keep their notices |
 | Vulkan network runtime, SPIR-V sources and model extractor | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) `743326d15f56c93ca757b18ca4d6b0d81d654113` | [imaami/DLSSNR-AMD](https://github.com/imaami/DLSSNR-AMD/tree/dlsslop-amd) `3dfdddc7c06b888685c8be4275d1eb5e8edc7334` | MIT |
 | AMD neural scheduler and HIP kernels | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) `ad499a8199c9ce3678d83c9be58fe3bc1bef3498` | [imaami/dlss5-on-amd-9070xt-porting](https://github.com/imaami/dlss5-on-amd-9070xt-porting/tree/dlsslop-amd) `c1908317fb7e7ee9fe4884feba4a67220d93461f` | MIT |
-| Eight scaling shader sources | [optiscaler/OptiScaler](https://github.com/optiscaler/OptiScaler) `fb41e3e6361ca9ae55b30a821a40c2b4b346f330` | none | GPL-3.0; individual files retain additional notices |
+
+The eight scaling filters in `layer/scaling/` are GLSL ports of
+`OptiScaler/shaders/output_scaling/precompile/*.hlsl` from
+[optiscaler/OptiScaler](https://github.com/optiscaler/OptiScaler) at
+`fb41e3e6361ca9ae55b30a821a40c2b4b346f330` (GPL-3.0; the text is
+`external/layer/third_party/optiscaler/LICENSE`). `bcus.comp` also keeps the
+Microsoft MiniEngine MIT notice of its original.
 
 The layer fork adapts Linux loading and transport and extends controls and
 composition. In the AMD fork, `hip_api.h` loads the Linux HIP runtime

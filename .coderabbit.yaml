@@ -40,14 +40,21 @@ reviews:
     - path: "external/**"
       instructions: >-
         Submodules: dlsslop-amd's forks of the layer and both networks
-        (their dlsslop-amd branches) and OptiScaler, pinned in
-        upstreams.lock.json. A PR changes only their pinned commits;
-        review the fork commits a pin moves to, not the surrounding
-        upstream code. Upstream lines change only for a real bug that
+        (their dlsslop-amd branches), pinned in upstreams.lock.json. A
+        PR changes only their pinned commits; review the fork commits a
+        pin moves to, not the surrounding upstream code. Upstream lines change only for a real bug that
         cannot be fixed otherwise or a significant performance gain;
         upstream names and contracts are preserved. Never suggest
         restyling upstream or vendored code, including the densely
         formatted vendored HIP network.
+    - path: "layer/scaling/**"
+      instructions: >-
+        GLSL ports of OptiScaler's scaling HLSL, bit-identical in RGB to
+        the DXC-built originals (bcus writes alpha 1.0 where its original
+        left alpha undefined). The arithmetic follows DXC's folded forms,
+        documented beside each upstream expression; upstream names and
+        quirks are kept on purpose. A change that alters output must say
+        so.
     - path: "gui/**"
       instructions: >-
         Qt 6 Widgets controller; Qt stays at this boundary. The
@@ -94,8 +101,9 @@ reviews:
         exception to the AGENTS.md shell rule.
     - path: "**/CMakeLists.txt"
       instructions: >-
-        Shader headers and SPIR-V are generated from the submodule
-        sources with DXC and glslangValidator and are never committed;
+        Shader headers and SPIR-V are generated at build time from the
+        submodule sources and layer/scaling/ with DXC, glslangValidator
+        and cmake/spirv-header.cmake and are never committed;
         do not suggest committing them.
   tools:
     # clang-tidy's default checks (readability-identifier-length,

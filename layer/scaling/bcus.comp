@@ -1,0 +1,167 @@
+//
+// Copyright (c) Microsoft. All rights reserved.
+// This code is licensed under the MIT License (MIT).
+// THIS CODE IS PROVIDED *AS IS* WITHOUT WARRANTY OF
+// ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING ANY
+// IMPLIED WARRANTIES OF FITNESS FOR A PARTICULAR
+// PURPOSE, MERCHANTABILITY, OR NON-INFRINGEMENT.
+//
+// Developed by Minigraph
+//
+// Author(s):  James Stanard
+//
+// Ported to GLSL in 2026 from OptiScaler/shaders/output_scaling/precompile/bcus.hlsl in
+// OptiScaler, whose changes to the MiniEngine original are GPL-3.0 (see PROVENANCE.md).
+
+#version 450
+#extension GL_EXT_samplerless_texture_functions : require
+
+layout(set = 0, binding = 1) uniform texture2D Source;
+
+// Formatless: the layer enables shaderStorageImageWriteWithoutFormat.
+layout(set = 0, binding = 2) uniform writeonly image2D Dest;
+
+layout(set = 0, binding = 0) uniform Params
+{
+    int _SrcWidth;
+    int _SrcHeight;
+    int _DstWidth;
+    int _DstHeight;
+};
+
+#define TILE_DIM_X 16
+#define TILE_DIM_Y 16
+
+#define GROUP_COUNT (TILE_DIM_X * TILE_DIM_Y)
+
+#define SAMPLES_X (TILE_DIM_X + 3)
+#define SAMPLES_Y (TILE_DIM_Y + 3)
+
+#define TOTAL_SAMPLES (SAMPLES_X * SAMPLES_Y)
+
+// De-interleaved to avoid LDS bank conflicts
+shared float g_R[TOTAL_SAMPLES];
+shared float g_G[TOTAL_SAMPLES];
+shared float g_B[TOTAL_SAMPLES];
+
+vec4 GetBicubicFilterWeights(float offset, float A)
+{
+    // Precompute weights for 16 discrete offsets
+    //
+    // Upstream initializes entry k with ComputeWeights((k + 0.5) / 16.0, -0.5), where
+    // ComputeWeights(d1, A) = (W2(1 + d1), W1(d1), W1(1 - d1), W2(2 - d1)),
+    // W1(x) = x * x * ((A + 2) * x - (A + 3)) + 1 and W2(x) = A * (x * (x * (x - 5) + 8) - 4).
+    // These are the values DXC folded those calls to. No step of W1 or W2 rounds for these
+    // arguments: d1 is an odd multiple of 1/32, so every intermediate is a multiple of 2^-16
+    // below 8 in magnitude, and float32 evaluation in source order gives exactly these bits.
+    const vec4 FilterWeights[16] =
+    {
+        vec4(-0.0146636962890625, 0.9976043701171875, 0.0175323486328125, -0.0004730224609375),
+        vec4(-0.0384979248046875, 0.9792633056640625, 0.0632171630859375, -0.0039825439453125),
+        vec4(-0.0556182861328125, 0.9446868896484375, 0.1212310791015625, -0.0102996826171875),
+        vec4(-0.0667572021484375, 0.8960723876953125, 0.1893768310546875, -0.0186920166015625),
+        vec4(-0.0726470947265625, 0.8356170654296875, 0.2654571533203125, -0.0284271240234375),
+        vec4(-0.0740203857421875, 0.7655181884765625, 0.3472747802734375, -0.0387725830078125),
+        vec4(-0.0716094970703125, 0.6879730224609375, 0.4326324462890625, -0.0489959716796875),
+        vec4(-0.0661468505859375, 0.6051788330078125, 0.5193328857421875, -0.0583648681640625),
+        vec4(-0.0583648681640625, 0.5193328857421875, 0.6051788330078125, -0.0661468505859375),
+        vec4(-0.0489959716796875, 0.4326324462890625, 0.6879730224609375, -0.0716094970703125),
+        vec4(-0.0387725830078125, 0.3472747802734375, 0.7655181884765625, -0.0740203857421875),
+        vec4(-0.0284271240234375, 0.2654571533203125, 0.8356170654296875, -0.0726470947265625),
+        vec4(-0.0186920166015625, 0.1893768310546875, 0.8960723876953125, -0.0667572021484375),
+        vec4(-0.0102996826171875, 0.1212310791015625, 0.9446868896484375, -0.0556182861328125),
+        vec4(-0.0039825439453125, 0.0632171630859375, 0.9792633056640625, -0.0384979248046875),
+        vec4(-0.0004730224609375, 0.0175323486328125, 0.9976043701171875, -0.0146636962890625)
+    };
+
+    return FilterWeights[uint(offset * 16.0)];
+}
+
+// Store pixel to LDS (local data store)
+void StoreLDS(uint LdsIdx, vec3 rgb)
+{
+    g_R[LdsIdx] = rgb.r;
+    g_G[LdsIdx] = rgb.g;
+    g_B[LdsIdx] = rgb.b;
+}
+
+// Load four pixel samples from LDS.  Stride determines horizontal or vertical groups.
+//
+// Upstream's float3x4 has the R, G and B groups as rows; a GLSL mat3x4 takes the same twelve
+// values as columns, so weights * LoadSamples(...) is upstream's mul(LoadSamples(...), weights).
+mat3x4 LoadSamples(uint idx, uint Stride)
+{
+    uint i0 = idx, i1 = idx + Stride, i2 = idx + 2 * Stride, i3 = idx + 3 * Stride;
+    return mat3x4(
+        g_R[i0], g_R[i1], g_R[i2], g_R[i3],
+        g_G[i0], g_G[i1], g_G[i2], g_G[i3],
+        g_B[i0], g_B[i1], g_B[i2], g_B[i3]);
+}
+
+layout(local_size_x = TILE_DIM_X, local_size_y = TILE_DIM_Y, local_size_z = 1) in;
+void main()
+{
+    uvec3 DTid = gl_GlobalInvocationID;
+    uvec3 GTid = gl_LocalInvocationID;
+    uvec3 Gid = gl_WorkGroupID;
+    uint GI = gl_LocalInvocationIndex;
+
+    float scaleX = float(_SrcWidth) / float(_DstWidth);
+    float scaleY = float(_SrcHeight) / float(_DstHeight);
+    const vec2 kRcpScale = vec2(scaleX, scaleY);
+    const float kA = 0.3;
+
+    // Number of samples needed from the source buffer to generate the output tile dimensions.
+    const uvec2 SampleSpace = uvec2(ceil(vec2(TILE_DIM_X, TILE_DIM_Y) * kRcpScale + 3.0));
+
+    // Pre-Load source pixels
+    ivec2 UpperLeft = ivec2(floor((vec2(Gid.xy * uvec2(TILE_DIM_X, TILE_DIM_Y)) + 0.5) * kRcpScale - 1.5));
+
+    for (uint i = GI; i < TOTAL_SAMPLES; i += GROUP_COUNT)
+        StoreLDS(i, texelFetch(Source, UpperLeft + ivec2(i % SAMPLES_X, i / SAMPLES_Y), 0).rgb);
+
+    barrier();
+
+    // The coordinate of the top-left sample from the 4x4 kernel (offset by -0.5
+    // so that whole numbers land on a pixel center.)  This is in source texture space.
+    vec2 TopLeftSample = (vec2(DTid.xy) + 0.5) * kRcpScale - 1.5;
+
+    // Position of samples relative to pixels used to evaluate the Sinc function.
+    vec2 Phase = fract(TopLeftSample);
+
+    // LDS tile coordinate for the top-left sample (for this thread)
+    uvec2 TileST = uvec2(ivec2(floor(TopLeftSample)) - UpperLeft);
+
+    // Convolution weights, one per sample (in each dimension)
+    vec4 xWeights = GetBicubicFilterWeights(Phase.x, kA);
+    vec4 yWeights = GetBicubicFilterWeights(Phase.y, kA);
+
+    // Horizontally convolve the first N rows
+    uint ReadIdx = TileST.x + GTid.y * SAMPLES_X;
+
+    uint WriteIdx = GTid.x + GTid.y * SAMPLES_X;
+    StoreLDS(WriteIdx, xWeights * LoadSamples(ReadIdx, 1));
+
+    // If the source tile plus border is larger than the destination tile, we
+    // have to convolve a few more rows.
+    if (GI + GROUP_COUNT < SampleSpace.y * TILE_DIM_X)
+    {
+        ReadIdx += TILE_DIM_Y * SAMPLES_X;
+        WriteIdx += TILE_DIM_Y * SAMPLES_X;
+        StoreLDS(WriteIdx, xWeights * LoadSamples(ReadIdx, 1));
+    }
+
+    barrier();
+
+    // Convolve vertically N columns
+    ReadIdx = GTid.x + TileST.y * SAMPLES_X;
+    vec3 Result = yWeights * LoadSamples(ReadIdx, SAMPLES_X);
+
+    // Transform to display settings
+    // Result = RemoveDisplayProfile(Result, LDR_COLOR_FORMAT);
+    // Dest[DTid.xy] = ApplyDisplayProfile(Result, DISPLAY_PLANE_FORMAT);
+    //
+    // Upstream writes the three channels of Result to the four-channel view. imageStore takes a
+    // vec4, so alpha is written as 1.0.
+    imageStore(Dest, ivec2(DTid.xy), vec4(Result, 1.0));
+}

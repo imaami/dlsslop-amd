@@ -1,0 +1,18 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// Ported to GLSL in 2026 from OptiScaler/shaders/output_scaling/precompile/bcds_lanczos2.hlsl
+// in OptiScaler (GPL-3.0; see PROVENANCE.md).
+
+#include "bcds.glsl"
+
+// Set a=2 for Lanczos2, a=3 for Lanczos3 (but then you need 6x6 or bigger).
+const float A_LANCZOS = 2.0;
+const int TAP_COUNT = 4;
+const int RADIUS = 2;
+
+// DXC's factor for Sinc(x / A_LANCZOS): x / 2.0 became x * 0.5, and
+// 0.5 * 3.14159274 (3.1415926535 as float) is 1.57079637 (0x3fc90fdb).
+// Recompute it when changing A_LANCZOS.
+const float PI_OVER_A = 1.5707963705062866;
+
+#include "bcds_window.glsl"

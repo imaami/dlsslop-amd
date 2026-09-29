@@ -1,0 +1,28 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// Ported to GLSL in 2026 from OptiScaler/shaders/output_scaling/precompile/bcds_kaiser3.hlsl
+// in OptiScaler (GPL-3.0; see PROVENANCE.md).
+
+#include "bcds.glsl"
+
+#define KAISER
+
+// Radius 3 => taps at {-2,-1,0,1,2,3} (6 taps) around ip
+const float A_KAISER = 3.0;
+const int TAP_COUNT = 6;
+const int RADIUS = 3;
+
+// Good starting point for radius-3 Kaiser in post-TAA pipelines.
+const float BETA = 6.0;
+
+// DXC's constants for A_KAISER and BETA, each rounded to float per step.
+// Recompute them when changing A_KAISER or BETA.
+// 1 / 3.0 = 0.333333343; squared 0.111111119 (0x3de38e3a).
+const float INV_A_SQUARED = 0.111111119389534;
+// 1 / 3.75 = 0.266666681; BETA * 0.266666681 = 1.60000008 exactly halfway,
+// rounds to even 1.60000014; squared 2.56000042 (0x4023d70c).
+const float I0_T2_SCALE = 2.560000419616699;
+// I0_T2_SCALE * 0.0045813 = 0.0117281303 (0x3c402758).
+const float I0_C6_SCALED = 0.011728130280971527;
+
+#include "bcds_window.glsl"

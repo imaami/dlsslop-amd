@@ -55,6 +55,9 @@ fetched sources in place under `external/`.
 A checkout prepared before the forks needs `git submodule sync` once, so that
 the fetch uses the forks, and the generated `upstream-layer/`, `kernels/`,
 `backend/vendor/`, `vulkan-nr/` and `.prepared-sources.json` can be deleted.
+The OptiScaler submodule is gone too: `external/optiscaler/` and
+`.git/modules/optiscaler/` can be deleted, and
+`git config --remove-section submodule.optiscaler` removes its settings.
 Pins and fetched paths are in `upstreams.lock.json`; attribution is in
 [PROVENANCE.md](PROVENANCE.md).
 
@@ -88,8 +91,9 @@ This compiles and validates ten Vulkan shaders, compiles the Vulkan network's
 SPIR-V with `glslang` and the `gfx1201` HIP modules (the HIP network's and
 `linux_native`, its codec, tuning, color and motion kernels), and builds the
 daemon, layer, CLI, Qt GUI and tests.
-CMake builds the shaders from their submodule sources; `-DDXC` defaults to `dxc`
-on `PATH`.
+CMake compiles the layer's `dlssnr.hlsl` with DXC and its other shaders,
+including the GLSL scaling filters in `layer/scaling/`, with glslang; `-DDXC`
+defaults to `dxc` on `PATH`.
 Compilation does not require a GPU, ROCm runtime or model weights. Qt uses the
 distribution's shared Qt 6 libraries; the worker and layer have no Qt dependency.
 For an independent GUI build, see [gui/README.md](gui/README.md).

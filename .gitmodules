@@ -6,9 +6,6 @@
 	path = external/amd
 	url = https://github.com/imaami/dlss5-on-amd-9070xt-porting.git
 	branch = dlsslop-amd
-[submodule "optiscaler"]
-	path = external/optiscaler
-	url = https://github.com/optiscaler/OptiScaler.git
 [submodule "vulkan"]
 	path = external/vulkan
 	url = https://github.com/imaami/DLSSNR-AMD.git

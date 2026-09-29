@@ -91,21 +91,6 @@
         "src/LmxxfProductionOptions.h"
       ]
     },
-    "optiscaler": {
-      "path": "external/optiscaler",
-      "url": "https://github.com/optiscaler/OptiScaler.git",
-      "commit": "fb41e3e6361ca9ae55b30a821a40c2b4b346f330",
-      "sources": [
-        "OptiScaler/shaders/output_scaling/precompile/bcds_bicubic.hlsl",
-        "OptiScaler/shaders/output_scaling/precompile/bcds_catmull.hlsl",
-        "OptiScaler/shaders/output_scaling/precompile/bcds_kaiser2.hlsl",
-        "OptiScaler/shaders/output_scaling/precompile/bcds_kaiser3.hlsl",
-        "OptiScaler/shaders/output_scaling/precompile/bcds_lanczos2.hlsl",
-        "OptiScaler/shaders/output_scaling/precompile/bcds_lanczos3.hlsl",
-        "OptiScaler/shaders/output_scaling/precompile/bcds_magc.hlsl",
-        "OptiScaler/shaders/output_scaling/precompile/bcus.hlsl"
-      ]
-    },
     "vulkan": {
       "path": "external/vulkan",
       "url": "https://github.com/imaami/DLSSNR-AMD.git",
