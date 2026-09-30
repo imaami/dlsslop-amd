@@ -50,10 +50,10 @@ The fetch helper uses exact commits, filtered downloads and selected working-tre
 paths, avoiding upstream binary payloads. A shallow clone alone does not omit
 those files. The helper fails if the server cannot provide blob filtering.
 The layer, the Vulkan network's shaders and model extractor, and the HIP
-network's kernels come from dlsslop-amd's forks of their upstreams, whose
-`dlsslop-amd` branches carry the Linux integration; the build reads the fetched
-sources in place under `external/`. Both networks run with the project's own
-host code.
+network's kernels come from dlsslop-amd's forks of their upstreams. The fork
+branches that `.gitmodules` names carry the Linux integration; the build reads
+the fetched sources in place under `external/`. Both networks run with the
+project's own host code.
 A checkout prepared before the forks needs `git submodule sync` once, so that
 the fetch uses the forks, and the generated `upstream-layer/`, `kernels/`,
 `backend/vendor/`, `vulkan-nr/` and `.prepared-sources.json` can be deleted.
@@ -154,6 +154,6 @@ Normal inference never substitutes an identity filter; `dlsslopd
 --test-identity` is an explicit transport-test mode. If no valid worker result
 arrives, the layer presents the original frame.
 
-Changes to upstream sources are commits on a fork's `dlsslop-amd` branch; pin
-the new commit in the submodule and in `upstreams.lock.json`.
+Changes to upstream sources are commits on the fork branch that `.gitmodules`
+names; pin the new commit in the submodule and in `upstreams.lock.json`.
 Keep the pins and all license/attribution notices intact.

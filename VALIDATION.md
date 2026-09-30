@@ -283,7 +283,9 @@ create the finest flow level for sampling" creates the motion estimate's finest
 flow level, an R32G32_SFLOAT image of a quarter of the frame's width and height,
 without sampled usage. Every frame of a build with motion history then has the
 same commands but differs in that image's usage, and the comparison prints
-`DIFFERENT`.
+`DIFFERENT`. The motion frames of any dlsslopd built before "external: pin the
+Vulkan fork rebased on DLSSNR-AMD d1185d2" also differ in the temporal blocks'
+SPIR-V and in their motion parameters, 32 bytes there and 48 since.
 
 A frame is a submission that dispatches and is not a build's one-shot, whose
 command pool is created after the previous submission and destroyed before the

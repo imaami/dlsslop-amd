@@ -24,8 +24,8 @@ ports in `layer/dlssnr/` and `layer/scaling/`, the HIP host port in `backend/`
 and the Vulkan host port in `common/`) and attribution remain unchanged, as do
 references to NVIDIA DLSS and OptiScaler_DLSSNR.
 
-`.gitmodules` declares dlsslop-amd's forks of three repositories: each fork's
-`dlsslop-amd` branch holds the Linux integration as commits on top of the
+`.gitmodules` declares dlsslop-amd's forks of three repositories and, for each
+fork, the branch that holds the Linux integration as commits on top of the
 upstream commit listed below. `upstreams.lock.json` records the pinned commits
 and the files fetched from each repository; the build uses them in place under
 `external/`.
@@ -33,7 +33,7 @@ and the files fetched from each repository; the build uses them in place under
 | Component | Upstream and base commit | Fork and pinned commit | License |
 |---|---|---|---|
 | Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) `ab722b091071d6d59df56f10d86d4f3005bcad86` | [imaami/DLSS5VKLayer](https://github.com/imaami/DLSS5VKLayer/tree/dlsslop-amd) `ada7427f89d53f790e8ec753cfd9d7b888e4674f` | AGPL-3.0; embedded dependencies keep their notices |
-| Vulkan network's SPIR-V sources, shader build and model extractor, and the runtime that dlsslop-amd ports | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) `743326d15f56c93ca757b18ca4d6b0d81d654113` | [imaami/DLSSNR-AMD](https://github.com/imaami/DLSSNR-AMD/tree/dlsslop-amd) `3dfdddc7c06b888685c8be4275d1eb5e8edc7334` | MIT |
+| Vulkan network's SPIR-V sources, shader build and model extractor, and the runtime that dlsslop-amd ports | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) `d1185d25141b1714d7837151b6fa782e6427568b` | [imaami/DLSSNR-AMD](https://github.com/imaami/DLSSNR-AMD/tree/dlsslop-amd-d1185d2) `49dffcdbee2ffe3aa6133fb7ef73ffd865139cf8` | MIT |
 | AMD HIP kernels, and the scheduler that dlsslopd ports | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) `ad499a8199c9ce3678d83c9be58fe3bc1bef3498` | [imaami/dlss5-on-amd-9070xt-porting](https://github.com/imaami/dlss5-on-amd-9070xt-porting/tree/dlsslop-amd) `c1908317fb7e7ee9fe4884feba4a67220d93461f` | MIT |
 
 The layer's composition shader `layer/dlssnr/dlssnr.comp` is a GLSL port of the
@@ -110,7 +110,10 @@ path of the fork's `linux/src/core` (MIT) at `3dfdddc`: `nr_runtime.cpp`,
 estimation that dlsslop-amd uses, the port records each frame's dispatches, push
 constants, barriers and copies as the fork's host code does, and it packs and
 uploads the weights byte for byte as upstream does; the network mathematics are
-unchanged. Unlike upstream, it rejects frames whose working extent is not a
+unchanged. The pinned fork's temporal blocks also read where the frame lands in
+the motion field, which the port gives as the whole field; it keeps `3dfdddc`'s
+history weight of 1 and precomputed noise.
+Unlike upstream, it rejects frames whose working extent is not a
 multiple of 8, on which upstream's build fails, and frames whose activation
 arena needs offsets past 32 bits or does not fit the device's storage buffers,
 which upstream did not check. It bounds every read of the model, sends its

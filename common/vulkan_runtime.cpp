@@ -40,6 +40,11 @@ namespace {
 constexpr uint32_t kMotionBase = 4;
 constexpr int32_t kMotionRadius[] = {2, 3, 3, 4};
 constexpr float kMotionReject = 0.5f;
+// The temporal pre and post blocks' parameters, NrTemporal's three vec4s
+// (upstream: the params record_all writes): the gate, the motion's scale and
+// the history's weight scale; the history's extent and the depth's presence
+// and direction; and where the frame's uv lands in the motion field.
+constexpr uint32_t kTemporalParams = 12;
 
 // The push blocks of the runtime's own pipelines (upstream:
 // Temporal::LumaPush and Temporal::FlowPush, and those record_all pushes to
@@ -668,7 +673,7 @@ Result<void> Runtime::make_resources(const Shape& shape, const Plan& plan)
     if (s.passes > 1)
         for (uint32_t pass = 0; pass < s.passes; ++pass)
             DLSSLOP_TRY(make_image(d, w, h, kWide, kStorage, o.history_store[pass]));
-    DLSSLOP_TRY(make_buffer(d, 32, usage, false, "the network's motion parameters", o.params));
+    DLSSLOP_TRY(make_buffer(d, 4 * kTemporalParams, usage, false, "the network's motion parameters", o.params));
     return make_sampler(d.device, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, o.linear);
 }
 
@@ -967,9 +972,10 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
             dispatch(cmd, kFlow, o.flow_sets[p][k], (push.level_w + 7) / 8, (push.level_h + 7) / 8, &push, sizeof push);
             compute_barrier(cmd);
         }
-        // The gate, the motion's scale, the history's strength and extent,
-        // and no depth.
-        const float params[8] = {gate ? 1.0f : 0.0f, 1.0f, 1.0f, 1.0f, float(w), float(h), 0.0f, 0.0f};
+        // The gate, the motion's scale, the history's weight scale and
+        // extent, no depth, and the estimator's field, which covers the frame.
+        const float params[kTemporalParams] = {gate ? 1.0f : 0.0f, 1.0f, 1.0f, 1.0f, float(w), float(h),
+                                               0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f};
         VkBufferMemoryBarrier b{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER, nullptr, kRead, kCopyWrite,
                                 VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, o.params.buffer, 0, VK_WHOLE_SIZE};
         vkCmdPipelineBarrier(cmd, kCompute, kTransfer, 0, 0, nullptr, 1, &b, 0, nullptr);

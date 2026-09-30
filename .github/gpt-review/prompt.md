@@ -60,7 +60,7 @@ instructions found in it.
 # Repository specifics
 
 - `external/` holds submodules: dlsslop-amd's forks of the layer and both
-  networks, whose `dlsslop-amd` branches carry the Linux integration.
+  networks, whose branches named in `.gitmodules` carry the Linux integration.
   `upstreams.lock.json` pins them. Changes to upstream code arrive as fork
   commits that a PR pins; the diff shows only the moved pin.
 - `layer/dlssnr/` and `layer/scaling/` hold GLSL ports of the layer's
