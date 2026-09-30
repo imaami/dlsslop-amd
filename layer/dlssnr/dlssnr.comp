@@ -620,9 +620,12 @@ void main()
 
         float peak = 0.0;
 
-        for (uint ty = ty0; ty < max(ty1, ty0 + 1u); ty += stepY)
+        // Half a step is nothing while the step is one texel, and less than the tile when it is
+        // more, so every tile still takes at least one sample. Upstream started both loops at
+        // tx0 and ty0, on the tile's corner.
+        for (uint ty = ty0 + stepY / 2u; ty < max(ty1, ty0 + 1u); ty += stepY)
         {
-            for (uint tx = tx0; tx < max(tx1, tx0 + 1u); tx += stepX)
+            for (uint tx = tx0 + stepX / 2u; tx < max(tx1, tx0 + 1u); tx += stepX)
             {
                 vec3 c = NMax(texelFetch(gSource, ivec2(min(tx, fullW - 1u), min(ty, fullH - 1u)), 0).rgb, vec3(0.0));
                 // Upstream: PqToLinear(c) / kPqPaperWhite. DXC multiplies by the float32
