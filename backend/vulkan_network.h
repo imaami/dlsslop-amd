@@ -1,4 +1,4 @@
-// The network on Vulkan: DLSSNR-AMD's runtime (external/vulkan/linux/) on a device of the daemon's own.
+// The network on Vulkan: DLSSNR-AMD's network (external/vulkan/linux/) on a device of the daemon's own.
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "network_recorder.h"
@@ -29,6 +29,9 @@ public:
     Result<bool> shape(const VulkanFrame& frame);
     // True when shape() would build.
     bool shape_differs(const VulkanFrame& frame) const;
+    // Rejects a frame of an extent the network does not take, before shape(): milliseconds of
+    // work for a new extent, none after.
+    Result<void> plan(const VulkanFrame& frame);
     // Imports an offered proxy/answer pair into a slot (below kImportSlots), releasing
     // the pair it held once the new one is in, and declines one of another device or
     // driver. Takes ownership of each descriptor it imports and sets it to -1; the

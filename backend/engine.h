@@ -76,8 +76,11 @@ public:
     // A slot's frames: the slot alone, for an engine that finds them itself.
     Frames frames_of(unsigned slot) const { return {nullptr, nullptr, int(slot)}; }
     // False when a request of this shape needs a build first (reshape): seconds
-    // of work the caller reports as a start, not a slow frame.
+    // of work the caller reports as a start, not a slow frame. admit, called
+    // before reshape, rejects a shape the engine does not take; it builds
+    // nothing.
     bool fits(unsigned, unsigned, unsigned, const ProcessingSettings&) const { return true; }
+    Result<void> admit(unsigned, unsigned, unsigned, const ProcessingSettings&) { return {}; }
     Result<void> reshape(unsigned, unsigned, unsigned, const ProcessingSettings&) { return {}; }
     // Serving only: DMA the channel's frame slots directly.
     void pin(uint8_t*, uint8_t*, size_t) {}

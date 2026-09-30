@@ -177,6 +177,8 @@ Result<std::string> process(const Request& r, E& engine, Mapping& mapping, Frame
     // A frame of a new shape needs a build: seconds in which the layer
     // presents its own frames rather than waiting for this one.
     if (!engine.fits(r.width, r.height, r.passes, settings)) {
+        // A shape the engine does not take is rejected before a build: serving goes on as it was.
+        DLSSLOP_TRY(engine.admit(r.width, r.height, r.passes, settings));
         h->helperState.store(kHelperStarting);
         std::fprintf(stderr, "building the network for %ux%u%s\n", r.width, r.height, settings.fp16 ? " FP16" : "");
         DLSSLOP_TRY(engine.reshape(r.width, r.height, r.passes, settings));

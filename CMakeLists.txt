@@ -19,8 +19,7 @@ add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initi
 # linked libstdc++ and the symbol tables from every binary.
 add_compile_options(-ffunction-sections -fdata-sections)
 # The project's code reports errors as Results: it throws, catches and asks for
-# types at run time nowhere. Vendored code that throws keeps exceptions, and is
-# reached only through the boundary files that catch them.
+# types at run time nowhere.
 add_compile_options(-fno-exceptions -fno-rtti)
 add_link_options(-Wl,--gc-sections $<$<CONFIG:Release>:-s>)
 # Link-time optimization shrinks the daemon's code by 7% and the GUI's
@@ -115,17 +114,11 @@ set_target_properties(dlssnr-shmctl PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
 # A command that runs once: its code is built for size.
 target_compile_options(dlssnr-shmctl PRIVATE -Os)
 
-# The Vulkan network from DLSSNR-AMD's linux/ tree: its SPIR-V and the host
-# library dlsslopd runs it with. The host must be compiled with the constants
-# its shaders were built with, which linux/build/arch/rdna4.sh
-# lists; the runtime refuses shaders whose markers disagree.
+# The Vulkan network's SPIR-V from DLSSNR-AMD's linux/ tree, and the project's
+# own host code that runs it. The host knows the constants the SPIR-V is built
+# with (common/vulkan_plan.h) and refuses SPIR-V whose markers disagree.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 set(VKNR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/vulkan/linux")
-file(STRINGS "${VKNR_ROOT}/build/arch/rdna4.sh" VKNR_ARCH REGEX "^ +-DNR_")
-string(REGEX MATCHALL "NR_[A-Z0-9_]+=[0-9]+" VKNR_DEFINES "${VKNR_ARCH}")
-if(NOT VKNR_DEFINES)
-    message(FATAL_ERROR "no NR_ constants in ${VKNR_ROOT}/build/arch/rdna4.sh")
-endif()
 set(VKNR_SHADERS "${CMAKE_CURRENT_BINARY_DIR}/vulkan-nr/network")
 file(GLOB_RECURSE VKNR_SHADER_SOURCES CONFIGURE_DEPENDS "${VKNR_ROOT}/shaders/*")
 add_custom_command(OUTPUT "${VKNR_SHADERS}/shader-constants.txt"
@@ -134,36 +127,26 @@ add_custom_command(OUTPUT "${VKNR_SHADERS}/shader-constants.txt"
     DEPENDS ${VKNR_SHADER_SOURCES} "${VKNR_ROOT}/build/build_network.py"
     COMMENT "Building the Vulkan network's SPIR-V" VERBATIM)
 add_custom_target(vulkan-nr-shaders ALL DEPENDS "${VKNR_SHADERS}/shader-constants.txt")
-add_library(dlsslop-vknr STATIC "${VKNR_ROOT}/src/core/nr_runtime.cpp" "${VKNR_ROOT}/src/core/nr_native_plan.cpp")
-set_target_properties(dlsslop-vknr PROPERTIES CXX_STANDARD 20)
-target_compile_definitions(dlsslop-vknr PUBLIC ${VKNR_DEFINES})
-# Upstream code: its own warnings are not this project's to fix. It throws.
-target_compile_options(dlsslop-vknr PRIVATE -w -fexceptions -frtti)
-# Code that throws stays out of LTO. With it, the program's one copy of an
-# inline function such as std::vector::reserve may come from a file built
-# without exceptions, and a catch around a call to it is then dropped as dead:
-# what the vendored code throws would end the daemon instead of being caught.
-set_target_properties(dlsslop-vknr PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF POSITION_INDEPENDENT_CODE ON)
-target_include_directories(dlsslop-vknr PUBLIC "${VKNR_ROOT}/src/core")
-target_link_libraries(dlsslop-vknr PUBLIC vulkan Threads::Threads)
+# The network's plan, weights and runtime, for dlsslopd and the in-layer
+# network's module alike.
+add_library(dlsslop-vulkan OBJECT common/vulkan_plan.cpp common/vulkan_schedule.cpp common/vulkan_weights.cpp
+    common/vulkan_runtime.cpp common/network_recorder.cpp)
+set_target_properties(dlsslop-vulkan PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_include_directories(dlsslop-vulkan PRIVATE backend)
+target_link_libraries(dlsslop-vulkan PUBLIC vulkan Threads::Threads)
 
 add_library(dlsslop-codec OBJECT backend/codec.cpp)
 # The HIP backend: the runtime, the network and the daemon's own kernels.
 add_library(dlsslop-hip OBJECT backend/hip.cpp backend/hip_weights.cpp backend/hip_plan.cpp backend/hip_network.cpp
     backend/native_kernels.cpp)
 target_link_libraries(dlsslop-hip PUBLIC ${CMAKE_DL_LIBS})
-# The boundary to the vendored Vulkan network, built with exceptions to catch its own.
-add_library(dlsslop-nr-vendor OBJECT common/nr_vendor.cpp)
-set_target_properties(dlsslop-nr-vendor PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF POSITION_INDEPENDENT_CODE ON)
-target_compile_options(dlsslop-nr-vendor PRIVATE -fexceptions -frtti)
-target_link_libraries(dlsslop-nr-vendor PUBLIC dlsslop-vknr)
 # The in-layer network, in a module beside the layer that loads it on demand
-# (layer/network_module.h): vulkan-nr and the libstdc++ it needs stay out of
+# (layer/network_module.h): the network and the libstdc++ it needs stay out of
 # the layer, which every game loads. It exports its C functions only.
-add_library(dlsslop-network MODULE layer/network_module.cpp common/network_recorder.cpp backend/processing.cpp
-    backend/options.cpp backend/paths.cpp backend/files.cpp)
+add_library(dlsslop-network MODULE layer/network_module.cpp backend/processing.cpp backend/options.cpp
+    backend/paths.cpp backend/files.cpp)
 target_include_directories(dlsslop-network PRIVATE backend ${LAYER_ROOT}/common)
-target_link_libraries(dlsslop-network PRIVATE dlsslop-nr-vendor ${CMAKE_DL_LIBS})
+target_link_libraries(dlsslop-network PRIVATE dlsslop-vulkan ${CMAKE_DL_LIBS})
 target_link_options(dlsslop-network PRIVATE -static-libstdc++ -static-libgcc -Wl,-Bsymbolic
     "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/layer/network_module.map")
 add_dependencies(dlsslop-network vulkan-nr-shaders)
@@ -173,9 +156,9 @@ add_executable(dlsslopd
     backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.cpp
     backend/open.cpp backend/hip_engine.cpp backend/self_test.cpp
     backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp
-    backend/processing.cpp common/network_recorder.cpp)
+    backend/processing.cpp)
 target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
-target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip dlsslop-nr-vendor Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip dlsslop-vulkan Threads::Threads ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)
 target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 # What runs once per start, per transport offer or per diagnostic is built for

@@ -1,7 +1,7 @@
 // The in-layer network's module, libdlsslop-network.so, beside the layer. The
 // layer loads it for a device whose ledger enabled the network, and reaches it
-// through these C functions only: vulkan-nr, its exceptions and its iostreams
-// stay out of the layer. C++17, like the layer.
+// through these C functions only: the network's code and the C++ runtime it
+// links stay out of the layer. C++17, like the layer.
 // SPDX-License-Identifier: MIT
 #pragma once
 

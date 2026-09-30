@@ -197,7 +197,7 @@ static void NetworkFeatures() {
     info.enabledExtensionCount = uint32_t(extensions.size());
     info.ppEnabledExtensionNames = extensions.data();
     Check(dlssnr::NetworkEnabled(info), "ledger missed an enabled network");
-    // vulkan-nr's adopt() requires explicit workgroup layout too.
+    // The network requires explicit workgroup layout too (network_requirements.h).
     --info.enabledExtensionCount;
     Check(!dlssnr::NetworkEnabled(info), "ledger ignored the missing explicit workgroup layout");
 

@@ -1002,7 +1002,7 @@ Result<uint32_t> Blob::word(uint64_t index) const
     return fail("network plan: a table word is outside the tables");
 }
 
-Result<Plan> plan(uint32_t width, uint32_t height)
+Result<Plan> plan(uint32_t width, uint32_t height, uint64_t storage)
 {
     Network net;
     DLSSLOP_TRY(place(width, height, net));
@@ -1053,6 +1053,12 @@ Result<Plan> plan(uint32_t width, uint32_t height)
         return refuse(width, height,
                       "its activation arena of " + std::to_string(arena) + " bytes overflows 32-bit offsets");
     if (blob.bytes > UINT32_MAX) return fail("network plan: the weight blob overflows 32-bit offsets");
+    // The arena and the weights are each one storage buffer, bound whole.
+    if (arena > storage || blob.bytes > storage)
+        return refuse(width, height,
+                      "its activation arena of " + std::to_string(arena) + " bytes or weights of " +
+                          std::to_string(blob.bytes) + " bytes exceed the device's storage buffers of " +
+                          std::to_string(storage) + " bytes");
     p.arena_bytes = arena;
     p.blob_bytes = uint32_t(blob.bytes);
     p.noise = lowering.noise;

@@ -328,14 +328,16 @@ struct Plan {
     uint16_t chained;
 };
 
-// The plan for frames of WIDTH x HEIGHT pixels. A frame the network cannot
-// take is rejected: a side of 0 or above 16384, a working extent whose sides
-// are not multiples of 8 (a side of 16 pixels or less, where upstream fails),
-// and one whose arena or tile counters overflow the 32-bit offsets and
-// indices of the push constants (upstream wrapped them). The arena's size is
-// known only once the network is lowered, so a rejection costs as much as a
-// plan: a caller keeps the plan it checked an extent with, and remembers an
-// extent that was rejected.
-Result<Plan> plan(uint32_t width, uint32_t height);
+// The plan for frames of WIDTH x HEIGHT pixels on a device whose storage
+// buffers hold at most STORAGE bytes. A frame the network cannot take is
+// rejected: a side of 0 or above 16384, a working extent whose sides are not
+// multiples of 8 (a side of 16 pixels or less, where upstream fails), one
+// whose arena or tile counters overflow the 32-bit offsets and indices of the
+// push constants (upstream wrapped them), and one whose arena or weights
+// exceed STORAGE (upstream did not check). The arena's size is known only
+// once the network is lowered, so a rejection costs as much as a plan: a
+// caller keeps the plan it checked an extent with, and remembers an extent
+// that was rejected.
+Result<Plan> plan(uint32_t width, uint32_t height, uint64_t storage = UINT64_MAX);
 
 } // namespace dlsslop::vulkan

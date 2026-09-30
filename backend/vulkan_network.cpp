@@ -1,9 +1,7 @@
-// The network on Vulkan: DLSSNR-AMD's runtime (external/vulkan/linux/) on a device of the daemon's own.
+// The network on Vulkan: DLSSNR-AMD's network (external/vulkan/linux/) on a device of the daemon's own.
 // SPDX-License-Identifier: MIT
 #include "vulkan_network.h"
 #include "network_requirements.h"
-
-#include "nr_log.hpp"
 
 #include <array>
 #include <cstdio>
@@ -127,7 +125,6 @@ Result<VulkanNetwork> VulkanNetwork::create(const VulkanPaths& paths, int device
     VulkanNetwork network(std::make_unique<Impl>());
     auto& s = *network.impl_;
     s.paths = paths;
-    nr::set_log_sink(log_line);
     // The daemon has no overlay to show: keep implicit layers (Steam's, MangoHud's) out
     // of its instance, unless the environment already says otherwise.
     setenv("VK_LOADER_LAYERS_DISABLE", "~implicit~", 0);
@@ -194,13 +191,19 @@ Result<VulkanNetwork> VulkanNetwork::create(const VulkanPaths& paths, int device
     queries.queryType = VK_QUERY_TYPE_TIMESTAMP;
     queries.queryCount = 4;
     DLSSLOP_TRY(vk_check(vkCreateQueryPool(s.device, &queries, nullptr, &s.queries), "create timestamp queries"));
-    nr::HostDevice host;
-    host.instance = s.instance;
-    host.physical = s.physical;
-    host.device = s.device;
-    host.queue = s.queue;
-    host.queue_family = s.family;
-    s.recorder.emplace(host, s.memory, s.paths);
+    vulkan::Device on{};
+    on.instance = s.instance;
+    on.physical = s.physical;
+    on.device = s.device;
+    on.queue = s.queue;
+    on.family = s.family;
+    on.memory = s.memory;
+    on.functions = {vkGetPhysicalDeviceQueueFamilyProperties, vkGetPhysicalDeviceProperties2,
+                    vkGetPhysicalDeviceFormatProperties2,
+                    reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR>(
+                        vkGetInstanceProcAddr(s.instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"))};
+    on.log = log_line;
+    s.recorder.emplace(on, s.paths);
     return network;
 }
 
@@ -212,6 +215,8 @@ const std::string& VulkanNetwork::device_name() const { return impl_->name; }
 unsigned VulkanNetwork::device_index() const { return impl_->index; }
 
 bool VulkanNetwork::shape_differs(const VulkanFrame& frame) const { return impl_->recorder->shape_differs(frame); }
+
+Result<void> VulkanNetwork::plan(const VulkanFrame& frame) { return impl_->recorder->plan(frame); }
 
 Result<bool> VulkanNetwork::shape(const VulkanFrame& frame)
 {
@@ -305,7 +310,7 @@ Result<void> VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint
     vkCmdResetQueryPool(cmd, s.queries, 0, 4);
     vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, s.queries, 0);
     // The layer's exported buffers change hands at every frame.
-    DLSSLOP_TRY(s.recorder->record(cmd, source, target, frame, s.family, exported, s.queries, 1));
+    s.recorder->record(cmd, source, target, frame, s.family, exported, s.queries, 1);
     if (!exported) {
         static constexpr VkMemoryBarrier kToHost{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_TRANSFER_WRITE_BIT,
                                                  VK_ACCESS_HOST_READ_BIT};

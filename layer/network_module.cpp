@@ -3,7 +3,6 @@
 #include "network_module.h"
 #include "files.h"
 #include "network_recorder.h"
-#include "nr_log.hpp"
 #include "options.h"
 #include "paths.h"
 #include "processing.h"
@@ -11,7 +10,6 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
-#include <iterator>
 #include <new>
 #include <pthread.h>
 #include <string>
@@ -31,44 +29,31 @@ dlsslop::VulkanPaths module_paths(const std::string& model)
             dlsslop::vulkan_cache()};
 }
 
-// The physical-device functions vulkan-nr looks up while it builds. The network resolves them
-// when it opens. A lookup on the build thread goes through the loader, which takes the loader's
+// The game's device, with the next layer's physical-device functions the build queries, looked
+// up now: a lookup on the build thread would go through the loader, which takes the loader's
 // lock, and vkDestroyDevice holds that lock while the layer waits for the build to end.
-constexpr const char* kPhysicalFunctions[] = {
-    "vkGetPhysicalDeviceFeatures2",
-    "vkGetPhysicalDeviceProperties",
-    "vkGetPhysicalDeviceProperties2",
-    "vkGetPhysicalDeviceMemoryProperties",
-    "vkGetPhysicalDeviceQueueFamilyProperties",
-    "vkGetPhysicalDeviceFormatProperties",
-    "vkGetPhysicalDeviceFormatProperties2",
-    "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR",
-};
-
-// The build thread's resolved functions, in kPhysicalFunctions order.
-thread_local const PFN_vkVoidFunction* t_physical = nullptr;
-
-// vulkan-nr's physical_dispatch on the build thread: a resolved function, or null for a name
-// outside kPhysicalFunctions, which fails the build with that name.
-PFN_vkVoidFunction VKAPI_PTR physical_dispatch(VkInstance, const char* name)
+dlsslop::vulkan::Device network_device(const DlsslopNetworkDevice& d)
 {
-    for (size_t i = 0; i < std::size(kPhysicalFunctions); ++i)
-        if (!std::strcmp(name, kPhysicalFunctions[i])) return t_physical[i];
-    return nullptr;
-}
-
-nr::HostDevice host_device(const DlsslopNetworkDevice& d)
-{
-    nr::HostDevice host;
-    host.instance = d.instance;
-    host.physical = d.physical;
-    host.device = d.device;
-    host.queue = d.queue;
-    host.queue_family = d.family;
-    host.physical_dispatch = physical_dispatch;
-    host.queue_lock = [lock = d.lockQueue, context = d.context] { lock(context); };
-    host.queue_unlock = [unlock = d.unlockQueue, context = d.context] { unlock(context); };
-    return host;
+    const auto find = [&d](const char* name) { return d.physicalDispatch(d.instance, name); };
+    dlsslop::vulkan::Device device{};
+    device.instance = d.instance;
+    device.physical = d.physical;
+    device.device = d.device;
+    device.queue = d.queue;
+    device.family = d.family;
+    device.lock = d.lockQueue;
+    device.unlock = d.unlockQueue;
+    device.context = d.context;
+    device.memory = d.memory;
+    device.functions = {
+        reinterpret_cast<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(
+            find("vkGetPhysicalDeviceQueueFamilyProperties")),
+        reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(find("vkGetPhysicalDeviceProperties2")),
+        reinterpret_cast<PFN_vkGetPhysicalDeviceFormatProperties2>(find("vkGetPhysicalDeviceFormatProperties2")),
+        reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR>(
+            find("vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"))};
+    device.log = d.log;
+    return device;
 }
 }  // namespace
 
@@ -76,7 +61,6 @@ struct DlsslopNetwork {
     // The model dlsslopd loads, as its config file names it; or why that is unknown, which fails
     // the network.
     dlsslop::Result<std::string> model;
-    PFN_vkVoidFunction physical[std::size(kPhysicalFunctions)];
     NetworkRecorder recorder;
     dlsslop::VulkanFrame prepared;
     // A build in the background: its frame, and whether it still runs. The
@@ -90,10 +74,8 @@ struct DlsslopNetwork {
 
     DlsslopNetwork(const DlsslopNetworkDevice& d)
         : model(dlsslop::configured_vulkan_model()),
-          recorder(host_device(d), d.memory, module_paths(model.value_or(std::string())))
+          recorder(network_device(d), module_paths(model.value_or(std::string())))
     {
-        for (size_t i = 0; i < std::size(kPhysicalFunctions); ++i)
-            physical[i] = d.physicalDispatch(d.instance, kPhysicalFunctions[i]);
         if (!model) fail(model.error().what);
     }
 
@@ -108,7 +90,6 @@ struct DlsslopNetwork {
     static void* build(void* self)
     {
         auto& n = *static_cast<DlsslopNetwork*>(self);
-        t_physical = n.physical;
         if (auto built = n.recorder.shape(n.target); !built) n.fail(std::move(built).error().what);
         n.building.store(false, std::memory_order_release);
         return nullptr;
@@ -119,7 +100,6 @@ extern "C" {
 
 DlsslopNetwork* dlsslop_network_open(const DlsslopNetworkDevice* device)
 {
-    if (device->log) nr::set_log_sink(device->log);
     return new (std::nothrow) DlsslopNetwork(*device);
 }
 
@@ -144,6 +124,13 @@ int dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader* channel, uint32_
         return kDlsslopNetworkReady;
     }
     if (auto model = dlsslop::require_vulkan_model(*n->model); !model) return n->fail(std::move(model).error().what);
+    // A new extent is planned here, so that one the network does not take on the device is
+    // refused without a build; the build thread builds from that plan.
+    if (auto planned = n->recorder.plan(frame); !planned) {
+        if (!planned.error().rejected) return n->fail(std::move(planned).error().what);
+        n->error = std::move(planned).error().what;
+        return kDlsslopNetworkRejected;
+    }
     n->target = frame;
     n->building.store(true, std::memory_order_relaxed);
     if (const int error = pthread_create(&n->builder, nullptr, DlsslopNetwork::build, n)) {
@@ -157,8 +144,8 @@ int dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader* channel, uint32_
 int dlsslop_network_record(DlsslopNetwork* n, VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, uint32_t family,
                            int exported)
 {
-    auto recorded = n->recorder.record(cmd, proxy, answer, n->prepared, family, exported != 0);
-    return recorded ? kDlsslopNetworkReady : n->fail(std::move(recorded).error().what);
+    n->recorder.record(cmd, proxy, answer, n->prepared, family, exported != 0);
+    return kDlsslopNetworkReady;
 }
 
 const char* dlsslop_network_error(const DlsslopNetwork* n) { return n->error.c_str(); }

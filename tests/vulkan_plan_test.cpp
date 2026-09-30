@@ -289,10 +289,10 @@ void check_goldens()
 
 void check_rejections()
 {
-    auto refused = [](uint32_t width, uint32_t height, const std::string& why) {
+    auto refused = [](uint32_t width, uint32_t height, const std::string& why, uint64_t storage = UINT64_MAX) {
         const std::string what = "the network does not take " + std::to_string(width) + "x" +
                                  std::to_string(height) + " frames: " + why;
-        const auto p = vulkan::plan(width, height);
+        const auto p = vulkan::plan(width, height, storage);
         expect(!p && p.error().rejected && p.error().what == what, "%ux%u: expected rejected \"%s\", got \"%s\"",
                width, height, what.c_str(), p ? "a plan" : p.error().what.c_str());
     };
@@ -307,6 +307,12 @@ void check_rejections()
     // Upstream truncated the offsets past 4 GiB: at 7680x4320 its values end
     // at 6291095552 bytes.
     refused(7680, 4320, "its activation arena of at least 6291095552 bytes overflows 32-bit offsets");
+    // Nor did it check the device's storage buffers, which must each hold the
+    // arena or the weights whole.
+    const std::string storage = " bytes or weights of 163217868 bytes exceed the device's storage buffers of ";
+    refused(1280, 720, "its activation arena of 252244224" + storage + "252244223 bytes", 252244223);
+    refused(1280, 720, "its activation arena of 252244224" + storage + "163217867 bytes", 163217867);
+    expect(bool(vulkan::plan(1280, 720, 252244224)), "1280x720: rejected on a device that holds its arena");
 }
 
 // The size of an entry in the real model, the pack that linux/package/

@@ -24,9 +24,8 @@ reviews:
     - path: "{backend,common,layer}/**/*.{cpp,h,hip}"
       instructions: >-
         C++23 daemon and project headers, built without exceptions or
-        RTTI: errors are dlsslop::Result values, and only
-        common/nr_vendor.cpp catches what the vendored Vulkan network
-        throws. HIP kernels are compiled by clang for
+        RTTI: errors are dlsslop::Result values, and no project code
+        catches exceptions. HIP kernels are compiled by clang for
         gfx1201 (wave32). Check GPU stream ordering,
         host/device synchronization and buffer lifetimes, and races on
         the cross-process shared-memory channel: the layer can rewrite

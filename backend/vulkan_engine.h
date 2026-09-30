@@ -36,6 +36,10 @@ public:
     {
         return !network_.shape_differs(vulkan_frame(w, h, passes, settings));
     }
+    Result<void> admit(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings)
+    {
+        return network_.plan(vulkan_frame(w, h, passes, settings));
+    }
     Result<void> reshape(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings)
     {
         return network_.shape(vulkan_frame(w, h, passes, settings)).transform([](bool) {});
