@@ -88,8 +88,8 @@ accepts any downsample or decoder file that holds at least the weight matrix.
 layouts of the types it passes to them. It takes those layouts from ROCm's
 `include/hip/hip_runtime_api.h` as the fork's `hip_api.h` and
 `hip_device_properties.h` copy them from rocm-7.1.1 (MIT, Copyright (c)
-2015 - 2023 Advanced Micro Devices, Inc.; the notice is in
-`packaging/THIRD-PARTY.txt`). `backend/hip.cpp` loads the runtime
+2015 - 2023 Advanced Micro Devices, Inc.; `backend/hip.h` carries the notice,
+and `packaging/THIRD-PARTY.txt` repeats it for binary releases). `backend/hip.cpp` loads the runtime
 (`libamdhip64.so.7`, `.so.6` or the unversioned soname, also from
 `/opt/rocm/lib` or an explicit `DLSSLOP_HIP_LIBRARY` path) with
 `dlopen`/`dlsym`. Of the 30 modules that upstream's `hip/build-modules.ps1`
