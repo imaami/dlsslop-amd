@@ -80,7 +80,10 @@ pass. The port leaves out the adaptive ViT reuse, and dlsslopd warns when
 `DLSS5_VIT_ADAPTIVE` requests it. It also leaves out the weights no kernel
 reads, which upstream uploads: the C512 blocks' unpacked `ffwd` weights, and
 the c256 blocks' attention weights in the `@fp8` layout that the c64, c128 and
-c512 blocks read.
+c512 blocks read. The port reads a weight's `.f16` file only when there is no
+`.f32` file, and only files of the exact size that `dlsslop-setup` imports.
+Upstream reads the `.f16` file whenever the `.f32` file does not open, and it
+accepts any downsample or decoder file that holds at least the weight matrix.
 `backend/hip.h` declares the HIP runtime entry points dlsslopd calls and the
 layouts of the types it passes to them. It takes those layouts from ROCm's
 `include/hip/hip_runtime_api.h` as the fork's `hip_api.h` and

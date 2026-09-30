@@ -10,6 +10,7 @@
 #include "../external/layer/common/shm_protocol.h"
 
 #include <getopt.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <bit>
 #include <cinttypes>
@@ -647,38 +648,60 @@ void check_errors(Scratch& scratch)
     expect_error(read({"block5-bogus", Recipe::kDsFrag}), "unknown weight block5-bogus");
     expect_error(read({"block10-ffn", Recipe::kSplitMixF16}), "no split-mix-f16 packing of block10-ffn");
     expect_error(read({"block66-ffn", Recipe::kMhFfn}), "no fp8-g128 packing of block66-ffn");
-    expect_error(read(ffn), "missing " + f16);
+    expect_error(read(ffn), "missing weight " + dir + "/block5-ffn (neither .f32 nor .f16)");
+    // A file that does not hold exactly its stem's values is rejected with both sizes.
+    const size_t elements = hip::file_elements(ffn);
+    auto wrong_size = [](const std::string& path, size_t bytes, size_t expected) {
+        return path + ": " + std::to_string(bytes) + " bytes, expected " + std::to_string(expected);
+    };
     scratch.write("block5-ffn.f16", "");
-    expect_error(read(ffn), "empty " + f16);
+    expect_error(read(ffn), wrong_size(f16, 0, 2 * elements));
     scratch.write("block5-ffn.f16", "abc");
-    expect_error(read(ffn), "weight size " + f16);
-    scratch.write("block5-ffn.f16", std::string(2 * hip::file_elements(ffn), '\0'));
+    expect_error(read(ffn), wrong_size(f16, 3, 2 * elements));
+    scratch.write("block5-ffn.f16", std::string(2 * elements, '\0'));
     expect(bool(read(ffn)), "a zero block5-ffn.f16 rejected");
-    // Whenever the f32 file opens, it is the one read.
-    scratch.write("block5-ffn.f32", "abcdef");
-    expect_error(read(ffn), "weight size " + f32);
-    scratch.write("block5-ffn.f32", std::string(8, '\0'));
-    expect_error(read(ffn), "packed weight shape " + f32);
+    // Whenever the f32 file exists, it is the one read.
+    scratch.write("block5-ffn.f32", std::string(2 * elements, '\0'));
+    expect_error(read(ffn), wrong_size(f32, 2 * elements, 4 * elements));
+    scratch.write("block5-ffn.f32", std::string(4 * elements, '\0'));
+    const auto full = hip::read_weights(dir, ffn);
+    expect(full && full->path == f32, "a zero block5-ffn.f32 not read");
+    // An f32 file that does not open is an error, not a reason to read the
+    // f16 one. The check needs a user whom the file's mode keeps out, not root.
+    chmod(f32.c_str(), 0);
+    if (access(f32.c_str(), R_OK)) {
+        expect_error(read(ffn), "open " + f32 + ": " + std::strerror(EACCES));
+        // With no f32 file, an f16 file that does not open is an open error, not a
+        // missing weight.
+        unlink(f32.c_str());
+        chmod(f16.c_str(), 0);
+        expect_error(read(ffn), "open " + f16 + ": " + std::strerror(EACCES));
+    }
     scratch.write("post70-head.f32", std::string(95 * 4, '\0'));
-    expect_error(read({"post70-head", Recipe::kRaw}), "weight shape " + dir + "/post70-head.f32: 95");
-    // The ds-cast, ds-frag and decoder loaders check only a lower bound. The
-    // ds-cast image is the whole file, the ds-frag one its first 2c² values.
-    const WeightSpec cast{"block4-ds", Recipe::kDsCast}, frag{"block8-ds", Recipe::kDsFrag};
-    scratch.write("block4-ds.f16", std::string(2 * (2 * 32 * 32 + 5), '\0'));
-    auto ds = hip::read_weights(dir, cast);
-    expect(ds && hip::pack(cast, *ds) && ds->values.size() == 2 * 32 * 32 + 5,
-           "a longer block4-ds not packed whole");
-    scratch.write("block8-ds.f16", std::string(2 * (2 * 64 * 64 + 5), '\0'));
-    ds = hip::read_weights(dir, frag);
-    expect(ds && hip::pack(frag, *ds) && ds->values.size() == 64 * 64, "a longer block8-ds not packed to c² floats");
-    const WeightSpec decoder{"block62-weights", Recipe::kDecoderF16r};
-    scratch.write("block62-weights.f16", std::string(2 * 2 * 64 * 64, '\0'));
-    expect(bool(read(decoder)), "a block62-weights of 2c² values rejected");
-    scratch.write("block62-weights.f16", std::string(2 * (2 * 64 * 64 - 1), '\0'));
-    expect_error(read(decoder), "decoder weight shape " + dir + "/block62-weights.f16");
+    expect_error(read({"post70-head", Recipe::kRaw}), wrong_size(dir + "/post70-head.f32", 380, 384));
+    // The ds-cast, ds-frag and decoder files as well, which upstream's loaders
+    // read at any size of at least 2c² values.
+    for (const WeightSpec& spec : {WeightSpec{"block4-ds", Recipe::kDsCast}, WeightSpec{"block8-ds", Recipe::kDsFrag},
+                                   WeightSpec{"block62-weights", Recipe::kDecoderF16r}}) {
+        const size_t n = hip::file_elements(spec);
+        const std::string name = std::string(spec.stem) + ".f16";
+        for (const size_t count : {n - 1, n + 1}) {
+            scratch.write(name, std::string(2 * count, '\0'));
+            expect_error(read(spec), wrong_size(dir + "/" + name, 2 * count, 2 * n));
+        }
+    }
+    // Encoding errors name the file read and the element.
+    const WeightSpec attention{"block0-attention", Recipe::kC32};
+    std::string input(2 * hip::file_elements(attention), '\0');
+    input[2 * 7] = 0x55; // 0x3555, about a third in binary16, which E4M3 cannot hold.
+    input[2 * 7 + 1] = 0x35;
+    scratch.write("block0-attention.f16", input);
+    auto file = hip::read_weights(dir, attention);
+    expect_error(file.and_then([&](WeightFile& f) { return hip::pack(attention, f); }),
+                 dir + "/block0-attention.f16: element 7: matrix weight not exact finite FP8");
     scratch.clear();
 
-    // Encoding errors name the file and the element.
+    // So do the other encodings' errors, here of a file named PATH.
     auto packed = [](const WeightSpec& spec, size_t element, float value) {
         WeightFile file{"PATH", std::vector<float>(hip::file_elements(spec))};
         Random random{3};

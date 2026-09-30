@@ -30,34 +30,31 @@ constexpr uint16_t kAnyType = 0xffff;
 // The channel counts a loader applies to, as bits.
 enum Channels : uint8_t { kAt32 = 1, kAbove32 = 2, kAnyChannels = 3 };
 
-// Upstream's words when a file's element count does not fit its loader,
-// whether the loader checks only a lower bound of 2c² elements, and the stem
-// types and channel counts upstream applies the loader to.
-struct Shape {
-    const char* words;
-    bool minimum;
+// The stems upstream applies each recipe's loader to: their types and channel
+// counts.
+struct Domain {
     uint16_t types;
     Channels channels;
 };
-constexpr Shape kShapes[] = {
-    {"weight shape", false, kAnyType, kAnyChannels},
-    {"packed C32 weight shape", false, 1 << kFfn | 1 << kAttention, kAt32},
-    {"downsample weight shape", true, 1 << kDs, kAt32},
-    {"downsample weight shape", true, 1 << kDs, kAbove32},
-    {"packed weight shape", false, 1 << kFfn, kAbove32},
-    {"packed weight shape", false, 1 << kAttention, kAbove32},
-    {"packed weight shape", false, 1 << kAttention, kAbove32},
-    {"fused FFN weight shape", false, 1 << kFfn, kAbove32},
-    {"packed weight shape", false, 1 << kAttention, kAbove32},
-    {"split FFN weight shape", false, 1 << kFfwd, kAbove32},
-    {"split projection weight shape", false, 1 << kFfwdProjection, kAbove32},
-    {"packed weight shape", false, 1 << kAttention, kAbove32},
-    {"ViT tiled weight shape", false, 1 << kExpand | 1 << kContract, kAbove32},
-    {"ViT QKV compact shape", false, 1 << kQkv, kAbove32},
-    {"ViT projection shape", false, 1 << kProjection, kAbove32},
-    {"decoder weight shape", true, 1 << kWeights, kAnyChannels},
+constexpr Domain kDomains[] = {
+    {kAnyType, kAnyChannels},
+    {1 << kFfn | 1 << kAttention, kAt32},
+    {1 << kDs, kAt32},
+    {1 << kDs, kAbove32},
+    {1 << kFfn, kAbove32},
+    {1 << kAttention, kAbove32},
+    {1 << kAttention, kAbove32},
+    {1 << kFfn, kAbove32},
+    {1 << kAttention, kAbove32},
+    {1 << kFfwd, kAbove32},
+    {1 << kFfwdProjection, kAbove32},
+    {1 << kAttention, kAbove32},
+    {1 << kExpand | 1 << kContract, kAbove32},
+    {1 << kQkv, kAbove32},
+    {1 << kProjection, kAbove32},
+    {1 << kWeights, kAnyChannels},
 };
-static_assert(std::size(kShapes) == std::size(kRecipeSuffix));
+static_assert(std::size(kDomains) == std::size(kRecipeSuffix));
 
 // The channel count of each block, by the last block of each stage (upstream:
 // WeightElements). Later blocks, and post70 as block 70, have 32.
@@ -198,6 +195,14 @@ uint8_t fp8_code(float exact) { return exact_fp8(exact).value_or(0); }
     return fail("element " + std::to_string(element) + ": " + kFlawWords[size_t(flaw)]);
 }
 
+// ACTION PATH and why the last system call failed, with errno read before the
+// words are built.
+[[gnu::cold, gnu::noinline]] Result<WeightFile> file_error(const char* action, const std::string& path)
+{
+    const int error = errno;
+    return fail(std::string(action) + " " + path + ": " + std::strerror(error));
+}
+
 void round_halves(std::vector<float>& values, Region region)
 {
     auto* halves = reinterpret_cast<uint8_t*>(values.data() + region.first);
@@ -281,33 +286,34 @@ Result<WeightFile> read_weights(std::string_view assets, const WeightSpec& spec)
 {
     const Stem stem = parse(spec.stem);
     if (!stem.c) return fail("unknown weight " + std::string(spec.stem));
-    const Shape& shape = kShapes[size_t(spec.recipe)];
-    if (!(shape.types >> stem.type & 1) || !(shape.channels & (stem.c == 32 ? kAt32 : kAbove32)))
+    const Domain& domain = kDomains[size_t(spec.recipe)];
+    if (!(domain.types >> stem.type & 1) || !(domain.channels & (stem.c == 32 ? kAt32 : kAbove32)))
         return fail("no " + std::string(kRecipeSuffix[size_t(spec.recipe)]) + " packing of " + spec.stem);
     WeightFile file{join(assets, spec.stem) + ".f32", {}};
     Descriptor in(::open(file.path.c_str(), O_RDONLY | O_CLOEXEC));
     const bool full = in.fd >= 0;
     if (!full) {
+        if (errno != ENOENT) return file_error("open", file.path);
         file.path.replace(file.path.size() - 2, 2, "16");
-        in = Descriptor(::open(file.path.c_str(), O_RDONLY | O_CLOEXEC));
-        if (in.fd < 0) return fail("missing " + file.path);
+        in.fd = ::open(file.path.c_str(), O_RDONLY | O_CLOEXEC);
+        if (in.fd < 0)
+            return errno == ENOENT ? fail("missing weight " + file.path.substr(0, file.path.size() - 4) +
+                                          " (neither .f32 nor .f16)")
+                                   : file_error("open", file.path);
     }
     struct stat st{};
-    if (fstat(in.fd, &st)) return fail("read " + file.path + ": " + std::strerror(errno));
-    if (st.st_size <= 0) return fail("empty " + file.path);
-    const size_t bytes = size_t(st.st_size), width = full ? 4 : 2, elements = bytes / width;
-    if (bytes % width) return fail("weight size " + file.path);
-    if (shape.minimum ? elements < 2 * size_t(stem.c) * stem.c : elements != stem.elements)
-        return fail(std::string(shape.words) + " " + file.path +
-                    (spec.recipe == Recipe::kRaw ? ": " + std::to_string(elements) : std::string()));
-    file.values.resize(elements);
+    if (fstat(in.fd, &st)) return file_error("read", file.path);
+    const size_t bytes = stem.elements * (full ? 4 : 2);
+    if (st.st_size != off_t(bytes))
+        return fail(file.path + ": " + std::to_string(st.st_size) + " bytes, expected " + std::to_string(bytes));
+    file.values.resize(stem.elements);
     // A binary16 file goes into the second half of the floats and is widened
     // from the front: each float overwrites only halves widened already.
-    auto* data = reinterpret_cast<char*>(file.values.data()) + elements * 4 - bytes;
+    auto* data = reinterpret_cast<char*>(file.values.data()) + stem.elements * 4 - bytes;
     if (const auto got = read_all(in.fd, data, bytes); !got)
         return fail("read " + file.path + ": " + got.error().what);
     if (full) return file;
-    for (size_t i = 0; i < elements; ++i) {
+    for (size_t i = 0; i < stem.elements; ++i) {
         uint16_t half;
         std::memcpy(&half, data + 2 * i, 2);
         file.values[i] = widen_half(half);

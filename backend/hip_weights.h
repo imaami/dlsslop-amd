@@ -65,10 +65,11 @@ struct WeightFile {
     std::string path;
     std::vector<float> values;
 };
-// ASSETS/STEM.f32 when it opens, else ASSETS/STEM.f16 (upstream: ReadWeights),
-// of a stem upstream knows and applies SPEC's recipe to, with the element count
-// upstream's loader checks: file_elements() exactly, or at least 2c² for the
-// ds-cast, ds-frag and decoder recipes.
+// ASSETS/STEM.f32, or ASSETS/STEM.f16 when there is no .f32 (upstream:
+// ReadWeights), of a stem upstream knows and applies SPEC's recipe to, holding
+// exactly file_elements() values. Upstream reads the .f16 whenever the .f32
+// does not open, and its ds-cast, ds-frag and decoder loaders accept longer
+// files.
 Result<WeightFile> read_weights(std::string_view assets, const WeightSpec&);
 // FILE's values packed in place into the image upstream uploads, resized where
 // upstream resizes them; FILE is one read_weights() accepted for SPEC. Bytes
