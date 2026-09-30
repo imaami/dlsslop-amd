@@ -3,16 +3,18 @@
 
 An execution barrier alone does not order shared-memory accesses. Multi-wave
 kernels need an explicit fence before signalling a barrier, so LDS stores and
-reads have completed. This regression inspects every kernel in the production
-code objects without requiring a GPU or model weights. With a compiler, it
-first proves that the scan flags an unfenced probe kernel and passes a fenced
-one. Exit status 77 means the disassembler or the code objects are missing.
+reads have completed. This regression inspects every kernel in the code
+objects that the module directory's modules.json lists, without requiring a GPU
+or model weights. With a compiler, it first proves that the scan flags an
+unfenced probe kernel and passes a fenced one. Exit status 77 means the
+disassembler or the module manifest is missing.
 
 The check is deliberately conservative: within each disassembled kernel, any
 LDS load/store requires a zero DS wait before the next barrier signal.
 """
 
 import argparse
+import json
 from pathlib import Path
 import re
 import shutil
@@ -87,19 +89,22 @@ def main():
     parser.add_argument("-d", "--objdump", default="llvm-objdump",
                         help="AMDGPU-capable disassembler (default: llvm-objdump from PATH)")
     parser.add_argument("-m", "--modules", type=Path, default=base / "assets/HIP/gfx1201",
-                        help="code-object directory (default: %(default)s)")
+                        help="code-object directory; its modules.json names the code objects to scan "
+                        "(default: %(default)s)")
     parser.add_argument("-c", "--compiler",
                         help="AMDGPU-capable clang++ for the probe control (default: unset; empty or unset skips it)")
     parser.add_argument("-h", "--help", action="help",
                         help="show help and exit (default: off)")
     args = parser.parse_args()
     objdump = shutil.which(args.objdump)
-    modules = sorted(args.modules.glob("*.hsaco"))
-    if not objdump or not modules:
+    manifest = args.modules / "modules.json"
+    if not objdump or not manifest.is_file():
         print(f"SKIP: need an AMDGPU-capable disassembler ({args.objdump}) "
-              f"and code objects in {args.modules}", file=sys.stderr)
+              f"and a module manifest in {args.modules}", file=sys.stderr)
         return 77
     try:
+        # A rebuild leaves the files of modules it no longer builds; scan the ones the manifest lists.
+        modules = [args.modules / f"{row['module']}.hsaco" for row in json.loads(manifest.read_text(encoding="utf-8"))]
         errors = probe(objdump, args.compiler, base) if args.compiler else []
         results = [check_kernel(body, f"{module.stem}:{symbol}")
                    for module in modules for symbol, body in disassemble(objdump, module).items()]

@@ -73,7 +73,8 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
         assert result.returncode == expected, (folder.name, options, result.stdout, result.stderr)
         if expected:
             return result.stderr
-        return json.loads((output / 'modules.json').read_text())[0]['compiler']
+        return next(row['compiler'] for row in json.loads((output / 'modules.json').read_text())
+                    if row['module'] == 'linux_native')
 
     old = 'AMD clang version 19.0.0git (roc-6.4.0)'
     sdk_root = compilers('sdk-root', {'lib/llvm/bin/clang++': 'TheRock clang version 22.0.0',
@@ -102,15 +103,15 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
     # includes beside it: decoys beside the source must not be recorded.
     kernels = root / 'kernels'
     kernels.mkdir()
-    (kernels / 'prefix_fast.hip').write_text('#include "color_preserve_math.h"\n')
+    (kernels / 'deep_reference.hip').write_text('#include "color_preserve_math.h"\n')
     for name in ('color_preserve_math.h', 'tuning_math.h'):
         (kernels / name).write_text('decoy the compiler never sees\n')
-    build(mixed, '--only', 'prefix_fast', '--source', str(kernels))
-    prefix = next(row for row in json.loads((root / 'mixed-out/modules.json').read_text())
-                  if row['module'] == 'prefix_fast')
-    assert prefix['sources'] == {
-        'prefix_fast.hip': hashlib.sha256((kernels / 'prefix_fast.hip').read_bytes()).hexdigest(),
-        **{name: native['sources'][name] for name in ('color_preserve_math.h', 'tuning_math.h', 'geometry.h')}}, prefix
+    build(mixed, '--only', 'deep_reference', '--source', str(kernels))
+    module = next(row for row in json.loads((root / 'mixed-out/modules.json').read_text())
+                  if row['module'] == 'deep_reference')
+    assert module['sources'] == {
+        'deep_reference.hip': hashlib.sha256((kernels / 'deep_reference.hip').read_bytes()).hexdigest(),
+        **{name: native['sources'][name] for name in ('color_preserve_math.h', 'tuning_math.h', 'geometry.h')}}, module
 
     newer = compilers('newer', {'amdclang++': 'AMD clang version 22.0.0git',
                                 'clang++-22': 'Debian clang version 22.1.8'})
@@ -125,12 +126,12 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
     (root / 'stale-out/modules.json').write_text(json.dumps(
         [{'module': 'c32_wmma', 'compiler': 'old', 'sha256': '1' * 64},
          {'module': 'linux_color', 'compiler': 'old', 'sha256': '2' * 64},
-         {'module': 'prefix_fast', 'compiler': 'old', 'sha256': '0' * 64}]))
+         {'module': 'deep_reference', 'compiler': 'old', 'sha256': '0' * 64}]))
     build(stale)
     rows = json.loads((root / 'stale-out/modules.json').read_text())
-    assert [row['module'] for row in rows] == ['linux_native', 'prefix_fast'], rows
+    assert [row['module'] for row in rows] == ['deep_reference', 'linux_native'], rows
     sums = (root / 'stale-out/SHA256SUMS').read_text()
-    assert 'c32_wmma' not in sums and 'linux_color' not in sums and f'{"0" * 64}  prefix_fast.hsaco\n' in sums, sums
+    assert 'c32_wmma' not in sums and 'linux_color' not in sums and f'{"0" * 64}  deep_reference.hsaco\n' in sums, sums
 
     # An explicit compiler, from the option or HIP_CLANG, is used whatever its version.
     assert build(mixed, '--compiler', 'clang++') == 'clang version 20.1.8'

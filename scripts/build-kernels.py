@@ -18,18 +18,12 @@ import subprocess
 import sys
 
 
-# Upstream hip/build-modules.ps1's selections in its order, less the twelve the
-# production network never loads, then the Linux kernels.
+# Upstream hip/build-modules.ps1's selections in its order, less the 24 the
+# production network never launches, then the Linux kernels.
 MODULES = [
-    ("c32_prefix_reference", [], ["c32_reference.hip", "prefix_reference.hip"]),
     ("multihead-reference", [], ["multihead_reference.hip"]),
     ("deep_reference", [], ["deep_reference.hip"]),
-    ("boundary_reference", [], ["boundary_reference.hip"]),
-    ("c32_fast", [], ["c32_fast.hip"]),
-    ("c32_fast_attention", [], ["c32_fast_attention.hip"]),
-    ("boundary-fast", [], ["c32_fast_attention.hip", "boundary_fast.hip"]),
     ("c32_fused_ffn_attention-packed", ["HIP_C32_DIAG_WEIGHTS 1", "HIP_FP8_SAT_MODE 3"], ["c32_fused_ffn_attention.hip"]),
-    ("prefix_fast", [], ["prefix_fast.hip"]),
     ("multihead_fused_attention", ["HIP_MH_RTZ_ISA 1"], ["multihead_fused_attention.hip"]),
     ("deep_fast-packed", ["HIP_VIT_ATTN_TRANSPOSED_SCORE 1", "HIP_BRANCHLESS_F 1"], ["deep_fast.hip"]),
     ("multihead-fast-padded-wave-packed", ["C512_HEAD_GROUP 1", "HIP_FFN_HOIST_RES 2", "HIP_FFN_LINE_STORES 1", "HIP_FMED3_CLAMP 1"],

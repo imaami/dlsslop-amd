@@ -92,8 +92,9 @@ layouts of the types it passes to them. It takes those layouts from ROCm's
 `packaging/THIRD-PARTY.txt`). `backend/hip.cpp` loads the runtime
 (`libamdhip64.so.7`, `.so.6` or the unversioned soname, also from
 `/opt/rocm/lib` or an explicit `DLSSLOP_HIP_LIBRARY` path) with
-`dlopen`/`dlsym`. The build ships 12 of upstream's 29 modules; the network
-loads the 6 it launches.
+`dlopen`/`dlsym`. Of the 30 modules that upstream's `hip/build-modules.ps1`
+builds (its header comment says 29), the build ships only the 6 that the
+network launches.
 
 Preserve `external/layer/ATTRIBUTION.md` and all inherited notices of upstream
 code. The layer's shader/dispatch lineage includes OptiScaler and

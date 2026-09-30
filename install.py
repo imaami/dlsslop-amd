@@ -13,10 +13,8 @@ import tempfile
 
 
 MODULE_NAMES = (
-    "c32_prefix_reference", "multihead-reference", "deep_reference", "boundary_reference",
-    "c32_fast", "c32_fast_attention", "boundary-fast", "c32_fused_ffn_attention-packed",
-    "prefix_fast", "multihead_fused_attention", "deep_fast-packed",
-    "multihead-fast-padded-wave-packed", "linux_native",
+    "multihead-reference", "deep_reference", "c32_fused_ffn_attention-packed", "multihead_fused_attention",
+    "deep_fast-packed", "multihead-fast-padded-wave-packed", "linux_native",
 )
 MODULE_DIRECTORY = "share/dlsslop-amd/HIP/gfx1201"
 LAYER_LIBRARY = "lib/dlsslop-amd/libVkLayer_DLSSLOP_amd.so"

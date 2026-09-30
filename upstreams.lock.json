@@ -69,20 +69,13 @@
       "commit": "c1908317fb7e7ee9fe4884feba4a67220d93461f",
       "sources": [
         "LICENSE",
-        "hip/boundary_fast.hip",
-        "hip/boundary_reference.hip",
-        "hip/c32_fast.hip",
-        "hip/c32_fast_attention.hip",
         "hip/c32_fused_ffn_attention.hip",
-        "hip/c32_reference.hip",
         "hip/c512_head_group.inc",
         "hip/deep_fast.hip",
         "hip/deep_reference.hip",
         "hip/multihead_fast_padded.hip",
         "hip/multihead_fused_attention.hip",
-        "hip/multihead_reference.hip",
-        "hip/prefix_fast.hip",
-        "hip/prefix_reference.hip"
+        "hip/multihead_reference.hip"
       ]
     },
     "vulkan": {
