@@ -18,7 +18,14 @@ byte for byte against digests of upstream's packers on synthetic weights, and
 the weight sizes the network expects against the model import's manifest. It
 checks the Vulkan network's weight packing byte for byte against digests of
 what upstream's graph build packed from a synthetic model pack, and its model
-reader on damaged packs. At
+reader on damaged packs. At 40 frame extents from 17x17 to 5120x2880 it checks
+the Vulkan network's launch plan against upstream's graph build: every dispatch
+with its push constants and the activation arena's values and sizes, and at 8
+of them the weight blob packed from a synthetic model pack. Frames that
+upstream fails on, and frames whose arena overflows 32-bit offsets, must be
+rejected. It checks each network kernel's push block and bindings in the built
+SPIR-V against the plan, and the shader build's markers and the model tools'
+entry list against what the plan expects. At
 every tier and preset it checks the HIP network's launch plan against traces
 of upstream's network: every launch with the buffers it uses, on the first
 frame and later ones, the buffer pool, the uploaded weights, and the gather map
@@ -106,6 +113,17 @@ reference checks.
 Repeat with `--passes 2` to exercise feedback. Successful execution and
 deterministic output are basic sanity checks; the self-test does not measure
 visual quality or game performance.
+
+Without a GPU, the Vulkan network's weight blob can be checked against
+upstream's packing of the real model at every extent the plan test covers:
+
+```bash
+./build/vulkan-plan-test --model ~/.local/share/dlsslop-amd/dlssnr.bin
+```
+
+`vulkan-plan-test --print WxH` prints the plan for WxH frames, a line a
+dispatch and a line a value, in the form of the dumps of upstream's build that
+its goldens were recorded from.
 
 When the game renders on the worker's RX 9070 XT, its layer log (beside the
 channel file) must report `device-local transport ready`: proxy and answer then

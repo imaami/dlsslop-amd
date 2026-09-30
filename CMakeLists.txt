@@ -246,6 +246,18 @@ if(BUILD_TESTING)
     add_executable(vulkan-weights-test tests/vulkan_weights_test.cpp common/vulkan_weights.cpp backend/files.cpp)
     target_include_directories(vulkan-weights-test PRIVATE backend)
     add_test(NAME vulkan-weights COMMAND vulkan-weights-test)
+    # The Vulkan network's plan against goldens of upstream's graph build, the
+    # push blocks and bindings of the SPIR-V the build made against it, and the
+    # fork's shader markers and model entries against those it expects.
+    add_executable(vulkan-plan-test tests/vulkan_plan_test.cpp common/vulkan_plan.cpp common/vulkan_schedule.cpp
+        common/vulkan_weights.cpp backend/files.cpp)
+    target_include_directories(vulkan-plan-test PRIVATE backend)
+    add_dependencies(vulkan-plan-test vulkan-nr-shaders)
+    add_test(NAME vulkan-plan COMMAND vulkan-plan-test)
+    add_test(NAME vulkan-plan-abi COMMAND vulkan-plan-test --spirv ${VKNR_SHADERS})
+    add_test(NAME vulkan-constants COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/vulkan-constants.py
+        --plan-test $<TARGET_FILE:vulkan-plan-test> --pipelines ${VKNR_ROOT}/shaders/rdna4/pipelines.json
+        --model-files ${VKNR_ROOT}/package/model-tools/model-files.txt)
     # A fake layer that serves dlsslopd frames for the tracers below; tested
     # against dlsslopd's identity mode.
     add_executable(shmclient tests/shmclient.cpp)
@@ -354,8 +366,8 @@ if(BUILD_TESTING)
     target_link_libraries(vktrace-probe PRIVATE ${VULKAN_LOADER})
     add_test(NAME vktrace COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/vktrace/vktrace-test.py
         $<TARGET_FILE:vktrace> $<TARGET_FILE:vktrace-probe> $<TARGET_FILE:shmclient>)
-    set_tests_properties(color-gpu hip-plan-abi lds-barriers codec-isa hdr-shader composition-rebuild vulkan-smoke
-        vktrace PROPERTIES SKIP_RETURN_CODE 77)
+    set_tests_properties(color-gpu hip-plan-abi vulkan-plan-abi lds-barriers codec-isa hdr-shader composition-rebuild
+        vulkan-smoke vktrace PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 # The GUI is an optional standalone client. No Qt dependency reaches the worker
