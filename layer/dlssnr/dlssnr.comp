@@ -277,18 +277,6 @@ void GetDimensions(texture2D tex, out uint width, out uint height)
     height = uint(size.y);
 }
 
-// The picture white point. Sources 0 (paper white) and 2 (scan) resolve it on the CPU and pass it in
-// gWhitePoint; source 1 (the game's own exposure) also passes a CPU value in gWhitePoint as a fallback,
-// but when the exposure texture is bound (D3D12) it is recomputed HERE from the live exposure --
-// gExposurePreMul (= preExposure * trim) / exposure -- which removes the 3-4 frame CPU-readback lag the
-// meter path has. The clamp matches the CPU path's [0.01, 4096]. Vulkan compiles the live path out and
-// always returns the CPU value, so its behaviour is unchanged.
-float WhitePoint()
-{
-    return NMax(gWhitePoint, 1e-4);
-}
-
-
 const vec3 kLuma = vec3(0.2126, 0.7152, 0.0722);
 
 // sRGB rather than a plain 2.2 power: it is what an SDR game buffer actually carries, and the model was
@@ -1497,19 +1485,19 @@ void main()
     if (outsideFrame)
         result = vec3(0.0, 0.0, 0.0);
 
-    // A hairline so the two sides are never mistaken for one picture.
-    if (onDivider)
-    {
-        vec3 white = vec3(WhitePoint(), WhitePoint(), WhitePoint());
-        if (gHdrTransfer != 0)
-            white = LinearToPq(vec3(WhitePoint() * kPqPaperWhite, WhitePoint() * kPqPaperWhite,
-                                    WhitePoint() * kPqPaperWhite));
-        result = white;
-    }
-
     // A linear scRGB target supports negative coordinates for colors outside
     // BT.709. UNORM/PQ destinations remain bounded by their own color encoding.
     vec3 stored = gPassthrough == 0 && gHdrTransfer == 0
         ? result : NMax(result, vec3(0.0, 0.0, 0.0));
+
+    // A hairline so the two sides are never mistaken for one picture, drawn over the final pixel.
+    //
+    // Paper white in the frame's own units: normScale, by which the composition was brought back out
+    // of its normalised space above. A passthrough frame is display-referred, so outside PQ that is 1
+    // whatever the white point. A line drawn at the white point came out at that value there -- 240
+    // times display white on a float scRGB target set to 240 -- and grey on a UNORM one below 1.
+    if (onDivider)
+        stored = gHdrTransfer != 0 ? LinearToPq(vec3(normScale)) : vec3(normScale);
+
     imageStore(gTarget, ivec2(id.xy), vec4(stored, originalSample.a));
 }
