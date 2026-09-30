@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Host test of the HIP network's launch plan, without a GPU or a model. At
 // every tier and preset its launches, buffers and uploads are checked against
-// traces that a tracing HIP runtime took of upstream's network
-// (hip_reference_network.h at c190831) in dlsslopd: hashes of the launch lists
-// with buffers named by first use, the pool's buffers, the weights and the
-// gather maps each launch reads. --modules checks the launches against the
+// traces that the tracing HIP runtime (tests/hiptrace) took of upstream's
+// network (hip_reference_network.h at c190831) in dlsslopd: hashes of the
+// launch lists with buffers named by first use, the pool's buffers, the
+// weights and the gather maps each launch reads. tests/hiptrace/plan_hashes.py
+// prints these values from a trace. --modules checks the launches against the
 // built kernels' metadata instead.
 #include "../backend/files.h"
 #include "../backend/hip_plan.h"
