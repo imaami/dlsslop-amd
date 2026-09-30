@@ -86,7 +86,6 @@ void HipEngine::release()
     gpu_codec_.reset();
     kernels_.reset();
     network_.reset();
-    model_.reset();
     previous_settings_ = {};
 }
 
@@ -100,7 +99,13 @@ Result<void> HipEngine::prepare()
     if (!stream_) DLSSLOP_TRY(api_.check(api_.hipStreamCreate(&stream_), "create the HIP stream"));
     const auto plan = DLSSLOP_TRY(hip::plan(raster.width, raster.networkHeight, options_.performance));
     const auto placement = DLSSLOP_TRY(hip::place(plan));
-    DLSSLOP_TRY(model_.emplace(api_).load(options_.modules, options_.assets, plan.weights));
+    if (!model_) {
+        // A model that failed to load is freed, so that no later network binds it.
+        if (auto loaded = model_.emplace(api_).load(options_.modules, options_.assets, plan.weights); !loaded) {
+            model_.reset();
+            return loaded;
+        }
+    }
     DLSSLOP_TRY(network_.emplace(api_, *model_, stream_).build(plan, placement));
     for (auto& event : marks_) DLSSLOP_TRY(api_.check(api_.hipEventCreate(&event), "create timing event"));
     // Tuning, colour and motion use the module's kernels with the CPU codec too.

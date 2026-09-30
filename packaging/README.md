@@ -211,10 +211,11 @@ Every command has `--help`; `dlsslopctl --settings` lists the current settings
 and reset values. `--tier` switches the running daemon to a 1280×720, 1600×900
 or 1920×1080 neural raster, independently of the game's resolution; the edit
 is composed against the native frame. The daemon rebuilds its network, which
-takes a few seconds while the game presents its own frames. A restarted daemon
-keeps the tier unless its command line or config file sets one. An extra pass
-consumes its predecessor's output, uses more compute and adds latency without
-guaranteeing better quality. Motion estimation is optional and off by default.
+takes under a second, and the game presents its own frames meanwhile. A
+restarted daemon keeps the tier unless its command line or config file sets
+one. An extra pass consumes its predecessor's output, uses more compute and
+adds latency without guaranteeing better quality. Motion estimation is
+optional and off by default.
 
 In-game menus and HUDs receive no special treatment: dlsslop-amd sees only
 finished frames, so it cannot tell which pixels belong to them. No input pixel

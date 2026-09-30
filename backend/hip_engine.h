@@ -29,6 +29,9 @@ class HipEngine : public EngineBase<HipEngine> {
     // The one stream of the network and every kernel and copy of the daemon's,
     // from the first prepare() on.
     hip::Handle stream_ = nullptr;
+    // The network's code objects and weights, from the first prepare() on.
+    // Every tier's plan reads the same weights (hip-plan checks it), and they
+    // differ only with --performance, which is fixed for the engine's life.
     std::optional<hip::Model> model_;
     std::optional<hip::Network> network_;
     std::optional<NativeKernels> kernels_;
@@ -53,7 +56,7 @@ class HipEngine : public EngineBase<HipEngine> {
     std::array<Imported, kSlots> imported_{};
 
     void release(Imported& slot);
-    // Everything prepare() made but the stream, and every import.
+    // Everything prepare() made but the stream and the model, and every import.
     void release();
     Result<void> mark(unsigned i) { return api_.check(api_.hipEventRecord(marks_[i], stream_), "record timing event"); }
     Result<void> synchronize() { return api_.check(api_.hipStreamSynchronize(stream_), "network completion"); }
@@ -82,8 +85,8 @@ public:
         return "processing=" + std::to_string(raster.width) + "x" + std::to_string(raster.networkHeight);
     }
     Result<void> prepare();
-    // Builds the network for another tier, between frames. The layer offers its
-    // device-local frames again.
+    // Builds the network for another tier, between frames, with the loaded
+    // model. The layer offers its device-local frames again.
     Result<void> retier(unsigned tier)
     {
         release();
