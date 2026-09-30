@@ -3,6 +3,7 @@
 #pragma once
 #include "result.h"
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -39,6 +40,9 @@ std::string absolute(const std::string& path);
 Result<std::string> read_file(const std::string& path);
 // BYTES from FD into DATA: a file that ends first is an error.
 Result<void> read_all(int fd, void* data, size_t bytes);
+// BYTES from FD at OFFSET into DATA, leaving FD's position as it was: a file
+// that ends first is an error.
+Result<void> read_at(int fd, uint64_t offset, void* data, size_t bytes);
 // All of DATA to FD.
 Result<void> write_all(int fd, const void* data, size_t bytes);
 // DATA as FILE, created or truncated; or strerror of what stopped it.

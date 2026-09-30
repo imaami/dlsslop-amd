@@ -241,6 +241,11 @@ if(BUILD_TESTING)
         backend/files.cpp)
     add_test(NAME hip-plan COMMAND hip-plan-test)
     add_test(NAME hip-plan-abi COMMAND hip-plan-test --modules ${HIP_MODULES})
+    # The Vulkan network's weight packing against digests of upstream's, and
+    # its model reader on damaged packs.
+    add_executable(vulkan-weights-test tests/vulkan_weights_test.cpp common/vulkan_weights.cpp backend/files.cpp)
+    target_include_directories(vulkan-weights-test PRIVATE backend)
+    add_test(NAME vulkan-weights COMMAND vulkan-weights-test)
     # A fake layer that serves dlsslopd frames for the tracers below; tested
     # against dlsslopd's identity mode.
     add_executable(shmclient tests/shmclient.cpp)
