@@ -139,7 +139,7 @@ struct Plan {
     std::vector<uint32_t> floats;
     // Tensors taken from the pool (id) and returned (~id), in program order.
     std::vector<int32_t> events;
-    // Every weight upstream uploads, in its order. Some no kernel reads.
+    // The weights the launches read, in the order upstream uploads them.
     std::vector<WeightSpec> weights;
 };
 // The plan at WIDTHxHEIGHT, one of the network's padded tiers. PERFORMANCE

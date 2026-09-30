@@ -77,7 +77,10 @@ weights byte for byte as upstream does; the network mathematics are unchanged.
 Like the fork, the port writes the final RGB straight into the caller's buffer,
 while upstream writes it into a pooled tensor and copies it from there on every
 pass. The port leaves out the adaptive ViT reuse, and dlsslopd warns when
-`DLSS5_VIT_ADAPTIVE` requests it.
+`DLSS5_VIT_ADAPTIVE` requests it. It also leaves out the weights no kernel
+reads, which upstream uploads: the C512 blocks' unpacked `ffwd` weights, and
+the c256 blocks' attention weights in the `@fp8` layout that the c64, c128 and
+c512 blocks read.
 `backend/hip.h` declares the HIP runtime entry points dlsslopd calls and the
 layouts of the types it passes to them. It takes those layouts from ROCm's
 `include/hip/hip_runtime_api.h` as the fork's `hip_api.h` and

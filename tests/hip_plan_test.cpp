@@ -33,7 +33,7 @@ namespace hip = dlsslop::hip;
 // What the traces show at a tier and preset: launches and distinct kernels
 // per frame, and the FNV-1a 64 of the canonical launch list of the first
 // frame, of a later one, and of a later one with a history (0: not traced),
-// and of the weight uploads (upload_text()).
+// and of the weight uploads that a launch reads (upload_text()).
 struct Traced {
     unsigned tier;
     bool performance;
@@ -41,12 +41,12 @@ struct Traced {
     uint64_t first, later, history, uploads;
 };
 constexpr Traced kTraced[] = {
-    {720, false, 250, 43, 0xa2dae6593e416beeu, 0x1f7c6f29d1c28a84u, 0x240a88c7eb4b11a6u, 0x31cab3178caac8b3u},
-    {720, true, 229, 43, 0x834bc420b12694dcu, 0x892cd4d1d3db66a5u, 0, 0x04a94107d26d8e52u},
-    {900, false, 254, 41, 0x32d0cdfcc08b67e2u, 0x0c823eac9f698da2u, 0, 0x5d53a99a6255a804u},
-    {900, true, 233, 41, 0xff9623a799b34742u, 0x42c5410c76dcbbb9u, 0, 0xa96616a3b8169072u},
-    {1080, false, 254, 42, 0x18bff6041650c106u, 0xdffb8c9588486891u, 0x4f31a38dc45a9974u, 0x5d53a99a6255a804u},
-    {1080, true, 233, 42, 0x1f5cb0ebce0e78d8u, 0xfb73f9fd4c0be465u, 0, 0xa96616a3b8169072u},
+    {720, false, 250, 43, 0xa2dae6593e416beeu, 0x1f7c6f29d1c28a84u, 0x240a88c7eb4b11a6u, 0x0ee01bec21d79f03u},
+    {720, true, 229, 43, 0x834bc420b12694dcu, 0x892cd4d1d3db66a5u, 0, 0xfd99729c88d07861u},
+    {900, false, 254, 41, 0x32d0cdfcc08b67e2u, 0x0c823eac9f698da2u, 0, 0xf023500cbbedf100u},
+    {900, true, 233, 41, 0xff9623a799b34742u, 0x42c5410c76dcbbb9u, 0, 0x38d51bf165148771u},
+    {1080, false, 254, 42, 0x18bff6041650c106u, 0xdffb8c9588486891u, 0x4f31a38dc45a9974u, 0xf023500cbbedf100u},
+    {1080, true, 233, 42, 0x1f5cb0ebce0e78d8u, 0xfb73f9fd4c0be465u, 0, 0x38d51bf165148771u},
 };
 // Per tier, with either preset: the pool's buffers in creation order, ending
 // with 0, and the FNV-1a 64 of the gather maps in the order the launches first
@@ -74,10 +74,14 @@ constexpr TracedTier kTracedTiers[] = {
 // FNV-1a 64 of identity_text(). The traces hold only the payloads. The names
 // are those under which the pinned upstream packers, run on the real model,
 // made the same payloads in the same order; no two payloads are alike.
+// Upstream also uploads 32 weights, 29 with --performance, that no launch
+// reads, and dlsslopd leaves them out: these values and the upload hashes
+// above are of the traced uploads without them. A weight that no launch reads
+// fails the upload hash, as upload_text() writes "BYTES -" for it.
 constexpr struct {
     size_t count, bytes;
     uint64_t identity;
-} kTracedWeights[] = {{268, 696668200, 0x438ba827cb0b6fa9u}, {253, 654182056, 0x8646ffc501474da1u}};
+} kTracedWeights[] = {{236, 644222504, 0x675dbc4f8229a0b1u}, {224, 608027816, 0xec181f70bf0130c9u}};
 
 int failures = 0;
 // Whether OK; if not, the test fails with the message.
@@ -225,13 +229,13 @@ void check_plans()
             for (const hip::WeightSpec& spec : plan->weights) bytes += hip::packed_bytes(spec);
             const auto& w = kTracedWeights[performance];
             expect(plan->weights.size() == w.count && bytes == w.bytes,
-                   "tier %u%s: %zu weights of %zu bytes; upstream uploads %zu of %zu", tier.height, preset,
+                   "tier %u%s: %zu weights of %zu bytes; upstream's launches read %zu of %zu", tier.height, preset,
                    plan->weights.size(), bytes, w.count, w.bytes);
             const std::string identity = identity_text(*plan);
-            expect(fnv1a(identity) == w.identity, "tier %u%s: other weights uploaded than upstream's", tier.height,
-                   preset);
+            expect(fnv1a(identity) == w.identity, "tier %u%s: other weights uploaded than upstream's launches read",
+                   tier.height, preset);
             expect(fnv1a(upload_text(*plan)) == traced->uploads,
-                   "tier %u%s: weights uploaded otherwise than upstream's", tier.height, preset);
+                   "tier %u%s: weights uploaded otherwise than upstream's launches read them", tier.height, preset);
             // One model serves every tier.
             if (weights[performance].empty()) weights[performance] = identity;
             expect(identity == weights[performance], "tier %u%s: weights differ from tier %u's", tier.height, preset,

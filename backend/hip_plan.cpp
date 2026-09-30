@@ -66,8 +66,8 @@ uint32_t groups(const KernelInfo& k, size_t count, const Arg* args)
 }
 
 // Records upstream's RunGraph as it queues its production path: each launch,
-// each weight as upstream first asks for it, and each tensor it takes from its
-// pool and returns.
+// each weight a launch reads when upstream first asks for it, and each tensor
+// it takes from its pool and returns.
 class Builder {
 public:
     // Upstream's pooled Tensor: a reference to a tensor. When the last one is
@@ -227,11 +227,11 @@ Builder::Tensor Builder::mh_block(Tensor input, unsigned w, unsigned h, unsigned
     const bool identity = !sx && !sy && ww == w && hh == h;
     const Tensor ffn = tensor(size_t(n) * c / 4), norm = tensor(size_t(n) * 3 * c / 4);
     const bool frag = c == 256;
+    // At c256 upstream also uploads the attention weight as kMhAttention packs
+    // it, which no kernel reads.
     const Weight ffn_weights = weight(block, "ffn", frag ? Recipe::kFfnFrag : Recipe::kMhFfn),
                  qkv = weight(block, "attention", frag ? Recipe::kQkvFragOnly : Recipe::kMhAttention);
     launch(kFfn[level][!identity][byte_in], size_t(n) * c, input, ffn_weights, qkv, ffn, norm, n, w, h, ww, sx, sy);
-    // Upstream uploads this for c256 too, where no kernel reads it.
-    weight(block, "attention", Recipe::kMhAttention);
     const Tensor out = tensor(size_t(identity ? n : w * h) * c / (byte_out ? 4 : 1));
     // The output's rounding: Hrtz at the end of an encoder level, which is a
     // skip; F of Hrtz at blocks 48, 55, 61 and 65; F elsewhere.
@@ -257,8 +257,8 @@ Builder::Tensor Builder::c512_block(Tensor input, unsigned w, unsigned h, unsign
     {
         Tensor mixed = tensor(size_t(n) * 512);
         const Tensor contract = tensor(size_t(n) * 512);
-        // Upstream uploads the weights as read too, and no kernel reads them.
-        weight(block, "ffwd", Recipe::kRaw);
+        // Upstream also uploads the unpacked ffwd weights, which no kernel
+        // reads.
         const Weight mix = weight(block, "ffwd", Recipe::kSplitMixF16);
         launch(Kernel::kSplitMix, size_t(n) * 512, packed, mix, mixed, n);
         const Tensor contract8 = tensor(size_t(n) * 128);

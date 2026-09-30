@@ -183,7 +183,8 @@ std::string synthetic_file(const WeightSpec& spec, size_t elements, bool half)
     return bytes;
 }
 
-// One weight per recipe and channel count that production packs.
+// One weight per recipe and channel count that upstream's production path
+// packs.
 constexpr WeightSpec kCases[] = {
     {"post70-scales", Recipe::kRaw},
     {"post70-head", Recipe::kRaw},
@@ -716,10 +717,12 @@ void check_production_list()
             expect(hip::file_elements(spec) != 0, "%s: unknown stem", spec.stem);
             expect(keys.insert(key(spec)).second, "%s listed twice", key(spec).c_str());
         }
-        // The weights upstream uploads: its traces show these totals.
-        const size_t count = performance ? 253 : 268, total = performance ? 654182056 : 696668200;
-        expect(list->size() == count && bytes == total, "%zu weights%s of %zu bytes; upstream uploads %zu of %zu",
-               list->size(), performance ? " with --performance" : "", bytes, count, total);
+        // The weights upstream uploads that a launch reads: its traces show
+        // these totals.
+        const size_t count = performance ? 224 : 236, total = performance ? 608027816 : 644222504;
+        expect(list->size() == count && bytes == total,
+               "%zu weights%s of %zu bytes; upstream's launches read %zu of %zu", list->size(),
+               performance ? " with --performance" : "", bytes, count, total);
     }
 }
 
