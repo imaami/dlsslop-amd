@@ -21,11 +21,18 @@ of upstream's network: every launch with the buffers it uses, on the first
 frame and later ones, the buffer pool, the uploaded weights, and the gather map
 each ViT gather reads. It checks the tracing HIP runtime (see
 [Tracing the HIP network](#tracing-the-hip-network)) against a fake runtime
-line for line, and its tools, client and run script without a GPU. With the
-GUI enabled it also checks the controller's option parsing without a display,
-its shared-memory backend and slider, that an edit is written at once and later
-ones coalesced, and that the wheel scrolls a page without editing the
-unfocused controls it crosses.
+line for line, and its tools and run script without a GPU. It checks the
+tracing Vulkan layer (see
+[Tracing the Vulkan network](#tracing-the-vulkan-network)) with a probe on
+Mesa's lavapipe under the Khronos validation layer, and its tools and run
+script; without lavapipe or the validation layer it skips the probe. The
+tracers' fake layer, `shmclient`, must send dlsslopd's identity mode the
+inputs the tracers' baselines were taken with, after storing the settings that
+the daemon then finds in the channel. With the GUI enabled it also
+checks the controller's option parsing without a display, its shared-memory
+backend and slider, that an edit is written at once and later ones coalesced,
+and that the wheel scrolls a page without editing the unfocused controls it
+crosses.
 
 The presentation smoke drives Vulkan capture, an explicit identity worker,
 composition and presentation through a separate test layer that also admits
@@ -118,9 +125,9 @@ needs a Vulkan 1.3 instance`.
 A change to the HIP network's host code must leave its launches as they were,
 unless it means to change them. `tests/hiptrace` checks this on the GPU. The
 build's `libhiptrace.so` is a HIP runtime that dlsslopd loads in place of
-ROCm's: it forwards every call to the real runtime and logs it.
-`hiptrace-shmclient` is a minimal layer that serves dlsslopd frames on a
-private channel. `trace.sh` runs one configuration with both and writes
+ROCm's: it forwards every call to the real runtime and logs it. `shmclient`,
+from `tests/shmclient.cpp`, is a minimal layer that serves dlsslopd frames on
+a private channel. `trace.sh` runs one configuration with both and writes
 `NAME.trace`:
 
 ```bash
@@ -186,6 +193,111 @@ two can be compared with `diff`. The first evaluation, `--print 0`, compares
 with `hip-plan-test --print TIER --first`. For a trace taken with
 `--performance`, add `--performance` to hip-plan-test; the third evaluation of
 a trace taken with `--motion`, `--print 2`, compares with `--history`.
+
+### Tracing the Vulkan network
+
+A change to the Vulkan network's host code must leave its command streams as
+they were, unless it means to change them. `tests/vktrace` checks this on the
+GPU. The build's `libvktrace.so` is an explicit Vulkan layer,
+`VK_LAYER_LOCAL_vktrace`, with its manifest in `build/vktrace`. It logs the
+device work of dlsslopd with every handle renamed by kind and creation order:
+the device and every feature it enables, memory, resources and their binds,
+pipelines with the SPIR-V file each shader module holds, descriptor writes,
+every recorded command with its push constant bytes and barriers, and every
+submission and wait. It also logs the FNV-1a 64 of each copy out of mapped host
+memory when it is submitted (`Upload`) and of each copy into host memory once
+it has been waited for (`Readback`). `trace.sh` runs one configuration with
+the layer and `shmclient` and writes `NAME.trace`:
+
+```bash
+tests/vktrace/trace.sh --output traces --self-test   # traces/selftest-720.trace and .ppm
+tests/vktrace/trace.sh --output traces               # traces/serve-720.trace: frames A, A, B
+tests/vktrace/trace.sh --output traces --tier 1080 --fp16 --motion --frames AABB
+tests/vktrace/trace.sh --output traces --name serve-720-live --frames AAAAAA -- \
+    --sharpness 1:0.5 --sharpness 2:0 --passes 3:2 --intensity 4:0.5 --mvec 5:1
+```
+
+`--help` lists the options and their defaults: the build tree, the dlsslopd,
+the SPIR-V directories and the model, the output and channel directories, the
+configuration and the content hashes. dlsslopd reads no settings file and keeps
+its pipeline cache in `XDG_CACHE_HOME`. Arguments after `--` go to
+`shmclient`, whose setting options are dlsslopctl's, with the same ranges; each
+takes a value, stored before the daemon starts, or `FRAME:VALUE`, stored before
+frame FRAME (from 0) is sent. dlsslopd follows a tier only between requests, so
+for `--tier FRAME:VALUE` the client waits until the daemon has published the
+new tier's raster before it sends frame FRAME. The layer goes first in
+`VK_INSTANCE_LAYERS`, above any layer the environment already names there, so
+`VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation` also validates the layer's own
+commands.
+
+To compare two builds, trace the same configuration with each, each with the
+SPIR-V its revision builds, and compare the traces:
+
+```bash
+tests/vktrace/trace.sh --output traces/old --daemon ../old/build/dlsslopd --spirv ../old/build/vulkan-nr/network
+tests/vktrace/trace.sh --output traces/new
+tests/vktrace/compare.py traces/old/serve-720.trace traces/new/serve-720.trace
+```
+
+A frame is a submission that dispatches and is not a build's one-shot, whose
+command pool is created after the previous submission and destroyed before the
+next. `compare.py` prints `MATCH` when both traces have the same number of
+frames and each pair of frames has the same canonical command stream: every
+dispatch with its pipeline's definition (SPIR-V, entry point, specialization
+and layout), the contents of the descriptor sets it binds and its push constant
+bytes; every barrier, copy, fill, update, clear, query and timestamp. Resources
+are renamed by first use in the frame and described there (size, usage,
+format, extent), and pipelines are named by their definitions, so two builds
+may create objects in another order. The frames' uploads and readbacks must
+have equal FNVs. Before the frames, the frames' pipelines must have the same
+definitions, and the uploads outside frames must carry the same payloads;
+the same payloads in another order are reported but pass. Otherwise it prints
+each frame's first difference with the commands before it, and for a dispatch
+which part differs (pipeline, grid, sets or push constant words), then
+`DIFFERENT`, and exits with 1. `--ignore-queries` leaves query pool resets,
+queries and timestamps out, `--frames 2-5:0-3` compares frames of A with other
+frames of B, and `--span network` compares only the frames that run the
+network, from its first dispatch to its last, and the answer that follows;
+with `--skip-setup` it compares a game's trace of the in-layer network with
+dlsslopd's. The first line of a trace names the hashing options and the SPIR-V
+directories, so it differs between builds.
+
+Content hashes also compare the data on the device. `--hash` takes
+comma-separated selectors: `i2b` the bytes each image-to-buffer copy wrote,
+such as the answer; `copydst` every copy, fill, update and clear destination;
+`storage` every storage buffer range and storage image a dispatch bound;
+`dispatch=N` those of a submission's dispatch N; `all` every buffer and image;
+`bufN` and `imgN` those resources. After each submission they select, which
+`--hash-submits` may limit to ranges `A-B` and ordinals `A` of the 1-based
+submission numbers (`sub=` in the trace) or to `dispatch` for submissions that
+dispatch, the layer waits for the queue, copies the selected resources through
+its own command buffer and staging buffer and logs their FNV-1a 64 as `Hash`
+lines. It logs none of its own commands, so a hashed trace has the same calls
+and frames; only the run is slower. Submission numbers count a build's
+submissions too, so a range that selects a baseline's build and frames does not
+select the same work in a build that submits its setup another way; `dispatch`
+does. `compare.py` compares the hashes of each selector kind as multisets of
+size and FNV, which do not depend on the order or names of the resources: in
+every frame, and in the state after setup. That state is, for each region
+hashed in a submission before the first frame that is not a frame itself, its
+last hash there, unless its resource is destroyed before the first frame, so a
+build's staging buffers do not count however the build splits its
+submissions. A kind that both traces' `--hash` selectors name must be hashed in
+both or in neither, in the state after setup and in each frame; a kind only one
+of them names is counted and left out. With `--hash all`, that state holds the
+weights with their noise field, the zeroed activation arena and the images
+after the network's build.
+Past the network's values, the activation arena ends in counters the kernels
+synchronise through. After a frame, they differ from one run of the same build
+to the next while the answers stay equal, so each frame's hashes of `all`
+differ in the arena between any two runs; the state after setup does not.
+`--no-host` leaves the frames' uploads, readbacks and content hashes out and
+still compares the state after setup.
+
+`analyze.py NAME.trace` writes, next to the trace, a summary of the device,
+builds, frames and answers, each frame's counts, the first and last frame of
+each build in canonical form, what changes between consecutive frames, and
+every allocation, pipeline and upload.
 
 ## Game and desktop testing
 

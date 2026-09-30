@@ -45,14 +45,14 @@ usage() {
 ${usage_line}
 Run dlsslopd once with the tracing HIP runtime from the build tree, which logs
 every HIP call to OUTPUT/NAME.trace. dlsslopd reads no settings file and uses
-its own channel in --channel. Served frames come from hiptrace-shmclient: its
+its own channel in --channel. Served frames come from shmclient: its
 output goes to OUTPUT/NAME.log and the daemon's to OUTPUT/NAME.daemon.log. A
 self-test's output goes to OUTPUT/NAME.log. The client's or the self-test's
 output is also shown; the daemon's log is only written to the file. The exit
 status is the client's or the self-test's; 2 is a usage error.
 
 Options:
-  -b, --build DIR         Build tree with libhiptrace.so and hiptrace-shmclient
+  -b, --build DIR         Build tree with libhiptrace.so and shmclient
                           (default: ${build_default}).
   -d, --daemon FILE       The dlsslopd to trace (default: BUILD/dlsslopd).
   -m, --modules DIR       HIP modules (.hsaco) for dlsslopd, which also name the
@@ -140,7 +140,7 @@ done
 daemon=${daemon:-$build/dlsslopd}
 [[ -x $daemon ]] || fail 1 "trace.sh: no dlsslopd at $daemon"
 [[ -f $build/libhiptrace.so ]] || fail 1 "trace.sh: no libhiptrace.so in $build"
-[[ $self_test || -x $build/hiptrace-shmclient ]] || fail 1 "trace.sh: no hiptrace-shmclient in $build"
+[[ $self_test || -x $build/shmclient ]] || fail 1 "trace.sh: no shmclient in $build"
 [[ -d $modules ]] || fail 1 "trace.sh: no module directory $modules"
 [[ -d $assets ]] || fail 1 "trace.sh: no model directory $assets"
 mkdir -p -- "$output" || fail 1 "trace.sh: cannot create $output"
@@ -153,9 +153,9 @@ if [[ $self_test ]]; then
     command+=(--self-test)
 else
     wh=${size[$tier]}
-    client=("$build/hiptrace-shmclient" --shm "$channel/$name.bin" --width "${wh%x*}" --height "${wh#*x}"
+    client=("$build/shmclient" --shm "$channel/$name.bin" --width "${wh%x*}" --height "${wh#*x}"
             --tier "$tier" --passes "$passes" --frames "${frames:-$frames_default}" --log "$output/$name.daemon.log")
-    [[ $motion ]] && client+=(--motion)
+    [[ $motion ]] && client+=(--mvec 1)
     command=("${client[@]}" -- "${command[@]}")
 fi
 export DLSSLOP_HIP_LIBRARY=$build/libhiptrace.so HIPTRACE_FILE=$output/$name.trace HIPTRACE_MODULES=$modules \

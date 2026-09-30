@@ -3,8 +3,8 @@
 
 The runtime forwards to a fake runtime and loads a code object made here; its
 trace must be exactly the expected one, and analyze.py, compare.py and
-plan_hashes.py must read it. trace.sh and hiptrace-shmclient run a stand-in
-dlsslopd.
+plan_hashes.py must read it. trace.sh and the shared client, shmclient, run a
+stand-in dlsslopd, and the client must report the settings trace.sh gives it.
 """
 import argparse
 import ctypes
@@ -26,7 +26,7 @@ parser.add_argument('-h', '--help', action='help', help='show this help and exit
 parser.add_argument('runtime', type=Path, help='the tracing runtime, libhiptrace.so (required; no default)')
 parser.add_argument('fake', type=Path, help='the fake runtime it forwards to (required; no default)')
 parser.add_argument('client', type=Path,
-                    help='hiptrace-shmclient, in the same directory as the runtime (required; no default)')
+                    help='shmclient, in the same directory as the runtime (required; no default)')
 args = parser.parse_args()
 runtime, fake, client = args.runtime.resolve(), args.fake.resolve(), args.client.resolve()
 assert client.parent == runtime.parent, 'trace.sh finds the runtime and the client in one build tree'
@@ -304,18 +304,6 @@ with tempfile.TemporaryDirectory(prefix='hiptrace-test-') as directory:
     for name in ('analyze.py', 'compare.py', 'plan_hashes.py'):
         assert '(default: off)' in tool(name, '--help')
 
-    # The client: every option's default in --help; usage errors exit 2.
-    helptext = run([client, '--help'])
-    options = re.split(r'\n(?=  -)', helptext.split('\n\n', 1)[1].strip('\n'))
-    assert [re.match(r'  -\w, --([\w-]+)', entry)[1] for entry in options] == \
-        ['shm', 'width', 'height', 'tier', 'frames', 'motion', 'passes', 'log', 'help'], options
-    assert all('\n                       Default: ' in entry for entry in options), options
-    run([client], expected=2)
-    run([client, '--shm', root / 'x.bin', '--width', '1', '--height', '720', '--tier', '720', '--', 'true'],
-        expected=2)
-    run([client, '--shm', root / 'x.bin', '--width', '1280', '--height', '720', '--tier', '720', '--frames', 'a',
-         '--', 'true'], expected=2)
-
     # trace.sh: its defaults, and the commands it runs with a stand-in dlsslopd
     # that records them and exits with 3.
     script = HERE / 'trace.sh'
@@ -360,14 +348,16 @@ with tempfile.TemporaryDirectory(prefix='hiptrace-test-') as directory:
                  '--self-test'],
         'env': {'DLSSLOP_HIP_LIBRARY': str(runtime), 'HIPTRACE_FILE': f'{output}/{name}.trace',
                 'HIPTRACE_MODULES': str(modules), 'HIPTRACE_DEEP': '0-5', 'HIPTRACE_DEEP_KERNELS': ''}}
-    # Served: the client starts the stand-in, which exits before it is ready.
+    # Served: the client stores the settings, then starts the stand-in, which
+    # exits before it is ready.
     run([script, *common, '--motion', '--passes', '2', '--frames=ABBA', '-k', 'tail'], expected=1, env=env)
     name = 'serve-720-motion-passes2'
-    assert 'daemon exited before it was ready' in (output / f'{name}.log').read_text()
+    log = (output / f'{name}.log').read_text()
+    assert 'settings: tier=720 passes=2 mvec=1 before frame 0' in log and 'daemon exited before it was ready' in log
     assert 'stand-in dlsslopd' in (output / f'{name}.daemon.log').read_text()
     got = json.loads(record.read_text())
     assert got['argv'] == ['--config', '/dev/null', '--backend', 'hip', '--tier', '720', '--passes', '2', '--modules',
                            str(modules), '--assets', str(root / 'assets'), '--shm', f'{channel}/{name}.bin'], got
     assert got['env']['HIPTRACE_FILE'] == f'{output}/{name}.trace' and got['env']['HIPTRACE_DEEP_KERNELS'] == 'tail'
 
-print('PASS: tracing runtime trace, trace tools, client and run script')
+print('PASS: tracing runtime trace, trace tools and run script')

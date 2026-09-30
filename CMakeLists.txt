@@ -241,17 +241,21 @@ if(BUILD_TESTING)
         backend/files.cpp)
     add_test(NAME hip-plan COMMAND hip-plan-test)
     add_test(NAME hip-plan-abi COMMAND hip-plan-test --modules ${HIP_MODULES})
-    # A tracing HIP runtime, which dlsslopd loads as its HIP library, and a
-    # fake layer that serves it frames, for comparing the network's launches
-    # between builds (VALIDATION.md); tested against a fake runtime.
+    # A fake layer that serves dlsslopd frames for the tracers below; tested
+    # against dlsslopd's identity mode.
+    add_executable(shmclient tests/shmclient.cpp)
+    target_include_directories(shmclient PRIVATE ${LAYER_ROOT}/common)
+    add_test(NAME shmclient COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/shmclient-test.py
+        $<TARGET_FILE:shmclient> $<TARGET_FILE:dlsslopd> $<TARGET_FILE:dlssnr-shmctl>)
+    # A tracing HIP runtime, which dlsslopd loads as its HIP library, for
+    # comparing the network's launches between builds (VALIDATION.md); tested
+    # against a fake runtime.
     add_library(hiptrace MODULE tests/hiptrace/hiptrace.cpp)
     set_target_properties(hiptrace PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
     target_link_libraries(hiptrace PRIVATE ${CMAKE_DL_LIBS})
-    add_executable(hiptrace-shmclient tests/hiptrace/shmclient.cpp)
-    target_include_directories(hiptrace-shmclient PRIVATE ${LAYER_ROOT}/common)
     add_library(hiptrace-fake-runtime MODULE tests/hiptrace/fake_runtime.cpp)
     add_test(NAME hiptrace COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/hiptrace/hiptrace-test.py
-        $<TARGET_FILE:hiptrace> $<TARGET_FILE:hiptrace-fake-runtime> $<TARGET_FILE:hiptrace-shmclient>)
+        $<TARGET_FILE:hiptrace> $<TARGET_FILE:hiptrace-fake-runtime> $<TARGET_FILE:shmclient>)
     add_executable(color-kernel-host-test tests/color_kernel_host_test.cpp)
     target_compile_options(color-kernel-host-test PRIVATE -Wno-attributes -Wno-unknown-pragmas)
     add_test(NAME color-kernel-host COMMAND color-kernel-host-test)
@@ -300,8 +304,53 @@ if(BUILD_TESTING)
     add_test(NAME composition-rebuild COMMAND composition-rebuild-test)
     add_test(NAME vulkan-smoke COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/run-smoke.py
         --build-dir ${CMAKE_CURRENT_BINARY_DIR} --headless)
+    # A tracing Vulkan layer, VK_LAYER_LOCAL_vktrace, for comparing the
+    # network's command streams between builds (VALIDATION.md); tested with a
+    # probe on lavapipe. Its name tables come from the registry of the Vulkan
+    # headers it is built with, and its manifest names their API version.
+    find_file(VULKAN_CORE_HEADER vulkan/vulkan_core.h REQUIRED)
+    find_file(VULKAN_REGISTRY vk.xml PATHS ${CMAKE_SYSTEM_PREFIX_PATH} PATH_SUFFIXES share/vulkan/registry
+        DOC "The Vulkan registry, share/vulkan/registry/vk.xml of the Vulkan headers")
+    if(NOT VULKAN_REGISTRY)
+        message(FATAL_ERROR "The tests need the Vulkan registry, share/vulkan/registry/vk.xml, which the Vulkan "
+            "headers install (Debian: libvulkan-dev). Set VULKAN_REGISTRY to it, or configure with "
+            "-DBUILD_TESTING=OFF.")
+    endif()
+    file(STRINGS ${VULKAN_CORE_HEADER} VKTRACE_VERSION REGEX "^#define VK_HEADER_VERSION(_COMPLETE)? ")
+    if(NOT VKTRACE_VERSION MATCHES "VERSION ([0-9]+);.*_API_VERSION\\(0, ([0-9]+), ([0-9]+), VK_HEADER_VERSION\\)")
+        message(FATAL_ERROR "no header version in ${VULKAN_CORE_HEADER}")
+    endif()
+    set(VKTRACE_VERSION ${CMAKE_MATCH_2}.${CMAKE_MATCH_3}.${CMAKE_MATCH_1})
+    set(VKTRACE_DIR ${CMAKE_CURRENT_BINARY_DIR}/vktrace)
+    add_custom_command(OUTPUT ${VKTRACE_DIR}/vkt_names.inc
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/vktrace/gen_names.py ${VULKAN_REGISTRY}
+            ${VULKAN_CORE_HEADER} ${VKTRACE_DIR}/vkt_names.inc
+        DEPENDS tests/vktrace/gen_names.py ${VULKAN_REGISTRY} ${VULKAN_CORE_HEADER} VERBATIM)
+    add_library(vktrace MODULE tests/vktrace/vktrace.cpp ${VKTRACE_DIR}/vkt_names.inc)
+    set_target_properties(vktrace PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+    target_include_directories(vktrace PRIVATE ${VKTRACE_DIR})
+    file(GENERATE OUTPUT ${VKTRACE_DIR}/VkLayer_LOCAL_vktrace.json CONTENT "{
+  \"file_format_version\": \"1.2.0\",
+  \"layer\": {
+    \"name\": \"VK_LAYER_LOCAL_vktrace\",
+    \"type\": \"GLOBAL\",
+    \"library_path\": \"$<TARGET_FILE:vktrace>\",
+    \"api_version\": \"${VKTRACE_VERSION}\",
+    \"implementation_version\": \"1\",
+    \"description\": \"dlsslop-amd tests: logs an application's device work\"
+  }
+}
+")
+    add_custom_command(OUTPUT ${VKTRACE_DIR}/probe.spv
+        COMMAND ${GLSLANG_VALIDATOR} --quiet -V --target-env vulkan1.3 -o ${VKTRACE_DIR}/probe.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/vktrace/probe.comp
+        DEPENDS tests/vktrace/probe.comp VERBATIM)
+    add_executable(vktrace-probe tests/vktrace/probe.cpp ${VKTRACE_DIR}/probe.spv)
+    target_link_libraries(vktrace-probe PRIVATE ${VULKAN_LOADER})
+    add_test(NAME vktrace COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/vktrace/vktrace-test.py
+        $<TARGET_FILE:vktrace> $<TARGET_FILE:vktrace-probe> $<TARGET_FILE:shmclient>)
     set_tests_properties(color-gpu hip-plan-abi lds-barriers codec-isa hdr-shader composition-rebuild vulkan-smoke
-        PROPERTIES SKIP_RETURN_CODE 77)
+        vktrace PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 # The GUI is an optional standalone client. No Qt dependency reaches the worker
