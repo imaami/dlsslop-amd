@@ -53,6 +53,18 @@ Result<std::string> read_file(const std::string& path)
     return text;
 }
 
+Result<void> read_all(int fd, void* data, size_t bytes)
+{
+    for (auto* at = static_cast<char*>(data); bytes;) {
+        const ssize_t got = read(fd, at, bytes);
+        if (got < 0 && errno == EINTR) continue;
+        if (got <= 0) return fail(got ? std::strerror(errno) : "unexpected end of file");
+        at += got;
+        bytes -= size_t(got);
+    }
+    return {};
+}
+
 Result<void> write_all(int fd, const void* data, size_t bytes)
 {
     for (auto* at = static_cast<const char*>(data); bytes;) {

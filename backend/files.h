@@ -37,6 +37,8 @@ std::string join(std::string_view a, std::string_view b);
 std::string absolute(const std::string& path);
 // The whole file, or strerror of what stopped it.
 Result<std::string> read_file(const std::string& path);
+// BYTES from FD into DATA: a file that ends first is an error.
+Result<void> read_all(int fd, void* data, size_t bytes);
 // All of DATA to FD.
 Result<void> write_all(int fd, const void* data, size_t bytes);
 // DATA as FILE, created or truncated; or strerror of what stopped it.

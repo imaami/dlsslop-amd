@@ -230,6 +230,12 @@ if(BUILD_TESTING)
     # Uses the GPU when the HIP runtime, a gfx1201 device and the module exist.
     set(HIP_MODULES ${CMAKE_CURRENT_SOURCE_DIR}/assets/HIP/gfx1201)
     add_test(NAME color-gpu COMMAND color-gpu-test --module ${HIP_MODULES}/linux_native.hsaco)
+    # The HIP network's weight packing against digests of upstream's packers,
+    # and its element counts against the model import's manifest.
+    add_executable(hip-weights-test tests/hip_weights_test.cpp backend/hip_weights.cpp backend/files.cpp)
+    add_test(NAME hip-weights COMMAND hip-weights-test)
+    add_test(NAME hip-weights-manifest COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/hip-weights-manifest.py $<TARGET_FILE:hip-weights-test>)
     add_executable(color-kernel-host-test tests/color_kernel_host_test.cpp)
     target_compile_options(color-kernel-host-test PRIVATE -Wno-attributes -Wno-unknown-pragmas)
     add_test(NAME color-kernel-host COMMAND color-kernel-host-test)

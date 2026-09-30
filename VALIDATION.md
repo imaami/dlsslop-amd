@@ -13,10 +13,13 @@ codec/tuning/temporal behaviour, color preservation, trace serialization,
 capture writing, color-diagnostic orchestration, offline imports with filtered
 dependency fetches and source preparation, the kernel build's compiler
 selection, and the model import's SHA-256 inventory, which
-`dlsslop-setup --check` verifies. With the GUI enabled it also checks the
-controller's option parsing without a display, its shared-memory backend and
-slider, that an edit is written at once and later ones coalesced, and that the
-wheel scrolls a page without editing the unfocused controls it crosses.
+`dlsslop-setup --check` verifies. It checks the HIP network's weight packing
+byte for byte against digests of upstream's packers on synthetic weights, and
+the weight sizes the network expects against the model import's manifest.
+With the GUI enabled it also checks the controller's option parsing without a
+display, its shared-memory backend and slider, that an edit is written at once
+and later ones coalesced, and that the wheel scrolls a page without editing the
+unfocused controls it crosses.
 
 The presentation smoke drives Vulkan capture, an explicit identity worker,
 composition and presentation through a separate test layer that also admits
