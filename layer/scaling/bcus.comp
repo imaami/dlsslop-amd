@@ -11,7 +11,9 @@
 // Author(s):  James Stanard
 //
 // Ported to GLSL in 2026 from OptiScaler/shaders/output_scaling/precompile/bcus.hlsl in
-// OptiScaler, whose changes to the MiniEngine original are GPL-3.0 (see PROVENANCE.md).
+// OptiScaler, whose changes to the MiniEngine original are GPL-3.0 (see PROVENANCE.md). The
+// port fixes upstream's reads and writes outside the images, its unsynchronized horizontal pass
+// and its count of rows to convolve; the comment at each fix says what upstream did.
 
 #version 450
 #extension GL_EXT_samplerless_texture_functions : require
@@ -44,9 +46,12 @@ shared float g_R[TOTAL_SAMPLES];
 shared float g_G[TOTAL_SAMPLES];
 shared float g_B[TOTAL_SAMPLES];
 
-vec4 GetBicubicFilterWeights(float offset, float A)
+vec4 GetBicubicFilterWeights(float offset)
 {
     // Precompute weights for 16 discrete offsets
+    //
+    // The table is Catmull-Rom (A = -0.5), the only A the filter uses. Upstream also took an A
+    // argument, which CSMain passed as 0.3 and this function never read.
     //
     // Upstream initializes entry k with ComputeWeights((k + 0.5) / 16.0, -0.5), where
     // ComputeWeights(d1, A) = (W2(1 + d1), W1(d1), W1(1 - d1), W2(2 - d1)),
@@ -109,16 +114,22 @@ void main()
     float scaleX = float(_SrcWidth) / float(_DstWidth);
     float scaleY = float(_SrcHeight) / float(_DstHeight);
     const vec2 kRcpScale = vec2(scaleX, scaleY);
-    const float kA = 0.3;
-
-    // Number of samples needed from the source buffer to generate the output tile dimensions.
-    const uvec2 SampleSpace = uvec2(ceil(vec2(TILE_DIM_X, TILE_DIM_Y) * kRcpScale + 3.0));
 
     // Pre-Load source pixels
     ivec2 UpperLeft = ivec2(floor((vec2(Gid.xy * uvec2(TILE_DIM_X, TILE_DIM_Y)) + 0.5) * kRcpScale - 1.5));
 
+    // UpperLeft is negative at the top and left edges, and the tile runs past the right and bottom
+    // ones. Upstream fetched there unclamped, which is undefined without robustImageAccess; AMD
+    // returns zeros, which darkened the border. Clamping to the edge gives the filter the samples
+    // it should see beyond the border. Tile rows are SAMPLES_X apart; upstream divided by
+    // SAMPLES_Y, the same number only because the tile is square.
+    const ivec2 SourceMax = ivec2(_SrcWidth, _SrcHeight) - 1;
+
     for (uint i = GI; i < TOTAL_SAMPLES; i += GROUP_COUNT)
-        StoreLDS(i, texelFetch(Source, UpperLeft + ivec2(i % SAMPLES_X, i / SAMPLES_Y), 0).rgb);
+    {
+        ivec2 Texel = clamp(UpperLeft + ivec2(i % SAMPLES_X, i / SAMPLES_X), ivec2(0), SourceMax);
+        StoreLDS(i, texelFetch(Source, Texel, 0).rgb);
+    }
 
     barrier();
 
@@ -133,23 +144,35 @@ void main()
     uvec2 TileST = uvec2(ivec2(floor(TopLeftSample)) - UpperLeft);
 
     // Convolution weights, one per sample (in each dimension)
-    vec4 xWeights = GetBicubicFilterWeights(Phase.x, kA);
-    vec4 yWeights = GetBicubicFilterWeights(Phase.y, kA);
+    vec4 xWeights = GetBicubicFilterWeights(Phase.x);
+    vec4 yWeights = GetBicubicFilterWeights(Phase.y);
 
     // Horizontally convolve the first N rows
     uint ReadIdx = TileST.x + GTid.y * SAMPLES_X;
 
     uint WriteIdx = GTid.x + GTid.y * SAMPLES_X;
-    StoreLDS(WriteIdx, xWeights * LoadSamples(ReadIdx, 1));
+    vec3 Row = xWeights * LoadSamples(ReadIdx, 1);
 
     // If the source tile plus border is larger than the destination tile, we
     // have to convolve a few more rows.
-    if (GI + GROUP_COUNT < SampleSpace.y * TILE_DIM_X)
-    {
-        ReadIdx += TILE_DIM_Y * SAMPLES_X;
-        WriteIdx += TILE_DIM_Y * SAMPLES_X;
-        StoreLDS(WriteIdx, xWeights * LoadSamples(ReadIdx, 1));
-    }
+    //
+    // An enlargement's vertical pass can read any of the SAMPLES_Y rows, so all are convolved.
+    // Upstream convolved max(TILE_DIM_Y, ceil(TILE_DIM_Y * kRcpScale.y + 3)) rows, which is one
+    // short when the tile's first sample lies late in its texel: from 1080 to 1242 rows, thread
+    // row 15 of group row 11 read tile row 17, and only rows 0 to 16 had been convolved.
+    bool HasExtraRow = GTid.y < SAMPLES_Y - TILE_DIM_Y;
+    vec3 ExtraRow;
+    if (HasExtraRow)
+        ExtraRow = xWeights * LoadSamples(ReadIdx + TILE_DIM_Y * SAMPLES_X, 1);
+
+    // The convolved rows replace samples that other threads of the same row read above, so every
+    // read finishes first. Upstream stored without this barrier, which works only while a row of
+    // threads runs as one wave.
+    barrier();
+
+    StoreLDS(WriteIdx, Row);
+    if (HasExtraRow)
+        StoreLDS(WriteIdx + TILE_DIM_Y * SAMPLES_X, ExtraRow);
 
     barrier();
 
@@ -163,5 +186,10 @@ void main()
     //
     // Upstream writes the three channels of Result to the four-channel view. imageStore takes a
     // vec4, so alpha is written as 1.0.
-    imageStore(Dest, ivec2(DTid.xy), vec4(Result, 1.0));
+    //
+    // The groups at the right and bottom edges run past a destination that is not a multiple of
+    // the tile, and upstream stored there too. Only the store is skipped: every thread has taken
+    // part in the barriers above.
+    if (all(lessThan(DTid.xy, uvec2(_DstWidth, _DstHeight))))
+        imageStore(Dest, ivec2(DTid.xy), vec4(Result, 1.0));
 }

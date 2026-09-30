@@ -50,12 +50,11 @@ reviews:
     - path: "layer/**/*.{comp,glsl}"
       instructions: >-
         GLSL ports of the layer's composition HLSL and OptiScaler's
-        scaling HLSL, bit-identical to the DXC-built originals (except
-        that bcus writes alpha 1.0 where its original left alpha
-        undefined). The arithmetic follows DXC's folded forms, documented
-        beside each upstream expression; upstream names, comments and
-        quirks are kept on purpose. A change that alters output must say
-        so.
+        scaling HLSL. They reproduce the DXC-built originals' arithmetic,
+        including DXC's folded forms, documented beside each upstream
+        expression, except where a comment marks a fixed upstream bug;
+        upstream names and comments are kept. A change that alters
+        output must say so.
     - path: "gui/**"
       instructions: >-
         Qt 6 Widgets controller; Qt stays at this boundary. The
