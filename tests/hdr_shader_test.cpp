@@ -455,15 +455,15 @@ float PqToLinear(float code) {
 // A darkening model at a hard edge: the enlarged edit is far larger than the dark side's own light.
 // No output channel may fall below the frame's own: zero, or a wide-gamut pixel's own negative
 // BT.709 coordinate. The PQ store clamps at zero, so a PQ run can fail this only with a non-finite
-// channel, and at transfer 2 checks nothing else.
+// channel.
 //
-// The matched residual (transfer 1) also keeps every pixel's luminance above input / (MaxRatio x
-// 1.6), the resolve's 1/MaxRatio floor with the per-pixel band as margin. Native plus edit
-// (transfer 2) does not: at the dark side the clamped sum is the zero vector, and the colour bound,
-// which lets a grey pixel swing by sqrt(3) under a ColourTrust of 2, accepts that move to black
-// over the resolve's floor, as upstream does.
+// Every pixel's luminance must also stay above input / (MaxRatio x 1.6). The matched residual
+// (transfer 1) keeps it by the resolve's 1/MaxRatio floor, with the per-pixel band as margin. Native
+// plus edit (transfer 2) keeps it by its band's lower edge, 1/1.6 of a neighbourhood level the
+// guard holds within MaxRatio of the frame's: at the dark side the clamped sum is the zero vector,
+// and the edge makes the missing light up in the frame's own colour rather than leaving it black.
 void NoNegativeLight(const char* name, const std::array<float, components>& input, const Result& result,
-                     bool pq, bool banded) {
+                     bool pq) {
     // BT.709 weights for linear scRGB, BT.2020 for PQ once decoded.
     const float weights[2][3] = {{0.2126f, 0.7152f, 0.0722f}, {0.2627f, 0.6780f, 0.0593f}};
     const float band = max_ratio * 1.6f;
@@ -482,7 +482,7 @@ void NoNegativeLight(const char* name, const std::array<float, components>& inpu
             out += weights[pq][channel] * (pq ? PqToLinear(value) : value);
         }
         lowest = std::min(lowest, out / in);
-        if (!banded || out >= in / band) continue;
+        if (out >= in / band) continue;
         std::fprintf(stderr, "%s pixel %zu: luminance %.9g from %.9g\n", name, pixel, out, in);
         Fail("darkening edit crushed an edge pixel below the luminance band");
     }
@@ -627,11 +627,13 @@ int main() {
         std::snprintf(name, sizeof(name), "darkening edge, %s, HdrProxy %u, transfer %u",
                       darker.pq ? "HDR10 PQ" : "linear HDR", darker.hdrProxy, darker.transfer);
         const auto& input = darker.pq ? edge_pq : edge;
-        NoNegativeLight(name, input, Run(context, input, darker), darker.pq, darker.transfer == 1);
+        NoNegativeLight(name, input, Run(context, input, darker), darker.pq);
     }
     // A BT.2020 green in scRGB beside a bright white column, under native plus edit. The native
     // transports compose it from the frame's own hue; HdrProxy 1 carries it to the model with no
-    // such fallback and relies on the sum's zero clamp to keep a channel above the frame's own.
+    // such fallback and relies on the sum's zero clamp to keep a channel above the frame's own, and
+    // on the band's lower edge, which adds light in the frame's positive channels only, to keep its
+    // luminance.
     std::array<float, components> gamut_edge{};
     constexpr float green2020[] = {-0.5876f, 1.1329f, -0.1006f};
     for (size_t i = 0; i < components; ++i)
@@ -645,7 +647,7 @@ int main() {
         char name[80];
         std::snprintf(name, sizeof(name), "wide-gamut edge x%.1f, HdrProxy %u, transfer 2",
                       darker.modelScale, darker.hdrProxy);
-        NoNegativeLight(name, gamut_edge, Run(context, gamut_edge, darker), false, false);
+        NoNegativeLight(name, gamut_edge, Run(context, gamut_edge, darker), false);
     }
     Options bound_hdr10 = hdr10;
     bound_hdr10.debugView = 4;

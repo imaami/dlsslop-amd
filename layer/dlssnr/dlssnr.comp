@@ -9,7 +9,8 @@
 // The arithmetic is that of the HLSL as DXC compiles it (dxc -spirv optimizes by default). DXC
 // turned x / c into x * (1 / c), merged and folded constants, and cancelled a few factors, which
 // rounds differently from the source's order, and drivers fuse multiply-adds by the shape they are
-// given. This port therefore writes out DXC's forms, each beside the upstream expression.
+// given. This port therefore writes out DXC's forms, each beside the upstream expression. It also
+// fixes upstream bugs; the comment at each fix says what upstream did.
 #version 450
 #extension GL_EXT_control_flow_attributes : require
 #extension GL_EXT_samplerless_texture_functions : require
@@ -1108,55 +1109,81 @@ void main()
         float editRatio = (modelLuma + kEditFloor) / (proxyLuma + kEditFloor);
         float sumLuma = dot(upgraded, kLuma);
 
-        if (sumLuma > 1e-5 && proxyLuma > 1e-5)
+        // The higher of two ceilings: 2.5x the pixel's own luminance, so a pixel the model
+        // genuinely brightened is not pulled back, and the model's ratio with half again plus an
+        // absolute 0.1, so a near-black pixel keeps an allowance rather than one that scales away
+        // with it. One scalar over the whole triple -- a per-channel bound moves hue.
+        float targetLuma = originalLuma * editRatio;
+
+        // Bounded by the guard the user set, and in both directions.
+        //
+        // This path adds a difference, so nothing about it says where the result lands -- and it
+        // was bounded only upwards, only at a fixed 2.5x, and never by the control whose whole
+        // job is to say how far the pass may move a pixel. On a photograph that is generous
+        // enough not to show; on flat high-contrast panels it is not, and an interface put
+        // through it comes back scorched: highlights driven to 2.5x, dark text driven below zero
+        // and clamped flat, which together is the deep-fried look.
+        //
+        // The ratio path a few lines down has been two-sided since a measured collapse -- red
+        // fell 57% while an upward-only bound sat watching it -- and there is no reason this path
+        // should be the exception. The absolute term stays, so a near-black pixel keeps an
+        // allowance rather than one that scales away with it. One scalar over the whole triple:
+        // a per-channel bound moves hue.
+        // The guard was doing two jobs with one number, and they pull in opposite directions.
+        //
+        // Raising it is how you ask for stronger relighting -- more room for the model's verdict
+        // about how much light belongs somewhere. But the same number was also the only thing
+        // bounding how far a *single* pixel may depart from its neighbours, and that one must
+        // stay tight whatever the first is set to. At a guard of 8 this band is
+        // [originalLuma/8, originalLuma*8], which is no bound at all: the raw sum passes through
+        // with every per-pixel excursion the addition produced, and the ones that drive a channel
+        // to nothing arrive as blown or black pixels wearing the texture's own colour. That is
+        // why the artifacts scale with the guard rather than being clipped by it, and why smoothing
+        // the relighting ratio further down could not reach them -- the damage is already in
+        // `upgraded` before that ratio is applied to it.
+        //
+        // So the two are separated. The guard sets how far the *neighbourhood's* light may move,
+        // which is the relighting it was always meant to control. A single pixel may then depart
+        // from that level by a fixed factor and no more, however high the guard goes. Detail is a
+        // pixel differing from its neighbours by tens of percent; a blowout is one differing by
+        // multiples, and only the second is refused.
+        float addGuard = NMax(gMaxRatio, 1.0);
+        float broadGain = clamp(gainSmooth, 1.0 / addGuard, addGuard);
+        // Centred on the level the edit aims for: the neighbourhood's gain only as far as detail
+        // strength takes the edit. At strength 0 the sum is the frame itself (its positive part on
+        // HdrProxy 1), and a band around the model's full gain would move it anyway -- down
+        // wherever that gain is below 1/1.6, up wherever it is above 1.6. Upstream centred the band
+        // on the full gain at every strength. From 1 up the gain is taken whole rather than through
+        // mix(), which need not land on it exactly.
+        if (gTransferStrength < 1.0)
+            broadGain = mix(1.0, broadGain, NMax(gTransferStrength, 0.0));
+        float broadLuma = originalLuma * broadGain;
+        const float kPixelBand = 1.6;
+        float maxLuma = NMax(broadLuma * kPixelBand, targetLuma * 0.25 + 0.02);
+        float minLuma = broadLuma / kPixelBand;
+
+        // Below the band the missing light is made up in the frame's own colour, not by scaling
+        // the sum. Upstream computed minLuma and never applied it: only the ceiling below ran,
+        // inside the gate that still guards it. The clamp above holds each channel the edit drove past its floor at that floor,
+        // so the sum can be black, and scaling it up is an unfloored ratio against a near-empty
+        // pixel: behind the ceiling's gate, a sum just above 1e-5 would go all the way to the band
+        // while one just below stayed dark, and where the edit crosses the pixel's own value that
+        // step moves with sub-pixel motion and flickers. Made up in the frame's colour, the light
+        // lands on the band exactly, is nothing at its edge and reaches a black sum too, so no
+        // gate is needed. Its positive part, because HdrProxy 1 has dropped the negative
+        // coordinates already, and on a wide-gamut pixel of little luminance they would take a
+        // large multiple of themselves to make up the light. That part carries at least the
+        // frame's own luminance, so it is above zero wherever minLuma is.
+        //
+        // The ceiling keeps the gate, because it divides by the sum. A sum below the lower edge is
+        // below the ceiling as well, so the two never both apply.
+        if (sumLuma < minLuma && minLuma > 0.0)
         {
-            // The higher of two ceilings: 2.5x the pixel's own luminance, so a pixel the model
-            // genuinely brightened is not pulled back, and the model's ratio with half again plus an
-            // absolute 0.1, so a near-black pixel keeps an allowance rather than one that scales away
-            // with it. One scalar over the whole triple -- a per-channel bound moves hue.
-            float targetLuma = originalLuma * editRatio;
-
-            // Bounded by the guard the user set, and in both directions.
-            //
-            // This path adds a difference, so nothing about it says where the result lands -- and it
-            // was bounded only upwards, only at a fixed 2.5x, and never by the control whose whole
-            // job is to say how far the pass may move a pixel. On a photograph that is generous
-            // enough not to show; on flat high-contrast panels it is not, and an interface put
-            // through it comes back scorched: highlights driven to 2.5x, dark text driven below zero
-            // and clamped flat, which together is the deep-fried look.
-            //
-            // The ratio path a few lines down has been two-sided since a measured collapse -- red
-            // fell 57% while an upward-only bound sat watching it -- and there is no reason this path
-            // should be the exception. The absolute term stays, so a near-black pixel keeps an
-            // allowance rather than one that scales away with it. One scalar over the whole triple:
-            // a per-channel bound moves hue.
-            // The guard was doing two jobs with one number, and they pull in opposite directions.
-            //
-            // Raising it is how you ask for stronger relighting -- more room for the model's verdict
-            // about how much light belongs somewhere. But the same number was also the only thing
-            // bounding how far a *single* pixel may depart from its neighbours, and that one must
-            // stay tight whatever the first is set to. At a guard of 8 this band is
-            // [originalLuma/8, originalLuma*8], which is no bound at all: the raw sum passes through
-            // with every per-pixel excursion the addition produced, and the ones that drive a channel
-            // to nothing arrive as blown or black pixels wearing the texture's own colour. That is
-            // down could not reach them -- the damage is already in `upgraded` before that ratio is
-            // applied to it.
-            //
-            // So the two are separated. The guard sets how far the *neighbourhood's* light may move,
-            // which is the relighting it was always meant to control. A single pixel may then depart
-            // from that level by a fixed factor and no more, however high the guard goes. Detail is a
-            // pixel differing from its neighbours by tens of percent; a blowout is one differing by
-            // multiples, and only the second is refused.
-            float addGuard = NMax(gMaxRatio, 1.0);
-            float broadLuma = originalLuma * clamp(gainSmooth, 1.0 / addGuard, addGuard);
-            const float kPixelBand = 1.6;
-            float maxLuma = NMax(broadLuma * kPixelBand, targetLuma * 0.25 + 0.02);
-            float minLuma = broadLuma / kPixelBand;
-
-
-            if (sumLuma > maxLuma)
-                upgraded *= maxLuma / sumLuma;
+            vec3 lit = NMax(original, vec3(0.0));
+            upgraded += lit * ((minLuma - sumLuma) / dot(lit, kLuma));
         }
+        if (sumLuma > 1e-5 && proxyLuma > 1e-5 && sumLuma > maxLuma)
+            upgraded *= maxLuma / sumLuma;
     }
     else
     {
