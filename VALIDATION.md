@@ -281,10 +281,10 @@ definitions, and the uploads outside frames must carry the same payloads;
 the same payloads in another order are reported but pass. Otherwise it prints
 each frame's first difference with the commands before it, and for a dispatch
 which part differs (pipeline, grid, sets or push constant words), then
-`DIFFERENT`, and exits with 1. `--ignore-queries` leaves query pool resets,
-queries and timestamps out, `--frames 2-5:0-3` compares frames of A with other
-frames of B, and `--span network` compares only the frames that run the
-network, from its first dispatch to its last, and the answer that follows;
+`DIFFERENT`, and exits with 1. `--ignore-queries` leaves query pools, their
+resets, queries and timestamps out, `--frames 2-5:0-3` compares frames of A
+with other frames of B, and `--span network` compares only the frames that run
+the network, from its first dispatch to its last, and the answer that follows;
 with `--skip-setup` it compares a game's trace of the in-layer network with
 dlsslopd's. The first line of a trace names the hashing options and the SPIR-V
 directories, so it differs between builds.

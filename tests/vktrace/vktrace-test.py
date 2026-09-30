@@ -10,9 +10,11 @@ bindings they reach, and the FNV-1a 64 of what the probe itself wrote and read
 in its Upload, Readback and Hash lines; the validation layer must report
 nothing, also about the layer's own hashing commands. compare.py must match the
 trace with itself, with a trace hashed another way, with one whose content
-hashes come in another order and with one whose setup is split and leaves a
-staging buffer alive, and must find each changed field of a frame, a changed
-state after setup and a setup left unhashed; analyze.py must summarise it.
+hashes come in another order, with one whose setup is split and leaves a
+staging buffer alive and, told to ignore queries, with one whose frames use no
+query pool, and must find each changed field of a frame, those queries, a
+changed state after setup and a setup left unhashed; analyze.py must summarise
+it.
 Exits 77 after the device-free checks when lavapipe or the validation layer is
 missing.
 """
@@ -339,6 +341,15 @@ with tempfile.TemporaryDirectory(prefix='vktrace-test-') as directory:
     # streams, uploads and readbacks stay the same.
     report = tool('compare.py', storage, hashed)
     assert 'content hashes: all only in B: 3\n' in report and report.endswith('MATCH\n'), report
+    # Without the frames' query pool resets and timestamps, the frames match
+    # only when queries are ignored, and then without the pool itself.
+    quiet = root / 'quiet.trace'
+    quiet.write_text(''.join(line for line in storage.read_text().splitlines(True)
+                             if not re.search(r' Cmd(ResetQueryPool|WriteTimestamp) ', line)))
+    report = tool('compare.py', storage, quiet, expected=1)
+    assert 'frame 0:0 (submit 3:3): 11 vs 8 commands; first difference at command 0:' in report, report
+    report = tool('compare.py', '--ignore-queries', storage, quiet)
+    assert report.endswith('compared 2 frames\nMATCH\n'), report
 
     # One field changed in a copy of the storage trace: each is a difference.
     def edit(name, source, after, anchor, old, new):

@@ -31,6 +31,7 @@ from collections import Counter
 import vkt
 
 QUERY_CALLS = ("CmdResetQueryPool", "CmdWriteTimestamp", "CmdBeginQuery", "CmdEndQuery")
+QUERY_POOL = re.compile(vkt.RESOURCE_KINDS["qp"] + r"\d+")
 
 
 def network_dispatch(trace, cmd):
@@ -51,8 +52,10 @@ def frame_view(trace, submit, args):
         submit = view
     lines, sigs = vkt.canonical(trace, submit, by=args.by, literal=args.literal)
     if args.ignore_queries:
-        # The runtime's timing ring and a host's own timestamps: no effect on the frame's data.
+        # A host's own timestamps and upstream's timing ring: no effect on the frame's data.
+        # Their query pools, Q0, Q1 and so on in the frame, are left out too.
         lines = [l for l in lines if not l.startswith(QUERY_CALLS)]
+        sigs = {k: v for k, v in sigs.items() if not QUERY_POOL.fullmatch(k)}
     if args.span == "dispatch" and lines:
         idx = [i for i, l in enumerate(lines) if l.startswith("CmdDispatch")]
         if idx:
@@ -232,7 +235,7 @@ def main():
     p.add_argument("-S", "--skip-setup", action="store_true",
                    help="compare the frames only, not the setup (default: off)")
     p.add_argument("-q", "--ignore-queries", action="store_true",
-                   help="leave query pool resets, timestamps and queries out of the frames (default: off)")
+                   help="leave query pools, their resets, timestamps and queries out of the frames (default: off)")
     p.add_argument("-n", "--no-host", action="store_true",
                    help="ignore the frames' uploads, readbacks and content hashes (default: off)")
     p.add_argument("-c", "--context", type=int, default=2, metavar="LINES",
