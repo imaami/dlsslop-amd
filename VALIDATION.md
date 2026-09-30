@@ -288,7 +288,22 @@ Vulkan fork rebased on DLSSNR-AMD d1185d2" also differ in the temporal blocks'
 SPIR-V and in their motion parameters, 32 bytes there and 48 since. From
 "vulkan: weight the motion history by the model's blend scale" on, the
 parameters scale the history's weight by 0.7397 instead of 1, and motion frames
-after the first of each history have other answers.
+after the first of each history have other answers. From "vulkan: seed the pre
+block's noise with the frame count" on, those frames' pre blocks carry the seed
+and no noise field in their push constants.
+
+The revision before "vulkan: run the network with the project's own host code"
+runs the host code of the fork in its `external/vulkan`. Its lock pins an older
+fork and lists only the files that the older fork's build needs. After
+`scripts/fetch-submodules.py` there, fetch the commit that the current lock pins
+for `vulkan` into `external/vulkan`, run
+`git -C external/vulkan sparse-checkout disable` and check that commit out. A
+dlsslopd built that way gives traces that must match the current revision's
+with `--ignore-queries --skip-setup`, except that its motion frames differ in
+the finest flow level's usage, as described above. To compare the rest of those
+frames, change `usage=0xb` to `usage=0xf` in that dlsslopd's traces, in the
+CreateImage of the R32G32_SFLOAT image of a quarter of the frame's width and
+height.
 
 A frame is a submission that dispatches and is not a build's one-shot, whose
 command pool is created after the previous submission and destroyed before the

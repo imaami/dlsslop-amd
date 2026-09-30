@@ -103,17 +103,15 @@ network launches.
 dlsslopd and the in-layer network run the DLSSNR-AMD fork's SPIR-V with the
 project's own host code. `common/vulkan_weights.*`, `common/vulkan_plan.*`,
 `common/vulkan_schedule.*` and `common/vulkan_runtime.*` port the production
-path of the fork's `linux/src/core` (MIT) at `3dfdddc`: `nr_runtime.cpp`,
+path of the fork's `linux/src/core` (MIT) at `49dffcd`: `nr_runtime.cpp`,
 `nr_graph.cpp`, `nrvk.hpp`, `nr_native_plan.cpp` with its layer table,
 `tinlayout.hpp` and `nr_activation_lut.hpp`, including the fork's changes to
 `nr_runtime.cpp`. For the frame formats, pass counts, stages and motion
 estimation that dlsslop-amd uses, the port records each frame's dispatches, push
 constants, barriers and copies as the fork's host code does, and it packs and
 uploads the weights byte for byte as upstream does; the network mathematics are
-unchanged. The pinned fork's temporal blocks also read where the frame lands in
-the motion field, which the port gives as the whole field, and weight the
-history by the model's blend scale, which the port, like upstream, takes as a
-constant. It keeps `3dfdddc`'s precomputed noise.
+unchanged. Like upstream, it takes the model's blend scale, by which the
+temporal post block weights the history, as a constant.
 Unlike upstream, it rejects frames whose working extent is not a
 multiple of 8, on which upstream's build fails, and frames whose activation
 arena needs offsets past 32 bits or does not fit the device's storage buffers,
@@ -137,7 +135,7 @@ the GPU timing that `last_gpu_ms()` and `average_gpu_ms()` report, and every
 `vulkan-plan-abi` and `vulkan-constants` check the fetched shaders and the model
 tools' entry list against the port. `common/vulkan_plan.h` holds the constants
 that the plan takes from `linux/build/arch/rdna4.sh` and from `nr_graph.cpp`'s
-defaults at `3dfdddc`; `vulkan-constants` checks those that the markers in
+defaults at `49dffcd`; `vulkan-constants` checks those that the markers in
 `pipelines.json` record, and a change of the pin must re-check the rest.
 
 Preserve `external/layer/ATTRIBUTION.md` and all inherited notices of upstream

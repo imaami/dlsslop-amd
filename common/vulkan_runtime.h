@@ -122,8 +122,8 @@ struct Pipeline {
 //   below L2 being write-through (upstream: nr_graph.cpp:4230-4258); the
 //   steps that tile counters order rely on the queue starting consecutive
 //   dispatches' workgroups in order.
-// - The motion history's latch and parity flip when a frame is recorded,
-//   not when it is submitted.
+// - The motion history's latch, parity and noise seed advance when a frame
+//   is recorded, not when it is submitted.
 class Runtime {
 public:
     // The network for SHAPE on DEVICE, from PLAN, which is of SHAPE's extent
@@ -182,6 +182,9 @@ private:
         uint32_t level_width[kLevels], level_height[kLevels];
         bool latch;
         uint32_t parity, current;
+        // The pre block's noise seed for the next frame, unless that frame
+        // starts the history over.
+        uint32_t seed;
     };
 
     Device device_;

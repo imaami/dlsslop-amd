@@ -475,8 +475,10 @@ void copy_general(VkCommandBuffer cmd, VkImage from, VkImage to, uint32_t width,
 
 // The pre block's controls in its PushPreImage (upstream: patch_push): the
 // style; the tone, which later passes do without; and the structures, under
-// the automatic mask the skin's and the rest's.
-void patch_pre(uint32_t* words, const Controls& c, bool later)
+// the automatic mask the skin's and the rest's. A nonzero SEED has the
+// shader compute the noise for it instead of reading the noise field, which
+// the build computed for seed 0 (upstream: pre_seed in record_all).
+void patch_pre(uint32_t* words, const Controls& c, bool later, uint32_t seed)
 {
     PushPreImage p;
     std::memcpy(&p, words + sizeof(PushFSwin) / 4, sizeof p);
@@ -485,6 +487,10 @@ void patch_pre(uint32_t* words, const Controls& c, bool later)
     p.structure = c.auto_mask ? 1.0f : c.structure;
     p.skin = c.auto_mask ? (c.skin < 0 ? c.structure : c.skin) : -1.0f;
     p.other = c.auto_mask ? c.structure : -1.0f;
+    if (seed) {
+        p.seed = seed;
+        p.noise_off = 0;
+    }
     std::memcpy(words + sizeof(PushFSwin) / 4, &p, sizeof p);
 }
 
@@ -953,6 +959,7 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
     const Step& last = steps_.back();
     size_t pre = size_t(first.kernel), post = size_t(last.kernel);
     VkDescriptorSet pre_set = o.kernel_sets[pre], post_set = o.kernel_sets[post];
+    uint32_t seed = 0;
     if (s.motion) {
         pre = kPre;
         post = kPost;
@@ -963,6 +970,10 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
         // the parameters the pre and post blocks read, gated on that.
         const bool gate = s.latch && !reset;
         const uint32_t p = s.parity;
+        // The pre block's noise seed, as NVIDIA's DLL counts it: frames since
+        // the history's first frame or last reset.
+        seed = gate ? s.seed : 0;
+        s.seed = seed + 1;
         for (uint32_t k = 0; k < kLevels; ++k) {
             const LumaPush push{s.level_width[k], s.level_height[k], k ? s.level_width[k - 1] : w,
                                 k ? s.level_height[k - 1] : h, k ? 1u : 0u};
@@ -1004,7 +1015,7 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
         }
         uint32_t words[32];
         std::copy_n(push_.data() + first.push, first.words, words);
-        patch_pre(words, c, pass > 0);
+        patch_pre(words, c, pass > 0, seed);
         run_step(cmd, first, pre, pre_set, words);
         for (size_t i = 1; i + 1 < steps_.size(); ++i) {
             const Step& step = steps_[i];
