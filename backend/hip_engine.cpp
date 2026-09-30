@@ -12,34 +12,6 @@
 
 namespace dlsslop {
 
-namespace hip {
-namespace {
-// Nothing, or the vendored network's failure.
-Result<void> vendor_result(std::string failure)
-{
-    if (failure.empty()) return {};
-    return fail(std::move(failure));
-}
-
-// The pinned network with dlsslopd's production options, on the device it makes
-// current for this thread. It loads the runtime again, with the vendored loader.
-Result<NetworkHandle> network(const NetworkOptions& options)
-{
-    NetworkHandle network;
-    DLSSLOP_TRY(vendor_result(vendor::network(options, network)));
-    return network;
-}
-// One evaluation, queued on the network's stream.
-Result<void> enqueue(Network& network, void* rgba, void* history, void* rgb)
-{
-    return vendor_result(vendor::enqueue(network, rgba, history, rgb));
-}
-Result<void> synchronize(Network& network) { return vendor_result(vendor::synchronize(network)); }
-// The network's memory use, to stdout.
-Result<void> print_memory(Network& network) { return vendor_result(vendor::print_memory(network)); }
-} // namespace
-} // namespace hip
-
 namespace selftest = control_selftest;
 
 Result<int> select_device(const hip::Api& api, int requested)
@@ -87,9 +59,18 @@ Result<hip::Api> open_hip(Options& o)
     return api;
 }
 
+HipEngine::HipEngine(Options o, unsigned tier, const hip::Api& api) : options_(std::move(o)), tier_(tier), api_(api)
+{
+    // Upstream's approximate ViT cache, which this variable selected, is not
+    // part of the port.
+    if (const char* adaptive = std::getenv("DLSS5_VIT_ADAPTIVE"); adaptive && std::strcmp(adaptive, "0"))
+        std::fprintf(stderr, "DLSS5_VIT_ADAPTIVE is not supported; the HIP network runs every ViT block\n");
+}
+
 void HipEngine::release()
 {
-    if (!network_) return;
+    if (!stream_) return;
+    // Once the stream is done, nothing prepare() made is in use.
     api_.hipStreamSynchronize(stream_);
     for (auto& slot : imported_) release(slot);
     for (auto& event : marks_) {
@@ -105,16 +86,22 @@ void HipEngine::release()
     gpu_codec_.reset();
     kernels_.reset();
     network_.reset();
-    stream_ = nullptr;
+    model_.reset();
     previous_settings_ = {};
 }
 
 Result<void> HipEngine::prepare()
 {
     const NativeTier& raster = *ShmNativeTier(tier_);
-    network_ = DLSSLOP_TRY(hip::network({raster.width, raster.networkHeight, unsigned(options_.device), options_.modules,
-                                         options_.assets, options_.performance}));
-    stream_ = hip::stream(*network_);
+    // What follows is allocated on the device this thread selects.
+    DLSSLOP_TRY(api_.check(api_.hipSetDevice(options_.device), "select the HIP device"));
+    // With default flags, the stream's work stays in order with the null
+    // stream's synchronous copies, which the CPU codec and diagnostics make.
+    if (!stream_) DLSSLOP_TRY(api_.check(api_.hipStreamCreate(&stream_), "create the HIP stream"));
+    const auto plan = DLSSLOP_TRY(hip::plan(raster.width, raster.networkHeight, options_.performance));
+    const auto placement = DLSSLOP_TRY(hip::place(plan));
+    DLSSLOP_TRY(model_.emplace(api_).load(options_.modules, options_.assets, plan.weights));
+    DLSSLOP_TRY(network_.emplace(api_, *model_, stream_).build(plan, placement));
     for (auto& event : marks_) DLSSLOP_TRY(api_.check(api_.hipEventCreate(&event), "create timing event"));
     // Tuning, colour and motion use the module's kernels with the CPU codec too.
     kernels_.emplace(api_, stream_);
@@ -129,12 +116,13 @@ Result<void> HipEngine::prepare()
     DLSSLOP_TRY(api_.check(api_.hipMalloc(&device_output_, pixels * 12), "allocate network output"));
     // The host copy of the answer serves the CPU codec and the self-test's checks.
     if (!gpu_codec_ || options_.self_test) neural_.resize(pixels * 3);
-    // Warm once before announcing readiness: upstream allocates weights and
-    // scratch lazily, whatever the input; warmup has no temporal history.
+    // One evaluation, without a history, before the daemon reports itself
+    // ready, so that a kernel that cannot launch fails here. It is the
+    // network's first frame, which has a buffer assignment of its own.
     DLSSLOP_TRY(api_.check(api_.hipMemsetAsync(device_input_, 0, pixels * 16, stream_), "warm input"));
-    DLSSLOP_TRY(hip::enqueue(*network_, device_input_, nullptr, device_output_));
-    DLSSLOP_TRY(hip::synchronize(*network_));
-    DLSSLOP_TRY(hip::print_memory(*network_));
+    DLSSLOP_TRY(network_->enqueue(device_input_, nullptr, device_output_));
+    DLSSLOP_TRY(synchronize());
+    DLSSLOP_TRY(network_->print_memory());
     if (!options_.self_test) return {};
     // The kernels on synthetic inputs, independent of model weights.
     DLSSLOP_TRY(selftest::check_tuning(*kernels_));
@@ -172,7 +160,7 @@ Result<void> HipEngine::trace_image(FrameTrace* trace, const Geometry& g, unsign
                                     const void* pointer, unsigned channels)
 {
     if (!trace) return {};
-    DLSSLOP_TRY(hip::synchronize(*network_));
+    DLSSLOP_TRY(synchronize());
     std::vector<float> buffer(std::size_t(g.width) * g.height * channels);
     DLSSLOP_TRY(api_.check(api_.hipMemcpy(buffer.data(), pointer, buffer.size() * sizeof(float), 2),
                            "read diagnostic neural stage"));
@@ -187,13 +175,6 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
 {
     const uint8_t* const input = io.proxy;
     uint8_t* const output = io.answer;
-    if (passes > 1 || options_.self_test || settings.motion) {
-        // The optional upstream approximate cache has one history, not
-        // one history per pass. Do not silently mix those states.
-        const char* adaptive = std::getenv("DLSS5_VIT_ADAPTIVE");
-        if (adaptive && std::strtoul(adaptive, nullptr, 10))
-            return reject("multi-pass/motion/self-test requires DLSS5_VIT_ADAPTIVE=0 (uncached inference)");
-    }
     const auto g = DLSSLOP_TRY(geometry(w, h, tier_));
     if (settings.fp16 && options_.cpu_compose)
         return reject("FP16 proxy transport requires Vulkan composition; disable --cpu-compose");
@@ -268,8 +249,7 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
             history = DLSSLOP_TRY(temporal_->history(pass, pass_input));
             stages[tuned + colored] = DLSSLOP_TRY(temporal_->target(pass));
         }
-        // Graph replay (upstream o.graph, off) would need one stable rgb_output.
-        DLSSLOP_TRY(hip::enqueue(*network_, pass_input, history, stages[0]));
+        DLSSLOP_TRY(network_->enqueue(pass_input, history, stages[0]));
         DLSSLOP_TRY(trace_image(trace, g, pass, "raw", stages[0], 3));
         if (tuned) {
             DLSSLOP_TRY(gpu_tune(*kernels_, g, pass_input, stages[0], stages[1], settings.tuning));
@@ -283,7 +263,7 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
         answer = stages[tuned + colored];
         // The CPU codec, like the GPU one, rejects the nonfinite samples it reads.
         if (!gpu_codec_ || verify) {
-            DLSSLOP_TRY(hip::synchronize(*network_));
+            DLSSLOP_TRY(synchronize());
             DLSSLOP_TRY(api_.check(api_.hipMemcpy(neural_.data(), answer, neural_.size() * sizeof(float), 2),
                                    "read neural answer"));
         }

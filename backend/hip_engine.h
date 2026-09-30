@@ -1,11 +1,11 @@
-// The HIP network: the pinned lmxxf network and the daemon's own codec, tuning,
+// The HIP network, a port of lmxxf's, and the daemon's own codec, tuning,
 // color and motion kernels, on a gfx1201 device.
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "codec_gpu.h"
 #include "engine.h"
 #include "hip.h"
-#include "hip_vendor.h"
+#include "hip_network.h"
 #include "native_kernels.h"
 #include "temporal_gpu.h"
 
@@ -26,8 +26,11 @@ class HipEngine : public EngineBase<HipEngine> {
     Options options_;
     unsigned tier_;
     hip::Api api_;
-    hip::NetworkHandle network_;
+    // The one stream of the network and every kernel and copy of the daemon's,
+    // from the first prepare() on.
     hip::Handle stream_ = nullptr;
+    std::optional<hip::Model> model_;
+    std::optional<hip::Network> network_;
     std::optional<NativeKernels> kernels_;
     std::optional<GpuCodec> gpu_codec_;
     std::optional<GpuTemporal> temporal_;
@@ -50,9 +53,10 @@ class HipEngine : public EngineBase<HipEngine> {
     std::array<Imported, kSlots> imported_{};
 
     void release(Imported& slot);
-    // Everything prepare() made, and every import.
+    // Everything prepare() made but the stream, and every import.
     void release();
     Result<void> mark(unsigned i) { return api_.check(api_.hipEventRecord(marks_[i], stream_), "record timing event"); }
+    Result<void> synchronize() { return api_.check(api_.hipStreamSynchronize(stream_), "network completion"); }
     // A pass's stage, read back into the trace.
     Result<void> trace_image(FrameTrace* trace, const Geometry& g, unsigned pass, const char* stage,
                              const void* pointer, unsigned channels);
@@ -62,10 +66,13 @@ public:
     // A tier is a raster the network is built for.
     static constexpr bool rebuilds_for_tier = true;
 
-    HipEngine(Options o, unsigned tier, const hip::Api& api) : options_(std::move(o)), tier_(tier), api_(api) {}
+    HipEngine(Options o, unsigned tier, const hip::Api& api);
     HipEngine(const HipEngine&) = delete;
-    // The members go next, in reverse order: the helpers before the network whose runtime they use.
-    ~HipEngine() { release(); }
+    ~HipEngine()
+    {
+        release();
+        if (stream_) api_.hipStreamDestroy(stream_);
+    }
     const char* name() const { return "HIP"; }
     std::string device() const { return "device " + std::to_string(options_.device); }
     unsigned tier() const { return tier_; }

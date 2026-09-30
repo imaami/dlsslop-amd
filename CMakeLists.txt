@@ -148,13 +148,11 @@ target_include_directories(dlsslop-vknr PUBLIC "${VKNR_ROOT}/src/core")
 target_link_libraries(dlsslop-vknr PUBLIC vulkan Threads::Threads)
 
 add_library(dlsslop-codec OBJECT backend/codec.cpp)
-# The boundaries to the vendored networks, built with exceptions to catch theirs.
-add_library(dlsslop-hip-vendor OBJECT backend/hip_vendor.cpp)
-set_target_properties(dlsslop-hip-vendor PROPERTIES CXX_STANDARD 20 INTERPROCEDURAL_OPTIMIZATION OFF)
-target_include_directories(dlsslop-hip-vendor PRIVATE external/amd/src external/amd/Development/HIP)
-# The vendored network's own warnings are not this project's to fix.
-target_compile_options(dlsslop-hip-vendor PRIVATE -fexceptions -frtti -Wno-deprecated-declarations
-    -Wno-misleading-indentation -Wno-parentheses)
+# The HIP backend: the runtime, the network and the daemon's own kernels.
+add_library(dlsslop-hip OBJECT backend/hip.cpp backend/hip_weights.cpp backend/hip_plan.cpp backend/hip_network.cpp
+    backend/native_kernels.cpp)
+target_link_libraries(dlsslop-hip PUBLIC ${CMAKE_DL_LIBS})
+# The boundary to the vendored Vulkan network, built with exceptions to catch its own.
 add_library(dlsslop-nr-vendor OBJECT common/nr_vendor.cpp)
 set_target_properties(dlsslop-nr-vendor PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF POSITION_INDEPENDENT_CODE ON)
 target_compile_options(dlsslop-nr-vendor PRIVATE -fexceptions -frtti)
@@ -173,12 +171,11 @@ add_dependencies(dlsslop-network vulkan-nr-shaders)
 # deliberately does not require ROCm headers or a GPU; real inference does.
 add_executable(dlsslopd
     backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.cpp
-    backend/open.cpp backend/hip.cpp backend/hip_engine.cpp backend/native_kernels.cpp
-    backend/self_test.cpp
+    backend/open.cpp backend/hip_engine.cpp backend/self_test.cpp
     backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp
     backend/processing.cpp common/network_recorder.cpp)
 target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
-target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip-vendor dlsslop-nr-vendor Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip dlsslop-nr-vendor Threads::Threads ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)
 target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 # What runs once per start, per transport offer or per diagnostic is built for
