@@ -49,9 +49,10 @@ python3 scripts/fetch-submodules.py
 The fetch helper uses exact commits, filtered downloads and selected working-tree
 paths, avoiding upstream binary payloads. A shallow clone alone does not omit
 those files. The helper fails if the server cannot provide blob filtering.
-The layer and both networks come from dlsslop-amd's forks of their upstreams,
-whose `dlsslop-amd` branches carry the Linux integration; the build reads the
-fetched sources in place under `external/`.
+The layer, the Vulkan network and the HIP network's kernels come from
+dlsslop-amd's forks of their upstreams, whose `dlsslop-amd` branches carry the
+Linux integration; the build reads the fetched sources in place under
+`external/`.
 A checkout prepared before the forks needs `git submodule sync` once, so that
 the fetch uses the forks, and the generated `upstream-layer/`, `kernels/`,
 `backend/vendor/`, `vulkan-nr/` and `.prepared-sources.json` can be deleted.

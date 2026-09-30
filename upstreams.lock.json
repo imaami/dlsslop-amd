@@ -68,10 +68,6 @@
       "url": "https://github.com/imaami/dlss5-on-amd-9070xt-porting.git",
       "commit": "c1908317fb7e7ee9fe4884feba4a67220d93461f",
       "sources": [
-        "Development/HIP/hip_api.h",
-        "Development/HIP/hip_device_properties.h",
-        "Development/HIP/hip_reference_network.h",
-        "Development/HIP/packed_weights.h",
         "LICENSE",
         "hip/boundary_fast.hip",
         "hip/boundary_reference.hip",
@@ -86,8 +82,7 @@
         "hip/multihead_fused_attention.hip",
         "hip/multihead_reference.hip",
         "hip/prefix_fast.hip",
-        "hip/prefix_reference.hip",
-        "src/LmxxfProductionOptions.h"
+        "hip/prefix_reference.hip"
       ]
     },
     "vulkan": {
