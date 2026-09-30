@@ -21,6 +21,8 @@ parser.add_argument('hip_stub', type=Path,
                     help='shared library whose dependency is unreachable (required; no default)')
 parser.add_argument('hip_fake', type=Path,
                     help='fake HIP runtime listing HIP_FAKE_ARCHS devices (required; no default)')
+parser.add_argument('hip_incomplete', type=Path,
+                    help='hip_fake without hipModuleUnload (required; no default)')
 args = parser.parse_args()
 worker = args.worker.resolve()
 assert worker.read_bytes().startswith(b'\x7fELF'), 'worker tests require the native ELF'
@@ -205,6 +207,15 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
         assert result.stderr.count(missing) == 3, result.stderr
         for name in ('libamdhip64.so.7', 'libamdhip64.so.6', 'libamdhip64.so'):
             assert f'\n  /opt/rocm/lib/{name}: cannot open shared object file' in result.stderr, result.stderr
+
+    # A runtime that lacks a required export fails to load, and the error
+    # names the export. The stub's dependency exports no HIP function, and
+    # the incomplete fake lacks one that --diagnose never calls.
+    for library, export in ((args.hip_stub.parent / 'libhip-loader-stub-dependency.so', 'hipGetDevicePropertiesR0600'),
+                            (args.hip_incomplete, 'hipModuleUnload')):
+        result = run(binary, '--backend', 'hip', '--diagnose',
+                     env=dict(env, DLSSLOP_HIP_LIBRARY=str(library.resolve())), cwd=cwd, expected=1)
+        assert result.stderr == f'dlsslopd: missing HIP export {export}\n', result.stderr
 
     # --diagnose reports the device serving would use, or fails with the
     # startup error: gfx1201 with any feature suffix qualifies, and a

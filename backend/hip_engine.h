@@ -5,6 +5,7 @@
 #include "codec_gpu.h"
 #include "engine.h"
 #include "hip.h"
+#include "hip_vendor.h"
 #include "native_kernels.h"
 #include "temporal_gpu.h"
 

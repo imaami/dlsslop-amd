@@ -173,7 +173,7 @@ add_dependencies(dlsslop-network vulkan-nr-shaders)
 # deliberately does not require ROCm headers or a GPU; real inference does.
 add_executable(dlsslopd
     backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.cpp
-    backend/open.cpp backend/hip_engine.cpp backend/native_kernels.cpp
+    backend/open.cpp backend/hip.cpp backend/hip_engine.cpp backend/native_kernels.cpp
     backend/self_test.cpp
     backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp
     backend/processing.cpp common/network_recorder.cpp)
@@ -185,7 +185,7 @@ target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 # size; the frame path (serving loop, engines, codec, networks) stays at -O3.
 # GCC does not inline -O3 code into these callers, so none of it slows down.
 set_source_files_properties(backend/main.cpp backend/options.cpp backend/paths.cpp backend/files.cpp
-    backend/channel.cpp backend/transport.cpp backend/trace.cpp backend/open.cpp backend/self_test.cpp
+    backend/channel.cpp backend/transport.cpp backend/trace.cpp backend/open.cpp backend/self_test.cpp backend/hip.cpp
     PROPERTIES COMPILE_OPTIONS -Os)
 
 if(BUILD_TESTING)
@@ -204,9 +204,11 @@ if(BUILD_TESTING)
     target_link_libraries(hip-loader-stub PRIVATE hip-loader-stub-dependency)
     add_library(hip-fake-runtime SHARED tests/hip_loader_stub.cpp)
     target_compile_definitions(hip-fake-runtime PRIVATE HIP_FAKE_RUNTIME)
+    add_library(hip-fake-incomplete SHARED tests/hip_loader_stub.cpp)
+    target_compile_definitions(hip-fake-incomplete PRIVATE HIP_FAKE_RUNTIME HIP_FAKE_INCOMPLETE)
     add_test(NAME worker-cli COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/worker-cli.py $<TARGET_FILE:dlsslopd>
-        $<TARGET_FILE:hip-loader-stub> $<TARGET_FILE:hip-fake-runtime>)
+        $<TARGET_FILE:hip-loader-stub> $<TARGET_FILE:hip-fake-runtime> $<TARGET_FILE:hip-fake-incomplete>)
     add_executable(worker-channel-test tests/worker_channel_test.cpp)
     target_include_directories(worker-channel-test PRIVATE ${LAYER_ROOT}/common)
     add_test(NAME worker-channel COMMAND worker-channel-test $<TARGET_FILE:dlsslopd>)
@@ -223,8 +225,8 @@ if(BUILD_TESTING)
     add_executable(codec-test backend/codec_test.cpp)
     target_link_libraries(codec-test PRIVATE dlsslop-codec)
     add_test(NAME codec COMMAND codec-test)
-    add_executable(color-gpu-test tests/color_gpu_test.cpp backend/native_kernels.cpp backend/files.cpp)
-    target_link_libraries(color-gpu-test PRIVATE dlsslop-hip-vendor ${CMAKE_DL_LIBS})
+    add_executable(color-gpu-test tests/color_gpu_test.cpp backend/hip.cpp backend/native_kernels.cpp backend/files.cpp)
+    target_link_libraries(color-gpu-test PRIVATE ${CMAKE_DL_LIBS})
     # Uses the GPU when the HIP runtime, a gfx1201 device and the module exist.
     set(HIP_MODULES ${CMAKE_CURRENT_SOURCE_DIR}/assets/HIP/gfx1201)
     add_test(NAME color-gpu COMMAND color-gpu-test --module ${HIP_MODULES}/linux_native.hsaco)

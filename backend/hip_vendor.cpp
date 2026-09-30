@@ -5,7 +5,6 @@
 #include "hip_vendor.h"
 #include "LmxxfProductionOptions.h"
 
-#include <dlfcn.h>
 #include <exception>
 
 namespace dlsslop::hip {
@@ -17,7 +16,7 @@ public:
 
 void NetworkDeleter::operator()(Network* network) const noexcept { delete network; }
 
-Handle stream(Network& network) { return network.Stream(); }
+void* stream(Network& network) { return network.Stream(); }
 
 namespace vendor {
 namespace {
@@ -35,46 +34,6 @@ std::string caught(F&& f)
     }
 }
 } // namespace
-
-std::string load(Entries& api)
-{
-    return caught([&] {
-        const hip_probe::Api vendor; // Loads and keeps the runtime for the process.
-        api.hipGetDevicePropertiesR0600 = vendor.hipGetDevicePropertiesR0600;
-        api.hipInit = vendor.hipInit;
-        api.hipRuntimeGetVersion = vendor.hipRuntimeGetVersion;
-        api.hipGetDeviceCount = vendor.hipGetDeviceCount;
-        api.hipSetDevice = vendor.hipSetDevice;
-        api.hipMalloc = vendor.hipMalloc;
-        api.hipFree = vendor.hipFree;
-        api.hipHostMalloc = vendor.hipHostMalloc;
-        api.hipMemcpy = vendor.hipMemcpy;
-        api.hipMemcpyAsync = vendor.hipMemcpyAsync;
-        api.hipMemsetAsync = vendor.hipMemsetAsync;
-        api.hipEventCreate = vendor.hipEventCreate;
-        api.hipEventRecord = vendor.hipEventRecord;
-        api.hipEventElapsedTime = vendor.hipEventElapsedTime;
-        api.hipEventDestroy = vendor.hipEventDestroy;
-        api.hipEventSynchronize = vendor.hipEventSynchronize;
-        api.hipStreamCreate = vendor.hipStreamCreate;
-        api.hipStreamSynchronize = vendor.hipStreamSynchronize;
-        api.hipStreamDestroy = vendor.hipStreamDestroy;
-        api.hipImportExternalMemory = reinterpret_cast<decltype(api.hipImportExternalMemory)>(vendor.hipImportExternalMemory);
-        api.hipExternalMemoryGetMappedBuffer =
-            reinterpret_cast<decltype(api.hipExternalMemoryGetMappedBuffer)>(vendor.hipExternalMemoryGetMappedBuffer);
-        api.hipDestroyExternalMemory = vendor.hipDestroyExternalMemory;
-        api.hipModuleLoadData = vendor.hipModuleLoadData;
-        api.hipModuleGetFunction = vendor.hipModuleGetFunction;
-        api.hipModuleLaunchKernel = vendor.hipModuleLaunchKernel;
-        api.hipModuleUnload = vendor.hipModuleUnload;
-        api.hipGetErrorName = vendor.hipGetErrorName;
-        // Resolved here so the vendored loader stays as upstream adapted it.
-        api.hipHostFree = reinterpret_cast<decltype(api.hipHostFree)>(dlsym(vendor.dll, "hipHostFree"));
-        api.hipSetDeviceFlags = reinterpret_cast<decltype(api.hipSetDeviceFlags)>(dlsym(vendor.dll, "hipSetDeviceFlags"));
-        api.hipHostRegister = reinterpret_cast<decltype(api.hipHostRegister)>(dlsym(vendor.dll, "hipHostRegister"));
-        api.hipHostUnregister = reinterpret_cast<decltype(api.hipHostUnregister)>(dlsym(vendor.dll, "hipHostUnregister"));
-    });
-}
 
 std::string network(const NetworkOptions& options, NetworkHandle& network)
 {

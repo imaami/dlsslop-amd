@@ -7,9 +7,38 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <utility>
 
 namespace dlsslop {
+
+namespace hip {
+namespace {
+// Nothing, or the vendored network's failure.
+Result<void> vendor_result(std::string failure)
+{
+    if (failure.empty()) return {};
+    return fail(std::move(failure));
+}
+
+// The pinned network with dlsslopd's production options, on the device it makes
+// current for this thread. It loads the runtime again, with the vendored loader.
+Result<NetworkHandle> network(const NetworkOptions& options)
+{
+    NetworkHandle network;
+    DLSSLOP_TRY(vendor_result(vendor::network(options, network)));
+    return network;
+}
+// One evaluation, queued on the network's stream.
+Result<void> enqueue(Network& network, void* rgba, void* history, void* rgb)
+{
+    return vendor_result(vendor::enqueue(network, rgba, history, rgb));
+}
+Result<void> synchronize(Network& network) { return vendor_result(vendor::synchronize(network)); }
+// The network's memory use, to stdout.
+Result<void> print_memory(Network& network) { return vendor_result(vendor::print_memory(network)); }
+} // namespace
+} // namespace hip
 
 namespace selftest = control_selftest;
 
