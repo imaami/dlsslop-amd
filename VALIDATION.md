@@ -27,11 +27,13 @@ rejected. The Vulkan network's digests and goldens were recorded from the
 DLSSNR-AMD fork's host code at `3dfdddc`, which the build neither fetches nor
 compiles. CTest also checks each network kernel's push block and bindings in
 the built SPIR-V against the plan, and the shader build's markers and the model
-tools' entry list against what the plan expects. At
-every tier and preset it checks the HIP network's launch plan against traces
-of upstream's network: every launch with the buffers it uses, on the first
-frame and later ones, the buffer pool, the uploaded weights, and the gather map
-each ViT gather reads. It checks the tracing HIP runtime (see
+tools' entry list against what the plan expects. It checks that two writers
+replacing the Vulkan network's pipeline cache at once, as dlsslopd and a game's
+in-layer network can, never leave a reader without the file or with part of
+one. At every tier and preset it checks the HIP network's launch plan against
+traces of upstream's network: every launch with the buffers it uses, on the
+first frame and later ones, the buffer pool, the uploaded weights, and the
+gather map each ViT gather reads. It checks the tracing HIP runtime (see
 [Tracing the HIP network](#tracing-the-hip-network)) against a fake runtime
 line for line, and its tools and run script without a GPU. It checks the
 tracing Vulkan layer (see

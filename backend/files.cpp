@@ -2,6 +2,8 @@
 #include "files.h"
 
 #include <climits>
+#include <cstdio>
+#include <cstdlib>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -95,6 +97,23 @@ Result<void> write_file(const std::string& file, std::string_view data)
     const Descriptor out(open(file.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666));
     if (out.fd < 0) return fail(std::strerror(errno));
     return write_all(out.fd, data.data(), data.size());
+}
+
+Result<void> replace_file(const std::string& file, std::string_view data)
+{
+    std::string temporary = file + ".XXXXXX";
+    const Descriptor out(mkostemp(temporary.data(), O_CLOEXEC));
+    if (out.fd < 0) return fail(std::strerror(errno));
+    if (auto written = write_all(out.fd, data.data(), data.size()); !written) {
+        unlink(temporary.c_str());
+        return written;
+    }
+    if (rename(temporary.c_str(), file.c_str())) {
+        const int error = errno;
+        unlink(temporary.c_str());
+        return fail(std::strerror(error));
+    }
+    return {};
 }
 
 Result<bool> make_directories(const std::string& path)

@@ -403,7 +403,11 @@ VkPipelineCache load_cache(VkDevice device, const std::string& path)
     return vkCreatePipelineCache(device, &info, nullptr, &cache) == VK_SUCCESS ? cache : VK_NULL_HANDLE;
 }
 
-// CACHE written to PATH through PATH.tmp (upstream: Context::save_pipeline_cache).
+// CACHE written to PATH, which dlsslopd and every game's in-layer network
+// share (upstream: Context::save_pipeline_cache). A new file replaces PATH in
+// one rename; upstream writes PATH.tmp, which another writer can truncate or
+// rename away, and removes PATH before its rename. A failed save only makes the
+// next build compile again.
 void save_cache(VkDevice device, VkPipelineCache cache, const std::string& path)
 {
     size_t bytes = 0;
@@ -412,10 +416,7 @@ void save_cache(VkDevice device, VkPipelineCache cache, const std::string& path)
     std::string data(bytes, '\0');
     if (vkGetPipelineCacheData(device, cache, &bytes, data.data()) != VK_SUCCESS) return;
     data.resize(bytes);
-    const std::string temporary = path + ".tmp";
-    if (!write_file(temporary, data)) return;
-    std::remove(path.c_str());
-    if (std::rename(temporary.c_str(), path.c_str())) std::remove(temporary.c_str());
+    (void)replace_file(path, data);
 }
 
 // An image's layout change, or a barrier in its layout (upstream: barrier in

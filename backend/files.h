@@ -47,6 +47,12 @@ Result<void> read_at(int fd, uint64_t offset, void* data, size_t bytes);
 Result<void> write_all(int fd, const void* data, size_t bytes);
 // DATA as FILE, created or truncated; or strerror of what stopped it.
 Result<void> write_file(const std::string& file, std::string_view data);
+// DATA as FILE, written to a new file beside it that rename(2) then puts in
+// FILE's place: a reader finds the old FILE or the new one, whole, and
+// concurrent writers each write a file of their own. The new FILE has mode
+// 0600, as mkstemp(3) creates it. Or strerror of what stopped it, with FILE
+// unchanged.
+Result<void> replace_file(const std::string& file, std::string_view data);
 // Creates DIR and any missing parents: true when DIR itself was created.
 Result<bool> make_directories(const std::string& directory);
 // Creates DIR, with any missing parents, as 0700, or accepts an existing real
