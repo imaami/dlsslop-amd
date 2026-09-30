@@ -202,6 +202,15 @@ if(BUILD_TESTING)
     target_include_directories(network-module-test PRIVATE layer ${LAYER_ROOT}/common)
     target_link_libraries(network-module-test PRIVATE ${CMAKE_DL_LIBS})
     add_test(NAME network-module COMMAND network-module-test $<TARGET_FILE:dlsslop-network>)
+    # The network's motion history across frames that are and are not
+    # submitted, recorded on a fake device that the test defines in place of
+    # the Vulkan loader.
+    add_executable(network-recorder-test tests/network_recorder_test.cpp common/network_recorder.cpp
+        common/vulkan_runtime.cpp common/vulkan_plan.cpp common/vulkan_schedule.cpp common/vulkan_weights.cpp
+        backend/files.cpp)
+    target_include_directories(network-recorder-test PRIVATE backend)
+    add_dependencies(network-recorder-test vulkan-nr-shaders)
+    add_test(NAME network-recorder COMMAND network-recorder-test ${VKNR_SHADERS})
     add_executable(codec-test backend/codec_test.cpp)
     target_link_libraries(codec-test PRIVATE dlsslop-codec)
     add_test(NAME codec COMMAND codec-test)

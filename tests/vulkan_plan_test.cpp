@@ -24,15 +24,16 @@
 namespace {
 namespace vulkan = dlsslop::vulkan;
 using vulkan::After;
-using vulkan::Directory;
 using vulkan::Kernel;
 using vulkan::Plan;
 using vulkan::Recipe;
 using vulkan::Segment;
 using vulkan::Source;
 using vulkan::Step;
-using vulkan::Suffix;
+using vulkan_test::entries;
 using vulkan_test::fnv1a;
+using vulkan_test::model_bytes;
+using vulkan_test::synthetic_model;
 
 int failures = 0;
 // Whether OK; if not, the test fails with the message.
@@ -313,80 +314,6 @@ void check_rejections()
     refused(1280, 720, "its activation arena of 252244224" + storage + "252244223 bytes", 252244223);
     refused(1280, 720, "its activation arena of 252244224" + storage + "163217867 bytes", 163217867);
     expect(bool(vulkan::plan(1280, 720, 252244224)), "1280x720: rejected on a device that holds its arena");
-}
-
-// The size of an entry in the real model, the pack that linux/package/
-// model-tools extracts from nvngx_dlssnr 310.8.0.
-uint32_t model_bytes(const Source& s)
-{
-    using enum Suffix;
-    const unsigned b = s.block;
-    if (s.directory == Directory::kRecords) return b >= 31 && b <= 38 ? 3145856 : 524288;
-    if (s.directory == Directory::kVit) return s.suffix == kSkipWeight ? 2048 : s.layer == 4 ? 1048576 : 4194304;
-    if (s.directory == Directory::kSplitSwin) switch (s.suffix) {
-        case kQkv: return 786432;
-        case kAttnPosBias: return 131072;
-        case kSkipWeight: return 1024;
-        case kTail: return 64;
-        default: return (b == 30 && s.layer == 4) || b == 39 ? 524288 : 262144;
-        }
-    // The Swin blocks: at C=32 the pre and post blocks and the first and last
-    // levels, then 64, 128 and 256 down to block 22 and back from block 48.
-    const bool edge = s.directory != Directory::kUnpacked;
-    const unsigned c = edge || b <= 4 || b >= 66 ? 32 : b <= 8 || b >= 62 ? 64 : b <= 14 || b >= 56 ? 128 : 256,
-                   heads = c / 32;
-    switch (s.suffix) {
-    case kMlpExpand: return 4 * c * c;
-    case kMlpContract: return c * (heads > 1 ? c : 4 * c);
-    case kMlpMid: return c * 128;
-    case kQkv: return 3 * c * c;
-    case kAttnOutProj: return c * c;
-    case kAttnPosBias: return heads * 8192;
-    case kResidualScale:
-        return s.directory == Directory::kPreblock ? 80 : s.directory == Directory::kPostblock ? 64 : 2 * (c + 16);
-    case kAttnResidualScale: return edge ? 80 : b == 4 || b == 8 || b == 14 || b == 22 ? 2 * c : 2 * (c + 8);
-    case kScalarsB: return 4 * std::max(4u, heads);
-    case kResample: return 2 * c * c;
-    case kUpsampleGain: return c >= 64 ? 2 * (c - 16) : 2 * c;
-    case kSkipGain:
-    case kMainGain: return 64;
-    default: return 1024; // input_lift, out_project
-    }
-}
-
-// The entries a plan's segments read, each once, by name.
-std::map<std::string, Source> entries(const Plan& p)
-{
-    std::map<std::string, Source> read;
-    for (const Segment& s : p.segments) {
-        if (s.recipe == Recipe::kZeros || s.recipe == Recipe::kTable || s.recipe == Recipe::kActivations) continue;
-        read.emplace(vulkan::entry_name(s.source), s.source);
-        // A short upsample gain takes the tail of its layer's residual scales.
-        if (s.flags & Segment::kGainTail) {
-            const Source scales{s.source.directory, s.source.block, s.source.layer, Suffix::kResidualScale};
-            read.emplace(vulkan::entry_name(scales), scales);
-        }
-    }
-    return read;
-}
-
-// A model pack of synthetic entries (vulkan_test::synthetic_entry), of the
-// real model's names and sizes, holding every entry the plan reads: the pack
-// that upstream's synthetic goldens came from, but for the entries no plan
-// reads.
-bool synthetic_model(const Plan& p, vulkan_test::Pack& pack)
-{
-    const auto read = entries(p);
-    std::string index = vulkan_test::pack_header(uint32_t(read.size()));
-    uint64_t offset = index.size();
-    for (const auto& [name, source] : read) offset += 4 + name.size() + 16;
-    for (const auto& [name, source] : read) {
-        index += vulkan_test::index_entry(name, offset, model_bytes(source));
-        offset += model_bytes(source);
-    }
-    pack.write(index);
-    for (const auto& [name, source] : read) pack.write(vulkan_test::synthetic_entry(name, model_bytes(source)));
-    return pack.ok;
 }
 
 // PLAN's blob packed from MODEL, and its FNV-1a 64.

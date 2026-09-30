@@ -148,6 +148,8 @@ int dlsslop_network_record(DlsslopNetwork* n, VkCommandBuffer cmd, VkBuffer prox
     return kDlsslopNetworkReady;
 }
 
+void dlsslop_network_submitted(DlsslopNetwork* n) { n->recorder.submitted(); }
+
 const char* dlsslop_network_error(const DlsslopNetwork* n) { return n->error.c_str(); }
 
 void dlsslop_network_close(DlsslopNetwork* n)

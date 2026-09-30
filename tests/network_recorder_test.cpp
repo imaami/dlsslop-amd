@@ -1,0 +1,386 @@
+// SPDX-License-Identifier: MIT
+// Host test of the network's motion history across frames, without a GPU.
+// NetworkRecorder builds the network with motion for 64x64 frames, from a
+// synthetic model and the build's SPIR-V, on a fake device whose functions
+// log the commands recorded. A frame that is recorded and not submitted must
+// leave the history as it was: the next frame's commands, with its motion
+// parameters and push constants, must equal those of the frame recorded
+// before it. Takes the directory of the network's SPIR-V.
+#include "network_recorder.h"
+#include "vulkan_pack.h"
+
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <initializer_list>
+#include <map>
+#include <span>
+#include <string>
+#include <vector>
+
+namespace {
+namespace vulkan = dlsslop::vulkan;
+
+void require(bool value, const char* message)
+{
+    if (value) return;
+    std::fprintf(stderr, "network-recorder test: %s\n", message);
+    std::exit(1);
+}
+
+// The fake device's handles are numbers from 1. It keeps the sizes of its
+// buffers and allocations, and host memory for the allocations mapped.
+uint64_t handles = 0;
+std::map<uint64_t, VkDeviceSize> sizes;
+std::map<uint64_t, std::vector<uint8_t>> host;
+template <class T>
+uint64_t id(T handle)
+{
+    return reinterpret_cast<uint64_t>(handle);
+}
+template <class T>
+VkResult make(T* handle)
+{
+    *handle = reinterpret_cast<T>(++handles);
+    return VK_SUCCESS;
+}
+
+// What a frame recorded: its commands, a line each, and the gate of its
+// motion parameters and the seed in the push constants of its pre block,
+// the first dispatch after the parameters.
+struct Frame {
+    std::string commands;
+    float gate = -1;
+    uint32_t seed = UINT32_MAX;
+    bool pre = false; // the next push constants are the pre block's
+};
+Frame frame;
+
+// A command: WHAT, its VALUES and the WORDS of its data.
+void log(const char* what, std::initializer_list<uint64_t> values, std::span<const uint32_t> words = {})
+{
+    frame.commands += what;
+    for (const uint64_t v : values) frame.commands += " " + std::to_string(v);
+    for (const uint32_t w : words) frame.commands += " " + std::to_string(w);
+    frame.commands += '\n';
+}
+} // namespace
+
+extern "C" {
+#define MAKE(name, Info, Handle)                                                                                    \
+    VKAPI_ATTR VkResult VKAPI_CALL name(VkDevice, const Info*, const VkAllocationCallbacks*, Handle* handle)       \
+    {                                                                                                              \
+        return make(handle);                                                                                       \
+    }
+MAKE(vkCreateImage, VkImageCreateInfo, VkImage)
+MAKE(vkCreateImageView, VkImageViewCreateInfo, VkImageView)
+MAKE(vkCreateSampler, VkSamplerCreateInfo, VkSampler)
+MAKE(vkCreateDescriptorSetLayout, VkDescriptorSetLayoutCreateInfo, VkDescriptorSetLayout)
+MAKE(vkCreatePipelineLayout, VkPipelineLayoutCreateInfo, VkPipelineLayout)
+MAKE(vkCreateShaderModule, VkShaderModuleCreateInfo, VkShaderModule)
+MAKE(vkCreatePipelineCache, VkPipelineCacheCreateInfo, VkPipelineCache)
+MAKE(vkCreateDescriptorPool, VkDescriptorPoolCreateInfo, VkDescriptorPool)
+MAKE(vkCreateCommandPool, VkCommandPoolCreateInfo, VkCommandPool)
+MAKE(vkCreateFence, VkFenceCreateInfo, VkFence)
+#undef MAKE
+#define DESTROY(name, Handle) \
+    VKAPI_ATTR void VKAPI_CALL name(VkDevice, Handle, const VkAllocationCallbacks*) {}
+DESTROY(vkDestroyBuffer, VkBuffer)
+DESTROY(vkDestroyImage, VkImage)
+DESTROY(vkDestroyImageView, VkImageView)
+DESTROY(vkDestroySampler, VkSampler)
+DESTROY(vkDestroyDescriptorSetLayout, VkDescriptorSetLayout)
+DESTROY(vkDestroyPipelineLayout, VkPipelineLayout)
+DESTROY(vkDestroyPipeline, VkPipeline)
+DESTROY(vkDestroyShaderModule, VkShaderModule)
+DESTROY(vkDestroyPipelineCache, VkPipelineCache)
+DESTROY(vkDestroyDescriptorPool, VkDescriptorPool)
+DESTROY(vkDestroyCommandPool, VkCommandPool)
+DESTROY(vkDestroyFence, VkFence)
+#undef DESTROY
+VKAPI_ATTR void VKAPI_CALL vkFreeMemory(VkDevice, VkDeviceMemory memory, const VkAllocationCallbacks*)
+{
+    host.erase(id(memory));
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(VkDevice, const VkBufferCreateInfo* info, const VkAllocationCallbacks*,
+                                              VkBuffer* buffer)
+{
+    make(buffer);
+    sizes[id(*buffer)] = info->size;
+    return VK_SUCCESS;
+}
+VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(VkDevice, const VkMemoryAllocateInfo* info,
+                                                const VkAllocationCallbacks*, VkDeviceMemory* memory)
+{
+    make(memory);
+    sizes[id(*memory)] = info->allocationSize;
+    return VK_SUCCESS;
+}
+VKAPI_ATTR VkResult VKAPI_CALL vkMapMemory(VkDevice, VkDeviceMemory memory, VkDeviceSize, VkDeviceSize,
+                                           VkMemoryMapFlags, void** data)
+{
+    auto& bytes = host[id(memory)];
+    bytes.resize(sizes[id(memory)]);
+    *data = bytes.data();
+    return VK_SUCCESS;
+}
+VKAPI_ATTR void VKAPI_CALL vkGetBufferMemoryRequirements(VkDevice, VkBuffer buffer, VkMemoryRequirements* req)
+{
+    *req = {sizes[id(buffer)], 256, 3};
+}
+VKAPI_ATTR void VKAPI_CALL vkGetImageMemoryRequirements(VkDevice, VkImage, VkMemoryRequirements* req)
+{
+    *req = {256, 256, 3};
+}
+VKAPI_ATTR VkResult VKAPI_CALL vkBindBufferMemory(VkDevice, VkBuffer, VkDeviceMemory, VkDeviceSize)
+{
+    return VK_SUCCESS;
+}
+VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(VkDevice, VkImage, VkDeviceMemory, VkDeviceSize)
+{
+    return VK_SUCCESS;
+}
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(VkDevice, VkPipelineCache, uint32_t count,
+                                                        const VkComputePipelineCreateInfo*,
+                                                        const VkAllocationCallbacks*, VkPipeline* pipelines)
+{
+    for (uint32_t i = 0; i < count; ++i) make(&pipelines[i]);
+    return VK_SUCCESS;
+}
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPipelineCacheData(VkDevice, VkPipelineCache, size_t* bytes, void*)
+{
+    *bytes = 0;
+    return VK_SUCCESS;
+}
+VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(VkDevice, const VkDescriptorSetAllocateInfo* info,
+                                                        VkDescriptorSet* sets)
+{
+    for (uint32_t i = 0; i < info->descriptorSetCount; ++i) make(&sets[i]);
+    return VK_SUCCESS;
+}
+VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(VkDevice, uint32_t, const VkWriteDescriptorSet*, uint32_t,
+                                                  const VkCopyDescriptorSet*)
+{
+}
+VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(VkDevice, const VkCommandBufferAllocateInfo*,
+                                                        VkCommandBuffer* cmd)
+{
+    return make(cmd);
+}
+VKAPI_ATTR VkResult VKAPI_CALL vkBeginCommandBuffer(VkCommandBuffer, const VkCommandBufferBeginInfo*)
+{
+    return VK_SUCCESS;
+}
+VKAPI_ATTR VkResult VKAPI_CALL vkEndCommandBuffer(VkCommandBuffer) { return VK_SUCCESS; }
+VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit(VkQueue, uint32_t, const VkSubmitInfo*, VkFence) { return VK_SUCCESS; }
+VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(VkDevice, uint32_t, const VkFence*, VkBool32, uint64_t)
+{
+    return VK_SUCCESS;
+}
+
+// The commands a frame records.
+VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(VkCommandBuffer, VkPipelineStageFlags src, VkPipelineStageFlags dst,
+                                                VkDependencyFlags, uint32_t memories, const VkMemoryBarrier*,
+                                                uint32_t buffers, const VkBufferMemoryBarrier* buffer,
+                                                uint32_t images, const VkImageMemoryBarrier* image)
+{
+    log("barrier", {src, dst, memories});
+    for (uint32_t i = 0; i < buffers; ++i) log(" buffer", {id(buffer[i].buffer), buffer[i].srcAccessMask});
+    for (uint32_t i = 0; i < images; ++i)
+        log(" image", {id(image[i].image), uint64_t(image[i].oldLayout), uint64_t(image[i].newLayout)});
+}
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer(VkCommandBuffer, VkBuffer from, VkBuffer to, uint32_t,
+                                           const VkBufferCopy*)
+{
+    log("copy buffer", {id(from), id(to)});
+}
+VKAPI_ATTR void VKAPI_CALL vkCmdFillBuffer(VkCommandBuffer, VkBuffer buffer, VkDeviceSize, VkDeviceSize, uint32_t)
+{
+    log("fill", {id(buffer)});
+}
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage(VkCommandBuffer, VkImage from, VkImageLayout, VkImage to, VkImageLayout,
+                                          uint32_t, const VkImageCopy*)
+{
+    log("copy image", {id(from), id(to)});
+}
+VKAPI_ATTR void VKAPI_CALL vkCmdBlitImage(VkCommandBuffer, VkImage from, VkImageLayout, VkImage to, VkImageLayout,
+                                          uint32_t, const VkImageBlit*, VkFilter)
+{
+    log("blit", {id(from), id(to)});
+}
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyBufferToImage(VkCommandBuffer, VkBuffer from, VkImage to, VkImageLayout,
+                                                  uint32_t, const VkBufferImageCopy*)
+{
+    log("copy buffer to image", {id(from), id(to)});
+}
+VKAPI_ATTR void VKAPI_CALL vkCmdCopyImageToBuffer(VkCommandBuffer, VkImage from, VkImageLayout, VkBuffer to,
+                                                  uint32_t, const VkBufferImageCopy*)
+{
+    log("copy image to buffer", {id(from), id(to)});
+}
+VKAPI_ATTR void VKAPI_CALL vkCmdBindPipeline(VkCommandBuffer, VkPipelineBindPoint, VkPipeline pipeline)
+{
+    log("pipeline", {id(pipeline)});
+}
+VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(VkCommandBuffer, VkPipelineBindPoint, VkPipelineLayout, uint32_t,
+                                                   uint32_t count, const VkDescriptorSet* sets, uint32_t,
+                                                   const uint32_t*)
+{
+    for (uint32_t i = 0; i < count; ++i) log("set", {id(sets[i])});
+}
+VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(VkCommandBuffer, VkPipelineLayout, VkShaderStageFlags, uint32_t,
+                                              uint32_t bytes, const void* data)
+{
+    std::vector<uint32_t> words(bytes / 4);
+    std::memcpy(words.data(), data, bytes);
+    log("push", {}, words);
+    constexpr size_t seed = (sizeof(vulkan::PushFSwin) + offsetof(vulkan::PushPreImage, seed)) / 4;
+    if (frame.pre && seed < words.size()) frame.seed = words[seed];
+    frame.pre = false;
+}
+VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(VkCommandBuffer, uint32_t x, uint32_t y, uint32_t z)
+{
+    log("dispatch", {x, y, z});
+}
+VKAPI_ATTR void VKAPI_CALL vkCmdUpdateBuffer(VkCommandBuffer, VkBuffer buffer, VkDeviceSize, VkDeviceSize bytes,
+                                             const void* data)
+{
+    std::vector<uint32_t> words(bytes / 4);
+    std::memcpy(words.data(), data, bytes);
+    log("update", {id(buffer)}, words);
+    std::memcpy(&frame.gate, data, sizeof frame.gate);
+    frame.pre = true;
+}
+VKAPI_ATTR void VKAPI_CALL vkCmdWriteTimestamp(VkCommandBuffer, VkPipelineStageFlagBits, VkQueryPool, uint32_t)
+{
+    log("timestamp", {});
+}
+} // extern "C"
+
+namespace {
+// The physical device: one queue family for everything, FP8 cooperative
+// matrices, every format feature and storage buffers of 4 GiB. The runtime
+// chains at most one structure to a query, which the fakes access through
+// its own type: the link-time optimizer inlines them into the runtime, and
+// access through VkBaseOutStructure breaks the aliasing rules it relies on.
+VKAPI_ATTR void VKAPI_CALL queue_families(VkPhysicalDevice, uint32_t* count, VkQueueFamilyProperties* families)
+{
+    *count = 1;
+    if (families)
+        families[0] = {VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT, 1, 64, {1, 1, 1}};
+}
+VKAPI_ATTR void VKAPI_CALL properties(VkPhysicalDevice, VkPhysicalDeviceProperties2* properties)
+{
+    properties->properties.limits.maxStorageBufferRange = UINT32_MAX;
+    auto* allocation = static_cast<VkPhysicalDeviceMaintenance3Properties*>(properties->pNext);
+    if (allocation && allocation->sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_3_PROPERTIES)
+        allocation->maxMemoryAllocationSize = 1ull << 32;
+}
+VKAPI_ATTR void VKAPI_CALL format_properties(VkPhysicalDevice, VkFormat, VkFormatProperties2* properties)
+{
+    properties->formatProperties.optimalTilingFeatures = ~VkFormatFeatureFlags(0);
+    auto* features = static_cast<VkFormatProperties3*>(properties->pNext);
+    if (features && features->sType == VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3)
+        features->optimalTilingFeatures = ~VkFormatFeatureFlags2(0);
+}
+VKAPI_ATTR VkResult VKAPI_CALL matrix_properties(VkPhysicalDevice, uint32_t* count,
+                                                 VkCooperativeMatrixPropertiesKHR* matrices)
+{
+    if (matrices && *count) {
+        VkCooperativeMatrixPropertiesKHR& m = matrices[0];
+        m.MSize = m.NSize = m.KSize = 16;
+        m.AType = m.BType = VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT;
+        m.CType = m.ResultType = VK_COMPONENT_TYPE_FLOAT32_KHR;
+        m.saturatingAccumulation = VK_FALSE;
+        m.scope = VK_SCOPE_SUBGROUP_KHR;
+    }
+    *count = 1;
+    return VK_SUCCESS;
+}
+
+vulkan::Device fake_device()
+{
+    vulkan::Device d{};
+    make(&d.instance);
+    make(&d.physical);
+    make(&d.device);
+    make(&d.queue);
+    d.memory.memoryTypeCount = 2;
+    d.memory.memoryTypes[0].propertyFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    d.memory.memoryTypes[1].propertyFlags =
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+    d.memory.memoryHeapCount = 1;
+    d.functions = {queue_families, properties, format_properties, matrix_properties};
+    return d;
+}
+
+// F recorded by RECORDER, from and into the same buffers each time.
+Frame record(dlsslop::NetworkRecorder& recorder, const dlsslop::VulkanFrame& f)
+{
+    static VkCommandBuffer cmd;
+    static VkBuffer proxy, answer;
+    if (!cmd) {
+        make(&cmd);
+        make(&proxy);
+        make(&answer);
+    }
+    frame = {};
+    recorder.record(cmd, proxy, answer, f, 0, false);
+    return frame;
+}
+
+// A frame's gate and seed as a message.
+std::string history(const Frame& f)
+{
+    return "gate " + std::to_string(f.gate) + ", seed " + std::to_string(f.seed);
+}
+
+void check(const dlsslop::VulkanPaths& paths, unsigned passes)
+{
+    dlsslop::VulkanFrame f;
+    f.width = f.height = 64;
+    f.motion = true;
+    f.passes = passes;
+    dlsslop::NetworkRecorder recorder(fake_device(), paths);
+    const auto built = recorder.shape(f);
+    require(built && *built, built ? "the network was not built" : built.error().what.c_str());
+    // The first frame, and the same frame again: the first was not
+    // submitted, so the second starts the history too.
+    const Frame first = record(recorder, f);
+    require(first.gate == 0 && first.seed == 0, ("the first frame has " + history(first)).c_str());
+    const Frame again = record(recorder, f);
+    require(again.commands == first.commands,
+            ("a frame after one that was not submitted differs from that one: " + history(again)).c_str());
+    // Submitted, the first frame starts the history, which the next frame reads.
+    recorder.submitted();
+    const Frame second = record(recorder, f);
+    require(second.gate == 1 && second.seed == 1, ("the second frame has " + history(second)).c_str());
+    // A frame with another intensity starts the history over, but is not
+    // submitted: the next frame is the second frame again.
+    dlsslop::VulkanFrame other = f;
+    other.intensity = 0.5f;
+    const Frame reset = record(recorder, other);
+    require(reset.gate == 0 && reset.seed == 0, ("a frame with another intensity has " + history(reset)).c_str());
+    const Frame after = record(recorder, f);
+    require(after.commands == second.commands,
+            ("a frame after a reset that was not submitted differs from the frame before: " + history(after)).c_str());
+    recorder.submitted();
+    const Frame third = record(recorder, f);
+    require(third.gate == 1 && third.seed == 2, ("the third frame has " + history(third)).c_str());
+}
+} // namespace
+
+int main(int argc, char** argv)
+{
+    require(argc == 2, "usage: network-recorder-test SPIRV-DIRECTORY");
+    const auto plan = vulkan::plan(64, 64);
+    require(bool(plan), "cannot plan 64x64 frames");
+    vulkan_test::Pack model;
+    require(vulkan_test::synthetic_model(*plan, model), "cannot make the synthetic model");
+    const dlsslop::VulkanPaths paths{model.path, argv[1], ""};
+    for (const unsigned passes : {1u, 2u}) check(paths, passes);
+    std::printf("network-recorder test: frames not submitted leave the motion history as it was\n");
+    return 0;
+}

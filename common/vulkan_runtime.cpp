@@ -560,7 +560,8 @@ Result<Runtime> Runtime::build(const Device& device, const VulkanPaths& paths, c
 
 Runtime::Runtime(Runtime&& other) noexcept
     : device_(other.device_), objects_(std::exchange(other.objects_, {})), state_(other.state_),
-      steps_(std::move(other.steps_)), push_(std::move(other.push_))
+      history_(other.history_), recorded_(other.recorded_), steps_(std::move(other.steps_)),
+      push_(std::move(other.push_))
 {
 }
 
@@ -935,7 +936,7 @@ void Runtime::run_step(VkCommandBuffer cmd, const Step& step, size_t pipeline, V
 void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool reset)
 {
     const Objects& o = objects_;
-    State& s = state_;
+    const State& s = state_;
     const uint32_t w = s.width, h = s.height, gx = (w + 7) / 8, gy = (h + 7) / 8;
     const uint32_t passes = std::clamp(c.passes, 1u, s.passes);
     // The frame into the input: copied in its own format, or blitted into
@@ -963,17 +964,19 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
     if (s.motion) {
         pre = kPre;
         post = kPost;
-        pre_set = o.pre_sets[s.current];
-        post_set = o.post_sets[s.current];
+        pre_set = o.pre_sets[history_.current];
+        post_set = o.post_sets[history_.current];
         // The motion estimate: this frame's luma pyramid, then, with a last
         // frame to follow, the flow from its pyramid, coarse to fine; then
         // the parameters the pre and post blocks read, gated on that.
-        const bool gate = s.latch && !reset;
-        const uint32_t p = s.parity;
+        const bool gate = history_.latch && !reset;
+        const uint32_t p = history_.parity;
         // The pre block's noise seed, as NVIDIA's DLL counts it: frames since
         // the history's first frame or last reset.
-        seed = gate ? s.seed : 0;
-        s.seed = seed + 1;
+        seed = gate ? history_.seed : 0;
+        // The history this frame leaves, which the next frame reads once
+        // submitted() says that this one was submitted.
+        recorded_ = {true, p ^ 1, s.pingpong ? history_.current ^ 1 : history_.current, seed + 1};
         for (uint32_t k = 0; k < kLevels; ++k) {
             const LumaPush push{s.level_width[k], s.level_height[k], k ? s.level_width[k - 1] : w,
                                 k ? s.level_height[k - 1] : h, k ? 1u : 0u};
@@ -1045,13 +1048,8 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
                 in_scratch = !in_scratch;
             }
     }
-    if (s.motion) {
-        // The first pass's history is what the next frame's first pass reads.
-        if (passes > 1) copy_general(cmd, o.history_store[0].image, o.history[0].image, w, h);
-        s.latch = true;
-        s.parity ^= 1;
-        if (s.pingpong) s.current ^= 1;
-    }
+    // The first pass's history is what the next frame's first pass reads.
+    if (s.motion && passes > 1) copy_general(cmd, o.history_store[0].image, o.history[0].image, w, h);
     // The answer back into the frame, with the frame's alpha, which one pass's
     // post block restores itself.
     const VkImage answer = in_scratch ? o.scratch.image : o.answer.image;
@@ -1065,5 +1063,7 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
     barrier(cmd, answer, kSource, kGeneral, kTransfer, kCopyRead, kCompute, kRead | kWrite);
     barrier(cmd, frame, kTarget, kSource, kTransfer, kCopyWrite, kTransfer, kCopyRead);
 }
+
+void Runtime::submitted() { history_ = recorded_; }
 
 } // namespace dlsslop::vulkan

@@ -97,6 +97,7 @@ Result<bool> NetworkRecorder::shape(const VulkanFrame& frame)
     runtime_.emplace(DLSSLOP_TRY(vulkan::Runtime::build(device_, paths_, shape, plan)));
     shape_ = shape;
     last_.reset();
+    recorded_.reset();
     return true;
 }
 
@@ -144,13 +145,19 @@ void NetworkRecorder::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answe
     runtime_->record(cmd, image_, controls, !last_ || settings(*last_) != settings(frame));
     if (queries) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries, query + 1);
     vkCmdCopyImageToBuffer(cmd, image_, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, answer, 1, &region);
-    last_ = frame;
+    recorded_ = frame;
     for (auto& b : pair) {
         std::swap(b.srcAccessMask, b.dstAccessMask);
         std::swap(b.srcQueueFamilyIndex, b.dstQueueFamilyIndex);
     }
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 2, pair, 0,
                          nullptr);
+}
+
+void NetworkRecorder::submitted()
+{
+    last_ = recorded_;
+    runtime_->submitted();
 }
 
 }  // namespace dlsslop

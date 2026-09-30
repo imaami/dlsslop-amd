@@ -4,7 +4,7 @@
     "layer": {
       "path": "external/layer",
       "url": "https://github.com/imaami/DLSS5VKLayer.git",
-      "commit": "ada7427f89d53f790e8ec753cfd9d7b888e4674f",
+      "commit": "680ec8afb96cff206cf6a7608d3a559ca1e9c2f3",
       "sources": [
         "ATTRIBUTION.md",
         "LICENSE",

@@ -46,6 +46,10 @@ public:
     // image, and QUERY + 1, once the network is done.
     void record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const VulkanFrame& frame, uint32_t family,
                 bool exported, VkQueryPool queries = VK_NULL_HANDLE, uint32_t query = 0);
+    // Says that the frame record() recorded last was submitted, so that the
+    // next frame follows it in the motion history. A frame that is recorded
+    // and not submitted leaves the history as it was.
+    void submitted();
 
 private:
     vulkan::Device device_;
@@ -54,7 +58,9 @@ private:
     VkDeviceMemory image_memory_ = VK_NULL_HANDLE;
     vulkan::Shape shape_{};
     std::optional<vulkan::Runtime> runtime_;
-    std::optional<VulkanFrame> last_;  // the history's frame; none since a build
+    // The history's last frame submitted, and the last frame recorded; none
+    // since a build.
+    std::optional<VulkanFrame> last_, recorded_;
     // The device's storage buffers' limit, the plan of an extent to build, and
     // the last extent rejected.
     uint64_t storage_;

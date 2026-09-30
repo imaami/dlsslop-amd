@@ -324,6 +324,7 @@ Result<void> VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint
     submit.pCommandBuffers = &cmd;
     DLSSLOP_TRY(vk_check(vkResetFences(s.device, 1, &s.fence), "reset fence"));
     DLSSLOP_TRY(vk_check(vkQueueSubmit(s.queue, 1, &submit, s.fence), "submit frame"));
+    s.recorder->submitted();
     // A healthy frame takes milliseconds; ten seconds means the device is gone.
     DLSSLOP_TRY(vk_check(vkWaitForFences(s.device, 1, &s.fence, VK_TRUE, 10'000'000'000ull), "wait for the frame"));
     uint64_t stamps[4] = {};

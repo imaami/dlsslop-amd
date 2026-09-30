@@ -60,6 +60,10 @@ int dlsslop_network_prepare(DlsslopNetwork* network, const ShmHeader* channel, u
 // valid commands, which give the pair back as they found it.
 int dlsslop_network_record(DlsslopNetwork* network, VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer,
                            uint32_t family, int exported);
+// Says that the frame record() recorded last was submitted, so that the next
+// frame follows it in the motion history. A frame that is recorded and not
+// submitted leaves the history as it was.
+void dlsslop_network_submitted(DlsslopNetwork* network);
 const char* dlsslop_network_error(const DlsslopNetwork* network);
 // Waits for a build to end. The device must have finished the network's work.
 void dlsslop_network_close(DlsslopNetwork* network);
@@ -74,6 +78,7 @@ struct NetworkModule {
     decltype(&dlsslop_network_open) open = nullptr;
     decltype(&dlsslop_network_prepare) prepare = nullptr;
     decltype(&dlsslop_network_record) record = nullptr;
+    decltype(&dlsslop_network_submitted) submitted = nullptr;
     decltype(&dlsslop_network_error) error = nullptr;
     decltype(&dlsslop_network_close) close = nullptr;
     // Why Load failed.
@@ -87,10 +92,11 @@ struct NetworkModule {
         FIND(open, dlsslop_network_open);
         FIND(prepare, dlsslop_network_prepare);
         FIND(record, dlsslop_network_record);
+        FIND(submitted, dlsslop_network_submitted);
         FIND(error, dlsslop_network_error);
         FIND(close, dlsslop_network_close);
 #undef FIND
-        if (open && prepare && record && error && close) return true;
+        if (open && prepare && record && submitted && error && close) return true;
         Refuse(path);
         // A module without the functions stays out of the game's process.
         dlclose(library);

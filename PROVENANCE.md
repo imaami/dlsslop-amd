@@ -32,7 +32,7 @@ and the files fetched from each repository; the build uses them in place under
 
 | Component | Upstream and base commit | Fork and pinned commit | License |
 |---|---|---|---|
-| Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) `ab722b091071d6d59df56f10d86d4f3005bcad86` | [imaami/DLSS5VKLayer](https://github.com/imaami/DLSS5VKLayer/tree/dlsslop-amd) `ada7427f89d53f790e8ec753cfd9d7b888e4674f` | AGPL-3.0; embedded dependencies keep their notices |
+| Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) `ab722b091071d6d59df56f10d86d4f3005bcad86` | [imaami/DLSS5VKLayer](https://github.com/imaami/DLSS5VKLayer/tree/dlsslop-amd) `680ec8afb96cff206cf6a7608d3a559ca1e9c2f3` | AGPL-3.0; embedded dependencies keep their notices |
 | Vulkan network's SPIR-V sources, shader build and model extractor, and the runtime that dlsslop-amd ports | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) `d1185d25141b1714d7837151b6fa782e6427568b` | [imaami/DLSSNR-AMD](https://github.com/imaami/DLSSNR-AMD/tree/dlsslop-amd-d1185d2) `49dffcdbee2ffe3aa6133fb7ef73ffd865139cf8` | MIT |
 | AMD HIP kernels, and the scheduler that dlsslopd ports | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) `ad499a8199c9ce3678d83c9be58fe3bc1bef3498` | [imaami/dlss5-on-amd-9070xt-porting](https://github.com/imaami/dlss5-on-amd-9070xt-porting/tree/dlsslop-amd) `c1908317fb7e7ee9fe4884feba4a67220d93461f` | MIT |
 
@@ -127,11 +127,13 @@ file of its own, where upstream writes a fixed `.tmp` file that another process
 can truncate or rename, and removes the cache file before its rename. It creates
 the motion estimate's finest flow level for sampling as well as storage and
 transfers, where upstream creates it for storage and transfers only and still
-binds it to the temporal blocks' samplers. It leaves out what dlsslop-amd never
-calls, such as control masks, `record_engine`, per-feature histories,
-preprocessing, model scales below 1, input formats other than RGBA8 and RGBA16F,
-the GPU timing that `last_gpu_ms()` and `average_gpu_ms()` report, and every
-`NR_*` environment variable.
+binds it to the temporal blocks' samplers. It advances the motion history's
+latch, parity and noise seed when its caller says that a recorded frame was
+submitted, where upstream advances them when it records the frame. It leaves
+out what dlsslop-amd never calls, such as control masks, `record_engine`,
+per-feature histories, preprocessing, model scales below 1, input formats other
+than RGBA8 and RGBA16F, the GPU timing that `last_gpu_ms()` and
+`average_gpu_ms()` report, and every `NR_*` environment variable.
 `vulkan-plan-abi` and `vulkan-constants` check the fetched shaders and the model
 tools' entry list against the port. `common/vulkan_plan.h` holds the constants
 that the plan takes from `linux/build/arch/rdna4.sh` and from `nr_graph.cpp`'s

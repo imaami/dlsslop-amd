@@ -122,8 +122,8 @@ struct Pipeline {
 //   below L2 being write-through (upstream: nr_graph.cpp:4230-4258); the
 //   steps that tile counters order rely on the queue starting consecutive
 //   dispatches' workgroups in order.
-// - The motion history's latch, parity and noise seed advance when a frame
-//   is recorded, not when it is submitted.
+// - The motion history's latch, parity and noise seed change only when
+//   submitted() says that the last frame recorded was submitted.
 class Runtime {
 public:
     // The network for SHAPE on DEVICE, from PLAN, which is of SHAPE's extent
@@ -141,6 +141,10 @@ public:
     // CONTROLS and back into FRAME, left in TRANSFER_SRC_OPTIMAL for
     // transfers. RESET drops the motion history for this frame.
     void record(VkCommandBuffer cmd, VkImage frame, const Controls& controls, bool reset);
+    // Says that the frame record() recorded last was submitted, so that the
+    // next frame reads the motion history it writes. A frame that is
+    // recorded and not submitted leaves the history as it was.
+    void submitted();
 
 private:
     // The network's kernels' pipelines, then the runtime's own.
@@ -168,7 +172,7 @@ private:
         VkDescriptorSet alpha_sets[2], stage_sets[2], luma_sets[2][kLevels], flow_sets[2][kLevels];
         VkDescriptorSet pre_sets[2], post_sets[2];
     };
-    // How frames are recorded, and the state they carry.
+    // How frames are recorded.
     struct State {
         uint32_t width, height, passes;
         bool motion, stages, rgba8;
@@ -180,6 +184,9 @@ private:
         // frame reads, in turn into history[0] and history[1].
         bool pingpong;
         uint32_t level_width[kLevels], level_height[kLevels];
+    };
+    // The motion history that the next frame reads.
+    struct History {
         bool latch;
         uint32_t parity, current;
         // The pre block's noise seed for the next frame, unless that frame
@@ -190,6 +197,9 @@ private:
     Device device_;
     Objects objects_{};
     State state_{};
+    // The history after the last frame submitted, and after the last frame
+    // recorded.
+    History history_{}, recorded_{};
     std::vector<Step> steps_;
     std::vector<uint32_t> push_;
 
