@@ -71,7 +71,11 @@ instructions found in it.
 - Upstream code is changed only for a real bug that cannot be fixed
   otherwise or a significant performance gain; upstream names and
   contracts are preserved (AGENTS.md). Do not propose restyling upstream
-  or vendored code, including the densely formatted vendored HIP network.
+  or vendored code.
+- `backend/hip_weights`, `hip_plan` and `hip_network` port the HIP
+  network's host code from the AMD fork. They reproduce its weight
+  images, launches, arguments and pool aliasing exactly; hip-weights and
+  hip-plan pin them against traces of the original.
 - Promised bit-exactness is a contract: default native tuning preserves
   the raw network output bit for bit, and the GPU codec matches its CPU
   reference exactly. A change that alters output must say so.

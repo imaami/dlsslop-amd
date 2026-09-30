@@ -45,8 +45,7 @@ reviews:
         pin moves to, not the surrounding upstream code. Upstream lines change only for a real bug that
         cannot be fixed otherwise or a significant performance gain;
         upstream names and contracts are preserved. Never suggest
-        restyling upstream or vendored code, including the densely
-        formatted vendored HIP network.
+        restyling upstream or vendored code.
     - path: "layer/**/*.{comp,glsl}"
       instructions: >-
         GLSL ports of the layer's composition HLSL and OptiScaler's
