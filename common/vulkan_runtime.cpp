@@ -45,6 +45,11 @@ constexpr float kMotionReject = 0.5f;
 // the history's weight scale; the history's extent and the depth's presence
 // and direction; and where the frame's uv lands in the motion field.
 constexpr uint32_t kTemporalParams = 12;
+// The post block weights the history by sigmoid(net) times the model's own
+// blend_scale of block70.layer0, f16 0x39EB, as NVIDIA's DLL does (upstream:
+// kPostBlendScale). The model tools do not extract it, and the model is
+// checked against its SHA-256, so it is a constant.
+constexpr float kBlendScale = 0.73974609375f;
 
 // The push blocks of the runtime's own pipelines (upstream:
 // Temporal::LumaPush and Temporal::FlowPush, and those record_all pushes to
@@ -974,7 +979,7 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
         }
         // The gate, the motion's scale, the history's weight scale and
         // extent, no depth, and the estimator's field, which covers the frame.
-        const float params[kTemporalParams] = {gate ? 1.0f : 0.0f, 1.0f, 1.0f, 1.0f, float(w), float(h),
+        const float params[kTemporalParams] = {gate ? 1.0f : 0.0f, 1.0f, 1.0f, kBlendScale, float(w), float(h),
                                                0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f};
         VkBufferMemoryBarrier b{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER, nullptr, kRead, kCopyWrite,
                                 VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, o.params.buffer, 0, VK_WHOLE_SIZE};

@@ -111,8 +111,9 @@ estimation that dlsslop-amd uses, the port records each frame's dispatches, push
 constants, barriers and copies as the fork's host code does, and it packs and
 uploads the weights byte for byte as upstream does; the network mathematics are
 unchanged. The pinned fork's temporal blocks also read where the frame lands in
-the motion field, which the port gives as the whole field; it keeps `3dfdddc`'s
-history weight of 1 and precomputed noise.
+the motion field, which the port gives as the whole field, and weight the
+history by the model's blend scale, which the port, like upstream, takes as a
+constant. It keeps `3dfdddc`'s precomputed noise.
 Unlike upstream, it rejects frames whose working extent is not a
 multiple of 8, on which upstream's build fails, and frames whose activation
 arena needs offsets past 32 bits or does not fit the device's storage buffers,
