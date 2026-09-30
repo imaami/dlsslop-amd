@@ -148,7 +148,6 @@ private:
     static constexpr size_t kAdapters = kPipelines - kAlpha;
     static constexpr uint32_t kLevels = 4; // the motion estimate's pyramid
     static constexpr uint32_t kMaxPasses = 16;
-    static constexpr uint32_t kTimingSlots = 4;
 
     // Every object the runtime owns.
     struct Objects {
@@ -160,7 +159,6 @@ private:
         Image input, answer, second, shown, scratch;
         Image luma[2][kLevels], flow[kLevels], history[2], depth, history_store[kMaxPasses];
         VkSampler nearest, linear;
-        VkQueryPool timing;
         Pipeline pipelines[kPipelines];
         VkDescriptorPool pool;
         // Each kernel's set, and the runtime's own pipelines' by what they
@@ -184,9 +182,6 @@ private:
         uint32_t level_width[kLevels], level_height[kLevels];
         bool latch;
         uint32_t parity, current;
-        // The timing ring's next slot and the frames recorded into it.
-        uint32_t timing_slot;
-        uint64_t timed;
     };
 
     Device device_;
@@ -197,7 +192,7 @@ private:
 
     explicit Runtime(const Device& device) : device_(device) {}
     Result<void> make(const VulkanPaths& paths, const Shape& shape, const Plan& plan);
-    Result<void> make_resources(const Shape& shape, const Plan& plan, bool timing);
+    Result<void> make_resources(const Shape& shape, const Plan& plan);
     Result<void> make_pipelines(const VulkanPaths& paths);
     Result<void> make_sets();
     Result<void> run_setup(const Plan& plan, const Model& model, double& packing);

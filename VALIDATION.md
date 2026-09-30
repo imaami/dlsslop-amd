@@ -264,7 +264,12 @@ tests/vktrace/compare.py traces/old/serve-720.trace traces/new/serve-720.trace
 
 `--daemon` may name any dlsslopd, including one that runs the fork's host
 code, such as one built from the revision before "vulkan: run the network with
-the project's own host code".
+the project's own host code". Such a dlsslopd, and any built before "vulkan:
+stop timing the network with queries nobody reads", also keeps upstream's
+timing ring: an 8-query timestamp pool per build and, in every frame, a query
+pool reset and two timestamps. Compare it with `--ignore-queries`, which leaves
+the ring out; without that option, the comparison above finds every frame
+different and prints `DIFFERENT`.
 
 A frame is a submission that dispatches and is not a build's one-shot, whose
 command pool is created after the previous submission and destroyed before the

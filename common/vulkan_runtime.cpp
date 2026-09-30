@@ -181,16 +181,17 @@ Result<std::vector<uint32_t>> read_spirv(const std::string& path)
 
 // What the device offers the network (upstream: the checks of the Runtime
 // constructor and nrvk's require_matrix_config): whether the input can be
-// the frame's format filled by a copy, whether the post block can store the
-// answer in that format, and whether its queue has a clock for the timing
-// ring.
+// the frame's format filled by a copy, and whether the post block can store
+// the answer in that format.
 struct Capabilities {
-    bool input_direct, answer_direct, timing;
+    bool input_direct, answer_direct;
 };
 
 Result<Capabilities> query(const Device& d, const Shape& shape)
 {
     const PhysicalFunctions& f = d.functions;
+    // Nothing here calls vkGetPhysicalDeviceProperties2, but without it
+    // storage_limit() gives plan() no limit, so the build must fail here.
     const char* missing = !f.queue_families      ? "vkGetPhysicalDeviceQueueFamilyProperties"
                           : !f.properties        ? "vkGetPhysicalDeviceProperties2"
                           : !f.format_properties ? "vkGetPhysicalDeviceFormatProperties2"
@@ -240,9 +241,6 @@ Result<Capabilities> query(const Device& d, const Shape& shape)
     c.answer_direct = c.input_direct && !shape.stages &&
                       has(frame3.optimalTilingFeatures,
                           VK_FORMAT_FEATURE_2_STORAGE_WRITE_WITHOUT_FORMAT_BIT | VK_FORMAT_FEATURE_2_TRANSFER_SRC_BIT);
-    VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
-    f.properties(d.physical, &properties);
-    c.timing = families[d.family].timestampValidBits && properties.properties.limits.timestampPeriod > 0;
     return c;
 }
 
@@ -573,7 +571,6 @@ Runtime::~Runtime()
     Objects& o = objects_;
     if (o.pool) vkDestroyDescriptorPool(d, o.pool, nullptr);
     for (Pipeline& p : o.pipelines) destroy(d, p);
-    if (o.timing) vkDestroyQueryPool(d, o.timing, nullptr);
     if (o.linear) vkDestroySampler(d, o.linear, nullptr);
     if (o.nearest) vkDestroySampler(d, o.nearest, nullptr);
     for (Image& i : o.history_store) destroy(d, i);
@@ -620,7 +617,7 @@ Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, const P
     steps_ = plan.steps;
     push_ = plan.push;
 
-    DLSSLOP_TRY(make_resources(shape, plan, caps.timing));
+    DLSSLOP_TRY(make_resources(shape, plan));
     const auto compiling = std::chrono::steady_clock::now();
     DLSSLOP_TRY(make_pipelines(paths));
     const double compiled = seconds_since(compiling);
@@ -647,18 +644,11 @@ Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, const P
     return {};
 }
 
-Result<void> Runtime::make_resources(const Shape& shape, const Plan& plan, bool timing)
+Result<void> Runtime::make_resources(const Shape& shape, const Plan& plan)
 {
     const Device& d = device_;
     Objects& o = objects_;
     const State& s = state_;
-    // The timing ring: two timestamps a frame in each of its slots.
-    if (timing) {
-        VkQueryPoolCreateInfo info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
-        info.queryType = VK_QUERY_TYPE_TIMESTAMP;
-        info.queryCount = 2 * kTimingSlots;
-        if (vkCreateQueryPool(d.device, &info, nullptr, &o.timing) != VK_SUCCESS) o.timing = VK_NULL_HANDLE;
-    }
     constexpr VkBufferUsageFlags usage =
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     DLSSLOP_TRY(make_buffer(d, plan.arena_bytes, usage, false, "the network's activation arena", o.arena));
@@ -969,11 +959,6 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
     const Objects& o = objects_;
     State& s = state_;
     const uint32_t w = s.width, h = s.height, gx = (w + 7) / 8, gy = (h + 7) / 8;
-    const uint32_t slot = s.timing_slot;
-    if (o.timing) {
-        vkCmdResetQueryPool(cmd, o.timing, 2 * slot, 2);
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, o.timing, 2 * slot);
-    }
     const uint32_t passes = std::clamp(c.passes, 1u, s.passes);
     // The frame into the input: copied in its own format, or blitted into
     // RGBA32F. With later passes, which overwrite the input, the first
@@ -1095,17 +1080,6 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
     transfer(cmd, answer, kSource, frame, kTarget, w, h, !s.answer_direct);
     barrier(cmd, answer, kSource, kGeneral, kTransfer, kCopyRead, kCompute, kRead | kWrite);
     barrier(cmd, frame, kTarget, kSource, kTransfer, kCopyWrite, kTransfer, kCopyRead);
-    if (o.timing) {
-        // Read a slot behind, never waiting (upstream: read_timing); nothing
-        // uses the reading.
-        vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, o.timing, 2 * slot + 1);
-        s.timing_slot = (slot + 1) % kTimingSlots;
-        if (++s.timed > kTimingSlots) {
-            uint64_t stamps[2];
-            vkGetQueryPoolResults(device_.device, o.timing, 2 * s.timing_slot, 2, sizeof stamps, stamps,
-                                  sizeof stamps[0], VK_QUERY_RESULT_64_BIT);
-        }
-    }
 }
 
 } // namespace dlsslop::vulkan

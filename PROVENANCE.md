@@ -118,7 +118,8 @@ messages to the caller's log instead of standard output and error, and loads
 neither `runtime_transfer.spv` nor `runtime_depth.spv`, which upstream loads but
 never dispatches. It leaves out what dlsslop-amd never calls, such as control
 masks, `record_engine`, per-feature histories, preprocessing, model scales below
-1, input formats other than RGBA8 and RGBA16F, and every `NR_*` environment
+1, input formats other than RGBA8 and RGBA16F, the GPU timing that
+`last_gpu_ms()` and `average_gpu_ms()` report, and every `NR_*` environment
 variable. `vulkan-plan-abi` and `vulkan-constants` check the fetched shaders and
 the model tools' entry list against the port. `common/vulkan_plan.h` holds the
 constants that the plan takes from `linux/build/arch/rdna4.sh` and from
