@@ -6,7 +6,8 @@
 // inputs. --model packs a real model instead, for comparison with the uploads
 // a trace of upstream's network records.
 #include "../backend/files.h"
-#include "../backend/hip_weights.h"
+#include "../backend/hip_plan.h"
+#include "../external/layer/common/shm_protocol.h"
 
 #include <getopt.h>
 #include <unistd.h>
@@ -224,71 +225,13 @@ constexpr WeightSpec kCases[] = {
 constexpr uint32_t kSampleCount = 1u << 21;
 uint32_t sample(uint32_t j) { return (j >> 1) << 12 | (j & 1) * ((j * 0x9e3779b1u) >> 20); }
 
-// The weights the production path uploads, in upstream's first-use order.
-struct ProductionWeights {
-    std::vector<WeightSpec> list;
-
-    void add(unsigned block, const char* part, Recipe recipe)
-    {
-        WeightSpec spec{{}, recipe};
-        std::snprintf(spec.stem, sizeof spec.stem, "block%u-%s", block, part);
-        list.push_back(spec);
-    }
-    void c32(unsigned block)
-    {
-        add(block, "attention", Recipe::kC32);
-        add(block, "ffn", Recipe::kC32);
-    }
-    void multihead(unsigned block, unsigned c)
-    {
-        add(block, "ffn", c == 256 ? Recipe::kFfnFrag : Recipe::kMhFfn);
-        if (c == 256) add(block, "attention", Recipe::kQkvFragOnly);
-        add(block, "attention", Recipe::kMhAttention);
-        add(block, "attention", Recipe::kMhAttentionDiag);
-    }
-    void c512(unsigned block)
-    {
-        add(block, "ffwd", Recipe::kRaw);
-        add(block, "ffwd", Recipe::kSplitMixF16);
-        add(block, "ffwd-projection", Recipe::kProjFrag);
-        add(block, "attention", Recipe::kQkvFrag);
-        add(block, "attention", Recipe::kMhAttention);
-    }
-    explicit ProductionWeights(bool performance)
-    {
-        struct Group {
-            unsigned first, last, c;
-        };
-        for (unsigned b = 0; b <= 4; ++b) c32(b);
-        add(4, "ds", Recipe::kDsCast);
-        for (const Group g : {Group{5, 8, 64}, Group{9, 14, 128}, Group{15, 22, 256}}) {
-            for (unsigned b = g.first; b <= g.last; ++b) multihead(b, g.c);
-            add(g.last, "ds", Recipe::kDsFrag);
-        }
-        for (unsigned b = 23; b <= 30; ++b) c512(b);
-        list.push_back({"head-matrix", Recipe::kDsFrag});
-        for (unsigned b = 31; b <= 38; ++b) {
-            add(b, "expand", Recipe::kVitFrag);
-            add(b, "contract", Recipe::kVitFrag);
-            add(b, "qkv", Recipe::kQkvF16Frag);
-            add(b, "projection", Recipe::kVitProjFrag);
-        }
-        list.push_back({"decoder39-weights", Recipe::kDecoderF16r});
-        for (unsigned b = 40; b <= 47; ++b)
-            if (!performance || (b != 42 && b != 43 && b != 46)) c512(b);
-        for (const Group g : {Group{48, 55, 256}, Group{56, 61, 128}, Group{62, 65, 64}}) {
-            add(g.first, "weights", Recipe::kDecoderF16r);
-            for (unsigned b = g.first; b <= g.last; ++b) multihead(b, g.c);
-        }
-        add(66, "weights", Recipe::kDecoderF16r);
-        for (unsigned b = 66; b <= 69; ++b) c32(b);
-        list.push_back({"post70-head", Recipe::kRaw});
-        list.push_back({"post70-attention", Recipe::kC32});
-        list.push_back({"post70-ffn", Recipe::kC32});
-        list.push_back({"post70-scales", Recipe::kRaw});
-    }
-};
-std::vector<WeightSpec> production_weights(bool performance) { return ProductionWeights(performance).list; }
+// The weights dlsslopd uploads, in upload order. hip-plan checks that the
+// plan at every tier lists the same.
+dlsslop::Result<std::vector<WeightSpec>> production_weights(bool performance)
+{
+    return hip::plan(kNativeTiers[0].width, kNativeTiers[0].networkHeight, performance)
+        .transform([](hip::Plan&& plan) { return std::move(plan.weights); });
+}
 
 // What upstream gave for the sample and for every binary16.
 struct PrimitiveDigests {
@@ -765,24 +708,25 @@ void check_production_list()
 {
     for (const bool performance : {false, true}) {
         const auto list = production_weights(performance);
+        if (!expect(bool(list), "%s", list ? "" : list.error().what.c_str())) continue;
         size_t bytes = 0;
         std::set<std::string> keys;
-        for (const WeightSpec& spec : list) {
+        for (const WeightSpec& spec : *list) {
             bytes += hip::packed_bytes(spec);
             expect(hip::file_elements(spec) != 0, "%s: unknown stem", spec.stem);
             expect(keys.insert(key(spec)).second, "%s listed twice", key(spec).c_str());
         }
         // The weights upstream uploads: its traces show these totals.
         const size_t count = performance ? 253 : 268, total = performance ? 654182056 : 696668200;
-        expect(list.size() == count && bytes == total, "%zu weights%s of %zu bytes; upstream uploads %zu of %zu",
-               list.size(), performance ? " with --performance" : "", bytes, count, total);
+        expect(list->size() == count && bytes == total, "%zu weights%s of %zu bytes; upstream uploads %zu of %zu",
+               list->size(), performance ? " with --performance" : "", bytes, count, total);
     }
 }
 
-// Packs the production weights from ASSETS: bytes, FNV-1a 64 and name of each.
-int pack_model(const std::string& assets, bool performance)
+// Packs WEIGHTS from ASSETS: bytes, FNV-1a 64 and name of each.
+int pack_model(const std::string& assets, const std::vector<WeightSpec>& weights)
 {
-    for (const WeightSpec& spec : production_weights(performance)) {
+    for (const WeightSpec& spec : weights) {
         auto file = hip::read_weights(assets, spec);
         if (const auto packed = file.and_then([&](WeightFile& f) { return hip::pack(spec, f); }); !packed) {
             std::fprintf(stderr, "hip-weights-test: %s\n", packed.error().what.c_str());
@@ -822,13 +766,18 @@ int main(int argc, char** argv)
             return 2;
     }
     if (optind != argc || (list && !model.empty())) return 2;
-    if (list) {
-        for (const WeightSpec& spec : production_weights(performance))
+    if (list || !model.empty()) {
+        const auto weights = production_weights(performance);
+        if (!weights) {
+            std::fprintf(stderr, "hip-weights-test: %s\n", weights.error().what.c_str());
+            return 1;
+        }
+        if (!model.empty()) return pack_model(model, *weights);
+        for (const WeightSpec& spec : *weights)
             std::printf("%s\t%zu\t%zu\t%s\n", spec.stem, hip::file_elements(spec), hip::packed_bytes(spec),
                         key(spec).c_str());
         return 0;
     }
-    if (!model.empty()) return pack_model(model, performance);
     Scratch scratch;
     if (!expect(!scratch.directory.empty(), "cannot create a directory in /tmp")) return 1;
     check_upstream_primitives();

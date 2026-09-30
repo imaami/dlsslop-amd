@@ -186,7 +186,7 @@ target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 # GCC does not inline -O3 code into these callers, so none of it slows down.
 set_source_files_properties(backend/main.cpp backend/options.cpp backend/paths.cpp backend/files.cpp
     backend/channel.cpp backend/transport.cpp backend/trace.cpp backend/open.cpp backend/self_test.cpp backend/hip.cpp
-    PROPERTIES COMPILE_OPTIONS -Os)
+    backend/hip_plan.cpp PROPERTIES COMPILE_OPTIONS -Os)
 
 if(BUILD_TESTING)
     add_test(NAME control-cli COMMAND ${Python3_EXECUTABLE}
@@ -231,11 +231,19 @@ if(BUILD_TESTING)
     set(HIP_MODULES ${CMAKE_CURRENT_SOURCE_DIR}/assets/HIP/gfx1201)
     add_test(NAME color-gpu COMMAND color-gpu-test --module ${HIP_MODULES}/linux_native.hsaco)
     # The HIP network's weight packing against digests of upstream's packers,
-    # and its element counts against the model import's manifest.
-    add_executable(hip-weights-test tests/hip_weights_test.cpp backend/hip_weights.cpp backend/files.cpp)
+    # and the element counts of the weights its plan loads against the model
+    # import's manifest.
+    add_executable(hip-weights-test tests/hip_weights_test.cpp backend/hip_weights.cpp backend/hip_plan.cpp
+        backend/files.cpp)
     add_test(NAME hip-weights COMMAND hip-weights-test)
     add_test(NAME hip-weights-manifest COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/hip-weights-manifest.py $<TARGET_FILE:hip-weights-test>)
+    # The HIP network's launch plan against traces of upstream's network, and
+    # against the kernels' metadata once scripts/build-kernels.py has run.
+    add_executable(hip-plan-test tests/hip_plan_test.cpp backend/hip_plan.cpp backend/hip_weights.cpp
+        backend/files.cpp)
+    add_test(NAME hip-plan COMMAND hip-plan-test)
+    add_test(NAME hip-plan-abi COMMAND hip-plan-test --modules ${HIP_MODULES})
     add_executable(color-kernel-host-test tests/color_kernel_host_test.cpp)
     target_compile_options(color-kernel-host-test PRIVATE -Wno-attributes -Wno-unknown-pragmas)
     add_test(NAME color-kernel-host COMMAND color-kernel-host-test)
@@ -284,7 +292,7 @@ if(BUILD_TESTING)
     add_test(NAME composition-rebuild COMMAND composition-rebuild-test)
     add_test(NAME vulkan-smoke COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/run-smoke.py
         --build-dir ${CMAKE_CURRENT_BINARY_DIR} --headless)
-    set_tests_properties(color-gpu lds-barriers codec-isa hdr-shader composition-rebuild vulkan-smoke
+    set_tests_properties(color-gpu hip-plan-abi lds-barriers codec-isa hdr-shader composition-rebuild vulkan-smoke
         PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 

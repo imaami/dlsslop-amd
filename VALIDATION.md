@@ -15,11 +15,14 @@ dependency fetches and source preparation, the kernel build's compiler
 selection, and the model import's SHA-256 inventory, which
 `dlsslop-setup --check` verifies. It checks the HIP network's weight packing
 byte for byte against digests of upstream's packers on synthetic weights, and
-the weight sizes the network expects against the model import's manifest.
-With the GUI enabled it also checks the controller's option parsing without a
-display, its shared-memory backend and slider, that an edit is written at once
-and later ones coalesced, and that the wheel scrolls a page without editing the
-unfocused controls it crosses.
+the weight sizes the network expects against the model import's manifest. At
+every tier and preset it checks the HIP network's launch plan against traces
+of upstream's network: every launch with the buffers it uses, on the first
+frame and later ones, the buffer pool, the uploaded weights, and the gather map
+each ViT gather reads. With the GUI enabled it also checks the controller's
+option parsing without a display, its shared-memory backend and slider, that an
+edit is written at once and later ones coalesced, and that the wheel scrolls a
+page without editing the unfocused controls it crosses.
 
 The presentation smoke drives Vulkan capture, an explicit identity worker,
 composition and presentation through a separate test layer that also admits
@@ -42,8 +45,10 @@ LDS-barrier check fails when a shared-memory access can still be outstanding at
 a workgroup barrier in any kernel; with `clang++-22` it first proves itself on
 a deliberately unfenced probe kernel. The codec ISA check counts the binary16
 conversions in the GPU codec, which a known compiler substitution breaks. Both
-skip until `scripts/build-kernels.py` has run, as does the color GPU test,
-which also skips without a HIP runtime and `gfx1201` device.
+skip until `scripts/build-kernels.py` has run, as do the check of the HIP
+network's launches against its kernels' metadata (their arguments and group
+sizes) and the color GPU test, which also skips without a HIP runtime and
+`gfx1201` device.
 
 Inspect the CTest result for skips. These checks do not establish neural image
 quality. After the build described in README.md:
