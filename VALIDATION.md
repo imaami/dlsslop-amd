@@ -23,9 +23,11 @@ the Vulkan network's launch plan against upstream's graph build: every dispatch
 with its push constants and the activation arena's values and sizes, and at 8
 of them the weight blob packed from a synthetic model pack. Frames that
 upstream fails on, and frames whose arena overflows 32-bit offsets, must be
-rejected. It checks each network kernel's push block and bindings in the built
-SPIR-V against the plan, and the shader build's markers and the model tools'
-entry list against what the plan expects. At
+rejected. The Vulkan network's digests and goldens were recorded from the
+DLSSNR-AMD fork's host code at `3dfdddc`, which the build neither fetches nor
+compiles. CTest also checks each network kernel's push block and bindings in
+the built SPIR-V against the plan, and the shader build's markers and the model
+tools' entry list against what the plan expects. At
 every tier and preset it checks the HIP network's launch plan against traces
 of upstream's network: every launch with the buffers it uses, on the first
 frame and later ones, the buffer pool, the uploaded weights, and the gather map
@@ -259,6 +261,10 @@ tests/vktrace/trace.sh --output traces/old --daemon ../old/build/dlsslopd --spir
 tests/vktrace/trace.sh --output traces/new
 tests/vktrace/compare.py traces/old/serve-720.trace traces/new/serve-720.trace
 ```
+
+`--daemon` may name any dlsslopd, including one that runs the fork's host
+code, such as one built from the revision before "vulkan: run the network with
+the project's own host code".
 
 A frame is a submission that dispatches and is not a build's one-shot, whose
 command pool is created after the previous submission and destroyed before the

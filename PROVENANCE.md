@@ -20,9 +20,9 @@ including local additions and inherited interfaces in the same patched source
 file.
 
 Upstream repository names, URLs, authorship, source filenames (except the GLSL
-ports in `layer/dlssnr/` and `layer/scaling/` and the HIP host port in
-`backend/`) and attribution remain unchanged, as do references to NVIDIA DLSS
-and OptiScaler_DLSSNR.
+ports in `layer/dlssnr/` and `layer/scaling/`, the HIP host port in `backend/`
+and the Vulkan host port in `common/`) and attribution remain unchanged, as do
+references to NVIDIA DLSS and OptiScaler_DLSSNR.
 
 `.gitmodules` declares dlsslop-amd's forks of three repositories: each fork's
 `dlsslop-amd` branch holds the Linux integration as commits on top of the
@@ -33,7 +33,7 @@ and the files fetched from each repository; the build uses them in place under
 | Component | Upstream and base commit | Fork and pinned commit | License |
 |---|---|---|---|
 | Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) `ab722b091071d6d59df56f10d86d4f3005bcad86` | [imaami/DLSS5VKLayer](https://github.com/imaami/DLSS5VKLayer/tree/dlsslop-amd) `ada7427f89d53f790e8ec753cfd9d7b888e4674f` | AGPL-3.0; embedded dependencies keep their notices |
-| Vulkan network runtime, SPIR-V sources and model extractor | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) `743326d15f56c93ca757b18ca4d6b0d81d654113` | [imaami/DLSSNR-AMD](https://github.com/imaami/DLSSNR-AMD/tree/dlsslop-amd) `3dfdddc7c06b888685c8be4275d1eb5e8edc7334` | MIT |
+| Vulkan network's SPIR-V sources, shader build and model extractor, and the runtime that dlsslop-amd ports | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) `743326d15f56c93ca757b18ca4d6b0d81d654113` | [imaami/DLSSNR-AMD](https://github.com/imaami/DLSSNR-AMD/tree/dlsslop-amd) `3dfdddc7c06b888685c8be4275d1eb5e8edc7334` | MIT |
 | AMD HIP kernels, and the scheduler that dlsslopd ports | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) `ad499a8199c9ce3678d83c9be58fe3bc1bef3498` | [imaami/dlss5-on-amd-9070xt-porting](https://github.com/imaami/dlss5-on-amd-9070xt-porting/tree/dlsslop-amd) `c1908317fb7e7ee9fe4884feba4a67220d93461f` | MIT |
 
 The layer's composition shader `layer/dlssnr/dlssnr.comp` is a GLSL port of the
@@ -57,10 +57,14 @@ barriers in LDS-only release/acquire fences, and `deep_fast.hip` declares
 the caller's buffer, and remove the `DLSS5_*` environment overrides from
 `LmxxfProductionOptions.h`. The build fetches only the fork's kernel sources and
 license; it neither fetches nor compiles the fork's host code.
-The DLSSNR-AMD fork lets the runtime load its model, SPIR-V and pipeline cache
-from explicit paths, lets the network build take its glslang, and adds
+The DLSSNR-AMD fork lets the network build take its glslang and adds
 dlsslop-amd's per-pass sharpening and color preservation
 (`linux/shaders/passes/pass_stages.comp`); the network mathematics are unchanged.
+The fork's host-side changes let the runtime load its model, SPIR-V and
+pipeline cache from explicit paths and record the new stages after every pass.
+The build fetches only the fork's SPIR-V sources, shader build, model tools and
+license; it neither fetches nor compiles the fork's host code
+(`linux/src/core`), which those changes modify.
 
 dlsslopd runs the AMD fork's kernels with its own host code.
 `backend/hip_weights.*`, `backend/hip_plan.*` and `backend/hip_network.*` port
@@ -95,6 +99,32 @@ and `packaging/THIRD-PARTY.txt` repeats it for binary releases). `backend/hip.cp
 `dlopen`/`dlsym`. Of the 30 modules that upstream's `hip/build-modules.ps1`
 builds (its header comment says 29), the build ships only the 6 that the
 network launches.
+
+dlsslopd and the in-layer network run the DLSSNR-AMD fork's SPIR-V with the
+project's own host code. `common/vulkan_weights.*`, `common/vulkan_plan.*`,
+`common/vulkan_schedule.*` and `common/vulkan_runtime.*` port the production
+path of the fork's `linux/src/core` (MIT) at `3dfdddc`: `nr_runtime.cpp`,
+`nr_graph.cpp`, `nrvk.hpp`, `nr_native_plan.cpp` with its layer table,
+`tinlayout.hpp` and `nr_activation_lut.hpp`, including the fork's changes to
+`nr_runtime.cpp`. For the frame formats, pass counts, stages and motion
+estimation that dlsslop-amd uses, the port records each frame's dispatches, push
+constants, barriers and copies as the fork's host code does, and it packs and
+uploads the weights byte for byte as upstream does; the network mathematics are
+unchanged. Unlike upstream, it rejects frames whose working extent is not a
+multiple of 8, on which upstream's build fails, and frames whose activation
+arena needs offsets past 32 bits or does not fit the device's storage buffers,
+which upstream did not check. It bounds every read of the model, sends its
+messages to the caller's log instead of standard output and error, and loads
+neither `runtime_transfer.spv` nor `runtime_depth.spv`, which upstream loads but
+never dispatches. It leaves out what dlsslop-amd never calls, such as control
+masks, `record_engine`, per-feature histories, preprocessing, model scales below
+1, input formats other than RGBA8 and RGBA16F, and every `NR_*` environment
+variable. `vulkan-plan-abi` and `vulkan-constants` check the fetched shaders and
+the model tools' entry list against the port. `common/vulkan_plan.h` holds the
+constants that the plan takes from `linux/build/arch/rdna4.sh` and from
+`nr_graph.cpp`'s defaults at `3dfdddc`; `vulkan-constants` checks those that the
+markers in `pipelines.json` record, and a change of the pin must re-check the
+rest.
 
 Preserve `external/layer/ATTRIBUTION.md` and all inherited notices of upstream
 code. The layer's shader/dispatch lineage includes OptiScaler and

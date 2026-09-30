@@ -84,7 +84,6 @@
       "commit": "3dfdddc7c06b888685c8be4275d1eb5e8edc7334",
       "sources": [
         "LICENSE",
-        "linux/build/arch/rdna4.sh",
         "linux/build/build_network.py",
         "linux/package/model-tools/descriptor.json",
         "linux/package/model-tools/extract_model.sh",
@@ -129,22 +128,7 @@
         "linux/shaders/rdna4/pipelines.json",
         "linux/shaders/rdna4/repack_tokens.comp",
         "linux/shaders/rdna4/upsample_view.comp",
-        "linux/shaders/rdna4/vit_attn.comp",
-        "linux/src/core/nr_activation_lut.hpp",
-        "linux/src/core/nr_device_features.hpp",
-        "linux/src/core/nr_frame.txt",
-        "linux/src/core/nr_graph.cpp",
-        "linux/src/core/nr_log.hpp",
-        "linux/src/core/nr_native_plan.cpp",
-        "linux/src/core/nr_native_plan.hpp",
-        "linux/src/core/nr_native_plan_data.hpp",
-        "linux/src/core/nr_runtime.cpp",
-        "linux/src/core/nr_runtime.hpp",
-        "linux/src/core/nr_runtime_dispatch.hpp",
-        "linux/src/core/nr_shader_manifest.hpp",
-        "linux/src/core/nrvk.hpp",
-        "linux/src/core/telemetry.hpp",
-        "linux/src/core/tinlayout.hpp"
+        "linux/shaders/rdna4/vit_attn.comp"
       ]
     }
   }
