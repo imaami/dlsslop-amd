@@ -654,11 +654,14 @@ Result<void> Runtime::make_resources(const Shape& shape, const Plan& plan)
     // The motion history: this frame's and the last frame's luma pyramids,
     // the flow between them, the history the pre and post blocks read, one
     // a pass with later passes, a depth nothing writes, and the parameters.
+    // The pre and post blocks also sample the finest flow level, which
+    // upstream creates without sampled usage.
     for (auto& pyramid : o.luma)
         for (uint32_t k = 0; k < kLevels; ++k)
             DLSSLOP_TRY(make_image(d, s.level_width[k], s.level_height[k], VK_FORMAT_R32_SFLOAT, kStorage, pyramid[k]));
     for (uint32_t k = 0; k < kLevels; ++k)
-        DLSSLOP_TRY(make_image(d, s.level_width[k], s.level_height[k], VK_FORMAT_R32G32_SFLOAT, kStorage, o.flow[k]));
+        DLSSLOP_TRY(make_image(d, s.level_width[k], s.level_height[k], VK_FORMAT_R32G32_SFLOAT,
+                               k ? kStorage : kSampledStorage, o.flow[k]));
     for (uint32_t c = 0; c < (s.pingpong ? 2u : 1u); ++c)
         DLSSLOP_TRY(make_image(d, w, h, kWide, kSampledStorage, o.history[c]));
     DLSSLOP_TRY(make_image(d, w, h, VK_FORMAT_R32_SFLOAT, kSampledStorage, o.depth));

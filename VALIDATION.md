@@ -278,7 +278,12 @@ pass, RGBA32F. Its setup uploads then hold one more payload per such build, of
 the frame's size in the input's format, so the comparison prints `setup uploads
 differ` and `DIFFERENT` even when every frame matches; `--skip-setup` compares
 the frames alone. With `--hash all`, the state after setup also differs in the
-input, which newer builds leave unwritten.
+input, which newer builds leave unwritten. Any dlsslopd built before "vulkan:
+create the finest flow level for sampling" creates the motion estimate's finest
+flow level, an R32G32_SFLOAT image of a quarter of the frame's width and height,
+without sampled usage. Every frame of a build with motion history then has the
+same commands but differs in that image's usage, and the comparison prints
+`DIFFERENT`.
 
 A frame is a submission that dispatches and is not a build's one-shot, whose
 command pool is created after the previous submission and destroyed before the

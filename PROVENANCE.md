@@ -122,11 +122,14 @@ once it has created every pipeline or failed to create one, where upstream saves
 it before it creates those of the alpha pass, the pass stages, the motion
 estimate and the temporal blocks. It replaces the cache file in one rename of a
 file of its own, where upstream writes a fixed `.tmp` file that another process
-can truncate or rename, and removes the cache file before its rename. It leaves
-out what dlsslop-amd never calls, such as control masks, `record_engine`,
-per-feature histories, preprocessing, model scales below 1, input formats other
-than RGBA8 and RGBA16F, the GPU timing that `last_gpu_ms()` and
-`average_gpu_ms()` report, and every `NR_*` environment variable.
+can truncate or rename, and removes the cache file before its rename. It creates
+the motion estimate's finest flow level for sampling as well as storage and
+transfers, where upstream creates it for storage and transfers only and still
+binds it to the temporal blocks' samplers. It leaves out what dlsslop-amd never
+calls, such as control masks, `record_engine`, per-feature histories,
+preprocessing, model scales below 1, input formats other than RGBA8 and RGBA16F,
+the GPU timing that `last_gpu_ms()` and `average_gpu_ms()` report, and every
+`NR_*` environment variable.
 `vulkan-plan-abi` and `vulkan-constants` check the fetched shaders and the model
 tools' entry list against the port. `common/vulkan_plan.h` holds the constants
 that the plan takes from `linux/build/arch/rdna4.sh` and from `nr_graph.cpp`'s
