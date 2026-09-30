@@ -29,6 +29,8 @@ layout(set = 0, binding = 0) uniform Params
     uint  gDebugView;
     float gMaxRatio;
     uint  gPassthrough;
+    // The motion vector scale and the guide size are set by the host and read by nothing here; they
+    // stay because the block's layout is the host's DlssNrConstants.
     float gMvScaleX;     // motion vector units -> pixels of this dispatch
     float gMvScaleY;
     uint  gGuideWidth;   // the motion texture's valid region
@@ -218,10 +220,8 @@ vec3 FromOkLab(vec3 lab)
 
 // Takes the hue and the chroma direction from `correct`, and only the chroma magnitude from
 // `incorrect`. Scaling a colour by a luminance ratio changes how saturated it reads; this puts the
-// saturation back where the model meant it without letting the hue drift.
-// Takes the hue and chroma direction from `correct` and only the chroma magnitude from
-// `incorrect`, so a rescaled colour keeps the model's own hue rather than drifting toward whatever
-// the scaling did to its channels.
+// saturation back where the model meant it, and the rescaled colour keeps the model's own hue rather
+// than drifting toward whatever the scaling did to its channels.
 vec3 HueOkLab(vec3 incorrect, vec3 correct)
 {
     vec3 incorrectLab = ToOkLab(incorrect);
@@ -257,16 +257,18 @@ vec3 HueOkLab(vec3 incorrect, vec3 correct)
 layout(set = 0, binding = 1) uniform texture2D gSource;    // encode: the frame. resolve: the proxy.
 layout(set = 0, binding = 2) uniform texture2D gModel;     // resolve: what the model returned.
 layout(set = 0, binding = 3) uniform texture2D gOriginal;  // resolve: the untouched frame.
-layout(set = 0, binding = 4) uniform texture2D gMotion;    // resolve, accumulating: the game's motion vectors.
+layout(set = 0, binding = 4) uniform texture2D gMotion;    // meter: the game's exposure. No mode reads motion.
 
 // The game's 1x1 exposure texture, bound at t4 (DispatchPass's "prev edit" SRV slot). D3D12 only:
-// Vulkan has no eighth descriptor for it and keeps computing the white point on the CPU, so the whole
-// live path is compiled out under VK_MODE and gUseGameExposure is never set on that backend.
-// (This port is the VK_MODE build, so it has no gExposure.)
+// Vulkan has no eighth descriptor for it and keeps computing the white point outside this shader, so
+// the whole live path is compiled out under VK_MODE and gUseGameExposure is never set on that
+// backend. (This port is the VK_MODE build, so it has no gExposure.)
 
 // Formatless: the layer enables shaderStorageImageWriteWithoutFormat.
+//
+// The layout's binding 6, a second storage image, is not declared: no mode writes it, and a layout
+// may hold a binding its shader does not use.
 layout(set = 0, binding = 5) uniform writeonly image2D gTarget;  // encode: the proxy. resolve: the frame.
-layout(set = 0, binding = 6) uniform writeonly image2D gKeep;    // encode: the untouched copy. unused by the resolve.
 layout(set = 0, binding = 7) uniform sampler gLinear;            // so the edit can be read at a different size
 
 // HLSL's Texture2D::GetDimensions(width, height), for mip 0.
@@ -353,22 +355,6 @@ float NormScale()
         return NMax(gWhitePoint, 1e-4) * kPqPaperWhite;
     return gPassthrough != 0 ? 1.0 : NMax(gWhitePoint, 1e-4);
 }
-
-// The edit at an arbitrary position, exactly as the resolve computes its own.
-vec3 EditAt(vec2 uvq)
-{
-    vec3 p = textureLod(sampler2D(gSource, gLinear), uvq, 0.0).rgb;
-    vec3 m = textureLod(sampler2D(gModel, gLinear), uvq, 0.0).rgb;
-
-    if (gPassthrough == 0)
-    {
-        p = SrgbToLinear(p);
-        m = SrgbToLinear(m);
-    }
-
-    return m - p;
-}
-
 
 // The soft knee, shared by the encode and the resolve.
 //
@@ -572,14 +558,16 @@ void main()
     // Normalised, so the source may be any size relative to this dispatch.
     vec2 uv = (vec2(id.xy) + 0.5) / vec2(gWidth, gHeight);
 
-    // The meter. One thread per tile of a 64x64 grid over the frame, writing that tile's mean
-    // luminance. The frame is raw linear here -- this runs before the encode, on purpose, because the
-    // number being looked for is what the encode's divisor should be.
+    // The calibration meter. One thread per tile of a 64x64 grid over the frame, writing that tile's
+    // peak luminance. The frame is raw linear here -- this reads the frame the encode reads, not
+    // the proxy it writes, on purpose, because the number being looked for is what the encode's
+    // divisor should be.
     //
-    // A mean per tile, then a percentile across tiles on the CPU. Not the frame's mean, which is what
-    // the meter this replaces measured: that reads scene brightness, and a dark scene then asks for a
-    // small divisor and hands the model a blown picture anyway. Not the frame's maximum either, which
-    // one specular hit decides.
+    // A peak per tile, then a percentile across tiles. Not the frame's mean, which is what the meter
+    // this replaces measured: that reads scene brightness, and a dark scene then asks for a small
+    // divisor and hands the model a blown picture anyway. Not the frame's maximum either, which one
+    // specular hit decides.
+    //
     // What scale is this game's buffer on?
     //
     // Not a taste question. The composition divides the frame by paper white to work in a normalised
@@ -589,15 +577,15 @@ void main()
     // hundreds, and ToOkLab is handed values far outside the range its cube root was built for -- the
     // green tint.
     //
-    // Measured from the UNTOUCHED copy the encode kept, never from the frame this pass writes. That
-    // distinction is the whole reason this is safe where the old white point meter was not: that one
-    // read its own output and chased it, walking one Enshrouded session from 0.010 to 97.910. There
-    // is no path from what this pass writes back into what this reads.
+    // Measured from the UNTOUCHED frame, never from anything this pass writes. That distinction is
+    // the whole reason this is safe where the old white point meter was not: that one read its own
+    // output and chased it, walking one Enshrouded session from 0.010 to 97.910. There is no path
+    // from what this pass writes back into what this reads.
     //
     // Per tile, the peak luminance rather than the mean. The mean is scene brightness and says
     // nothing about scale; the peak says where the top of the range is, which is exactly what the
-    // divisor has to match. One specular hit cannot decide the answer because the host takes a
-    // percentile across tiles afterwards.
+    // divisor has to match. One specular hit cannot decide the answer because the reduce pass takes
+    // a percentile across tiles afterwards.
     if (gMode == 4)
     {
         uint fullW, fullH;
@@ -776,13 +764,13 @@ void main()
             return;
         }
 
-        // What the model is shown. Mode 2 -- the default -- scales the frame and encodes it, and that
-        // is all: the game is going to tone map this picture later, so tone mapping it here as well
-        // shows the model a doubly compressed image. Measured against Cyberpunk's own numbers, the
-        // Reinhard proxy handed the model a scene value of 1.0 as 0.55 and 1.5 as 0.64 -- flat, dark,
-        // and nothing like the finished frame it was trained on. The model then synthesised weakly,
-        // judged tone on a picture that does not exist, and its answer had to be un-crushed on the way
-        // back. Mode 0 keeps that old curve, mode 1 the fitted one.
+        // What the model is shown: the frame scaled and encoded, and no tone map. The game is going to
+        // tone map this picture later, so tone mapping it here as well shows the model a doubly
+        // compressed image. Measured against Cyberpunk's own numbers, a Reinhard proxy handed the
+        // model a scene value of 1.0 as 0.55 and 1.5 as 0.64 -- flat, dark, and nothing like the
+        // finished frame it was trained on. The model then synthesised weakly, judged tone on a
+        // picture that does not exist, and its answer had to be un-crushed on the way back.
+        //
         // A soft knee instead of a hard ceiling. Anything above 0.75 is rolled off rather than
         // clipped, so the model is never shown a field of flat white whose blown pixels flip between
         // frames -- unstable input is unstable output, and this is where a bright scene would produce
@@ -1100,10 +1088,9 @@ void main()
         float editRatio = (modelLuma + kEditFloor) / (proxyLuma + kEditFloor);
         float sumLuma = dot(upgraded, kLuma);
 
-        // The higher of two ceilings: 2.5x the pixel's own luminance, so a pixel the model
-        // genuinely brightened is not pulled back, and the model's ratio with half again plus an
-        // absolute 0.1, so a near-black pixel keeps an allowance rather than one that scales away
-        // with it. One scalar over the whole triple -- a per-channel bound moves hue.
+        // Where the model's ratio would put the pixel. The ceiling below is the higher of the band
+        // over the neighbourhood's level and a quarter of this plus an absolute 0.02, so a
+        // near-black pixel keeps an allowance rather than one that scales away with it.
         float targetLuma = originalLuma * editRatio;
 
         // Bounded by the guard the user set, and in both directions.
