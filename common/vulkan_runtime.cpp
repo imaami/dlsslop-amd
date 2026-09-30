@@ -674,20 +674,21 @@ Result<void> Runtime::make_pipelines(const VulkanPaths& paths)
     const VkDevice d = device_.device;
     Pipeline* p = objects_.pipelines;
     const State& s = state_;
-    // The noise field's, which the build runs, and the kernels' the frames
-    // run go through the cache, which is saved then, as upstream saves it;
-    // with motion, the temporal variants replace the pre and post blocks.
-    // Then the runtime's own.
+    // Every pipeline goes through the cache: the noise field's, which the
+    // build runs, the kernels' that the frames run, and then the runtime's
+    // own. With motion, the temporal variants replace the pre and post
+    // blocks. The cache is saved once every pipeline exists or one has
+    // failed; upstream saves it before it creates the runtime's own.
     const VkPipelineCache cache = load_cache(d, paths.cache);
     constexpr size_t noise = size_t(Kernel::kNoiseField);
     Result<void> made = make_pipeline(d, cache, paths.shaders, noise, p[noise]);
     for (size_t i = s.motion; made && i < steps_.size() - s.motion; ++i)
         if (const size_t k = size_t(steps_[i].kernel); !p[k].pipeline)
             made = make_pipeline(d, cache, paths.shaders, k, p[k]);
-    if (made) save_cache(d, cache, paths.cache);
     const bool wanted[kAdapters] = {s.passes > 1, s.stages, s.motion, s.motion, s.motion, s.motion};
     for (size_t a = kAlpha; made && a < kPipelines; ++a)
         if (wanted[a - kAlpha]) made = make_pipeline(d, cache, paths.shaders, a, p[a]);
+    save_cache(d, cache, paths.cache);
     if (cache) vkDestroyPipelineCache(d, cache, nullptr);
     return made;
 }
