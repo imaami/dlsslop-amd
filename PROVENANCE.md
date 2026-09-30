@@ -116,16 +116,17 @@ arena needs offsets past 32 bits or does not fit the device's storage buffers,
 which upstream did not check. It bounds every read of the model, sends its
 messages to the caller's log instead of standard output and error, and loads
 neither `runtime_transfer.spv` nor `runtime_depth.spv`, which upstream loads but
-never dispatches. It leaves out what dlsslop-amd never calls, such as control
-masks, `record_engine`, per-feature histories, preprocessing, model scales below
-1, input formats other than RGBA8 and RGBA16F, the GPU timing that
-`last_gpu_ms()` and `average_gpu_ms()` report, and every `NR_*` environment
-variable. `vulkan-plan-abi` and `vulkan-constants` check the fetched shaders and
-the model tools' entry list against the port. `common/vulkan_plan.h` holds the
-constants that the plan takes from `linux/build/arch/rdna4.sh` and from
-`nr_graph.cpp`'s defaults at `3dfdddc`; `vulkan-constants` checks those that the
-markers in `pipelines.json` record, and a change of the pin must re-check the
-rest.
+never dispatches. Its build leaves the network's input unwritten, where upstream
+uploads a gradient that the first frame overwrites. It leaves out what
+dlsslop-amd never calls, such as control masks, `record_engine`, per-feature
+histories, preprocessing, model scales below 1, input formats other than RGBA8
+and RGBA16F, the GPU timing that `last_gpu_ms()` and `average_gpu_ms()` report,
+and every `NR_*` environment variable. `vulkan-plan-abi` and `vulkan-constants`
+check the fetched shaders and the model tools' entry list against the port.
+`common/vulkan_plan.h` holds the constants that the plan takes from
+`linux/build/arch/rdna4.sh` and from `nr_graph.cpp`'s defaults at `3dfdddc`;
+`vulkan-constants` checks those that the markers in `pipelines.json` record, and
+a change of the pin must re-check the rest.
 
 Preserve `external/layer/ATTRIBUTION.md` and all inherited notices of upstream
 code. The layer's shader/dispatch lineage includes OptiScaler and

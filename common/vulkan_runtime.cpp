@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <iterator>
@@ -491,23 +490,6 @@ void patch_post(uint32_t* words, const Controls& c, bool post_alpha, bool rgba8)
     std::memcpy(words + at, &p, sizeof p);
 }
 
-// The gradient upstream fills the input with at build, which every frame
-// overwrites: x / width, y / height, 0.5 and 1, as floats or rounded to 8
-// bits (upstream: NrSession::build, nr_graph.cpp:3927-3965).
-void gradient(uint8_t* out, uint32_t width, uint32_t height, bool floats)
-{
-    for (uint32_t y = 0; y < height; ++y)
-        for (uint32_t x = 0; x < width; ++x) {
-            const float texel[4] = {float(x) / float(width), float(y) / float(height), 0.5f, 1.0f};
-            if (floats) {
-                std::memcpy(out, texel, sizeof texel);
-                out += sizeof texel;
-            } else {
-                for (float v : texel) *out++ = uint8_t(std::lround(std::min(std::max(v, 0.0f), 1.0f) * 255.0f));
-            }
-        }
-}
-
 double seconds_since(std::chrono::steady_clock::time_point start)
 {
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
@@ -836,29 +818,21 @@ Result<void> Runtime::run_setup(const Plan& plan, const Model& model, double& pa
 {
     const VkDevice d = device_.device;
     Objects& o = objects_;
-    const State& s = state_;
-    // The weights packed straight into the staging memory, and after them
-    // the gradient in the input's format (none in RGBA16F).
+    // The weights packed straight into the staging memory.
     const auto packing = std::chrono::steady_clock::now();
-    const bool floats = !s.input_direct;
-    const VkDeviceSize texel = floats ? 16 : s.rgba8 ? 4 : 0;
-    const VkDeviceSize gradient_at = (VkDeviceSize(plan.blob_bytes) + 15) / 16 * 16;
-    const VkDeviceSize gradient_bytes = texel * s.width * s.height;
     Setup setup{d};
-    DLSSLOP_TRY(make_buffer(device_, gradient_at + gradient_bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true,
-                            "the network's upload", setup.staging));
+    DLSSLOP_TRY(make_buffer(device_, plan.blob_bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, "the network's upload",
+                            setup.staging));
     void* mapped = nullptr;
     DLSSLOP_TRY(
         vk_check(vkMapMemory(d, setup.staging.memory, 0, VK_WHOLE_SIZE, 0, &mapped), "map the network's upload"));
-    auto* staging = static_cast<uint8_t*>(mapped);
-    DLSSLOP_TRY(pack(plan.segments, plan.tables, model, {staging, plan.blob_bytes}));
-    if (gradient_bytes) gradient(staging + gradient_at, s.width, s.height, floats);
+    DLSSLOP_TRY(pack(plan.segments, plan.tables, model, {static_cast<uint8_t*>(mapped), plan.blob_bytes}));
     packed = seconds_since(packing);
 
-    // One submission: every image into the layout frames use it in (the
-    // input first into TRANSFER_DST when the gradient fills it), the
-    // uploads, the arena zeroed, the noise field in the weights, and a
-    // barrier before anything after it.
+    // One submission: every image into the layout frames use it in, the
+    // weights' upload, the arena zeroed, the noise field in the weights, and
+    // a barrier before anything after it. Each frame fills the input before
+    // any dispatch reads it, so the build leaves it unwritten.
     VkCommandPoolCreateInfo pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     pool.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     pool.queueFamilyIndex = device_.family;
@@ -873,7 +847,7 @@ Result<void> Runtime::run_setup(const Plan& plan, const Model& model, double& pa
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     DLSSLOP_TRY(vk_check(vkBeginCommandBuffer(cmd, &begin), "begin the network's build commands"));
     std::vector<VkImageMemoryBarrier> layouts;
-    settle(layouts, o.input, gradient_bytes ? kTarget : kSampled);
+    settle(layouts, o.input, kSampled);
     for (const Image* i : {&o.answer, &o.second, &o.shown, &o.scratch, &o.depth}) settle(layouts, *i, kGeneral);
     for (const auto& pyramid : o.luma)
         for (const Image& i : pyramid) settle(layouts, i, kGeneral);
@@ -882,28 +856,11 @@ Result<void> Runtime::run_setup(const Plan& plan, const Model& model, double& pa
     for (const Image& i : o.history_store) settle(layouts, i, kGeneral);
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0,
                          nullptr, uint32_t(layouts.size()), layouts.data());
-    if (gradient_bytes) {
-        VkBufferImageCopy region{};
-        region.bufferOffset = gradient_at;
-        region.imageSubresource = kColorLayer;
-        region.imageExtent = {s.width, s.height, 1};
-        vkCmdCopyBufferToImage(cmd, setup.staging.buffer, o.input.image, kTarget, 1, &region);
-    }
     const VkBufferCopy weights{0, 0, plan.blob_bytes};
     vkCmdCopyBuffer(cmd, setup.staging.buffer, o.weights.buffer, 1, &weights);
     vkCmdFillBuffer(cmd, o.arena.buffer, 0, plan.arena_bytes, 0);
     const VkMemoryBarrier uploaded{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, kCopyWrite, kRead | kWrite};
-    const VkImageMemoryBarrier sampled{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
-                                       nullptr,
-                                       kCopyWrite,
-                                       kRead,
-                                       kTarget,
-                                       kSampled,
-                                       VK_QUEUE_FAMILY_IGNORED,
-                                       VK_QUEUE_FAMILY_IGNORED,
-                                       o.input.image,
-                                       kColor};
-    vkCmdPipelineBarrier(cmd, kTransfer, kCompute, 0, 1, &uploaded, 0, nullptr, gradient_bytes ? 1 : 0, &sampled);
+    vkCmdPipelineBarrier(cmd, kTransfer, kCompute, 0, 1, &uploaded, 0, nullptr, 0, nullptr);
     const size_t noise = size_t(Kernel::kNoiseField);
     dispatch(cmd, noise, o.kernel_sets[noise], (plan.noise.width + 7) / 8, (plan.noise.height + 7) / 8, &plan.noise,
              sizeof plan.noise);

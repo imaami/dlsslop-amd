@@ -269,7 +269,14 @@ stop timing the network with queries nobody reads", also keeps upstream's
 timing ring: an 8-query timestamp pool per build and, in every frame, a query
 pool reset and two timestamps. Compare it with `--ignore-queries`, which leaves
 the ring out; without that option, the comparison above finds every frame
-different and prints `DIFFERENT`.
+different and prints `DIFFERENT`. Any dlsslopd built before "vulkan: stop
+uploading an input that the first frame overwrites" also fills the network's
+input with a gradient in each build whose input is RGBA8 or, with more than one
+pass, RGBA32F. Its setup uploads then hold one more payload per such build, of
+the frame's size in the input's format, so the comparison prints `setup uploads
+differ` and `DIFFERENT` even when every frame matches; `--skip-setup` compares
+the frames alone. With `--hash all`, the state after setup also differs in the
+input, which newer builds leave unwritten.
 
 A frame is a submission that dispatches and is not a build's one-shot, whose
 command pool is created after the previous submission and destroyed before the
