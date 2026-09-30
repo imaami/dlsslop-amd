@@ -3,17 +3,15 @@
 // Ported to GLSL in 2026 from OptiScaler/shaders/output_scaling/precompile/bcds_lanczos3.hlsl
 // in OptiScaler (GPL-3.0; see PROVENANCE.md).
 
-#include "bcds.glsl"
-
-// Lanczos3: a = 3, radius 3 => 6 taps per axis
-const float A_LANCZOS = 3.0;
-const int TAP_COUNT = 6;
-const int RADIUS = 3;
-
-// DXC's factor for Sinc(x / A_LANCZOS): x / 3.0 became x * 0.333333343,
-// and 0.333333343 * 3.14159274 (3.1415926535 as float) rounds to
-// 1.04719758 (0x3f860a92).
-// Recompute it when changing A_LANCZOS.
-const float PI_OVER_A = 1.0471975803375244;
-
 #include "bcds_window.glsl"
+
+const float A_LANCZOS = 3.0;
+
+const float SUPPORT = A_LANCZOS;
+
+float Weight(float x)
+{
+    return Lanczos(x, A_LANCZOS);
+}
+
+#include "bcds.glsl"
