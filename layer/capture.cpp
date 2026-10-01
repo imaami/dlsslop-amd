@@ -55,7 +55,7 @@ bool WritePng(const std::string& path, const void* pixels, uint32_t w, uint32_t 
         for (size_t i = 0; i < px; ++i) std::swap(rgba[i * 4 + 0], rgba[i * 4 + 2]);
     }
     if (!stbi_write_png(path.c_str(), int(w), int(h), 4, rgba.data(), int(w) * 4)) {
-        Log("[capture] could not write %s", path.c_str());
+        log_printf("[capture] could not write %s", path.c_str());
         return false;
     }
     return true;
@@ -67,7 +67,7 @@ bool WriteRaw(const std::string& path, const void* pixels, size_t bytes) {
         const bool closed = fclose(f) == 0;
         if (wrote && closed) return true;
     }
-    Log("[capture] could not write %s", path.c_str());
+    log_printf("[capture] could not write %s", path.c_str());
     return false;
 }
 
@@ -126,7 +126,7 @@ void CaptureWriter::Begin(uint32_t frames, uint32_t controlSeq) {
     MakeDirs(dir);
     _batchDir = dir + "/capture-" + std::to_string(getpid()) + "-XXXXXX";
     if (!mkdtemp(_batchDir.data())) {
-        Log("[capture] cannot create batch directory in %s", dir.c_str());
+        log_printf("[capture] cannot create batch directory in %s", dir.c_str());
         _remaining = 0;
         return;
     }
@@ -135,7 +135,7 @@ void CaptureWriter::Begin(uint32_t frames, uint32_t controlSeq) {
     _metadata.clear();
     _remaining = frames;
     _index = 0;
-    Log("[capture] capturing %u frames, control %u, to %s", frames, controlSeq, _batchDir.c_str());
+    log_printf("[capture] capturing %u frames, control %u, to %s", frames, controlSeq, _batchDir.c_str());
 }
 
 void CaptureWriter::WriteFrame(const void* before, const void* after, uint32_t width, uint32_t height,
@@ -162,7 +162,7 @@ void CaptureWriter::WriteFrame(const void* before, const void* after, uint32_t w
     }
     if (!beforeWritten || !afterWritten) {
         _remaining = 0;
-        Log("[capture] batch failed; completion manifest was not published");
+        log_printf("[capture] batch failed; completion manifest was not published");
         return;
     }
     auto frameMetadata = metadata;
@@ -174,9 +174,9 @@ void CaptureWriter::WriteFrame(const void* before, const void* after, uint32_t w
 
     if (_remaining == 0) {
         if (WriteManifest(width, height, vkFormat, png))
-            Log("[capture] wrote %u pairs to %s", _index, dir.c_str());
+            log_printf("[capture] wrote %u pairs to %s", _index, dir.c_str());
         else
-            Log("[capture] could not publish completion manifest for %s", dir.c_str());
+            log_printf("[capture] could not publish completion manifest for %s", dir.c_str());
     }
 }
 

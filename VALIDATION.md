@@ -89,8 +89,14 @@ Vulkan, the layer-units test checks the settings the layer composes a frame
 with: their defaults, values that are not finite or out of range, and the five
 environment overrides, each in a process of its own because the layer reads
 them once. It also checks the model raster over working scales and native
-maxima, the swapchain formats the composition takes, and the names of the
-downscalers and of the toggle key.
+maxima, the swapchain formats the composition takes, the names of the
+downscalers and of the toggle key, and the layer's log: the variables that
+switch it, its verbose and timing switches, the text of its lines, standard
+error when `DLSSNR_LOG` names no file that opens, lines from several threads,
+its clock, that it closes the file it opened when the process exits, and that
+a child forked while a thread writes a line can still exit. With the tests, the
+build compiles `tests/c_headers.c`, which includes as C the headers that C and
+C++ share.
 
 Two checks disassemble the built HIP modules and need `llvm-objdump`. The
 LDS-barrier check fails when a shared-memory access can still be outstanding at

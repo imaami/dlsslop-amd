@@ -58,16 +58,6 @@
 #endif
 
 // ---------------------------------------------------------------------------
-// Logging
-// ---------------------------------------------------------------------------
-// log.h's sink, which the composition and the passes write through too.
-using dlssnr::Log;
-using dlssnr::NowMs;
-using dlssnr::TimeEnabled;
-using dlssnr::TimeInterval;
-using dlssnr::Verbose;
-
-// ---------------------------------------------------------------------------
 // Shared memory transport
 // ---------------------------------------------------------------------------
 struct ShmMap {
@@ -145,9 +135,9 @@ static bool EnsureParentDir(const std::string& path) {
     mkdir(dir.c_str(), 0700);
 
     struct stat st{};
-    if (lstat(dir.c_str(), &st) != 0) { Log("[shm] %s is missing", dir.c_str()); return false; }
+    if (lstat(dir.c_str(), &st) != 0) { log_printf("[shm] %s is missing", dir.c_str()); return false; }
     if (!S_ISDIR(st.st_mode) || st.st_uid != getuid() || (st.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
-        Log("[shm] refusing %s: it is not a private directory owned by this user", dir.c_str());
+        log_printf("[shm] refusing %s: it is not a private directory owned by this user", dir.c_str());
         return false;
     }
     return true;
@@ -167,12 +157,12 @@ static bool ShmMapFrames(ShmMap& s, size_t bytes) {
     s.mappedFrameBytes = 0;
 
     void* in = mmap(nullptr, want, PROT_READ | PROT_WRITE, MAP_SHARED, s.fd, (off_t) kHeaderBytes);
-    if (in == MAP_FAILED) { Log("[shm] could not map the input region (%zu bytes)", want); return false; }
+    if (in == MAP_FAILED) { log_printf("[shm] could not map the input region (%zu bytes)", want); return false; }
 
     void* out = mmap(nullptr, want, PROT_READ | PROT_WRITE, MAP_SHARED, s.fd, (off_t) (kHeaderBytes + kMaxFrame));
     if (out == MAP_FAILED) {
         munmap(in, want);
-        Log("[shm] could not map the output region (%zu bytes)", want);
+        log_printf("[shm] could not map the output region (%zu bytes)", want);
         return false;
     }
 
@@ -188,7 +178,7 @@ static bool ShmOpen(ShmMap& s) {
     std::string p = (path && *path) ? path : ShmDefaultPath();
     if (!EnsureParentDir(p)) return false;
     int fd = open(p.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
-    if (fd < 0) { Log("[shm] open %s failed", p.c_str()); return false; }
+    if (fd < 0) { log_printf("[shm] open %s failed", p.c_str()); return false; }
     // The file still spans the whole protocol -- the offsets are fixed and both sides agree on them --
     // but it is sparse, so the size on disk is what has actually been written.
     size_t total = ShmTotalBytes();
@@ -198,7 +188,7 @@ static bool ShmOpen(ShmMap& s) {
     }
 
     void* m = mmap(nullptr, kHeaderBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (m == MAP_FAILED) { Log("[shm] mmap of the header failed"); close(fd); return false; }
+    if (m == MAP_FAILED) { log_printf("[shm] mmap of the header failed"); close(fd); return false; }
     s.fd = fd;
     s.hdr = (ShmHeader*)m;
     // A mapping left by an older build has a different magic, a different version, or a header
@@ -212,16 +202,16 @@ static bool ShmOpen(ShmMap& s) {
     if (s.hdr->magic.load() != kShmMagic || s.hdr->version.load() != kShmVersion ||
         s.hdr->passes.load() == 0) {
         if (s.hdr->magic.load() == kShmMagic && s.hdr->version.load() != kShmVersion)
-            Log("[shm] header is version %u but this layer is v%u -- another process is out of date, "
-                "re-initialising it; update the layer, the helper and the GUI together",
-                s.hdr->version.load(), kShmVersion);
+            log_printf("[shm] header is version %u but this layer is v%u -- another process is out of date, "
+                       "re-initialising it; update the layer, the helper and the GUI together",
+                       s.hdr->version.load(), kShmVersion);
         ShmInitDefaults(s.hdr);
     }
     s.lastHeartbeat = s.hdr->heartbeat.load();
     s.firstHeartbeat = s.lastHeartbeat;
     s.path = p;
-    Log("[shm] attached %s seq_req=%u seq_resp=%u", p.c_str(),
-        s.hdr->seq_req.load(), s.hdr->seq_resp.load());
+    log_printf("[shm] attached %s seq_req=%u seq_resp=%u", p.c_str(),
+               s.hdr->seq_req.load(), s.hdr->seq_resp.load());
     return true;
 }
 
@@ -234,7 +224,7 @@ static bool ShmNeuralEnabled(ShmMap& s) {
         if (s.dead && ::ShmNeuralEnabled(s.hdr)) {
             s.dead = false;
             s.timeouts = 0;
-            Log("[shm] control changed, re-enabling");
+            log_printf("[shm] control changed, re-enabling");
         }
     }
     const uint32_t hb = s.hdr->heartbeat.load();
@@ -244,10 +234,10 @@ static bool ShmNeuralEnabled(ShmMap& s) {
         // sits idle, so a helper that is up but not answering used to re-enable the layer the moment
         // it had given up -- which cost the game another round of full-length waits, over and over.
         // That is the stutter: recover, stall, give up, recover.
-        if (s.dead && NowMs() >= s.retryAfterMs && ::ShmNeuralEnabled(s.hdr)) {
+        if (s.dead && log_now_ms() >= s.retryAfterMs && ::ShmNeuralEnabled(s.hdr)) {
             s.dead = false;
             s.timeouts = 0;
-            Log("[shm] helper heartbeat, trying again");
+            log_printf("[shm] helper heartbeat, trying again");
         }
     }
     if (s.dead) return false;
@@ -269,13 +259,13 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
     if (bytes != size_t(w) * h * 4 && bytes != size_t(w) * h * 8) return false;
     if (s.hdr->quit.load()) { s.dead = true; return false; }
 
-    const bool time = TimeEnabled();
-    const double t0 = NowMs();
+    const bool time = log_time_enabled();
+    const double t0 = log_now_ms();
     if (!ShmMapFrames(s, bytes)) { s.dead = true; return false; }
     // A request that names a device-local transport generation crosses in the exported buffers:
     // the GPU already wrote the proxy where the daemon reads it, and there is nothing to copy.
     if (!transportGen) std::memcpy(s.inPixels, proxy, bytes);
-    const double tCopy = NowMs();
+    const double tCopy = log_now_ms();
     s.hdr->width.store(w);
     s.hdr->height.store(h);
     s.hdr->format.store(1u);  // RGBA byte order either way; the float path keeps the same swizzle
@@ -314,7 +304,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
     const double budgetMs = !helperPresent ? 20.0 : (warmingUp ? 10000.0 : frameBudgetMs);
 
     // Wait for the helper (fail-open: present the original frame on timeout).
-    const double tSignal = NowMs();
+    const double tSignal = log_now_ms();
     uint32_t beat = s.hdr->heartbeat.load();
     double beatAt = 0.0;
     for (;;) {
@@ -334,20 +324,20 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
             // check exists to refuse.
             const bool ok = s.hdr->seq_ok.load() == req && s.hdr->answeredW.load() == w &&
                             s.hdr->answeredH.load() == h;
-            if (!ok) Log("[shm] helper could not use frame %u (ok=%u)", req, s.hdr->seq_ok.load());
+            if (!ok) log_printf("[shm] helper could not use frame %u (ok=%u)", req, s.hdr->seq_ok.load());
             if (ok && !transportGen) std::memcpy(modelOut, s.outPixels, bytes);
             if (time) {
                 static int frameNo = 0;
-                if (++frameNo % TimeInterval() == 0) {
-                    const double tDone = NowMs();
-                    Log("[time] shm copy=%.2f signal=%.2f wait=%.2f total=%.2f ms",
-                        tCopy - t0, tSignal - tCopy, tDone - tSignal, tDone - t0);
+                if (++frameNo % log_time_interval() == 0) {
+                    const double tDone = log_now_ms();
+                    log_printf("[time] shm copy=%.2f signal=%.2f wait=%.2f total=%.2f ms",
+                               tCopy - t0, tSignal - tCopy, tDone - tSignal, tDone - t0);
                 }
             }
             return ok;
         }
         if (s.hdr->quit.load()) { s.dead = true; return false; }
-        const double elapsed = NowMs() - tSignal;
+        const double elapsed = log_now_ms() - tSignal;
         if (elapsed >= budgetMs) break;
         // The worker ticks its heartbeat every 100 ms, also mid-frame. One that
         // exits or dies (even by SIGKILL) will not answer; stop waiting for it.
@@ -365,18 +355,18 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
         const timespec timeout{0, long(std::min(50.0, budgetMs - elapsed) * 1000000.0)};
         syscall(SYS_futex, &s.hdr->seq_resp, FUTEX_WAIT, response, &timeout, nullptr, 0);
     }
-    Log("[shm] worker did not answer frame %u in %.0f ms (state=%u heartbeat=%u); "
-        "presenting original frames until it answers", req, NowMs() - tSignal,
-        s.hdr->helperState.load(), s.hdr->heartbeat.load());
+    log_printf("[shm] worker did not answer frame %u in %.0f ms (state=%u heartbeat=%u); "
+               "presenting original frames until it answers", req, log_now_ms() - tSignal,
+               s.hdr->helperState.load(), s.hdr->heartbeat.load());
     // Four rather than eight, and with a pause before the next attempt, so giving up costs a
     // fraction of a second and retrying costs that again only every few seconds.
     if (++s.timeouts >= 4) {
         s.dead = true;
-        s.retryAfterMs = NowMs() + 5000.0;
-        Log("[shm] no answer in %.0f ms x4 (helper %s); passing frames through, retrying in 5s "
-            "(seq_req=%u seq_resp=%u heartbeat=%u)",
-            budgetMs, helperPresent ? "is present but silent" : "not running",
-            s.hdr->seq_req.load(), s.hdr->seq_resp.load(), s.hdr->heartbeat.load());
+        s.retryAfterMs = log_now_ms() + 5000.0;
+        log_printf("[shm] no answer in %.0f ms x4 (helper %s); passing frames through, retrying in 5s "
+                   "(seq_req=%u seq_resp=%u heartbeat=%u)",
+                   budgetMs, helperPresent ? "is present but silent" : "not running",
+                   s.hdr->seq_req.load(), s.hdr->seq_resp.load(), s.hdr->heartbeat.load());
     }
     return false;
 }
@@ -384,7 +374,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
 // A worker that stopped (idle, crashed) is started again by its systemd socket unit, for which a
 // connection is enough. At most every two seconds, and never waiting: this is the present path.
 static void StartWorker(ShmMap& s) {
-    const double now = NowMs();
+    const double now = log_now_ms();
     if (now < s.startAfterMs) return;
     s.startAfterMs = now + 2000.0;
     sockaddr_un address{};
@@ -450,11 +440,11 @@ static Offer OfferTransport(ShmMap& s, dlssnr::Composition& comp, double& expire
             return s.hdr->helperState.load(std::memory_order_acquire) == kHelperRunning ? Offer::kDeclined
                                                                                     : Offer::kLater;
         comp.AwaitAnswer(connection);
-        expires = NowMs() + 5000.0;
+        expires = log_now_ms() + 5000.0;
         wait = 250;
     }
     pollfd answer{comp.OfferConnection(), POLLIN, 0};
-    if (poll(&answer, 1, wait) != 1) return NowMs() >= expires ? Offer::kDeclined : Offer::kWaiting;
+    if (poll(&answer, 1, wait) != 1) return log_now_ms() >= expires ? Offer::kDeclined : Offer::kWaiting;
     uint8_t imported = 0;
     if (recv(answer.fd, &imported, 1, 0) != 1) return Offer::kLater; // Closed unanswered.
     return imported ? Offer::kReady : Offer::kDeclined;
@@ -494,7 +484,7 @@ struct SwapchainState {
     VkFence fenceLeg1 = VK_NULL_HANDLE;
     VkFence fenceLeg2 = VK_NULL_HANDLE;
     bool leg2Pending = false;
-    // When the composition's outstanding transport offer counts as refused (NowMs).
+    // When the composition's outstanding transport offer counts as refused (log_now_ms).
     double offerExpires = 0.0;
     // Per image: leg 2 signals it and the present waits on it. Queue order alone does not order a
     // present behind earlier work, and an image is acquired again only after its present waited.
@@ -615,8 +605,8 @@ static bool DuplicateLayerCopy() {
         const char* claimed = getenv("DLSSNR_LAYER_OBJECT");
         if (claimed && *claimed) {
             if (self.empty() || self == claimed) return false;
-            Log("[layer] another copy is already loaded from %s; this copy (%s) stays inert. "
-                "Remove one of the implicit-layer manifests.", claimed, self.c_str());
+            log_printf("[layer] another copy is already loaded from %s; this copy (%s) stays inert. "
+                       "Remove one of the implicit-layer manifests.", claimed, self.c_str());
             return true;
         }
         if (!self.empty()) setenv("DLSSNR_LAYER_OBJECT", self.c_str(), 0);
@@ -649,7 +639,7 @@ static void PollHotkeys(DeviceChain* dc) {
     const bool wasOn = dc->shm.hdr->enabled.load() != 0;
     dc->shm.hdr->enabled.store(wasOn ? 0u : 1u);
     dc->shm.hdr->controlSeq.fetch_add(1);
-    Log("[hotkey] %s -> neural rendering %s", dlssnr::KeyNameFromCode(key), wasOn ? "off" : "on");
+    log_printf("[hotkey] %s -> neural rendering %s", dlssnr::KeyNameFromCode(key), wasOn ? "off" : "on");
 }
 
 static bool LayerEnabled() {
@@ -697,7 +687,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateInstance(
 
     std::lock_guard<std::mutex> lk(g_stateMutex);
     g_instances[*pInstance] = chain;
-    Log("[layer] vkCreateInstance -> %p", (void*)*pInstance);
+    log_printf("[layer] vkCreateInstance -> %p", (void*)*pInstance);
     return VK_SUCCESS;
 }
 
@@ -815,7 +805,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
                                physicalDevice, ic->apiVersion, ic->table.vkGetPhysicalDeviceProperties2,
                                ic->table.vkGetPhysicalDeviceFeatures2, ic->table.vkEnumerateDeviceExtensionProperties,
                                ic->table.vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR));
-    if (networkOff) Log("[layer] in-layer network unavailable: needs %s", networkOff);
+    if (networkOff) log_printf("[layer] in-layer network unavailable: needs %s", networkOff);
     if (network && dlssnr::AddNetworkExtensions(modified, enabledExts)) effective = &modified;
 
     link->u.pLayerInfo = link->u.pLayerInfo->pNext;
@@ -834,19 +824,19 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
                 effective = &modified;
             } else if (network && features.Enable(modified, false)) {
                 effective = &modified;
-                Log("[layer] in-layer network unavailable: cannot safely copy the game's feature chain");
+                log_printf("[layer] in-layer network unavailable: cannot safely copy the game's feature chain");
             } else {
-                Log("[layer] cannot safely clone the Features2 prefix; compositor disabled");
+                log_printf("[layer] cannot safely clone the Features2 prefix; compositor disabled");
             }
         } else {
-            Log("[layer] formatless storage writes unsupported; compositor disabled");
+            log_printf("[layer] formatless storage writes unsupported; compositor disabled");
         }
     }
     VkResult res = create(physicalDevice, effective, pAllocator, pDevice);
     if (res != VK_SUCCESS && effective != pCreateInfo) {
         // Nothing added here is worth failing a device creation over.
-        Log("[layer] vkCreateDevice refused the layer's additions (%d); retrying with the game's list",
-            (int) res);
+        log_printf("[layer] vkCreateDevice refused the layer's additions (%d); retrying with the game's list",
+                   (int) res);
         link->u.pLayerInfo = nextLayerInfo;
         effective = pCreateInfo;
         res = create(physicalDevice, pCreateInfo, pAllocator, pDevice);
@@ -866,12 +856,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
             dc->exportMemory = dc->table.vkGetMemoryFdKHR != nullptr;
     if (network) {
         dc->network = dlssnr::NetworkEnabled(*effective);
-        Log("[layer] in-layer network features %s", dc->network ? "enabled" : "not enabled");
+        log_printf("[layer] in-layer network features %s", dc->network ? "enabled" : "not enabled");
     }
     if (!dc->table.vkQueuePresentKHR || !dc->table.vkCreateSwapchainKHR || !ic) dc->inert = true;
     if (LayerEnabled() && !dlssnr::HasFormatlessStorageWrites(*effective)) {
         dc->inert = true;
-        Log("[layer] shaderStorageImageWriteWithoutFormat not enabled; presenting untouched");
+        log_printf("[layer] shaderStorageImageWriteWithoutFormat not enabled; presenting untouched");
     }
 
     // The native HIP worker runs on an AMD GPU, so on anything else there is nothing for this
@@ -891,14 +881,14 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
 #endif
         if (!vendorSupported) {
             dc->inert = true;
-            Log("[layer] inert on non-AMD device (vendor %#x): %s", props.vendorID, deviceName);
+            log_printf("[layer] inert on non-AMD device (vendor %#x): %s", props.vendorID, deviceName);
         }
     }
 
     std::lock_guard<std::mutex> lk(g_stateMutex);
     g_devices[*pDevice] = dc;
-    Log("[layer] vkCreateDevice -> %p on %s (inert=%d enabled=%d)", (void*)*pDevice, deviceName,
-        (int) dc->inert.load(), (int) LayerEnabled());
+    log_printf("[layer] vkCreateDevice -> %p on %s (inert=%d enabled=%d)", (void*)*pDevice, deviceName,
+               (int) dc->inert.load(), (int) LayerEnabled());
     return VK_SUCCESS;
 }
 
@@ -1066,13 +1056,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
                      sc.height > kMaxH || tooSmall;
 
     std::lock_guard<std::mutex> lk(dc->lock);
-    Log("[layer] swapchain %p %ux%u fmt=%d hdr=%u passThrough=%d%s", (void*)*pSwapchain,
-        pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height,
-        (int)pCreateInfo->imageFormat, sc.hdrKind, (int)sc.passThrough,
-        sc.passThrough ? (unsupportedHdr ? " (unsupported color space for native HIP)"
-                          : unsupportedTransfer ? " (surface cannot transfer frames)"
-                          : !SupportedFormat(sc.format) ? " (unsupported format)"
-                          : tooSmall ? " (too small)" : " (too large)") : "");
+    log_printf("[layer] swapchain %p %ux%u fmt=%d hdr=%u passThrough=%d%s", (void*)*pSwapchain,
+               pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height,
+               (int)pCreateInfo->imageFormat, sc.hdrKind, (int)sc.passThrough,
+               sc.passThrough ? (unsupportedHdr ? " (unsupported color space for native HIP)"
+                                 : unsupportedTransfer ? " (surface cannot transfer frames)"
+                                 : !SupportedFormat(sc.format) ? " (unsupported format)"
+                                 : tooSmall ? " (too small)" : " (too large)") : "");
     dc->swapchains[*pSwapchain] = std::move(sc);
     return VK_SUCCESS;
 }
@@ -1140,7 +1130,7 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
     uint32_t count = 32;
     dc->instance->table.vkGetPhysicalDeviceQueueFamilyProperties(dc->physical, &count, families);
     if (family >= count || !(families[family].queueFlags & VK_QUEUE_COMPUTE_BIT)) {
-        Log("[layer] present queue family %u cannot execute the compositor", family);
+        log_printf("[layer] present queue family %u cannot execute the compositor", family);
         return false;
     }
 
@@ -1154,7 +1144,7 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
     cbai.commandPool = sc.pool; cbai.commandBufferCount = 1;
     if (dc->table.vkAllocateCommandBuffers(d, &cbai, &sc.cb) != VK_SUCCESS) return false;
     if (!SetLoaderData(dc, sc.cb)) {
-        Log("[layer] vkSetDeviceLoaderData failed for the present command buffer");
+        log_printf("[layer] vkSetDeviceLoaderData failed for the present command buffer");
         return false;
     }
     VkFenceCreateInfo fci{};
@@ -1170,7 +1160,7 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
     if (!dc->instance) return false;
     sc.comp = std::make_unique<dlssnr::Composition>(&dc->table, &dc->instance->table, d, dc->physical);
     if (!sc.comp->Usable()) {
-        Log("[layer] composition unavailable: %s", sc.comp->Reason());
+        log_printf("[layer] composition unavailable: %s", sc.comp->Reason());
         sc.comp.reset();
         return false;
     }
@@ -1192,11 +1182,11 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
 static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
     if (r == VK_SUCCESS) return true;
     if (r == VK_ERROR_DEVICE_LOST) {
-        if (!dc->inert.exchange(true)) Log("[layer] %s -> DEVICE_LOST; layer inert for this device", what);
+        if (!dc->inert.exchange(true)) log_printf("[layer] %s -> DEVICE_LOST; layer inert for this device", what);
         return false;
     }
     static std::atomic<uint32_t> reported{0};
-    if (reported.fetch_add(1) < 8) Log("[layer] %s -> %d", what, (int) r);
+    if (reported.fetch_add(1) < 8) log_printf("[layer] %s -> %d", what, (int) r);
     return false;
 }
 
@@ -1253,7 +1243,7 @@ static void PublishFrame(DeviceChain* dc, const SwapchainState& sc, double ms) {
     hdr->layerHeartbeat.fetch_add(1);
 }
 
-static void NetworkLog(const char* line) { Log("[network] %s", line); }
+static void NetworkLog(const char* line) { log_printf("[network] %s", line); }
 
 // The in-layer network's state in the channel's layer reason, for the controllers: WHAT, DETAIL and
 // AFTER, stored when it changes and logged when it is news. Unchanged, it allocates nothing.
@@ -1264,7 +1254,7 @@ static void NetworkReason(DeviceChain* dc, const char* what, const char* detail 
         !reason.compare(a, b, detail) && !reason.compare(a + b, std::string::npos, after))
         return;
     reason.assign(what).append(detail).append(after);
-    Log("[layer] %s", reason.c_str());
+    log_printf("[layer] %s", reason.c_str());
     if (dc->shm.hdr) ShmStoreString(dc->shm.hdr->layerReasonSeq, dc->shm.hdr->layerReason, kReasonBytes, reason.c_str());
 }
 
@@ -1301,7 +1291,7 @@ static DlsslopNetwork* OpenNetwork(DeviceChain* dc, const SwapchainState& sc, Vk
     device.log = NetworkLog;
     DlsslopNetwork* network = g_network.open(&device);
     if (network)
-        Log("[layer] in-layer network on the game's device: frames skip dlsslopd");
+        log_printf("[layer] in-layer network on the game's device: frames skip dlsslopd");
     else
         NetworkReason(dc, "in-layer network off: out of memory; frames go to dlsslopd");
     return network;
@@ -1382,7 +1372,7 @@ static bool ProcessInLayer(DeviceChain* dc, SwapchainState& sc, VkQueue queue, u
     g_network.submitted(dc->inLayer);
     sc.leg2Pending = true;
     if (sc.comp->CaptureRecorded()) CollectLeg2(dc, sc);
-    PublishFrame(dc, sc, NowMs() - t0);
+    PublishFrame(dc, sc, log_now_ms() - t0);
     return true;
 }
 
@@ -1431,8 +1421,8 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
         return false;
     }
     VkCommandBuffer cb = sc.cb;
-    const bool time = TimeEnabled();
-    const double t0 = NowMs();
+    const bool time = log_time_enabled();
+    const double t0 = log_now_ms();
 
     // The previous frame's compose, if it is still running, must finish before anything here
     // touches the surfaces it reads or the command buffer it was recorded into. Waiting here rather
@@ -1460,7 +1450,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
     const uint32_t hdrTransfer = linearHdr && sc.hdrKind == kHdrPq10 ? 1u : 0u;
 
     if (!sc.comp->Prepare(sc.width, sc.height, sc.format, fs, linearHdr, hdrProxy, hdrTransfer)) {
-        Log("[layer] composition cannot run here: %s", sc.comp->Reason());
+        log_printf("[layer] composition cannot run here: %s", sc.comp->Reason());
         return false;
     }
 
@@ -1508,17 +1498,17 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
         switch (OfferTransport(dc->shm, *sc.comp, sc.offerExpires)) {
         case Offer::kReady:
             sc.comp->SetTransportReady(true);
-            Log("[shm] device-local transport ready: frames stay in video memory");
+            log_printf("[shm] device-local transport ready: frames stay in video memory");
             break;
         case Offer::kDeclined:
-            Log("[shm] device-local transport declined; staging frames through host memory");
+            log_printf("[shm] device-local transport declined; staging frames through host memory");
             sc.comp->DisableExport();
             break;
         case Offer::kWaiting:
             return false;
         case Offer::kLater:
             sc.comp->WithdrawOffer();
-            Log("[shm] daemon stopped before it took the transport offer; offering it again later");
+            log_printf("[shm] daemon stopped before it took the transport offer; offering it again later");
             return false;
         }
     }
@@ -1536,7 +1526,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
     if (!WaitLeg(dc, sc.fenceLeg1)) return false;
     dropWaits();
     sc.comp->ConsumeMeter();
-    const double tCapture = time ? NowMs() : 0.0;
+    const double tCapture = time ? log_now_ms() : 0.0;
 
     // ---- the round trip ----
     if (!ShmProcessFrame(dc->shm, sc.comp->ModelWidth(), sc.comp->ModelHeight(), sc.comp->ModelBytes(),
@@ -1549,7 +1539,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
         return false;
     }
     sc.comp->SetCaptureInference(dc->shm.hdr->seq_req.load());
-    const double tHelper = time ? NowMs() : 0.0;
+    const double tHelper = time ? log_now_ms() : 0.0;
 
     // ---- leg 2: the answer, composed back ----
     if (!BeginLeg(dc, cb)) return false;
@@ -1569,15 +1559,15 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
     // leg-2 path, including every frame of a capture whose buffer failed.
     // The semaphore is signalled either way, so a failed wait still presents.
     if (sc.comp->CaptureRecorded()) CollectLeg2(dc, sc);
-    const double tReturn = NowMs();
+    const double tReturn = log_now_ms();
     PublishFrame(dc, sc, tReturn - t0);
 
     if (time) {
         static int frameNo = 0;
-        if (++frameNo % TimeInterval() == 0) {
-            Log("[time] encode=%.2f helper=%.2f resolve=%.2f total=%.2f ms (model %ux%u)",
-                tCapture - t0, tHelper - tCapture, tReturn - tHelper, tReturn - t0,
-                sc.comp->ModelWidth(), sc.comp->ModelHeight());
+        if (++frameNo % log_time_interval() == 0) {
+            log_printf("[time] encode=%.2f helper=%.2f resolve=%.2f total=%.2f ms (model %ux%u)",
+                       tCapture - t0, tHelper - tCapture, tReturn - tHelper, tReturn - t0,
+                       sc.comp->ModelWidth(), sc.comp->ModelHeight());
         }
     }
     return true;
@@ -1627,7 +1617,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
             if (!ClaimPrimary(dc->self, pPresentInfo->pSwapchains[i], sc.width, sc.height)) {
                 static std::atomic<uint32_t> n{0};
                 const uint32_t k = n.fetch_add(1);
-                if (k < 3) Log("[layer] present: swapchain %p is not primary", (void*)pPresentInfo->pSwapchains[i]);
+                if (k < 3) log_printf("[layer] present: swapchain %p is not primary", (void*)pPresentInfo->pSwapchains[i]);
                 continue;
             }
             // One composition, and one semaphore, per present. A larger swapchain that has just taken
@@ -1635,9 +1625,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
             if (composedSem) continue;
             if (!sc.ready && !dc->shm.dead) {
                 if (!CreateResources(dc, sc, family)) {
-                    Log("[layer] staging resources failed for swapchain %p (%ux%u, family %u); "
-                        "passing this swapchain through",
-                        (void*)pPresentInfo->pSwapchains[i], sc.width, sc.height, family);
+                    log_printf("[layer] staging resources failed for swapchain %p (%ux%u, family %u); "
+                               "passing this swapchain through",
+                               (void*)pPresentInfo->pSwapchains[i], sc.width, sc.height, family);
                     sc.passThrough = true;
                     // This swapchain claimed the primary role and just gave it up. Without the
                     // release the claim would sit on a swapchain that never drives the channel,
@@ -1656,20 +1646,20 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
                                                  waitCount, pPresentInfo->pWaitSemaphores, waitsConsumed);
             if (composed) composedSem = sc.leg2Done[pPresentInfo->pImageIndices[i]];
             else ++dc->framesPassedThrough;
-            if (Verbose()) {
-                Log("[present] swapchain=%p image=%u seq=%u composed=%d",
-                    (void*)pPresentInfo->pSwapchains[i], pPresentInfo->pImageIndices[i],
-                    dc->shm.hdr ? dc->shm.hdr->seq_req.load() : 0u, int(composed));
+            if (log_verbose()) {
+                log_printf("[present] swapchain=%p image=%u seq=%u composed=%d",
+                           (void*)pPresentInfo->pSwapchains[i], pPresentInfo->pImageIndices[i],
+                           dc->shm.hdr ? dc->shm.hdr->seq_req.load() : 0u, int(composed));
             }
             // On failure before the capture submit, leave the application's waits attached to the
             // original present. Once our first submit accepted them they have been consumed.
         }
-        if (TimeEnabled()) {
+        if (log_time_enabled()) {
             static int frameNo = 0;
-            if (++frameNo % TimeInterval() == 0) {
-                Log("[layer] composed=%llu passed through=%llu",
-                    (unsigned long long)dc->framesComposed,
-                    (unsigned long long)dc->framesPassedThrough);
+            if (++frameNo % log_time_interval() == 0) {
+                log_printf("[layer] composed=%llu passed through=%llu",
+                           (unsigned long long)dc->framesComposed,
+                           (unsigned long long)dc->framesPassedThrough);
             }
         }
     }
@@ -1813,7 +1803,7 @@ vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* v) {
         const char* mixed = getenv("VKLayer_DLSS5");
         const char* upper = getenv("VKLAYER_DLSS5");
         const char* value = mixed ? mixed : upper;
-        Log("=== %s loaded (VKLayer_DLSS5=%s) ===", VK_LAYER_NAME, value ? value : "(unset)");
+        log_printf("=== %s loaded (VKLayer_DLSS5=%s) ===", VK_LAYER_NAME, value ? value : "(unset)");
     });
     return VK_SUCCESS;
 }

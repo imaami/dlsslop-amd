@@ -143,9 +143,10 @@ diff or the replacement lines, exact enough to apply and small enough
 to read. Prose may frame it; prose alone is not a fix. The owner
 compares competing fixes from several reviewers side by side, so make
 yours concrete, in the repository's own style (C++23 without
-exceptions or RTTI and with errors as dlsslop::Result, tables over
-branch piles, guard clauses over nesting, no `using namespace`, `\n`
-rather than `std::endl`, AGENTS.md's CLI and Bash conventions).
+exceptions or RTTI and with errors as dlsslop::Result, the layer's C23
+port by AGENTS.md's C sections, tables over branch piles, guard clauses
+over nesting, no `using namespace`, `\n` rather than `std::endl`,
+AGENTS.md's CLI and Bash conventions).
 
 Severity, with its marker:
 - ⛔ P0: catastrophic / security / destructive; merge blocker.

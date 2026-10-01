@@ -21,13 +21,14 @@ reviews:
         --help generated from the definitions used at
         initialization; no `using namespace`; "\n" rather than
         std::endl.
-    - path: "{backend,common,layer}/**/*.{cpp,h,hip}"
+    - path: "{backend,common,layer}/**/*.{c,cpp,h,hip}"
       instructions: >-
-        C++23 daemon and project headers, built without exceptions or
-        RTTI: errors are dlsslop::Result values, and no project code
-        catches exceptions. The sources imported from the layer's fork,
-        which the rule for them below lists, are upstream code that does
-        not use dlsslop::Result. HIP kernels are compiled
+        C++23 daemon and project headers, and the layer's C23 port. The
+        C++ is built without exceptions or RTTI: errors are
+        dlsslop::Result values, and no project code catches exceptions.
+        The sources imported from the layer's fork, which the rule for
+        them below lists, are upstream code that does not use
+        dlsslop::Result. HIP kernels are compiled
         by clang for gfx1201 (wave32). Check GPU stream ordering,
         host/device synchronization and buffer lifetimes, and races on
         the cross-process shared-memory channel: the layer can rewrite
@@ -47,7 +48,7 @@ reviews:
         cannot be fixed otherwise or a significant performance gain;
         upstream names and contracts are preserved. Never suggest
         restyling upstream or vendored code.
-    - path: "{common/shm_protocol.h,layer/{ATTRIBUTION,capture,composition,dlssnr_pass,hotkey,layer,log,scaler_vk,shader_vk,shmctl,vk_table}.*,layer/dlssnr/*.h,layer/dlssnr.map,layer/meter_reduce.comp,third_party/**}"
+    - path: "{common/shm_protocol.h,layer/{ATTRIBUTION,capture,composition,dlssnr_pass,hotkey,layer,scaler_vk,shader_vk,shmctl,vk_table}.*,layer/dlssnr/*.h,layer/dlssnr.map,layer/meter_reduce.comp,third_party/**}"
       instructions: >-
         The layer's sources, imported from dlsslop-amd's fork of the
         layer (PROVENANCE.md), and vendored notices and stb headers.
@@ -55,6 +56,13 @@ reviews:
         otherwise or a significant performance gain; upstream names and
         contracts are preserved. Never suggest restyling upstream or
         vendored code.
+    - path: "layer/log.{c,h}"
+      instructions: >-
+        The C23 port of the layer's sources imported from dlsslop-amd's
+        fork of the layer (PROVENANCE.md). AGENTS.md's C sections are
+        binding. Upstream names follow PROVENANCE.md's naming rule; log
+        texts, environment variables and the loader's entry points are
+        contracts and keep their names.
     - path: "{layer/dlssnr/*.comp,layer/scaling/**,layer/hlsl_ops.glsl}"
       instructions: >-
         GLSL ports of the layer's composition HLSL and OptiScaler's

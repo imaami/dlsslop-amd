@@ -1,13 +1,18 @@
 // The layer's pure functions on the host: the settings snapshot a frame composes with, the model
-// raster, the composition's format table, the scaler names and the toggle key's names. The values
-// are the C++ layer's, written out, so that a port has to reproduce them.
+// raster, the composition's format table, the scaler names, the toggle key's names, and the log's
+// switches, lines and clock. The values are the C++ layer's, written out, so that a port has to
+// reproduce them.
 #include "composition.h"
 #include "hotkey.h"
+#include "log.h"
 #include "shm_protocol.h"
 
 #include <linux/input-event-codes.h>
 
+#include <atomic>
 #include <cerrno>
+#include <chrono>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -15,7 +20,13 @@
 #include <iterator>
 #include <limits>
 #include <string>
+#include <thread>
+#include <vector>
 
+#include <dirent.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -537,11 +548,321 @@ void CheckKeyNames() {
     Require(named == 58, "the key table has " + std::to_string(named) + " names, not 58");
 }
 
+// The log reads its variables once per process, at the first call of a log.h function: each case
+// runs in a child of its own, forked before this process calls one. The child leaves through
+// exit(), so the log's destructor runs.
+const char* const kLogVariables[] = {"VKLayer_DLSS5", "VKLAYER_DLSS5", "DLSSNR_ENABLE", "DLSSNR_LOG",
+                                     "DLSSNR_VERBOSE", "DLSSNR_TIME", "DLSSNR_TIME_EVERY"};
+
+// A variable for a child to set; a null value leaves it unset.
+struct Env {
+    const char* variable;
+    const char* value;
+};
+
+template <typename Check>
+void InLogChild(const std::string& label, const std::vector<Env>& env, Check check) {
+    std::fflush(nullptr);
+    const pid_t child = fork();
+    Require(child >= 0, "fork failed");
+    if (!child) {
+        for (const Env& e : env)
+            if (e.value && setenv(e.variable, e.value, 1)) _exit(2);
+        check();
+        std::fflush(nullptr);
+        std::exit(0);
+    }
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0)
+        Require(errno == EINTR, "waitpid failed");
+    Require(WIFEXITED(status) && !WEXITSTATUS(status),
+            label + ": the child exited with " + std::to_string(WIFEXITED(status) ? WEXITSTATUS(status) : -1));
+}
+
+// The switches, which do not depend on whether the layer was asked for.
+struct SwitchCase {
+    const char* value;
+    bool on;
+};
+
+const SwitchCase kSwitchCases[] = {
+    {nullptr, false}, {"1", true}, {"10", true}, {"1x", true}, {"0", false}, {"", false}, {" 1", false},
+    {"yes", false}, {"true", false},
+};
+
+// atoi: a prefix of digits counts, leading blanks and a sign are skipped, and anything not positive
+// is the default.
+struct IntervalCase {
+    const char* value;
+    uint32_t interval;
+};
+
+const IntervalCase kIntervalCases[] = {
+    {nullptr, 30}, {"", 30}, {"0", 30}, {"-5", 30}, {"abc", 30}, {"1", 1}, {"45", 45}, {"7x", 7},
+    {" 12", 12}, {"+9", 9}, {"2147483647", 2147483647},
+};
+
+void CheckLogSwitches() {
+    for (const SwitchCase& c : kSwitchCases) {
+        const std::string value = c.value ? std::string("\"") + c.value + "\"" : "unset";
+        InLogChild("DLSSNR_VERBOSE " + value, {{"DLSSNR_VERBOSE", c.value}}, [&] {
+            Require(log_verbose() == c.on, "DLSSNR_VERBOSE " + value + ": log_verbose() is wrong");
+            Require(!log_time_enabled(), "DLSSNR_VERBOSE " + value + ": log_time_enabled() is on");
+        });
+        InLogChild("DLSSNR_TIME " + value, {{"DLSSNR_TIME", c.value}}, [&] {
+            Require(log_time_enabled() == c.on, "DLSSNR_TIME " + value + ": log_time_enabled() is wrong");
+            Require(!log_verbose(), "DLSSNR_TIME " + value + ": log_verbose() is on");
+        });
+    }
+    for (const IntervalCase& c : kIntervalCases) {
+        const std::string label = std::string("DLSSNR_TIME_EVERY ") +
+                                  (c.value ? std::string("\"") + c.value + "\"" : "unset");
+        InLogChild(label, {{"DLSSNR_TIME_EVERY", c.value}}, [&] {
+            const uint32_t got = log_time_interval();
+            Require(got == c.interval, label + ": log_time_interval() is " + std::to_string(got) + ", not " +
+                    std::to_string(c.interval));
+        });
+    }
+}
+
+std::string ReadFile(const std::string& path) {
+    std::string text;
+    FILE* f = std::fopen(path.c_str(), "rb");
+    if (!f) return text;
+    char buffer[4096];
+    for (size_t n; (n = std::fread(buffer, 1, sizeof buffer, f)) > 0;) text.append(buffer, n);
+    std::fclose(f);
+    return text;
+}
+
+bool Exists(const std::string& path) {
+    struct stat st;
+    return !lstat(path.c_str(), &st);
+}
+
+void WriteFile(const std::string& path, const std::string& text) {
+    FILE* f = std::fopen(path.c_str(), "wb");
+    Require(f && std::fwrite(text.data(), 1, text.size(), f) == text.size() && !std::fclose(f),
+            "cannot write " + path);
+}
+
+// Sends the child's standard error to a file.
+void RedirectStderr(const std::string& path) {
+    const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0 || dup2(fd, 2) != 2) _exit(2);
+    close(fd);
+}
+
+// After the log's destructor, which runs before this one: the child's log file is no longer open,
+// and its standard descriptors still are. A failure ends the child with 3. Static objects with
+// destructors are gone by then, so the path is a plain array.
+char g_closedAtExit[PATH_MAX];
+bool g_checkAtExit = false;
+
+[[gnu::destructor(101)]] void CheckAfterLogClose() {
+    if (!g_checkAtExit) return;
+    for (int fd = 0; fd < 3; ++fd)
+        if (fcntl(fd, F_GETFD) < 0) _exit(3);
+    if (!g_closedAtExit[0]) return;
+    DIR* fds = opendir("/proc/self/fd");
+    if (!fds) _exit(3);
+    for (dirent* entry; (entry = readdir(fds));) {
+        char target[PATH_MAX];
+        const std::string link = std::string("/proc/self/fd/") + entry->d_name;
+        const ssize_t n = readlink(link.c_str(), target, sizeof target - 1);
+        if (n > 0 && size_t(n) == std::strlen(g_closedAtExit) &&
+            !std::memcmp(target, g_closedAtExit, size_t(n)))
+            _exit(3);
+    }
+    closedir(fds);
+}
+
+void CheckLogLines(const std::string& dir) {
+    // Each variable that asks for the layer, appended to what the file held.
+    const Env kEnables[] = {{"DLSSNR_ENABLE", "1"}, {"VKLayer_DLSS5", "1"}, {"VKLAYER_DLSS5", "1x"}};
+    for (const Env& enable : kEnables) {
+        const std::string label = std::string(enable.variable) + "=" + enable.value;
+        const std::string log = dir + "/" + enable.variable + ".log";
+        const std::string err = dir + "/" + enable.variable + ".err";
+        WriteFile(log, "an earlier line\n");
+        InLogChild(label, {enable, {"DLSSNR_LOG", log.c_str()}}, [&] {
+            RedirectStderr(err);
+            log_printf("[test] %s %u %.2f %p", "one", 2u, 3.0, nullptr);
+            log_printf("%s", "");
+            std::snprintf(g_closedAtExit, sizeof g_closedAtExit, "%s", log.c_str());
+            g_checkAtExit = true;
+        });
+        const std::string want = "an earlier line\n[dlssnr-layer] [test] one 2 3.00 (nil)\n[dlssnr-layer] \n";
+        Require(ReadFile(log) == want, label + ": the log holds \"" + ReadFile(log) + "\"");
+        Require(ReadFile(err).empty(), label + ": the log wrote to stderr");
+    }
+
+    // Not asked for: nothing is written, and DLSSNR_LOG is not created.
+    const std::string offLog = dir + "/off.log";
+    const std::vector<Env> kNotEnabled[] = {
+        {{"DLSSNR_LOG", offLog.c_str()}},
+        {{"DLSSNR_ENABLE", "0"}, {"VKLayer_DLSS5", ""}, {"VKLAYER_DLSS5", "yes"}, {"DLSSNR_LOG", offLog.c_str()}},
+        {{"DLSSNR_ENABLE", " 1"}, {"DLSSNR_VERBOSE", "1"}, {"DLSSNR_TIME", "1"}, {"DLSSNR_LOG", offLog.c_str()}},
+    };
+    int row = 0;
+    for (const std::vector<Env>& env : kNotEnabled) {
+        const std::string label = "not enabled, row " + std::to_string(row++);
+        const std::string err = dir + "/off.err";
+        InLogChild(label, env, [&] {
+            RedirectStderr(err);
+            log_printf("[test] %s", "dropped");
+            g_checkAtExit = true;
+        });
+        Require(!Exists(offLog), label + ": DLSSNR_LOG was created");
+        Require(ReadFile(err).empty(), label + ": the log wrote to stderr");
+    }
+
+    // No usable DLSSNR_LOG: standard error.
+    const std::string missing = dir + "/missing/layer.log";
+    const char* const kStderrLogs[] = {nullptr, "", missing.c_str(), dir.c_str()};
+    for (const char* path : kStderrLogs) {
+        const std::string label =
+            std::string("DLSSNR_LOG ") + (path ? std::string("\"") + path + "\"" : "unset");
+        const std::string err = dir + "/stderr.err";
+        InLogChild(label, {{"DLSSNR_ENABLE", "1"}, {"DLSSNR_LOG", path}}, [&] {
+            RedirectStderr(err);
+            log_printf("[test] to %s", "stderr");
+            g_checkAtExit = true;
+        });
+        Require(ReadFile(err) == "[dlssnr-layer] [test] to stderr\n",
+                label + ": stderr holds \"" + ReadFile(err) + "\"");
+        Require(!Exists(dir + "/missing"), label + ": a directory was created");
+    }
+
+    // The text is cut to 2047 bytes, the prefix and the newline are not.
+    const std::string longLog = dir + "/long.log";
+    InLogChild("long lines", {{"DLSSNR_ENABLE", "1"}, {"DLSSNR_LOG", longLog.c_str()}}, [&] {
+        for (size_t length : {2046, 2047, 2048, 5000}) log_printf("%s", std::string(length, 'x').c_str());
+    });
+    std::string want;
+    for (size_t length : {2046, 2047, 2047, 2047}) want += "[dlssnr-layer] " + std::string(length, 'x') + "\n";
+    Require(ReadFile(longLog) == want, "long lines are not cut to 2047 bytes");
+
+    // Lines from several threads at once stay whole, and each thread's stay in order.
+    constexpr uint32_t kThreads = 8, kLines = 500;
+    const std::string threadLog = dir + "/threads.log";
+    InLogChild("threads", {{"DLSSNR_ENABLE", "1"}, {"DLSSNR_LOG", threadLog.c_str()}}, [&] {
+        std::vector<std::thread> threads;
+        for (uint32_t t = 0; t < kThreads; ++t)
+            threads.emplace_back([t] {
+                const std::string tail(200, char('a' + t));
+                for (uint32_t i = 0; i < kLines; ++i) log_printf("thread %u line %u %s", t, i, tail.c_str());
+            });
+        for (std::thread& thread : threads) thread.join();
+    });
+    const std::string lines = ReadFile(threadLog);
+    uint32_t next[kThreads] = {};
+    size_t start = 0, count = 0;
+    for (size_t end; (end = lines.find('\n', start)) != std::string::npos; start = end + 1, ++count) {
+        unsigned t = 0, i = 0;
+        char tail[256] = {};
+        const std::string line = lines.substr(start, end - start);
+        Require(std::sscanf(line.c_str(), "[dlssnr-layer] thread %u line %u %255s", &t, &i, tail) == 3 &&
+                t < kThreads, "a thread's line is broken: " + line);
+        Require(i == next[t]++ && std::string(tail) == std::string(200, char('a' + t)),
+                "a thread's line is out of order or broken: " + line);
+    }
+    Require(start == lines.size() && count == kThreads * kLines,
+            "the threads' log has " + std::to_string(count) + " lines");
+}
+
+// Whether a child exits with 0 within five seconds. A child that does not is killed.
+bool ExitsInTime(pid_t child) {
+    for (uint32_t ms = 0; ms < 5000; ++ms) {
+        int status = 0;
+        const pid_t done = waitpid(child, &status, WNOHANG);
+        if (done == child) return WIFEXITED(status) && !WEXITSTATUS(status);
+        Require(done == 0 || errno == EINTR, "waitpid failed");
+        usleep(1000);
+    }
+    kill(child, SIGKILL);
+    while (waitpid(child, nullptr, 0) < 0 && errno == EINTR) {}
+    return false;
+}
+
+// A child that fork() makes while a thread writes a line has the log's lock held by a thread it does
+// not have. Its exit() runs the log's destructor, which must not wait for that lock. The writer logs
+// to standard error, sent to /dev/null until the check ends, and allocates nothing. The children
+// therefore hold no descriptor that valgrind's --track-fds reports and no memory that LeakSanitizer
+// reports.
+void CheckLogForkExit() {
+    constexpr uint32_t kForks = 50;
+    InLogChild("fork while a thread logs", {{"DLSSNR_ENABLE", "1"}}, [&] {
+        const int err = dup(2);
+        if (err < 0) _exit(2);
+        RedirectStderr("/dev/null");
+        std::atomic<bool> stop{false};
+        std::thread writer([&stop] {
+            while (!stop.load(std::memory_order_relaxed)) log_printf("[test] %0200u", 0u);
+        });
+        uint32_t exited = 0;
+        bool forked = true;
+        while (exited < kForks) {
+            const pid_t child = fork();
+            if (!child) {
+                close(err);
+                std::exit(0);
+            }
+            forked = child > 0;
+            if (!forked || !ExitsInTime(child)) break;
+            ++exited;
+        }
+        stop.store(true, std::memory_order_relaxed);
+        writer.join();
+        if (dup2(err, 2) != 2) _exit(2);
+        close(err);
+        Require(forked, "fork failed");
+        Require(exited == kForks, "a child forked while a thread logged did not exit, after " +
+                                      std::to_string(exited) + " that did");
+    });
+}
+
+// log_now_ms reads the clock that std::chrono::steady_clock reads, in milliseconds.
+void CheckClock() {
+    const auto ms = [] {
+        const auto now = std::chrono::steady_clock::now().time_since_epoch();
+        return std::chrono::duration<double, std::milli>(now).count();
+    };
+    for (int i = 0; i < 1000; ++i) {
+        const double before = ms();
+        const double now = log_now_ms();
+        const double after = ms();
+        Require(before <= now && now <= after, "log_now_ms() is not between two steady_clock readings");
+    }
+}
+
+void CheckLog() {
+    const char* tmp = std::getenv("TMPDIR");
+    std::string pattern = std::string(tmp && *tmp ? tmp : "/tmp") + "/dlsslop-amd-log-XXXXXX";
+    Require(mkdtemp(pattern.data()), "mkdtemp failed");
+    char dir[PATH_MAX];
+    Require(realpath(pattern.c_str(), dir), "realpath failed");
+    CheckLogSwitches();
+    CheckLogLines(dir);
+    CheckLogForkExit();
+    CheckClock();
+    DIR* entries = opendir(dir);
+    Require(entries, "cannot list " + std::string(dir));
+    for (dirent* entry; (entry = readdir(entries));)
+        if (std::strcmp(entry->d_name, ".") && std::strcmp(entry->d_name, ".."))
+            Require(!unlink((std::string(dir) + "/" + entry->d_name).c_str()), "unlink failed");
+    closedir(entries);
+    Require(!rmdir(dir), "rmdir failed");
+}
+
 }  // namespace
 
 int main() {
-    // The overrides first: Read latches them in this process at its first call, and the children
-    // forked below must each make that first call themselves.
+    // The log and the overrides first: the log reads its variables and Read its overrides in this
+    // process at their first call, and the children forked below must each make that first call
+    // themselves.
+    for (const char* variable : kLogVariables) Require(!unsetenv(variable), "unsetenv failed");
+    CheckLog();
     for (const char* variable : {"DLSSNR_GHOST_SLACK", "DLSSNR_RATIO_SMOOTH", "DLSSNR_COLOUR_TRUST",
                                  "DLSSNR_MOTION_SMOOTH", "DLSSNR_EDIT_BLUR"})
         Require(!unsetenv(variable), "unsetenv failed");
@@ -551,6 +872,6 @@ int main() {
     CheckFormats();
     CheckScalerNames();
     CheckKeyNames();
-    std::printf("layer-units-test: settings, model extents, formats, scaler and key names hold\n");
+    std::printf("layer-units-test: the log, settings, model extents, formats, scaler and key names hold\n");
     return 0;
 }

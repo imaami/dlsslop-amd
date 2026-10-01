@@ -1,12 +1,18 @@
-cmake_minimum_required(VERSION 3.20)
-project(dlsslop_amd VERSION 0.1.0 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.21)
+project(dlsslop_amd VERSION 0.1.0 LANGUAGES C CXX)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
+set(CMAKE_C_STANDARD 23)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# Under strict C23, glibc's headers declare ISO C only. _GNU_SOURCE adds POSIX
+# and GNU, as g++ always does for C++.
+add_compile_definitions($<$<COMPILE_LANGUAGE:C>:_GNU_SOURCE>)
 set(CMAKE_SKIP_RPATH TRUE)
 # CPU references must match their HIP kernels bit for bit under any -march:
 # never fuse a multiply and an add.
@@ -16,8 +22,8 @@ add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initi
 # linked libstdc++ and the symbol tables from every binary.
 add_compile_options(-ffunction-sections -fdata-sections)
 # The project's code reports errors as Results: it throws, catches and asks for
-# types at run time nowhere.
-add_compile_options(-fno-exceptions -fno-rtti)
+# types at run time nowhere. GCC warns about -fno-rtti for C.
+add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
 add_link_options(-Wl,--gc-sections $<$<CONFIG:Release>:-s>)
 # Link-time optimization shrinks the daemon's code by 7% and the GUI's
 # too: the compiler inlines and drops code across files.
@@ -76,7 +82,7 @@ add_custom_target(layer-shaders DEPENDS ${LAYER_SHADERS} ${METER}.h)
 # Only layer.cpp differs between the layers; both and the layer tests link
 # the other translation units compiled once.
 add_library(dlsslop-layer-objects OBJECT layer/shader_vk.cpp layer/dlssnr_pass.cpp layer/composition.cpp
-    layer/capture.cpp layer/scaler_vk.cpp layer/hotkey.cpp)
+    layer/capture.cpp layer/scaler_vk.cpp layer/hotkey.cpp layer/log.c)
 set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_dependencies(dlsslop-layer-objects layer-shaders)
 target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC layer ${X11_HEADERS} ${XINPUT_HEADERS})
@@ -151,6 +157,9 @@ set_source_files_properties(backend/main.cpp backend/options.cpp backend/paths.c
     backend/hip_plan.cpp PROPERTIES COMPILE_OPTIONS -Os)
 
 if(BUILD_TESTING)
+    # The headers that C and C++ share, compiled as C.
+    add_library(c-headers OBJECT tests/c_headers.c)
+    target_include_directories(c-headers PRIVATE layer)
     add_test(NAME control-cli COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/control-cli.py $<TARGET_FILE:dlssnr-shmctl>)
     add_test(NAME launcher-cli COMMAND ${Python3_EXECUTABLE}

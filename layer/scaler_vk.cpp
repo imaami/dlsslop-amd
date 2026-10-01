@@ -105,7 +105,7 @@ ScalerVk::ScalerVk(const DeviceTable* InVk, const InstanceTable* InInstance, VkD
     if (!CreateComputePipeline(_pipelineLayout, &_pipeline, code)) return;
 
     _init = true;
-    Log("[scaler] %s ready, %s", _name.c_str(), _upsample ? "bicubic enlarge" : ScalerFilterName(_filter));
+    log_printf("[scaler] %s ready, %s", _name.c_str(), _upsample ? "bicubic enlarge" : ScalerFilterName(_filter));
 }
 
 bool ScalerVk::Dispatch(VkCommandBuffer cb, VkImageView source, VkImageView dest, uint32_t srcWidth,

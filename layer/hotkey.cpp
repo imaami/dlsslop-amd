@@ -111,16 +111,16 @@ void Hotkeys::Open() {
     const bool wantX11 = !forced || std::strcmp(forced, "x11") == 0;
 
     if (wantEvdev && OpenEvdev()) {
-        Log("[hotkey] watching %zu keyboard(s) through evdev", _fds.size());
+        log_printf("[hotkey] watching %zu keyboard(s) through evdev", _fds.size());
         return;
     }
     if (wantX11 && OpenX11()) {
-        Log("[hotkey] watching XInput2 raw keys on %s", getenv("DISPLAY"));
+        log_printf("[hotkey] watching XInput2 raw keys on %s", getenv("DISPLAY"));
         return;
     }
 
-    Log("[hotkey] no way to read the keyboard here. /dev/input needs the 'input' group or a uaccess "
-        "ACL; without it only an X11 session can be read, and never one inside gamescope.");
+    log_printf("[hotkey] no way to read the keyboard here. /dev/input needs the 'input' group or a uaccess "
+               "ACL; without it only an X11 session can be read, and never one inside gamescope.");
 }
 
 bool Hotkeys::OpenEvdev() {
@@ -188,7 +188,7 @@ void Hotkeys::RescanEvdev() {
         _fds.push_back(fd);
         _known.insert(name);
         _knownOrder.push_back(name);
-        if (_announced) Log("[hotkey] picked up a keyboard that appeared later: %s", path.c_str());
+        if (_announced) log_printf("[hotkey] picked up a keyboard that appeared later: %s", path.c_str());
     }
     closedir(dir);
 

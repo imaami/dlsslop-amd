@@ -39,7 +39,7 @@ uint32_t Shader_Vk::FindMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags pr
             return i;
     }
 
-    Log("[%s] no memory type with %#x", _name.c_str(), (unsigned) properties);
+    log_printf("[%s] no memory type with %#x", _name.c_str(), (unsigned) properties);
     return UINT32_MAX;
 }
 
@@ -52,7 +52,7 @@ bool Shader_Vk::CreateComputePipeline(VkPipelineLayout pipelineLayout, VkPipelin
     createInfo.pCode = reinterpret_cast<const uint32_t*>(shaderCode.data());
 
     if (_vk->vkCreateShaderModule(_device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-        Log("[%s] vkCreateShaderModule failed", _name.c_str());
+        log_printf("[%s] vkCreateShaderModule failed", _name.c_str());
         return false;
     }
 
@@ -71,7 +71,7 @@ bool Shader_Vk::CreateComputePipeline(VkPipelineLayout pipelineLayout, VkPipelin
     _vk->vkDestroyShaderModule(_device, shaderModule, nullptr);
 
     if (r != VK_SUCCESS) {
-        Log("[%s] vkCreateComputePipelines -> %d", _name.c_str(), (int) r);
+        log_printf("[%s] vkCreateComputePipelines -> %d", _name.c_str(), (int) r);
         return false;
     }
     return true;
@@ -95,7 +95,7 @@ bool Shader_Vk::CreateBufferResource(VkBuffer* buffer, VkDeviceMemory* memory, V
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     if (_vk->vkCreateBuffer(_device, &bufferInfo, nullptr, buffer) != VK_SUCCESS) {
-        Log("[%s] vkCreateBuffer failed", _name.c_str());
+        log_printf("[%s] vkCreateBuffer failed", _name.c_str());
         return false;
     }
 
@@ -115,7 +115,7 @@ bool Shader_Vk::CreateBufferResource(VkBuffer* buffer, VkDeviceMemory* memory, V
     allocInfo.memoryTypeIndex = type;
 
     if (_vk->vkAllocateMemory(_device, &allocInfo, nullptr, memory) != VK_SUCCESS) {
-        Log("[%s] vkAllocateMemory failed (%llu bytes)", _name.c_str(), (unsigned long long) memRequirements.size);
+        log_printf("[%s] vkAllocateMemory failed (%llu bytes)", _name.c_str(), (unsigned long long) memRequirements.size);
         _vk->vkDestroyBuffer(_device, *buffer, nullptr);
         *buffer = VK_NULL_HANDLE;
         return false;
@@ -149,7 +149,7 @@ void Shader_Vk::CreateLayouts(const std::vector<VkDescriptorSetLayoutBinding>& b
     layoutInfo.pBindings = bindings.data();
 
     if (_vk->vkCreateDescriptorSetLayout(_device, &layoutInfo, nullptr, &_descriptorSetLayout) != VK_SUCCESS) {
-        Log("[%s] vkCreateDescriptorSetLayout failed", _name.c_str());
+        log_printf("[%s] vkCreateDescriptorSetLayout failed", _name.c_str());
         return;
     }
 
@@ -159,7 +159,7 @@ void Shader_Vk::CreateLayouts(const std::vector<VkDescriptorSetLayoutBinding>& b
     pipelineLayoutInfo.pSetLayouts = &_descriptorSetLayout;
 
     if (_vk->vkCreatePipelineLayout(_device, &pipelineLayoutInfo, nullptr, &_pipelineLayout) != VK_SUCCESS)
-        Log("[%s] vkCreatePipelineLayout failed", _name.c_str());
+        log_printf("[%s] vkCreatePipelineLayout failed", _name.c_str());
 }
 
 void Shader_Vk::CreateDescriptorPool(const std::vector<VkDescriptorPoolSize>& poolSizes, uint32_t maxSets) {
@@ -170,7 +170,7 @@ void Shader_Vk::CreateDescriptorPool(const std::vector<VkDescriptorPoolSize>& po
     poolInfo.maxSets = maxSets;
 
     if (_vk->vkCreateDescriptorPool(_device, &poolInfo, nullptr, &_descriptorPool) != VK_SUCCESS)
-        Log("[%s] vkCreateDescriptorPool failed", _name.c_str());
+        log_printf("[%s] vkCreateDescriptorPool failed", _name.c_str());
 }
 
 void Shader_Vk::CreateDescriptorSets(uint32_t count) {
@@ -185,7 +185,7 @@ void Shader_Vk::CreateDescriptorSets(uint32_t count) {
 
     _descriptorSets.resize(count);
     if (_vk->vkAllocateDescriptorSets(_device, &allocInfo, _descriptorSets.data()) != VK_SUCCESS) {
-        Log("[%s] vkAllocateDescriptorSets failed (%u sets)", _name.c_str(), count);
+        log_printf("[%s] vkAllocateDescriptorSets failed (%u sets)", _name.c_str(), count);
         _descriptorSets.clear();
     }
 }
@@ -207,7 +207,7 @@ void Shader_Vk::CreateSampler(VkFilter filter, VkSamplerAddressMode addressMode)
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
 
     if (_vk->vkCreateSampler(_device, &samplerInfo, nullptr, &_textureSampler) != VK_SUCCESS)
-        Log("[%s] vkCreateSampler failed", _name.c_str());
+        log_printf("[%s] vkCreateSampler failed", _name.c_str());
 }
 
 void Shader_Vk::SetImageLayout(VkCommandBuffer cmdBuffer, VkImage image, VkImageLayout oldLayout,

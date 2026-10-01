@@ -13,7 +13,7 @@ DlssNrPass::DlssNrPass(const DeviceTable* InVk, const InstanceTable* InInstance,
                        VkPhysicalDevice InPhysicalDevice)
     : Shader_Vk("dlssnr-composition", InVk, InInstance, InDevice, InPhysicalDevice) {
     if (InDevice == VK_NULL_HANDLE || InPhysicalDevice == VK_NULL_HANDLE) {
-        Log("[pass] no device");
+        log_printf("[pass] no device");
         _init = false;
         return;
     }
@@ -34,13 +34,13 @@ DlssNrPass::DlssNrPass(const DeviceTable* InVk, const InstanceTable* InInstance,
     if (!CreateBufferResource(&_constantBuffer, &_constantBufferMemory, _slotStride * kSlots,
                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)) {
-        Log("[pass] could not allocate the constant ring");
+        log_printf("[pass] could not allocate the constant ring");
         return;
     }
 
     if (_vk->vkMapMemory(_device, _constantBufferMemory, 0, _slotStride * kSlots, 0, &_mappedConstantBuffer) !=
         VK_SUCCESS) {
-        Log("[pass] could not map the constant ring");
+        log_printf("[pass] could not map the constant ring");
         return;
     }
 
@@ -73,19 +73,19 @@ DlssNrPass::DlssNrPass(const DeviceTable* InVk, const InstanceTable* InInstance,
     CreateDescriptorSets(kSlots);
 
     if (_descriptorSets.size() < kSlots) {
-        Log("[pass] expected %u descriptor sets, got %zu", kSlots, _descriptorSets.size());
+        log_printf("[pass] expected %u descriptor sets, got %zu", kSlots, _descriptorSets.size());
         return;
     }
 
     std::vector<char> shaderCode(dlssnr_spv, dlssnr_spv + sizeof(dlssnr_spv));
 
     if (!CreateComputePipeline(_pipelineLayout, &_pipeline, shaderCode)) {
-        Log("[pass] could not create the compute pipeline");
+        log_printf("[pass] could not create the compute pipeline");
         return;
     }
 
     _init = true;
-    Log("[pass] composition up: %u constant slots, stride %llu", kSlots, (unsigned long long) _slotStride);
+    log_printf("[pass] composition up: %u constant slots, stride %llu", kSlots, (unsigned long long) _slotStride);
 }
 
 DlssNrPass::~DlssNrPass() {
@@ -118,7 +118,7 @@ bool DlssNrPass::CreateDummy(VkCommandBuffer cmdList) {
         info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
         if (_vk->vkCreateImage(_device, &info, nullptr, &_dummyImage) != VK_SUCCESS) {
-            Log("[pass] could not create the placeholder image");
+            log_printf("[pass] could not create the placeholder image");
             return false;
         }
 
@@ -135,7 +135,7 @@ bool DlssNrPass::CreateDummy(VkCommandBuffer cmdList) {
 
         if (_vk->vkAllocateMemory(_device, &alloc, nullptr, &_dummyMemory) != VK_SUCCESS ||
             _vk->vkBindImageMemory(_device, _dummyImage, _dummyMemory, 0) != VK_SUCCESS) {
-            Log("[pass] could not back the placeholder image");
+            log_printf("[pass] could not back the placeholder image");
             return false;
         }
 
@@ -147,7 +147,7 @@ bool DlssNrPass::CreateDummy(VkCommandBuffer cmdList) {
         view.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 
         if (_vk->vkCreateImageView(_device, &view, nullptr, &_dummyView) != VK_SUCCESS) {
-            Log("[pass] could not view the placeholder image");
+            log_printf("[pass] could not view the placeholder image");
             return false;
         }
     }
@@ -213,7 +213,7 @@ bool DlssNrPass::Dispatch(VkCommandBuffer InCmdList, const DlssNrConstants& InCo
     if (!CanRender() || InCmdList == VK_NULL_HANDLE) return false;
 
     if (InTarget == VK_NULL_HANDLE) {
-        Log("[pass] a dispatch with nothing to write");
+        log_printf("[pass] a dispatch with nothing to write");
         return false;
     }
 

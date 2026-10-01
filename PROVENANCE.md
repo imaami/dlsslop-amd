@@ -20,9 +20,10 @@ including local additions and inherited interfaces in the same patched source
 file.
 
 Upstream repository names, URLs, authorship, source filenames (except the GLSL
-ports in `layer/dlssnr/` and `layer/scaling/`, the HIP host port in `backend/`
-and the Vulkan host port in `common/`) and attribution remain unchanged, as do
-references to NVIDIA DLSS and OptiScaler_DLSSNR.
+ports in `layer/dlssnr/` and `layer/scaling/`, the HIP host port in `backend/`,
+the Vulkan host port in `common/` and the C port of the layer in `layer/`) and
+attribution remain unchanged, as do references to NVIDIA DLSS and
+OptiScaler_DLSSNR.
 
 `.gitmodules` declares dlsslop-amd's forks of the two networks' repositories
 and, for each fork, the branch that holds the Linux integration as commits on
@@ -57,6 +58,22 @@ The fork's `LICENSE` is the AGPL-3.0 text of [LICENSE](LICENSE). The paths that
 `layer/ATTRIBUTION.md` names are those of the fork's tree. The build uses the
 system's Vulkan headers, so the import left out the fork's copies of the Khronos
 Vulkan and video headers.
+
+The layer's sources are being ported to C23, one module at a time, under the
+layer's license. `layer/log.h` and `layer/log.c` are the C port of
+`layer_linux/src/log.h`. The port renames upstream names by one rule: the
+`dlssnr` namespace is dropped, CamelCase becomes snake_case, a class member
+takes its class as a prefix (`Composition::RecordCompose` becomes
+`composition_record_compose`), a free function with external linkage takes its
+module's name as a prefix unless its name begins with it (`Verbose` in log.h
+becomes `log_verbose`), and constants and enumerators become upper snake case
+with the class's prefix (`DlssNrPass::kSlots` becomes `DLSS_NR_PASS_SLOTS`). Log
+texts, environment variables, the loader's entry points and `layer/dlssnr.map`
+keep their names. These upstream names do not follow the rule:
+
+| Upstream name | Port | Why |
+|---|---|---|
+| `dlssnr::Log` | `log_printf` | `log` is the C library's natural logarithm |
 
 The layer's composition shader `layer/dlssnr/dlssnr.comp` is a GLSL port of the
 layer fork's `layer_linux/src/dlssnr/dlssnr.hlsl` (AGPL-3.0). Its RenoDX-derived

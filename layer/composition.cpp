@@ -183,7 +183,7 @@ Composition::Composition(const DeviceTable* vk, const InstanceTable* instance, V
     : _vk(vk), _instance(instance), _device(device), _physicalDevice(physicalDevice) {
     if (!DeviceTableComplete(*vk)) {
         _reason = "the device does not expose everything a compute pass needs";
-        Log("[comp] %s", _reason.c_str());
+        log_printf("[comp] %s", _reason.c_str());
         return;
     }
 
@@ -257,7 +257,7 @@ bool Composition::MakeImage(Image& img, uint32_t w, uint32_t h, VkFormat format,
     ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
     if (_vk->vkCreateImage(_device, &ci, nullptr, &img.image) != VK_SUCCESS) {
-        Log("[comp] vkCreateImage %ux%u fmt=%d failed", w, h, (int) format);
+        log_printf("[comp] vkCreateImage %ux%u fmt=%d failed", w, h, (int) format);
         return false;
     }
 
@@ -281,7 +281,7 @@ bool Composition::MakeImage(Image& img, uint32_t w, uint32_t h, VkFormat format,
     mai.allocationSize = req.size;
     mai.memoryTypeIndex = type;
     if (_vk->vkAllocateMemory(_device, &mai, nullptr, &img.memory) != VK_SUCCESS) {
-        Log("[comp] out of device memory for a %ux%u surface", w, h);
+        log_printf("[comp] out of device memory for a %ux%u surface", w, h);
         DropImage(img);
         return false;
     }
@@ -744,13 +744,13 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
         if (FormatSupportsStorage(wide) && FormatSupportsBlit(wide) && FormatSupportsBlit(swapchainFormat)) {
             // Prepare runs every frame; this is only news when the swapchain changed under it.
             if (swapchainFormat != _swapchainFormat)
-                Log("[comp] format %d cannot be written as a storage image here; composing in half float",
-                    (int) work);
+                log_printf("[comp] format %d cannot be written as a storage image here; composing in half float",
+                           (int) work);
             work = wide;
             blit = true;
         } else {
             _reason = "this device cannot write the swapchain's format as a storage image";
-            Log("[comp] %s (format %d)", _reason.c_str(), (int) work);
+            log_printf("[comp] %s (format %d)", _reason.c_str(), (int) work);
             _usable = false;
             return false;
         }
@@ -772,7 +772,7 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
         const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT |
                                    VK_FORMAT_FEATURE_TRANSFER_SRC_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
         if ((fp16.optimalTilingFeatures & need) != need) {
-            if (!_hdrProxy) Log("[comp] float16 proxy requested but not supported here; staying 8-bit");
+            if (!_hdrProxy) log_printf("[comp] float16 proxy requested but not supported here; staying 8-bit");
             hdrProxy = false;
         }
     }
@@ -782,18 +782,18 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
         _hdrTransfer == hdrTransfer && _scalerFilter == s.downscaler && _frame.image)
         return true;
 
-    Log("[comp] building %ux%u, model %ux%u, %s%s%s", width, height, modelW, modelH,
-        linearHdr ? "linear HDR" : "display-referred",
-        hdrProxy ? (hdrTransfer ? ", float16 proxy (PQ in)" : ", float16 proxy") : "",
-        superSample ? " (supersampling)" : "");
+    log_printf("[comp] building %ux%u, model %ux%u, %s%s%s", width, height, modelW, modelH,
+               linearHdr ? "linear HDR" : "display-referred",
+               hdrProxy ? (hdrTransfer ? ", float16 proxy (PQ in)" : ", float16 proxy") : "",
+               superSample ? " (supersampling)" : "");
 
     if (superSample) {
         // Said out loud because it is the transport, not the GPU, that decides whether this is
         // usable: the proxy and the answer both cross shared memory at the model's raster, so the
         // per-frame copy grows with the square of the scale.
         const double mb = double(modelW) * modelH * (hdrProxy ? 8.0 : 4.0) / (1024.0 * 1024.0);
-        Log("[comp] supersampling to %ux%u means %.0f MB across shared memory each way, every frame",
-            modelW, modelH, mb);
+        log_printf("[comp] supersampling to %ux%u means %.0f MB across shared memory each way, every frame",
+                   modelW, modelH, mb);
     }
 
     // Keep the captured frame across a rebuild that does not change its shape.
@@ -873,7 +873,7 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
         _superUp = std::make_unique<ScalerVk>(_vk, _instance, _device, _physicalDevice, true, s.downscaler);
         _superDown = std::make_unique<ScalerVk>(_vk, _instance, _device, _physicalDevice, false, s.downscaler);
         if (!_superUp->CanRender() || !_superDown->CanRender()) {
-            Log("[comp] the resampling filters could not be built; supersampling is unavailable");
+            log_printf("[comp] the resampling filters could not be built; supersampling is unavailable");
             _superUp.reset();
             _superDown.reset();
             okSuper = false;
@@ -1041,10 +1041,10 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
         _holding = true;
         const float* mirror = _meterGpu && _meterMirror.mapped ? (const float*) _meterMirror.mapped : nullptr;
         _heldWhitePoint = mirror && mirror[2] > 0.0f ? mirror[2] : ResolvedWhitePoint(s);
-        Log("[comp] frame held (white point %.3f)", double(_heldWhitePoint));
+        log_printf("[comp] frame held (white point %.3f)", double(_heldWhitePoint));
     } else if (!s.holdFrame && _holding) {
         _holding = false;
-        Log("[comp] frame released");
+        log_printf("[comp] frame released");
     }
 
     // While held the frame is not re-read, but everything downstream of it still runs: the encode

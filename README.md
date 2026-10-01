@@ -78,6 +78,10 @@ sudo apt-get install --no-install-recommends \
     spirv-tools strace clang-22 lld-22 llvm-22
 ```
 
+The project is written in C23 and C++23, and GCC 16.2 and Clang 23.1 build it.
+The oldest compilers that build the layer are GCC 13 and, with GCC 16's
+libstdc++, Clang 19; Clang 16 is the oldest that compiles its C sources.
+
 Then build from the fetched checkout:
 
 ```bash
