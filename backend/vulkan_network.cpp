@@ -286,7 +286,7 @@ bool VulkanNetwork::import(unsigned slot, const ShmTransportOffer& offer, int fd
 Result<void> VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint8_t* input, uint8_t* output)
 {
     auto& s = *impl_;
-    DLSSLOP_TRY(shape(frame));
+    (void)DLSSLOP_TRY(shape(frame));
     const VkDeviceSize bytes = VkDeviceSize(frame.width) * frame.height * (frame.fp16 ? 8 : 4);
     const bool exported = slot >= 0;  // the layer's device-local pair
     VkBuffer source = VK_NULL_HANDLE, target = VK_NULL_HANDLE;

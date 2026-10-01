@@ -247,7 +247,7 @@ inline Result<void> check_temporal(const NativeKernels& kernels)
         DLSSLOP_TRY(temporal.begin(device_input.pointer, step.geometry, step.quality, step.grid, step.passes));
         for (unsigned pass = 0; pass < step.passes; ++pass) {
             DLSSLOP_TRY(require((DLSSLOP_TRY(temporal.history(pass, device_input.pointer)) != nullptr) == step.history, step.failure));
-            DLSSLOP_TRY(temporal.target(pass));
+            (void)DLSSLOP_TRY(temporal.target(pass));
         }
         DLSSLOP_TRY(temporal.end());
     }
