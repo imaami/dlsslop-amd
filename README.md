@@ -74,7 +74,7 @@ sudo apt-get install --no-install-recommends \
     ca-certificates git build-essential cmake ninja-build \
     python3 python3-numpy python3-pil qt6-base-dev libx11-dev libxi-dev \
     libvulkan-dev mesa-vulkan-drivers vulkan-validationlayers glslang-tools \
-    spirv-tools clang-22 lld-22 llvm-22
+    spirv-tools strace clang-22 lld-22 llvm-22
 ```
 
 Then build from the fetched checkout:
@@ -118,7 +118,9 @@ export PATH="$HOME/.local/bin:$PATH"
 
 The installer lays a source build out exactly like the binary release (see
 [packaging/README.md](packaging/README.md)), in `~/.local` by default;
-`install.py --help` describes the prefix and build-directory options. It
+`install.py --help` describes the prefix and build-directory options. Over an
+earlier install, it removes the files that the earlier
+`share/doc/dlsslop-amd/SHA256SUMS` lists and this build leaves out. It
 installs these commands:
 
 | Command | Purpose |

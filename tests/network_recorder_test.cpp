@@ -12,10 +12,13 @@
 // built for that shape records. A frame of one pass without the pass stages
 // must copy the proxy straight into the network's input and its answer
 // straight out, and copy or blit no image. Takes the directory of the
-// network's SPIR-V.
+// network's SPIR-V. With --build, it only builds the network for one extent
+// with every pipeline of the runtime's own, so that tests/vulkan-files.py can
+// see the files that a build opens.
 #include "network_recorder.h"
 #include "vulkan_pack.h"
 
+#include <getopt.h>
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
@@ -529,12 +532,44 @@ void check_reshapes(const dlsslop::VulkanPaths& paths)
 
 int main(int argc, char** argv)
 {
-    require(argc == 2, "usage: network-recorder-test SPIRV-DIRECTORY");
-    const auto plan = vulkan::plan(64, 64);
-    require(bool(plan), "cannot plan 64x64 frames");
+    std::string extent;
+    const option options[] = {{"build", required_argument, nullptr, 'b'}, {"help", no_argument, nullptr, 'h'},
+                              {nullptr, 0, nullptr, 0}};
+    for (int code; (code = getopt_long(argc, argv, "+b:h", options, nullptr)) != -1;) {
+        if (code == 'b') extent = optarg;
+        else if (code == 'h') {
+            std::puts("Usage: network-recorder-test [OPTION]... SPIRV-DIRECTORY\n"
+                      "Checks the Vulkan network's motion history and reshapes on a fake device, from a synthetic\n"
+                      "model and the network's SPIR-V in SPIRV-DIRECTORY (required). No GPU or model needed.\n"
+                      " -b, --build WxH   Instead, build the network for WxH frames of 2 passes with motion history\n"
+                      "                   and pass stages, and so every pipeline of the runtime's own\n"
+                      "                   (default: unset)\n"
+                      " -h, --help        Show help (default: off)");
+            return 0;
+        } else
+            return 2;
+    }
+    unsigned width = 64, height = 64;
+    char end;
+    if (optind + 1 != argc || (!extent.empty() && std::sscanf(extent.c_str(), "%ux%u%c", &width, &height, &end) != 2))
+        return 2;
+    const auto plan = vulkan::plan(width, height);
+    require(bool(plan), "cannot plan the frames");
     vulkan_test::Pack model;
     require(vulkan_test::synthetic_model(*plan, model), "cannot make the synthetic model");
-    const dlsslop::VulkanPaths paths{model.path, argv[1], ""};
+    const dlsslop::VulkanPaths paths{model.path, argv[optind], ""};
+    if (!extent.empty()) {
+        dlsslop::VulkanFrame f;
+        f.width = width;
+        f.height = height;
+        f.passes = 2;
+        f.motion = true;
+        f.sharpness = 0.5f;
+        dlsslop::NetworkRecorder recorder(fake_device(), paths);
+        const auto built = recorder.shape(f);
+        require(built && *built, built ? "the network was not built" : built.error().what.c_str());
+        return 0;
+    }
     for (const unsigned passes : {1u, 2u}) check(paths, passes);
     check_reshapes(paths);
     std::printf("network-recorder test: frames not submitted leave the motion history as it was, and a "

@@ -43,7 +43,15 @@ the new archive.
    pkill -x dlsslopd
    ```
 
-2. Extract the archive to the install prefix.
+2. When updating, delete the files that the installed release's
+   `SHA256SUMS` lists: a new release may leave out files that an earlier one
+   installed, and extracting it does not remove them.
+
+   ```bash
+   (cd ~/.local && cut -c67- share/doc/dlsslop-amd/SHA256SUMS | xargs -d '\n' rm -f --)
+   ```
+
+   Extract the archive to the install prefix.
 
    ```bash
    tar -xf dlsslop-amd-linux-gfx1201.tar.xz -C ~/.local
@@ -104,8 +112,8 @@ systemctl --user disable dlsslop.socket dlsslop.service
 Delete a `dlsslop.service` you copied into `~/.config/systemd/user/`, and for a
 `/usr/local` install enabled for every user, run
 `sudo systemctl --global disable dlsslop.socket`. Then delete the files
-`share/doc/dlsslop-amd/SHA256SUMS` lists, and finally that `SHA256SUMS` file
-itself.
+`share/doc/dlsslop-amd/SHA256SUMS` lists, as in step 2, and finally that
+`SHA256SUMS` file itself.
 
 ## Set up the model
 

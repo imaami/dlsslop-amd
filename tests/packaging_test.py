@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import sys
@@ -39,7 +40,7 @@ def fixture(root):
     root.mkdir()
     paths = {"install.py", *INSTALLER.DOCUMENT_SOURCES.values(), *INSTALLER.UNIT_SOURCES.values(),
              *(source for source, *_ in INSTALLER.SCRIPT_SOURCES.values()),
-             "external/vulkan/linux/build/build_network.py", "external/vulkan/linux/shaders/rdna4/pipelines.json",
+             "common/vulkan_plan.h", "common/vulkan_runtime.cpp",
              *(f"external/vulkan/linux/package/model-tools/{name}" for name in INSTALLER.MODEL_TOOLS)}
     for name in paths:
         target = root / name
@@ -51,7 +52,8 @@ def fixture(root):
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile("/usr/bin/true", target)
         target.chmod(0o755)
-    for name in INSTALLER.vulkan_shader_names(root):
+    # The network's files, and two that its shader build writes and its runtime never reads.
+    for name in (*INSTALLER.vulkan_shader_names(root), "g_repack.spv", "runtime/runtime_transfer.spv"):
         target = build / "vulkan-nr/network" / name
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(name.encode())
@@ -82,6 +84,9 @@ def installed(prefix, runtime, env):
         assert target.read_bytes() == source.read_bytes(), name
         assert target.stat().st_mode & 0o777 == mode, name
     assert (prefix / INSTALLER.LAYER_LIBRARY).stat().st_mode & 0o777 == 0o644, "the layer library is executable"
+    vulkan = prefix / INSTALLER.VULKAN_DIRECTORY
+    assert {path.relative_to(vulkan).as_posix() for path in vulkan.rglob("*") if path.is_file()} == set(
+        INSTALLER.vulkan_shader_names(ROOT)), "a file that the network's runtime never reads is installed"
     network = prefix / INSTALLER.NETWORK_LIBRARY
     assert network.parent == (prefix / INSTALLER.LAYER_LIBRARY).parent, "the network is not beside the layer, which loads it"
     assert network.stat().st_mode & 0o777 == 0o644, "the network library is executable"
@@ -146,6 +151,18 @@ def main():
         for name, source_name in INSTALLER.LICENSE_SOURCES.items():
             assert (prefix / "share/doc/dlsslop-amd" / name).read_bytes() == (source / source_name).read_bytes()
         assert source.as_uri() in (prefix / "share/doc/dlsslop-amd/licenses/SOURCES").read_text()
+        # Over an earlier install, the installer removes the files that the earlier inventory lists and
+        # this install leaves out, and keeps the files that it does not list.
+        stale = prefix / INSTALLER.VULKAN_DIRECTORY / "g_repack.spv"
+        kept = prefix / "share/dlsslop-amd/dlssnr.bin"
+        for path in (stale, kept):
+            path.write_bytes(b"earlier")
+        digest = hashlib.sha256(b"earlier").hexdigest()
+        with (prefix / INSTALLER.INVENTORY).open("a") as inventory:
+            inventory.write(f"{digest}  {stale.relative_to(prefix).as_posix()}\n")
+        run([sys.executable, source / "install.py", "-b", build, "-p", prefix], env)
+        assert not stale.exists() and kept.exists(), "an earlier install's file was not removed, or another was"
+        installed(prefix, runtime, env)
 
         # A missing GUI and an incomplete module inventory each fail before
         # installing any binaries or publishing a Vulkan manifest.
@@ -212,6 +229,11 @@ def main():
             verified = subprocess.run(["systemd-analyze", "--user", "verify", *map(str, units)],
                                       env=env, capture_output=True, text=True)
             assert verified.returncode == 0, verified.stderr
+        # The release README's update command deletes every file that the inventory lists.
+        command = next(line.strip() for line in (source / "packaging/README.md").read_text().splitlines()
+                       if "| xargs" in line)
+        run(["/usr/bin/bash", "-c", command.replace("~/.local", shlex.quote(str(release)))], env)
+        assert [path for path in release.rglob("*") if path.is_file()] == [release / inventory]
         # Without SOURCE_DATE_EPOCH the entries carry the packaging time.
         with patch.dict(os.environ, {}, clear=True):
             before = int(time.time())

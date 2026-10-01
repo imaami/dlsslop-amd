@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Install a complete dlsslop-amd source build into a prefix, laid out like the binary release."""
 import argparse
-import ast
 import hashlib
 import json
 import os
@@ -24,8 +23,9 @@ NETWORK_LIBRARY = "lib/dlsslop-amd/libdlsslop-network.so"
 # launcher adds this directory to the loader's search for any other prefix.
 LAYER_MANIFEST = "share/vulkan/implicit_layer.d/VK_LAYER_LOCAL_dlsslop_amd.json"
 DOC_DIRECTORY = "share/doc/dlsslop-amd"
-# The Vulkan network's SPIR-V, as DLSSNR-AMD's build_network.py writes it into
-# the build tree, and the extractor dlsslop-setup --dll runs.
+# The files of the Vulkan network's SPIR-V that its runtime reads, from the
+# build tree, where DLSSNR-AMD's build_network.py writes them among others, and
+# the extractor dlsslop-setup --dll runs.
 VULKAN_DIRECTORY = "share/dlsslop-amd/vulkan"
 MODEL_TOOLS_DIRECTORY = "libexec/dlsslop-amd/model-tools"
 MODEL_TOOLS = ("descriptor.json", "extract_model.sh", "inspect_nr.py", "model-files.sha256", "model-files.txt",
@@ -121,16 +121,21 @@ def validate_modules(directory):
 
 
 def vulkan_shader_names(root):
-    """The SPIR-V and markers the network's shader build writes, named as it names them."""
-    # Its RUNTIME and MOTION lists, read rather than imported: nothing runs, nothing is cached.
-    script = ast.parse((root / "external/vulkan/linux/build/build_network.py").read_text(encoding="utf-8"))
-    lists = {node.targets[0].id: ast.literal_eval(node.value) for node in script.body
-             if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name)
-             and node.targets[0].id in ("RUNTIME", "MOTION")}
-    table = json.loads((root / "external/vulkan/linux/shaders/rdna4/pipelines.json").read_text(encoding="utf-8"))
-    return ([f"g_{name}.spv" for name in table["pipelines"]] + list(table["markers"]) +
-            [f"temporal/{name}.spv" for name in [*table["variants"], *lists["MOTION"]]] +
-            ["temporal/shader-constants.txt"] + [f"runtime/{name}.spv" for name in lists["RUNTIME"]])
+    """The files below the network's SPIR-V directory that its runtime reads, named by the runtime's tables:
+    each kernel's g_STEM.spv (kKernels), the markers (kMarkers), the SPIR-V of the runtime's own pipelines
+    (kAdapterBindings), and the shader constants that it checks beside the kernels' and the temporal SPIR-V."""
+    # The tables are read rather than compiled: each entry starts with its stem or file, and the
+    # vulkan-files test checks the result against the files that a build opens.
+    def table(path, name, entry):
+        text = (root / path).read_text(encoding="utf-8")
+        found = re.findall(entry, text.partition(f" {name}[] = {{")[2].partition("};")[0])
+        if not found:
+            raise ValueError(f"no {name} table in {root / path}")
+        return found
+    return ([f"g_{stem}.spv" for stem in table("common/vulkan_plan.h", "kKernels", r'\{"(\w+)",')] +
+            table("common/vulkan_plan.h", "kMarkers", r'\{"([\w.-]+)",') +
+            table("common/vulkan_runtime.cpp", "kAdapterBindings", r'"(\w+/\w+\.spv)"') +
+            ["shader-constants.txt", "temporal/shader-constants.txt"])
 
 
 def runtime_files(root, build):
@@ -225,8 +230,14 @@ def main():
               "in that checkout. See THIRD-PARTY.txt for component attribution.\n")
     try:
         # Read and validate every input before creating or changing installed files.
-        for name, (content, mode) in tree(root, args.build_dir.expanduser().resolve(), notice).items():
+        files = tree(root, args.build_dir.expanduser().resolve(), notice)
+        # The files that an earlier install's inventory lists and this one leaves out, removed last.
+        inventory = prefix / INVENTORY
+        stale = set(checksum_records(inventory)).difference(files) if inventory.exists() else ()
+        for name, (content, mode) in files.items():
             atomic_write(prefix / name, content, mode)
+        for name in stale:
+            (prefix / name).unlink(missing_ok=True)
     except (OSError, ValueError, TypeError) as exc:
         parser.error(str(exc))
     print(f"Installed dlsslop-amd in {prefix}")

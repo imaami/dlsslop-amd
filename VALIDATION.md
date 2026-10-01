@@ -33,7 +33,12 @@ in-layer network can, never leave a reader without the file or with part of
 one. It records the Vulkan network's frames on a fake device: a frame that is
 not submitted must leave the motion history as it was, and a network reshaped
 for another shape of its extent must upload nothing, make no pipeline that it
-has and record the frames of a network built for that shape.
+has and record the frames of a network built for that shape. Under `strace`, it
+checks that the files `install.py` installs for the Vulkan network are those
+that the network's builds on that fake device open, at extents whose plans run
+every kernel; without `strace` that check skips. A build there without two of
+the kernels' files must fail and name the first of them in the kernel table,
+whichever of the threads that make the pipelines meets it.
 It checks that the post block's SPIR-V never stores into its second output,
 where the runtime may bind a 1x1 image.
 At every tier and preset it checks the HIP network's launch plan against

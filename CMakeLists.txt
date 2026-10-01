@@ -212,6 +212,11 @@ if(BUILD_TESTING)
     target_link_libraries(network-recorder-test PRIVATE Threads::Threads)
     add_dependencies(network-recorder-test vulkan-nr-shaders)
     add_test(NAME network-recorder COMMAND network-recorder-test ${VKNR_SHADERS})
+    # The network's builds open exactly the files that install.py installs for
+    # it, and fail without one of them. The first check needs strace: without
+    # it, the test skips.
+    add_test(NAME vulkan-files COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/vulkan-files.py
+        --recorder $<TARGET_FILE:network-recorder-test> --spirv ${VKNR_SHADERS})
     add_executable(codec-test backend/codec_test.cpp)
     target_link_libraries(codec-test PRIVATE dlsslop-codec)
     add_test(NAME codec COMMAND codec-test)
@@ -362,8 +367,8 @@ if(BUILD_TESTING)
     target_link_libraries(vktrace-probe PRIVATE ${VULKAN_LOADER})
     add_test(NAME vktrace COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/vktrace/vktrace-test.py
         $<TARGET_FILE:vktrace> $<TARGET_FILE:vktrace-probe> $<TARGET_FILE:shmclient>)
-    set_tests_properties(color-gpu hip-plan-abi vulkan-plan-abi lds-barriers codec-isa hdr-shader composition-rebuild
-        vulkan-smoke vktrace PROPERTIES SKIP_RETURN_CODE 77)
+    set_tests_properties(color-gpu hip-plan-abi vulkan-plan-abi vulkan-files lds-barriers codec-isa hdr-shader
+        composition-rebuild vulkan-smoke vktrace PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
 # The GUI is an optional standalone client. No Qt dependency reaches the worker

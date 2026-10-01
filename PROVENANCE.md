@@ -64,7 +64,9 @@ The fork's host-side changes let the runtime load its model, SPIR-V and
 pipeline cache from explicit paths and record the new stages after every pass.
 The build fetches only the fork's SPIR-V sources, shader build, model tools and
 license; it neither fetches nor compiles the fork's host code
-(`linux/src/core`), which those changes modify.
+(`linux/src/core`), which those changes modify. Of the 65 files that the shader
+build writes, `install.py` installs the 38 that the project's own host code
+names in its tables and reads.
 
 dlsslopd runs the AMD fork's kernels with its own host code.
 `backend/hip_weights.*`, `backend/hip_plan.*` and `backend/hip_network.*` port
