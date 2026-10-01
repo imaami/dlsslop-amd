@@ -36,9 +36,11 @@ The Vulkan network runs the same correction, after its sharpening, in its
 runtime's pass loop (`linux/shaders/passes/pass_stages.comp` in DLSSNR-AMD). The reference
 is the proxy the first pass saw, and the corrected answer feeds the next pass or
 becomes the frame's. The network's own history is its raw output, which the
-correction does not change. The first nonzero strength or sharpness rebuilds the
-network once, in about a second, with a model-sized RGBA32F scratch image
-(about 32 MiB at 1920×1080). From then on, strength zero skips the work.
+correction does not change. The first nonzero strength or sharpness reshapes the
+network once: it keeps the weights and adds the stages' pipeline and a
+model-sized RGBA32F scratch image (about 32 MiB at 1920×1080), in about 10 ms
+at 1280×720 when the pipeline cache holds that pipeline. From then on,
+strength zero skips the work.
 
 ## HIP module
 

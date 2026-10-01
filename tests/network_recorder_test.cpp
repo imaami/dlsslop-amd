@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: MIT
-// Host test of the network's motion history across frames, without a GPU.
-// NetworkRecorder builds the network with motion for 64x64 frames, from a
-// synthetic model and the build's SPIR-V, on a fake device whose functions
-// log the commands recorded. A frame that is recorded and not submitted must
-// leave the history as it was: the next frame's commands, with its motion
+// Host test of the network's motion history across frames and of its
+// reshapes, without a GPU. NetworkRecorder builds the network for 64x64
+// frames, from a synthetic model and the build's SPIR-V, on a fake device
+// whose functions log the commands recorded, each handle named by its first
+// use in the frame and described by what it was made as, and each descriptor
+// set by what it holds. A frame that is recorded and not submitted must leave
+// the history as it was: the next frame's commands, with its motion
 // parameters and push constants, must equal those of the frame recorded
-// before it. Takes the directory of the network's SPIR-V.
+// before it. A network reshaped for another shape of its extent must upload
+// nothing, make no pipeline that it has, and record the frames that a network
+// built for that shape records. Takes the directory of the network's SPIR-V.
 #include "network_recorder.h"
 #include "vulkan_pack.h"
 
@@ -15,6 +19,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <map>
+#include <set>
 #include <span>
 #include <string>
 #include <vector>
@@ -30,10 +35,21 @@ void require(bool value, const char* message)
 }
 
 // The fake device's handles are numbers from 1. It keeps the sizes of its
-// buffers and allocations, and host memory for the allocations mapped.
+// buffers and allocations, and host memory for the allocations mapped; what
+// each image, buffer, sampler, shader module and pipeline was made as, each
+// view's image, each descriptor set's descriptors by binding, and what each
+// pipeline it made was made as, in order.
 uint64_t handles = 0;
 std::map<uint64_t, VkDeviceSize> sizes;
 std::map<uint64_t, std::vector<uint8_t>> host;
+std::map<uint64_t, std::string> made;
+std::map<uint64_t, uint64_t> views;
+struct Descriptor {
+    uint64_t resource, sampler;
+    VkImageLayout layout;
+};
+std::map<uint64_t, std::map<uint32_t, Descriptor>> contents;
+std::vector<std::string> pipelines_made;
 template <class T>
 uint64_t id(T handle)
 {
@@ -46,21 +62,32 @@ VkResult make(T* handle)
     return VK_SUCCESS;
 }
 
-// What a frame recorded: its commands, a line each, and the gate of its
-// motion parameters and the seed in the push constants of its pre block,
-// the first dispatch after the parameters.
+// What a frame recorded: its commands, a line each, the handles it named,
+// and the gate of its motion parameters and the seed in the push constants of
+// its pre block, the first dispatch after the parameters.
 struct Frame {
     std::string commands;
+    std::map<uint64_t, size_t> names;
     float gate = -1;
     uint32_t seed = UINT32_MAX;
     bool pre = false; // the next push constants are the pre block's
 };
 Frame frame;
 
-// A command: WHAT, its VALUES and the WORDS of its data.
-void log(const char* what, std::initializer_list<uint64_t> values, std::span<const uint32_t> words = {})
+// HANDLE as the frame names it: by its first use, which says what it was
+// made as.
+std::string name(uint64_t handle)
+{
+    const auto [at, first] = frame.names.try_emplace(handle, frame.names.size());
+    return "#" + std::to_string(at->second) + (first ? "(" + made[handle] + ")" : "");
+}
+
+// A command: WHAT, the HANDLES it names, its VALUES and the WORDS of its data.
+void log(const char* what, std::initializer_list<uint64_t> handles, std::initializer_list<uint64_t> values = {},
+         std::span<const uint32_t> words = {})
 {
     frame.commands += what;
+    for (const uint64_t h : handles) frame.commands += " " + name(h);
     for (const uint64_t v : values) frame.commands += " " + std::to_string(v);
     for (const uint32_t w : words) frame.commands += " " + std::to_string(w);
     frame.commands += '\n';
@@ -73,12 +100,8 @@ extern "C" {
     {                                                                                                              \
         return make(handle);                                                                                       \
     }
-MAKE(vkCreateImage, VkImageCreateInfo, VkImage)
-MAKE(vkCreateImageView, VkImageViewCreateInfo, VkImageView)
-MAKE(vkCreateSampler, VkSamplerCreateInfo, VkSampler)
 MAKE(vkCreateDescriptorSetLayout, VkDescriptorSetLayoutCreateInfo, VkDescriptorSetLayout)
 MAKE(vkCreatePipelineLayout, VkPipelineLayoutCreateInfo, VkPipelineLayout)
-MAKE(vkCreateShaderModule, VkShaderModuleCreateInfo, VkShaderModule)
 MAKE(vkCreatePipelineCache, VkPipelineCacheCreateInfo, VkPipelineCache)
 MAKE(vkCreateDescriptorPool, VkDescriptorPoolCreateInfo, VkDescriptorPool)
 MAKE(vkCreateCommandPool, VkCommandPoolCreateInfo, VkCommandPool)
@@ -109,6 +132,36 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateBuffer(VkDevice, const VkBufferCreateInfo
 {
     make(buffer);
     sizes[id(*buffer)] = info->size;
+    made[id(*buffer)] = "buffer " + std::to_string(info->size);
+    return VK_SUCCESS;
+}
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateImage(VkDevice, const VkImageCreateInfo* info, const VkAllocationCallbacks*,
+                                             VkImage* image)
+{
+    make(image);
+    made[id(*image)] = "image " + std::to_string(info->extent.width) + "x" + std::to_string(info->extent.height) +
+                       " format " + std::to_string(info->format) + " usage " + std::to_string(info->usage);
+    return VK_SUCCESS;
+}
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateImageView(VkDevice, const VkImageViewCreateInfo* info,
+                                                 const VkAllocationCallbacks*, VkImageView* view)
+{
+    make(view);
+    views[id(*view)] = id(info->image);
+    return VK_SUCCESS;
+}
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateSampler(VkDevice, const VkSamplerCreateInfo* info, const VkAllocationCallbacks*,
+                                               VkSampler* sampler)
+{
+    make(sampler);
+    made[id(*sampler)] = "sampler " + std::to_string(info->magFilter) + " " + std::to_string(info->addressModeU);
+    return VK_SUCCESS;
+}
+VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(VkDevice, const VkShaderModuleCreateInfo* info,
+                                                    const VkAllocationCallbacks*, VkShaderModule* module)
+{
+    make(module);
+    made[id(*module)] = "pipeline " + std::to_string(vulkan_test::fnv1a(info->pCode, info->codeSize));
     return VK_SUCCESS;
 }
 VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(VkDevice, const VkMemoryAllocateInfo* info,
@@ -143,10 +196,14 @@ VKAPI_ATTR VkResult VKAPI_CALL vkBindImageMemory(VkDevice, VkImage, VkDeviceMemo
     return VK_SUCCESS;
 }
 VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(VkDevice, VkPipelineCache, uint32_t count,
-                                                        const VkComputePipelineCreateInfo*,
+                                                        const VkComputePipelineCreateInfo* infos,
                                                         const VkAllocationCallbacks*, VkPipeline* pipelines)
 {
-    for (uint32_t i = 0; i < count; ++i) make(&pipelines[i]);
+    for (uint32_t i = 0; i < count; ++i) {
+        make(&pipelines[i]);
+        made[id(pipelines[i])] = made[id(infos[i].stage.module)];
+        pipelines_made.push_back(made[id(pipelines[i])]);
+    }
     return VK_SUCCESS;
 }
 VKAPI_ATTR VkResult VKAPI_CALL vkGetPipelineCacheData(VkDevice, VkPipelineCache, size_t* bytes, void*)
@@ -160,9 +217,15 @@ VKAPI_ATTR VkResult VKAPI_CALL vkAllocateDescriptorSets(VkDevice, const VkDescri
     for (uint32_t i = 0; i < info->descriptorSetCount; ++i) make(&sets[i]);
     return VK_SUCCESS;
 }
-VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(VkDevice, uint32_t, const VkWriteDescriptorSet*, uint32_t,
-                                                  const VkCopyDescriptorSet*)
+VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(VkDevice, uint32_t count, const VkWriteDescriptorSet* writes,
+                                                  uint32_t, const VkCopyDescriptorSet*)
 {
+    for (const VkWriteDescriptorSet& w : std::span(writes, count)) {
+        Descriptor& d = contents[id(w.dstSet)][w.dstBinding];
+        d = w.pBufferInfo ? Descriptor{id(w.pBufferInfo->buffer), 0, VK_IMAGE_LAYOUT_UNDEFINED}
+                          : Descriptor{views[id(w.pImageInfo->imageView)], id(w.pImageInfo->sampler),
+                                       w.pImageInfo->imageLayout};
+    }
 }
 VKAPI_ATTR VkResult VKAPI_CALL vkAllocateCommandBuffers(VkDevice, const VkCommandBufferAllocateInfo*,
                                                         VkCommandBuffer* cmd)
@@ -186,10 +249,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(VkCommandBuffer, VkPipelineStage
                                                 uint32_t buffers, const VkBufferMemoryBarrier* buffer,
                                                 uint32_t images, const VkImageMemoryBarrier* image)
 {
-    log("barrier", {src, dst, memories});
-    for (uint32_t i = 0; i < buffers; ++i) log(" buffer", {id(buffer[i].buffer), buffer[i].srcAccessMask});
+    log("barrier", {}, {src, dst, memories});
+    for (uint32_t i = 0; i < buffers; ++i) log(" buffer", {id(buffer[i].buffer)}, {buffer[i].srcAccessMask});
     for (uint32_t i = 0; i < images; ++i)
-        log(" image", {id(image[i].image), uint64_t(image[i].oldLayout), uint64_t(image[i].newLayout)});
+        log(" image", {id(image[i].image)}, {uint64_t(image[i].oldLayout), uint64_t(image[i].newLayout)});
 }
 VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer(VkCommandBuffer, VkBuffer from, VkBuffer to, uint32_t,
                                            const VkBufferCopy*)
@@ -228,28 +291,34 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(VkCommandBuffer, VkPipelineBi
                                                    uint32_t count, const VkDescriptorSet* sets, uint32_t,
                                                    const uint32_t*)
 {
-    for (uint32_t i = 0; i < count; ++i) log("set", {id(sets[i])});
+    for (uint32_t i = 0; i < count; ++i) {
+        frame.commands += "set";
+        for (const auto& [binding, d] : contents[id(sets[i])])
+            frame.commands += " " + std::to_string(binding) + "=" + name(d.resource) +
+                              (d.sampler ? "/" + name(d.sampler) : "") + "/" + std::to_string(d.layout);
+        frame.commands += '\n';
+    }
 }
 VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(VkCommandBuffer, VkPipelineLayout, VkShaderStageFlags, uint32_t,
                                               uint32_t bytes, const void* data)
 {
     std::vector<uint32_t> words(bytes / 4);
     std::memcpy(words.data(), data, bytes);
-    log("push", {}, words);
+    log("push", {}, {}, words);
     constexpr size_t seed = (sizeof(vulkan::PushFSwin) + offsetof(vulkan::PushPreImage, seed)) / 4;
     if (frame.pre && seed < words.size()) frame.seed = words[seed];
     frame.pre = false;
 }
 VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(VkCommandBuffer, uint32_t x, uint32_t y, uint32_t z)
 {
-    log("dispatch", {x, y, z});
+    log("dispatch", {}, {x, y, z});
 }
 VKAPI_ATTR void VKAPI_CALL vkCmdUpdateBuffer(VkCommandBuffer, VkBuffer buffer, VkDeviceSize, VkDeviceSize bytes,
                                              const void* data)
 {
     std::vector<uint32_t> words(bytes / 4);
     std::memcpy(words.data(), data, bytes);
-    log("update", {id(buffer)}, words);
+    log("update", {id(buffer)}, {}, words);
     std::memcpy(&frame.gate, data, sizeof frame.gate);
     frame.pre = true;
 }
@@ -370,6 +439,58 @@ void check(const dlsslop::VulkanPaths& paths, unsigned passes)
     const Frame third = record(recorder, f);
     require(third.gate == 1 && third.seed == 2, ("the third frame has " + history(third)).c_str());
 }
+
+// The first two frames of F, the second following the first in the motion
+// history.
+std::string frames_of(dlsslop::NetworkRecorder& recorder, const dlsslop::VulkanFrame& f)
+{
+    std::string commands = record(recorder, f).commands;
+    recorder.submitted();
+    return commands + record(recorder, f).commands;
+}
+
+// A walk through shapes of 64x64 frames, each a change that the recorder
+// rebuilds for: its passes, format, motion history and stages. Each shape's
+// frames after the reshape must be those of a network built for the shape.
+void check_reshapes(const dlsslop::VulkanPaths& paths)
+{
+    const struct {
+        unsigned passes;
+        bool fp16, motion;
+        float sharpness;
+    } walk[] = {{1, false, false, 0}, {1, false, false, 0.5f}, {2, false, false, 0.5f}, {2, false, true, 0.5f},
+                {2, true, true, 0.5f}, {1, true, false, 0},    {1, false, true, 0},     {3, false, true, 0},
+                {3, true, true, 0.5f}, {1, true, false, 0},    {1, false, false, 0},    {2, false, false, 0}};
+    dlsslop::NetworkRecorder recorder(fake_device(), paths);
+    std::set<std::string> kept; // what each pipeline the recorder made was made as
+    for (const auto& step : walk) {
+        dlsslop::VulkanFrame f;
+        f.width = f.height = 64;
+        f.passes = step.passes;
+        f.fp16 = step.fp16;
+        f.motion = step.motion;
+        f.sharpness = step.sharpness;
+        const std::string what = std::to_string(f.passes) + " passes, " + (f.fp16 ? "FP16" : "RGBA8") +
+                                 (f.motion ? ", motion" : "") + (f.sharpness != 0 ? ", pass stages" : "");
+        frame = {};
+        const size_t pipelines = pipelines_made.size();
+        const bool first = &step == walk;
+        const auto reshaped = recorder.shape(f);
+        require(reshaped && *reshaped, ("the network was not rebuilt for " + what).c_str());
+        // The first shape is a build; every other keeps the weights, the
+        // arena and the pipelines, and makes none that the recorder has.
+        bool remade = false;
+        for (size_t i = pipelines; i < pipelines_made.size(); ++i) remade |= !kept.insert(pipelines_made[i]).second;
+        require(first || (frame.commands.find("copy buffer") == std::string::npos &&
+                          frame.commands.find("fill") == std::string::npos && !remade),
+                ("the reshape for " + what + " uploaded the weights or made a pipeline it had").c_str());
+        const std::string after = frames_of(recorder, f);
+        dlsslop::NetworkRecorder built(fake_device(), paths);
+        require(built.shape(f).value_or(false), ("cannot build the network for " + what).c_str());
+        require(after == frames_of(built, f),
+                ("the frames after the reshape for " + what + " differ from those of a build").c_str());
+    }
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -381,6 +502,8 @@ int main(int argc, char** argv)
     require(vulkan_test::synthetic_model(*plan, model), "cannot make the synthetic model");
     const dlsslop::VulkanPaths paths{model.path, argv[1], ""};
     for (const unsigned passes : {1u, 2u}) check(paths, passes);
-    std::printf("network-recorder test: frames not submitted leave the motion history as it was\n");
+    check_reshapes(paths);
+    std::printf("network-recorder test: frames not submitted leave the motion history as it was, and a "
+                "reshaped network records the frames of a built one\n");
     return 0;
 }

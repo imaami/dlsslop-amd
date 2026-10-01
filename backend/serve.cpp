@@ -174,8 +174,9 @@ Result<std::string> process(const Request& r, E& engine, Mapping& mapping, Frame
     } else {
         engine.pin(mapping.input, mapping.output, r.bytes);
     }
-    // A frame of a new shape needs a build: seconds in which the layer
-    // presents its own frames rather than waiting for this one.
+    // A frame of a new shape needs a build first: seconds for a new extent,
+    // in which the layer presents its own frames rather than waiting for this
+    // one, or milliseconds for a reshape that keeps the weights.
     if (!engine.fits(r.width, r.height, r.passes, settings)) {
         // A shape the engine does not take is rejected before a build: serving goes on as it was.
         DLSSLOP_TRY(engine.admit(r.width, r.height, r.passes, settings));

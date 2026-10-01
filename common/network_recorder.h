@@ -35,7 +35,8 @@ public:
     // planning.
     Result<void> plan(const VulkanFrame& frame);
     // Builds the network for a frame's shape, unless it has it: seconds of work
-    // on first use, true after a build. The device must have finished the
+    // for a new extent, milliseconds for another shape of the same extent, which
+    // keeps the weights. True after a build. The device must have finished the
     // recorder's work. A rejected extent keeps the network as it was.
     Result<bool> shape(const VulkanFrame& frame);
     // Records one frame of the shape it has: from PROXY, w x h RGBA8 or RGBA16F,
@@ -69,6 +70,7 @@ private:
     std::string rejection_;
 
     Result<void> plan_for(uint32_t width, uint32_t height);
+    Result<void> make_image(const vulkan::Shape& shape);
     void drop();
 };
 

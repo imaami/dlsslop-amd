@@ -92,11 +92,14 @@ struct Controls {
     float sharpness, color_preserve;
 };
 
-// Handles a runtime owns, null until made.
+// Handles a runtime owns, null until made, and what an image was made as.
 struct Image {
     VkImage image;
     VkDeviceMemory memory;
     VkImageView view;
+    uint32_t width, height;
+    VkFormat format;
+    VkImageUsageFlags usage;
 };
 struct Buffer {
     VkBuffer buffer;
@@ -108,22 +111,24 @@ struct Pipeline {
     VkPipeline pipeline;
 };
 
-// The network built for one Shape on a Device. It is movable and not
-// copyable; the device must have finished its work before it is destroyed.
+// The network built for one frame extent on a Device, for one Shape of that
+// extent at a time. It is movable and not copyable; the device must have
+// finished its work before it is destroyed or reshaped.
 //
 // Invariants:
 // - The activation arena is zeroed once at build and never cleared or laid
 //   out again while the runtime lives: its zero tails, the persistent runs'
 //   epochs and the tile counters depend on it.
-// - Descriptors are written once. Every dispatch runs with the network's
-//   input image in SHADER_READ_ONLY_OPTIMAL and every other image in
-//   GENERAL.
+// - Descriptors are written only by build() and reshape(). Every dispatch
+//   runs with the network's input image in SHADER_READ_ONLY_OPTIMAL and
+//   every other image in GENERAL.
 // - The invalidate-only barriers between steps rely on gfx1201's caches
 //   below L2 being write-through (upstream: nr_graph.cpp:4230-4258); the
 //   steps that tile counters order rely on the queue starting consecutive
 //   dispatches' workgroups in order.
 // - The motion history's latch, parity and noise seed change only when
-//   submitted() says that the last frame recorded was submitted.
+//   submitted() says that the last frame recorded was submitted, and start
+//   over at reshape().
 class Runtime {
 public:
     // The network for SHAPE on DEVICE, from PLAN, which is of SHAPE's extent
@@ -135,6 +140,14 @@ public:
     Runtime(Runtime&& other) noexcept;
     Runtime& operator=(Runtime&&) = delete;
     ~Runtime();
+
+    // Makes the runtime what build() makes for SHAPE, of the extent it was
+    // built for, in milliseconds: its images, its own pipelines and every
+    // descriptor set as SHAPE wants them, in one submission. The weights, the
+    // arena and the network's pipelines stay, and so does each image that
+    // SHAPE wants as it is, its contents discarded as a new image's are. A
+    // runtime that fails to reshape must be destroyed.
+    Result<void> reshape(const VulkanPaths& paths, const Shape& shape);
 
     // Records a frame of the shape: from FRAME, an image of it in
     // TRANSFER_DST_OPTIMAL written by transfers, through the network with
@@ -203,12 +216,19 @@ private:
     std::vector<Step> steps_;
     std::vector<uint32_t> push_;
 
+    // The commands of a build or a reshape, submitted once.
+    struct Setup;
+
     explicit Runtime(const Device& device) : device_(device) {}
     Result<void> make(const VulkanPaths& paths, const Shape& shape, const Plan& plan);
-    Result<void> make_resources(const Shape& shape, const Plan& plan);
-    Result<void> make_pipelines(const VulkanPaths& paths);
+    Result<void> adopt(const VulkanPaths& paths, const Shape& shape);
+    Result<void> make_images();
+    Result<void> make_pipelines(const VulkanPaths& paths, bool noise);
     Result<void> make_sets();
-    Result<void> run_setup(const Plan& plan, const Model& model, double& packing);
+    Result<void> begin_setup(Setup& setup) const;
+    Result<void> upload(const Plan& plan, const Model& model, Setup& setup) const;
+    Result<void> end_setup(Setup& setup);
+    std::string described() const;
     void dispatch(VkCommandBuffer cmd, size_t pipeline, VkDescriptorSet set, uint32_t x, uint32_t y,
                   const void* push, uint32_t bytes, uint32_t z = 1) const;
     void run_step(VkCommandBuffer cmd, const Step& step, size_t pipeline, VkDescriptorSet set,

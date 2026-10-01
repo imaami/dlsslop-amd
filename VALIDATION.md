@@ -30,7 +30,11 @@ the built SPIR-V against the plan, and the shader build's markers and the model
 tools' entry list against what the plan expects. It checks that two writers
 replacing the Vulkan network's pipeline cache at once, as dlsslopd and a game's
 in-layer network can, never leave a reader without the file or with part of
-one. At every tier and preset it checks the HIP network's launch plan against
+one. It records the Vulkan network's frames on a fake device: a frame that is
+not submitted must leave the motion history as it was, and a network reshaped
+for another shape of its extent must upload nothing, make no pipeline that it
+has and record the frames of a network built for that shape.
+At every tier and preset it checks the HIP network's launch plan against
 traces of upstream's network: every launch with the buffers it uses, on the
 first frame and later ones, the buffer pool, the uploaded weights, and the
 gather map each ViT gather reads. It checks the tracing HIP runtime (see
@@ -290,7 +294,13 @@ SPIR-V and in their motion parameters, 32 bytes there and 48 since. From
 parameters scale the history's weight by 0.7397 instead of 1, and motion frames
 after the first of each history have other answers. From "vulkan: seed the pre
 block's noise with the frame count" on, those frames' pre blocks carry the seed
-and no noise field in their push constants.
+and no noise field in their push constants. Any dlsslopd built before "vulkan:
+keep the weights and pipelines when only passes, stages, motion or format
+change" builds the whole network again when only those change, such as at the
+first motion or FP16 frame, since dlsslopd builds for RGBA8 frames without
+motion when it starts. Its setup uploads then hold the weights once more per
+such build, so the comparison prints `setup uploads differ` and `DIFFERENT`
+even when every frame matches; `--skip-setup` compares the frames alone.
 
 The revision before "vulkan: run the network with the project's own host code"
 runs the host code of the fork in its `external/vulkan`. Its lock pins an older

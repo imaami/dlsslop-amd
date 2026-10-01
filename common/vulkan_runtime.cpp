@@ -11,6 +11,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 
 namespace dlsslop {
@@ -137,6 +138,10 @@ constexpr VkFormat kWide = VK_FORMAT_R32G32B32A32_SFLOAT;
 constexpr VkImageUsageFlags kCopies = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 constexpr VkImageUsageFlags kStorage = kCopies | VK_IMAGE_USAGE_STORAGE_BIT;
 constexpr VkImageUsageFlags kSampledStorage = kStorage | VK_IMAGE_USAGE_SAMPLED_BIT;
+// What make_image() takes for an image that a shape does without.
+constexpr VkFormat kNone = VK_FORMAT_UNDEFINED;
+constexpr VkBufferUsageFlags kBuffers =
+    VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 
 void write_log(const Device& d, const char* line)
 {
@@ -265,6 +270,27 @@ uint32_t pick_memory(const Device& d, uint32_t bits, VkMemoryPropertyFlags want,
     return i;
 }
 
+void destroy(VkDevice device, Pipeline& p)
+{
+    if (p.pipeline) vkDestroyPipeline(device, p.pipeline, nullptr);
+    if (p.layout) vkDestroyPipelineLayout(device, p.layout, nullptr);
+    if (p.set_layout) vkDestroyDescriptorSetLayout(device, p.set_layout, nullptr);
+    p = {};
+}
+void destroy(VkDevice device, Image& i)
+{
+    if (i.view) vkDestroyImageView(device, i.view, nullptr);
+    if (i.image) vkDestroyImage(device, i.image, nullptr);
+    if (i.memory) vkFreeMemory(device, i.memory, nullptr);
+    i = {};
+}
+void destroy(VkDevice device, Buffer& b)
+{
+    if (b.buffer) vkDestroyBuffer(device, b.buffer, nullptr);
+    if (b.memory) vkFreeMemory(device, b.memory, nullptr);
+    b = {};
+}
+
 // A buffer of BYTES for USAGE in its own memory: device-local memory the host
 // cannot see (upstream: Context::buffer), or with HOST coherent memory the
 // host can, cached where there is such.
@@ -291,11 +317,16 @@ Result<void> make_buffer(const Device& d, VkDeviceSize bytes, VkBufferUsageFlags
     return vk_check(vkBindBufferMemory(d.device, b.buffer, b.memory, 0), what);
 }
 
-// A WIDTH x HEIGHT image of FORMAT for USAGE in its own device-local memory,
-// and its view (upstream: Context::image).
+// I as a WIDTH x HEIGHT image of FORMAT for USAGE in its own device-local
+// memory, with its view (upstream: Context::image), or as none for kNone. An
+// image that is so already stays.
 Result<void> make_image(const Device& d, uint32_t width, uint32_t height, VkFormat format, VkImageUsageFlags usage,
                         Image& i)
 {
+    if (std::tie(i.width, i.height, i.format, i.usage) == std::tie(width, height, format, usage)) return {};
+    destroy(d.device, i);
+    if (format == kNone) return {};
+    std::tie(i.width, i.height, i.format, i.usage) = std::tie(width, height, format, usage);
     VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     info.imageType = VK_IMAGE_TYPE_2D;
     info.format = format;
@@ -376,27 +407,6 @@ Result<void> make_pipeline(VkDevice device, VkPipelineCache cache, const std::st
     const VkResult made = vkCreateComputePipelines(device, cache, 1, &info, nullptr, &p.pipeline);
     vkDestroyShaderModule(device, module, nullptr);
     return vk_check(made, what.c_str());
-}
-
-void destroy(VkDevice device, Pipeline& p)
-{
-    if (p.pipeline) vkDestroyPipeline(device, p.pipeline, nullptr);
-    if (p.layout) vkDestroyPipelineLayout(device, p.layout, nullptr);
-    if (p.set_layout) vkDestroyDescriptorSetLayout(device, p.set_layout, nullptr);
-    p = {};
-}
-void destroy(VkDevice device, Image& i)
-{
-    if (i.view) vkDestroyImageView(device, i.view, nullptr);
-    if (i.image) vkDestroyImage(device, i.image, nullptr);
-    if (i.memory) vkFreeMemory(device, i.memory, nullptr);
-    i = {};
-}
-void destroy(VkDevice device, Buffer& b)
-{
-    if (b.buffer) vkDestroyBuffer(device, b.buffer, nullptr);
-    if (b.memory) vkFreeMemory(device, b.memory, nullptr);
-    b = {};
 }
 
 // The pipeline cache from PATH, when it holds one; none when the device makes
@@ -512,8 +522,8 @@ double seconds_since(std::chrono::steady_clock::time_point start)
     return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 }
 
-// IMAGE, when it was made, from nothing into LAYOUT for anything after: a
-// barrier added to LAYOUTS.
+// IMAGE, when there is one, into LAYOUT for anything after, from nothing as
+// though new: a barrier added to LAYOUTS.
 void settle(std::vector<VkImageMemoryBarrier>& layouts, const Image& image, VkImageLayout layout)
 {
     if (image.image)
@@ -522,13 +532,16 @@ void settle(std::vector<VkImageMemoryBarrier>& layouts, const Image& image, VkIm
                            VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, image.image, kColor});
 }
 
-// What the build's submission uses and frees once it has run: never while
-// the device may still read it, so a submission that is not known to have
-// ended leaks it.
-struct Setup {
+} // namespace
+
+// What a build's or a reshape's submission uses, and frees once it has run:
+// never while the device may still read it, so a submission that is not
+// known to have ended leaks it.
+struct Runtime::Setup {
     VkDevice device;
     Buffer staging{};
     VkCommandPool pool = VK_NULL_HANDLE;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkFence fence = VK_NULL_HANDLE;
     bool running = false;
     ~Setup()
@@ -539,8 +552,6 @@ struct Setup {
         destroy(device, staging);
     }
 };
-
-} // namespace
 
 uint64_t storage_limit(const Device& device)
 {
@@ -593,10 +604,73 @@ Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, const P
     // What the build reads and what the device offers, before any object.
     DLSSLOP_TRY(check_constants(paths.shaders));
     DLSSLOP_TRY(check_markers(paths.shaders));
-    if (shape.motion) DLSSLOP_TRY(check_constants(join(paths.shaders, "temporal")));
     const Model model = DLSSLOP_TRY(Model::open(paths.model));
-    const Capabilities caps = DLSSLOP_TRY(query(device_, shape));
+    steps_ = plan.steps;
+    push_ = plan.push;
+    DLSSLOP_TRY(adopt(paths, shape));
+    // What stays while the runtime lives: the activation arena, the weights
+    // and the input's sampler.
+    const Device& d = device_;
+    Objects& o = objects_;
+    DLSSLOP_TRY(make_buffer(d, plan.arena_bytes, kBuffers, false, "the network's activation arena", o.arena));
+    DLSSLOP_TRY(make_buffer(d, plan.blob_bytes, kBuffers, false, "the network's weights", o.weights));
+    DLSSLOP_TRY(make_sampler(d.device, VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT, o.nearest));
+    const auto compiling = std::chrono::steady_clock::now();
+    DLSSLOP_TRY(make_pipelines(paths, true));
+    const double compiled = seconds_since(compiling);
+    DLSSLOP_TRY(make_sets());
+    // One submission: every image into the layout frames use it in, the
+    // weights and the arena, and a barrier before anything after it.
+    const auto setting_up = std::chrono::steady_clock::now();
+    Setup setup{d.device};
+    DLSSLOP_TRY(begin_setup(setup));
+    DLSSLOP_TRY(upload(plan, model, setup));
+    const double packed = seconds_since(setting_up);
+    DLSSLOP_TRY(end_setup(setup));
+    const double ran = seconds_since(setting_up) - packed;
+    destroy(d.device, o.pipelines[size_t(Kernel::kNoiseField)]);
 
+    size_t pipelines = 0;
+    for (const Pipeline& p : o.pipelines) pipelines += p.pipeline != VK_NULL_HANDLE;
+    char line[512];
+    std::snprintf(line, sizeof line,
+                  "built the network in %.2f s (pipelines %.2f s, weights %.2f s, GPU %.2f s) for %s, "
+                  "%zu dispatches a pass, arena %.1f MB, weights %.1f MB, %zu pipelines, %u barriers chained",
+                  seconds_since(start), compiled, packed, ran, described().c_str(), steps_.size(),
+                  double(plan.arena_bytes) / 1e6, double(plan.blob_bytes) / 1e6, pipelines, unsigned(plan.chained));
+    write_log(d, line);
+    return {};
+}
+
+Result<void> Runtime::reshape(const VulkanPaths& paths, const Shape& shape)
+{
+    const auto start = std::chrono::steady_clock::now();
+    if (shape.width != state_.width || shape.height != state_.height)
+        return fail("network reshape: frames of another extent need a build");
+    DLSSLOP_TRY(adopt(paths, shape));
+    const auto compiling = std::chrono::steady_clock::now();
+    DLSSLOP_TRY(make_pipelines(paths, false));
+    const double compiled = seconds_since(compiling);
+    DLSSLOP_TRY(make_sets());
+    // One submission: every image into the layout frames use it in.
+    const auto setting_up = std::chrono::steady_clock::now();
+    Setup setup{device_.device};
+    DLSSLOP_TRY(begin_setup(setup));
+    DLSSLOP_TRY(end_setup(setup));
+    history_ = recorded_ = {};
+    char line[512];
+    std::snprintf(line, sizeof line,
+                  "rebuilt the network in %.3f s (pipelines %.3f s, GPU %.3f s) for %s; its weights stay",
+                  seconds_since(start), compiled, seconds_since(setting_up), described().c_str());
+    write_log(device_, line);
+    return {};
+}
+
+// The state of SHAPE, from what the device offers it, and its images.
+Result<void> Runtime::adopt(const VulkanPaths& paths, const Shape& shape)
+{
+    if (shape.motion) DLSSLOP_TRY(check_constants(join(paths.shaders, "temporal")));
+    const Capabilities caps = DLSSLOP_TRY(query(device_, shape));
     State& s = state_;
     s.width = shape.width;
     s.height = shape.height;
@@ -614,101 +688,78 @@ Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, const P
         s.level_width[k] = (s.level_width[k - 1] + 1) / 2;
         s.level_height[k] = (s.level_height[k - 1] + 1) / 2;
     }
-    steps_ = plan.steps;
-    push_ = plan.push;
-
-    DLSSLOP_TRY(make_resources(shape, plan));
-    const auto compiling = std::chrono::steady_clock::now();
-    DLSSLOP_TRY(make_pipelines(paths));
-    const double compiled = seconds_since(compiling);
-    DLSSLOP_TRY(make_sets());
-    double packed = 0;
-    const auto setting_up = std::chrono::steady_clock::now();
-    DLSSLOP_TRY(run_setup(plan, model, packed));
-    const double ran = seconds_since(setting_up) - packed;
-
-    size_t pipelines = 0;
-    for (const Pipeline& p : objects_.pipelines) pipelines += p.pipeline != VK_NULL_HANDLE;
-    char line[512];
-    std::snprintf(line, sizeof line,
-                  "built the network for %ux%u %s%s%s%s in %.2f s (pipelines %.2f s, weights %.2f s, GPU %.2f s): "
-                  "%zu dispatches a pass, input %s, answer %s, arena %.1f MB, weights %.1f MB, %zu pipelines, "
-                  "%u barriers chained",
-                  s.width, s.height, shape.fp16 ? "FP16" : "RGBA8",
-                  s.passes > 1 ? (", up to " + std::to_string(s.passes) + " passes").c_str() : "",
-                  s.stages ? ", pass stages" : "", s.motion ? ", motion" : "", seconds_since(start), compiled, packed,
-                  ran, steps_.size(), s.input_direct ? "copied" : "blitted to RGBA32F",
-                  s.answer_direct ? "stored in the frame's format" : "blitted from RGBA32F",
-                  double(plan.arena_bytes) / 1e6, double(plan.blob_bytes) / 1e6, pipelines, unsigned(plan.chained));
-    write_log(device_, line);
-    return {};
+    return make_images();
 }
 
-Result<void> Runtime::make_resources(const Shape& shape, const Plan& plan)
+Result<void> Runtime::make_images()
 {
     const Device& d = device_;
     Objects& o = objects_;
     const State& s = state_;
-    constexpr VkBufferUsageFlags usage =
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    DLSSLOP_TRY(make_buffer(d, plan.arena_bytes, usage, false, "the network's activation arena", o.arena));
-    DLSSLOP_TRY(make_buffer(d, plan.blob_bytes, usage, false, "the network's weights", o.weights));
     // The input, sampled: the frame's format filled by a copy, or RGBA32F,
     // filled by a blit or by later passes. The answer, which the post block
     // stores in the frame's format or RGBA32F, and its second output, the
     // model's history. The first pass's input when later passes overwrite
     // it, and the pass stages' scratch.
-    const VkFormat frame = shape.fp16 ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
+    const VkFormat frame = s.rgba8 ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R16G16B16A16_SFLOAT;
     const uint32_t w = s.width, h = s.height;
     DLSSLOP_TRY(make_image(d, w, h, s.input_direct ? frame : kWide,
                            s.input_direct ? kCopies | VK_IMAGE_USAGE_SAMPLED_BIT : kSampledStorage, o.input));
     DLSSLOP_TRY(make_image(d, w, h, s.answer_direct ? frame : kWide, kStorage, o.answer));
     DLSSLOP_TRY(make_image(d, w, h, kWide, kStorage, o.second));
-    if (s.passes > 1) DLSSLOP_TRY(make_image(d, w, h, kWide, kSampledStorage, o.shown));
-    if (s.stages) DLSSLOP_TRY(make_image(d, w, h, kWide, kStorage, o.scratch));
-    DLSSLOP_TRY(make_sampler(d.device, VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT, o.nearest));
-    if (!s.motion) return {};
+    DLSSLOP_TRY(make_image(d, w, h, s.passes > 1 ? kWide : kNone, kSampledStorage, o.shown));
+    DLSSLOP_TRY(make_image(d, w, h, s.stages ? kWide : kNone, kStorage, o.scratch));
     // The motion history: this frame's and the last frame's luma pyramids,
     // the flow between them, the history the pre and post blocks read, one
     // a pass with later passes, a depth nothing writes, and the parameters.
     // The pre and post blocks also sample the finest flow level, which
     // upstream creates without sampled usage.
+    const auto motion = [&s](VkFormat format, bool want = true) { return s.motion && want ? format : kNone; };
     for (auto& pyramid : o.luma)
         for (uint32_t k = 0; k < kLevels; ++k)
-            DLSSLOP_TRY(make_image(d, s.level_width[k], s.level_height[k], VK_FORMAT_R32_SFLOAT, kStorage, pyramid[k]));
+            DLSSLOP_TRY(make_image(d, s.level_width[k], s.level_height[k], motion(VK_FORMAT_R32_SFLOAT), kStorage,
+                                   pyramid[k]));
     for (uint32_t k = 0; k < kLevels; ++k)
-        DLSSLOP_TRY(make_image(d, s.level_width[k], s.level_height[k], VK_FORMAT_R32G32_SFLOAT,
+        DLSSLOP_TRY(make_image(d, s.level_width[k], s.level_height[k], motion(VK_FORMAT_R32G32_SFLOAT),
                                k ? kStorage : kSampledStorage, o.flow[k]));
-    for (uint32_t c = 0; c < (s.pingpong ? 2u : 1u); ++c)
-        DLSSLOP_TRY(make_image(d, w, h, kWide, kSampledStorage, o.history[c]));
-    DLSSLOP_TRY(make_image(d, w, h, VK_FORMAT_R32_SFLOAT, kSampledStorage, o.depth));
-    if (s.passes > 1)
-        for (uint32_t pass = 0; pass < s.passes; ++pass)
-            DLSSLOP_TRY(make_image(d, w, h, kWide, kStorage, o.history_store[pass]));
-    DLSSLOP_TRY(make_buffer(d, 4 * kTemporalParams, usage, false, "the network's motion parameters", o.params));
+    for (uint32_t c = 0; c < 2; ++c)
+        DLSSLOP_TRY(make_image(d, w, h, motion(kWide, !c || s.pingpong), kSampledStorage, o.history[c]));
+    DLSSLOP_TRY(make_image(d, w, h, motion(VK_FORMAT_R32_SFLOAT), kSampledStorage, o.depth));
+    for (uint32_t pass = 0; pass < kMaxPasses; ++pass)
+        DLSSLOP_TRY(make_image(d, w, h, motion(kWide, s.passes > 1 && pass < s.passes), kStorage,
+                               o.history_store[pass]));
+    // The parameters and the sampler stay once made.
+    if (!s.motion || o.linear) return {};
+    DLSSLOP_TRY(make_buffer(d, 4 * kTemporalParams, kBuffers, false, "the network's motion parameters", o.params));
     return make_sampler(d.device, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, o.linear);
 }
 
-Result<void> Runtime::make_pipelines(const VulkanPaths& paths)
+Result<void> Runtime::make_pipelines(const VulkanPaths& paths, bool noise)
 {
     static_assert(std::size(kAdapterBindings) == kAdapters);
     const VkDevice d = device_.device;
     Pipeline* p = objects_.pipelines;
     const State& s = state_;
-    // Every pipeline goes through the cache: the noise field's, which the
-    // build runs, the kernels' that the frames run, and then the runtime's
-    // own. With motion, the temporal variants replace the pre and post
-    // blocks. The cache is saved once every pipeline exists or one has
-    // failed; upstream saves it before it creates the runtime's own.
+    // The pipelines that are wanted and not made yet: with NOISE the noise
+    // field's, which the build runs, then the kernels' of the steps, and the
+    // runtime's own that the shape wants. With motion, the temporal variants
+    // replace the pre and post blocks, whose kernels' pipelines are made all
+    // the same: they depend on the extent alone. A pipeline stays once made.
+    bool wanted[kPipelines] = {};
+    wanted[size_t(Kernel::kNoiseField)] = noise;
+    for (const Step& step : steps_) wanted[size_t(step.kernel)] = true;
+    const bool own[kAdapters] = {s.passes > 1, s.stages, s.motion, s.motion, s.motion, s.motion};
+    std::ranges::copy(own, wanted + kAlpha);
+    size_t missing[kPipelines], n = 0;
+    for (size_t i = 0; i < kPipelines; ++i)
+        if (wanted[i] && !p[i].pipeline) missing[n++] = i;
+    if (!n) return {};
+    // Every pipeline goes through the cache, which is saved once every
+    // pipeline exists or one has failed; upstream saves it before it creates
+    // the runtime's own.
     const VkPipelineCache cache = load_cache(d, paths.cache);
-    constexpr size_t noise = size_t(Kernel::kNoiseField);
-    Result<void> made = make_pipeline(d, cache, paths.shaders, noise, p[noise]);
-    for (size_t i = s.motion; made && i < steps_.size() - s.motion; ++i)
-        if (const size_t k = size_t(steps_[i].kernel); !p[k].pipeline)
-            made = make_pipeline(d, cache, paths.shaders, k, p[k]);
-    const bool wanted[kAdapters] = {s.passes > 1, s.stages, s.motion, s.motion, s.motion, s.motion};
-    for (size_t a = kAlpha; made && a < kPipelines; ++a)
-        if (wanted[a - kAlpha]) made = make_pipeline(d, cache, paths.shaders, a, p[a]);
+    Result<void> made;
+    for (size_t i = 0; made && i < n; ++i) made = make_pipeline(d, cache, paths.shaders, missing[i], p[missing[i]]);
     save_cache(d, cache, paths.cache);
     if (cache) vkDestroyPipelineCache(d, cache, nullptr);
     return made;
@@ -775,7 +826,8 @@ Result<void> Runtime::make_sets()
         }
     }
 
-    // One pool for them all, and one allocation and one update.
+    // One pool for them all, which replaces the last shape's, and one
+    // allocation and one update.
     uint32_t counts[3] = {}; // storage buffers, storage images, sampled images
     std::vector<VkDescriptorSetLayout> layouts;
     for (const SetDescriptor& set : sets) {
@@ -795,6 +847,7 @@ Result<void> Runtime::make_sets()
     pool.poolSizeCount = n;
     pool.pPoolSizes = sizes;
     const VkDevice d = device_.device;
+    if (o.pool) vkDestroyDescriptorPool(d, std::exchange(o.pool, VK_NULL_HANDLE), nullptr);
     DLSSLOP_TRY(vk_check(vkCreateDescriptorPool(d, &pool, nullptr, &o.pool), "create the network's descriptor pool"));
     std::vector<VkDescriptorSet> made(sets.size());
     VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
@@ -836,25 +889,13 @@ Result<void> Runtime::make_sets()
     return {};
 }
 
-Result<void> Runtime::run_setup(const Plan& plan, const Model& model, double& packed)
+// Starts SETUP's commands: every image into the layout frames use it in.
+// Each frame fills the input before any dispatch reads it, so a setup leaves
+// it unwritten.
+Result<void> Runtime::begin_setup(Setup& setup) const
 {
     const VkDevice d = device_.device;
-    Objects& o = objects_;
-    // The weights packed straight into the staging memory.
-    const auto packing = std::chrono::steady_clock::now();
-    Setup setup{d};
-    DLSSLOP_TRY(make_buffer(device_, plan.blob_bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, "the network's upload",
-                            setup.staging));
-    void* mapped = nullptr;
-    DLSSLOP_TRY(
-        vk_check(vkMapMemory(d, setup.staging.memory, 0, VK_WHOLE_SIZE, 0, &mapped), "map the network's upload"));
-    DLSSLOP_TRY(pack(plan.segments, plan.tables, model, {static_cast<uint8_t*>(mapped), plan.blob_bytes}));
-    packed = seconds_since(packing);
-
-    // One submission: every image into the layout frames use it in, the
-    // weights' upload, the arena zeroed, the noise field in the weights, and
-    // a barrier before anything after it. Each frame fills the input before
-    // any dispatch reads it, so the build leaves it unwritten.
+    const Objects& o = objects_;
     VkCommandPoolCreateInfo pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     pool.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     pool.queueFamilyIndex = device_.family;
@@ -863,11 +904,10 @@ Result<void> Runtime::run_setup(const Plan& plan, const Model& model, double& pa
     alloc.commandPool = setup.pool;
     alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc.commandBufferCount = 1;
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    DLSSLOP_TRY(vk_check(vkAllocateCommandBuffers(d, &alloc, &cmd), "allocate the network's build commands"));
+    DLSSLOP_TRY(vk_check(vkAllocateCommandBuffers(d, &alloc, &setup.cmd), "allocate the network's build commands"));
     VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    DLSSLOP_TRY(vk_check(vkBeginCommandBuffer(cmd, &begin), "begin the network's build commands"));
+    DLSSLOP_TRY(vk_check(vkBeginCommandBuffer(setup.cmd, &begin), "begin the network's build commands"));
     std::vector<VkImageMemoryBarrier> layouts;
     settle(layouts, o.input, kSampled);
     for (const Image* i : {&o.answer, &o.second, &o.shown, &o.scratch, &o.depth}) settle(layouts, *i, kGeneral);
@@ -876,8 +916,24 @@ Result<void> Runtime::run_setup(const Plan& plan, const Model& model, double& pa
     for (const Image& i : o.flow) settle(layouts, i, kGeneral);
     for (const Image& i : o.history) settle(layouts, i, kGeneral);
     for (const Image& i : o.history_store) settle(layouts, i, kGeneral);
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0,
-                         nullptr, uint32_t(layouts.size()), layouts.data());
+    vkCmdPipelineBarrier(setup.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
+                         nullptr, 0, nullptr, uint32_t(layouts.size()), layouts.data());
+    return {};
+}
+
+// A build's part of SETUP: the weights packed straight into the staging
+// memory and uploaded, the arena zeroed, and the noise field in the weights.
+Result<void> Runtime::upload(const Plan& plan, const Model& model, Setup& setup) const
+{
+    const VkDevice d = device_.device;
+    const Objects& o = objects_;
+    DLSSLOP_TRY(make_buffer(device_, plan.blob_bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, "the network's upload",
+                            setup.staging));
+    void* mapped = nullptr;
+    DLSSLOP_TRY(
+        vk_check(vkMapMemory(d, setup.staging.memory, 0, VK_WHOLE_SIZE, 0, &mapped), "map the network's upload"));
+    DLSSLOP_TRY(pack(plan.segments, plan.tables, model, {static_cast<uint8_t*>(mapped), plan.blob_bytes}));
+    const VkCommandBuffer cmd = setup.cmd;
     const VkBufferCopy weights{0, 0, plan.blob_bytes};
     vkCmdCopyBuffer(cmd, setup.staging.buffer, o.weights.buffer, 1, &weights);
     vkCmdFillBuffer(cmd, o.arena.buffer, 0, plan.arena_bytes, 0);
@@ -886,18 +942,24 @@ Result<void> Runtime::run_setup(const Plan& plan, const Model& model, double& pa
     const size_t noise = size_t(Kernel::kNoiseField);
     dispatch(cmd, noise, o.kernel_sets[noise], (plan.noise.width + 7) / 8, (plan.noise.height + 7) / 8, &plan.noise,
              sizeof plan.noise);
+    return {};
+}
+
+// Ends SETUP's commands with a barrier before anything after them, submits
+// them under the queue's lock and waits for them outside it.
+Result<void> Runtime::end_setup(Setup& setup)
+{
+    const VkDevice d = device_.device;
     const VkMemoryBarrier done{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_MEMORY_WRITE_BIT,
                                VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT};
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &done, 0,
-                         nullptr, 0, nullptr);
-    DLSSLOP_TRY(vk_check(vkEndCommandBuffer(cmd), "record the network's build commands"));
-
-    // Submitted under the queue's lock, and waited for outside it.
+    vkCmdPipelineBarrier(setup.cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1,
+                         &done, 0, nullptr, 0, nullptr);
+    DLSSLOP_TRY(vk_check(vkEndCommandBuffer(setup.cmd), "record the network's build commands"));
     VkFenceCreateInfo fence{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     DLSSLOP_TRY(vk_check(vkCreateFence(d, &fence, nullptr, &setup.fence), "create the network's build fence"));
     VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cmd;
+    submit.pCommandBuffers = &setup.cmd;
     if (device_.lock) device_.lock(device_.context);
     const VkResult submitted = vkQueueSubmit(device_.queue, 1, &submit, setup.fence);
     if (device_.unlock) device_.unlock(device_.context);
@@ -910,8 +972,18 @@ Result<void> Runtime::run_setup(const Plan& plan, const Model& model, double& pa
         return vk_check(waited, "wait for the network's build");
     }
     setup.running = false;
-    destroy(d, o.pipelines[noise]);
     return {};
+}
+
+// The shape that frames are recorded for, as the log says it.
+std::string Runtime::described() const
+{
+    const State& s = state_;
+    return std::to_string(s.width) + "x" + std::to_string(s.height) + (s.rgba8 ? " RGBA8" : " FP16") +
+           (s.passes > 1 ? ", up to " + std::to_string(s.passes) + " passes" : "") +
+           (s.stages ? ", pass stages" : "") + (s.motion ? ", motion" : "") + ": input " +
+           (s.input_direct ? "copied" : "blitted to RGBA32F") + ", answer " +
+           (s.answer_direct ? "stored in the frame's format" : "blitted from RGBA32F");
 }
 
 void Runtime::dispatch(VkCommandBuffer cmd, size_t pipeline, VkDescriptorSet set, uint32_t x, uint32_t y,
