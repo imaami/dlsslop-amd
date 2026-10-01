@@ -18,8 +18,6 @@ DlssNrPass::DlssNrPass(const DeviceTable* InVk, const InstanceTable* InInstance,
         return;
     }
 
-    _maxFramesInFlight = kFramesInFlight;
-
     // Linear, because the resolve reads the model's answer at a different size than it writes -- the
     // model may have run at a reduced resolution and the edit has to be stretched back over the frame.
     CreateSampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);

@@ -536,31 +536,10 @@ struct InstanceChain {
     // The game's own: device features beyond it need extensions of their own.
     uint32_t apiVersion = VK_API_VERSION_1_0;
 
-    // The instance-level entry points the composition needs, resolved once. Kept here rather than on
-    // the device chain because this is where the VkInstance handle is in scope.
+    // The instance-level entry points the layer and the composition need, resolved once. Kept here
+    // rather than on the device chain because this is where the VkInstance handle is in scope.
     dlssnr::InstanceTable table;
-
-    PFN_vkDestroyInstance vkDestroyInstance = nullptr;
-    PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices = nullptr;
-    PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties = nullptr;
-    PFN_vkEnumerateDeviceExtensionProperties vkEnumerateDeviceExtensionProperties = nullptr;
-    PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties = nullptr;
-    PFN_vkGetPhysicalDeviceProperties2 vkGetPhysicalDeviceProperties2 = nullptr;
-    PFN_vkGetPhysicalDeviceFeatures2 vkGetPhysicalDeviceFeatures2 = nullptr;
-    PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR = nullptr;
 };
-
-#define DEVICE_FN_LIST(X) \
-    X(vkDestroyDevice) X(vkGetDeviceQueue) X(vkGetDeviceQueue2) X(vkCreateSwapchainKHR) X(vkDestroySwapchainKHR) \
-    X(vkGetSwapchainImagesKHR) X(vkQueuePresentKHR) X(vkQueueSubmit) X(vkQueueSubmit2) X(vkQueueWaitIdle) X(vkCreateCommandPool) \
-    X(vkDestroyCommandPool) X(vkAllocateCommandBuffers) X(vkBeginCommandBuffer) X(vkEndCommandBuffer) \
-    X(vkCreateFence) X(vkDestroyFence) X(vkWaitForFences) X(vkResetFences) \
-    X(vkCreateImage) X(vkDestroyImage) X(vkGetImageMemoryRequirements) X(vkAllocateMemory) \
-    X(vkFreeMemory) X(vkBindImageMemory) X(vkCreateImageView) X(vkDestroyImageView) \
-    X(vkMapMemory) X(vkUnmapMemory) X(vkCreateBuffer) X(vkDestroyBuffer) \
-    X(vkGetBufferMemoryRequirements) X(vkBindBufferMemory) X(vkCmdCopyBufferToImage) \
-    X(vkCmdCopyImageToBuffer) X(vkCmdPipelineBarrier) X(vkDeviceWaitIdle) \
-    X(vkAcquireNextImageKHR) X(vkReleaseSwapchainImagesEXT) X(vkQueueSubmit2KHR) X(vkQueueBindSparse)
 
 struct SwapchainState {
     std::vector<VkImage> images;
@@ -615,15 +594,12 @@ struct DeviceChain {
     VkDevice self = VK_NULL_HANDLE;
     PFN_vkGetDeviceProcAddr next_dpa = nullptr;
 
-    // The same entry points again, in the form the composition takes them.
+    // The device-level entry points the layer and the composition need, resolved once.
     dlssnr::DeviceTable table;
 
     // The loader's hook for installing a dispatch table on a dispatchable object a layer creates.
     // Handed to every layer in its own VkLayerDeviceCreateInfo node; see Hook_CreateDevice.
     PFN_vkSetDeviceLoaderData setDeviceLoaderData = nullptr;
-#define X(name) PFN_##name name = nullptr;
-    DEVICE_FN_LIST(X)
-#undef X
     std::atomic<bool> inert{false};
     std::mutex lock;
     // Held by the in-layer network's build around each of its submits, and by the layer's own
@@ -831,15 +807,6 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateInstance(
             break;
         }
     }
-    chain.vkDestroyInstance = (PFN_vkDestroyInstance)next_gipa(*pInstance, "vkDestroyInstance");
-    chain.vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)next_gipa(*pInstance, "vkEnumeratePhysicalDevices");
-    chain.vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)next_gipa(*pInstance, "vkGetPhysicalDeviceProperties");
-    chain.vkEnumerateDeviceExtensionProperties = (PFN_vkEnumerateDeviceExtensionProperties)next_gipa(*pInstance, "vkEnumerateDeviceExtensionProperties");
-    chain.vkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)next_gipa(*pInstance, "vkGetPhysicalDeviceMemoryProperties");
-    chain.vkGetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2)next_gipa(*pInstance, "vkGetPhysicalDeviceProperties2");
-    chain.vkGetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2)next_gipa(*pInstance, "vkGetPhysicalDeviceFeatures2");
-    chain.vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR = (PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR)next_gipa(
-        *pInstance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR");
     if (pCreateInfo->pApplicationInfo && pCreateInfo->pApplicationInfo->apiVersion)
         chain.apiVersion = pCreateInfo->pApplicationInfo->apiVersion;
 
@@ -857,7 +824,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyInstance(VkInstance instance,
     std::lock_guard<std::mutex> lk(g_stateMutex);
     auto it = g_instances.find(instance);
     if (it == g_instances.end()) return;
-    auto destroy = it->second.vkDestroyInstance;
+    auto destroy = it->second.table.vkDestroyInstance;
     InstanceChain* chain = &it->second;
     g_instances.erase(it);
     for (auto pit = g_phys.begin(); pit != g_phys.end();)
@@ -873,8 +840,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_EnumeratePhysicalDevices(
         auto it = g_instances.find(instance);
         if (it != g_instances.end()) chain = &it->second;
     }
-    if (!chain || !chain->vkEnumeratePhysicalDevices) return VK_ERROR_INITIALIZATION_FAILED;
-    VkResult res = chain->vkEnumeratePhysicalDevices(instance, pCount, pPhysicalDevices);
+    if (!chain || !chain->table.vkEnumeratePhysicalDevices) return VK_ERROR_INITIALIZATION_FAILED;
+    VkResult res = chain->table.vkEnumeratePhysicalDevices(instance, pCount, pPhysicalDevices);
     if (res == VK_SUCCESS && pPhysicalDevices) {
         std::lock_guard<std::mutex> lk(g_stateMutex);
         for (uint32_t i = 0; i < *pCount; ++i) g_phys[pPhysicalDevices[i]] = chain;
@@ -899,25 +866,25 @@ static bool RestorePresent(DeviceChain* dc, SwapchainState& sc, uint32_t index) 
     if (!sc.comp || !sc.comp->HasCapturedFrame()) return false;
     // The previous leg 2 or restore may still hold the command buffer and the fence reused here.
     if (sc.leg2Pending) {
-        if (dc->vkWaitForFences(dc->self, 1, &sc.fenceLeg2, VK_TRUE, UINT64_MAX) != VK_SUCCESS) return false;
-        dc->vkResetFences(dc->self, 1, &sc.fenceLeg2);
+        if (dc->table.vkWaitForFences(dc->self, 1, &sc.fenceLeg2, VK_TRUE, UINT64_MAX) != VK_SUCCESS) return false;
+        dc->table.vkResetFences(dc->self, 1, &sc.fenceLeg2);
         sc.leg2Pending = false;
         sc.comp->WriteCapturedFrame();
     }
     VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    if (dc->vkBeginCommandBuffer(sc.cb, &bi) != VK_SUCCESS) return false;
+    if (dc->table.vkBeginCommandBuffer(sc.cb, &bi) != VK_SUCCESS) return false;
     if (!sc.comp->RecordRestore(sc.cb, sc.images[index])) {
-        dc->vkEndCommandBuffer(sc.cb);
+        dc->table.vkEndCommandBuffer(sc.cb);
         return false;
     }
-    if (dc->vkEndCommandBuffer(sc.cb) != VK_SUCCESS) return false;
+    if (dc->table.vkEndCommandBuffer(sc.cb) != VK_SUCCESS) return false;
     VkSubmitInfo si{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
     si.commandBufferCount = 1;
     si.pCommandBuffers = &sc.cb;
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = &sc.leg2Done[index];
-    if (dc->vkQueueSubmit(sc.queue, 1, &si, sc.fenceLeg2) != VK_SUCCESS) return false;
+    if (dc->table.vkQueueSubmit(sc.queue, 1, &si, sc.fenceLeg2) != VK_SUCCESS) return false;
     // Collected like leg 2: the present waits on the semaphore, and the next user of the command
     // buffer waits on the fence.
     sc.leg2Pending = true;
@@ -974,13 +941,14 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
     bool addedSwapMaint = false;
     VkDeviceCreateInfo modified = *pCreateInfo;
     std::vector<const char*> enabledExts;
-    if (LayerEnabled() && ic && ic->vkEnumerateDeviceExtensionProperties) {
+    if (LayerEnabled() && ic && ic->table.vkEnumerateDeviceExtensionProperties) {
         bool available[kWantCount] = {};
         bool enabled[kWantCount] = {};
         uint32_t n = 0;
-        ic->vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &n, nullptr);
+        ic->table.vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &n, nullptr);
         std::vector<VkExtensionProperties> avail(n);
-        if (n && ic->vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &n, avail.data()) == VK_SUCCESS) {
+        if (n && ic->table.vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &n,
+                                                                avail.data()) == VK_SUCCESS) {
             for (uint32_t i = 0; i < n; ++i)
                 for (size_t k = 0; k < kWantCount; ++k)
                     if (!std::strcmp(avail[i].extensionName, kWantExts[k])) available[k] = true;
@@ -1012,9 +980,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
     const char* networkOff = nullptr;
     const bool network = LayerEnabled() && ic && dlssnr::NetworkRequested() &&
                          !(networkOff = dlssnr::NetworkUnavailable(
-                               physicalDevice, ic->apiVersion, ic->vkGetPhysicalDeviceProperties2,
-                               ic->vkGetPhysicalDeviceFeatures2, ic->vkEnumerateDeviceExtensionProperties,
-                               ic->vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR));
+                               physicalDevice, ic->apiVersion, ic->table.vkGetPhysicalDeviceProperties2,
+                               ic->table.vkGetPhysicalDeviceFeatures2, ic->table.vkEnumerateDeviceExtensionProperties,
+                               ic->table.vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR));
     if (networkOff) Log("[layer] in-layer network unavailable: needs %s", networkOff);
     if (network && dlssnr::AddNetworkExtensions(modified, enabledExts)) effective = &modified;
     // The extension does nothing unless its feature is asked for.
@@ -1069,12 +1037,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
     dc->self = *pDevice;
     dc->next_dpa = next_dpa;
     dc->setDeviceLoaderData = setLoaderData;
-#define X(name) dc->name = (PFN_##name)next_dpa(*pDevice, #name);
-    DEVICE_FN_LIST(X)
-#undef X
     dc->table.next_dpa = next_dpa;
     dc->table.Load(*pDevice);
-    dc->releaseImages = addedSwapMaint && dc->vkReleaseSwapchainImagesEXT != nullptr;
+    dc->releaseImages = addedSwapMaint && dc->table.vkReleaseSwapchainImagesEXT != nullptr;
     for (uint32_t i = 0; i < effective->enabledExtensionCount; ++i)
         if (!std::strcmp(effective->ppEnabledExtensionNames[i], VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME))
             dc->exportMemory = dc->table.vkGetMemoryFdKHR != nullptr;
@@ -1082,7 +1047,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
         dc->network = dlssnr::NetworkEnabled(*effective);
         Log("[layer] in-layer network features %s", dc->network ? "enabled" : "not enabled");
     }
-    if (!dc->vkQueuePresentKHR || !dc->vkCreateSwapchainKHR || !ic) dc->inert = true;
+    if (!dc->table.vkQueuePresentKHR || !dc->table.vkCreateSwapchainKHR || !ic) dc->inert = true;
     if (LayerEnabled() && !dlssnr::HasFormatlessStorageWrites(*effective)) {
         dc->inert = true;
         Log("[layer] shaderStorageImageWriteWithoutFormat not enabled; presenting untouched");
@@ -1093,9 +1058,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
     // Hybrid machines are the case that matters: an implicit layer is loaded for every device the
     // loader builds, including the integrated one a game may well be running on.
     char deviceName[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE] = "?";
-    if (ic && ic->vkGetPhysicalDeviceProperties) {
+    if (ic && ic->table.vkGetPhysicalDeviceProperties) {
         VkPhysicalDeviceProperties props{};
-        ic->vkGetPhysicalDeviceProperties(physicalDevice, &props);
+        ic->table.vkGetPhysicalDeviceProperties(physicalDevice, &props);
         std::snprintf(deviceName, sizeof(deviceName), "%s", props.deviceName);
         bool vendorSupported = props.vendorID == 0x1002u;
 #ifdef DLSSLOP_TEST_LAVAPIPE
@@ -1215,7 +1180,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
                 // application may resume while this waits.
                 if (sc->repaintFence == VK_NULL_HANDLE) {
                     VkFenceCreateInfo fci{ VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
-                    if (dc->vkCreateFence(dc->self, &fci, nullptr, &sc->repaintFence) != VK_SUCCESS)
+                    if (dc->table.vkCreateFence(dc->self, &fci, nullptr, &sc->repaintFence) != VK_SUCCESS)
                         continue;
                 }
                 uint32_t index = 0;
@@ -1228,10 +1193,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
                 // present no longer waits for this lock but passes the frame through instead; the
                 // cost is no longer a stall but the compositions missed while it waits, so an
                 // application resuming mid-acquire goes unedited for this long and no longer.
-                const VkResult acq = dc->vkAcquireNextImageKHR(dc->self, swapchain,
-                                                               150ull * 1000ull * 1000ull,
-                                                               VK_NULL_HANDLE, sc->repaintFence,
-                                                               &index);
+                const VkResult acq = dc->table.vkAcquireNextImageKHR(dc->self, swapchain,
+                                                                     150ull * 1000ull * 1000ull,
+                                                                     VK_NULL_HANDLE, sc->repaintFence,
+                                                                     &index);
                 if (acq != VK_SUCCESS && acq != VK_SUBOPTIMAL_KHR) {
                     static std::atomic<uint32_t> n{0};
                     const uint32_t k = n.fetch_add(1);
@@ -1239,8 +1204,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
                         Log("[layer] idle repaint: acquire gave %d (attempt %u)", (int) acq, k + 1);
                     continue;
                 }
-                if (dc->vkWaitForFences(dc->self, 1, &sc->repaintFence, VK_TRUE,
-                                        500ull * 1000ull * 1000ull) != VK_SUCCESS) {
+                if (dc->table.vkWaitForFences(dc->self, 1, &sc->repaintFence, VK_TRUE,
+                                              500ull * 1000ull * 1000ull) != VK_SUCCESS) {
                     // Walking away here leaves the image acquired for good, and an acquired image is
                     // released by presenting it and by nothing else -- so the application is one
                     // image poorer for the rest of its life, and a swapchain that runs out is an
@@ -1253,7 +1218,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
                     sc->repaintOff = true;
                     continue;
                 }
-                dc->vkResetFences(dc->self, 1, &sc->repaintFence);
+                dc->table.vkResetFences(dc->self, 1, &sc->repaintFence);
                 if (index >= sc->images.size()) {
                     // Cannot happen, and handled anyway: the image is acquired and has to go back.
                     if (dc->releaseImages) {
@@ -1262,7 +1227,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
                         rel.swapchain = swapchain;
                         rel.imageIndexCount = 1;
                         rel.pImageIndices = &index;
-                        dc->vkReleaseSwapchainImagesEXT(dc->self, &rel);
+                        dc->table.vkReleaseSwapchainImagesEXT(dc->self, &rel);
                     }
                     continue;
                 }
@@ -1277,7 +1242,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
                     pi.swapchainCount = 1;
                     pi.pSwapchains = &swapchain;
                     pi.pImageIndices = &index;
-                    dc->vkQueuePresentKHR(sc->queue, &pi);
+                    dc->table.vkQueuePresentKHR(sc->queue, &pi);
                     dc->repaintSeenCtrl = ctrl;
                     dc->repaintSeenTuning = tune;
                     dc->repaintWasEnabled = on;
@@ -1290,13 +1255,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
                     rel.swapchain = swapchain;
                     rel.imageIndexCount = 1;
                     rel.pImageIndices = &index;
-                    dc->vkReleaseSwapchainImagesEXT(dc->self, &rel);
+                    dc->table.vkReleaseSwapchainImagesEXT(dc->self, &rel);
                 } else {
                     VkPresentInfoKHR pi{ VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
                     pi.swapchainCount = 1;
                     pi.pSwapchains = &swapchain;
                     pi.pImageIndices = &index;
-                    dc->vkQueuePresentKHR(sc->queue, &pi);
+                    dc->table.vkQueuePresentKHR(sc->queue, &pi);
                     Log("[layer] idle repaint: nothing drawn and no way to return the image; "
                         "not repainting again");
                     break;
@@ -1334,9 +1299,9 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
         if (!dc->networkReason.empty())
             ShmStoreString(dc->shm.hdr->layerReasonSeq, dc->shm.hdr->layerReason, kReasonBytes, "");
     }
-    if (dc->vkDeviceWaitIdle) {
+    if (dc->table.vkDeviceWaitIdle) {
         std::lock_guard<std::mutex> network(dc->networkSubmit);
-        dc->vkDeviceWaitIdle(device);
+        dc->table.vkDeviceWaitIdle(device);
     }
     // While the device is still found by its queues: the network's build submits through them.
     if (dc->inLayer) g_network.close(dc->inLayer);
@@ -1349,15 +1314,15 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
         for (auto& kv : dc->swapchains) {
             SwapchainState& sc = kv.second;
             sc.comp.reset();
-            if (sc.fenceLeg1) dc->vkDestroyFence(device, sc.fenceLeg1, nullptr);
-            if (sc.fenceLeg2) dc->vkDestroyFence(device, sc.fenceLeg2, nullptr);
+            if (sc.fenceLeg1) dc->table.vkDestroyFence(device, sc.fenceLeg1, nullptr);
+            if (sc.fenceLeg2) dc->table.vkDestroyFence(device, sc.fenceLeg2, nullptr);
             for (VkSemaphore semaphore : sc.leg2Done) dc->table.vkDestroySemaphore(device, semaphore, nullptr);
-            if (sc.repaintFence) dc->vkDestroyFence(device, sc.repaintFence, nullptr);
-            if (sc.pool) dc->vkDestroyCommandPool(device, sc.pool, nullptr);
+            if (sc.repaintFence) dc->table.vkDestroyFence(device, sc.repaintFence, nullptr);
+            if (sc.pool) dc->table.vkDestroyCommandPool(device, sc.pool, nullptr);
         }
         dc->swapchains.clear();
     }
-    if (dc->vkDestroyDevice) dc->vkDestroyDevice(device, pAllocator);
+    if (dc->table.vkDestroyDevice) dc->table.vkDestroyDevice(device, pAllocator);
     delete dc;
 }
 
@@ -1376,8 +1341,8 @@ static void RememberQueue(DeviceChain* dc, VkQueue queue, uint32_t family) {
 static VKAPI_ATTR void VKAPI_CALL Hook_GetDeviceQueue(VkDevice device, uint32_t family,
                                                       uint32_t index, VkQueue* pQueue) {
     DeviceChain* dc = FindDevice(device);
-    if (!dc || !dc->vkGetDeviceQueue) return;
-    dc->vkGetDeviceQueue(device, family, index, pQueue);
+    if (!dc || !dc->table.vkGetDeviceQueue) return;
+    dc->table.vkGetDeviceQueue(device, family, index, pQueue);
     RememberQueue(dc, *pQueue, family);
 }
 
@@ -1389,8 +1354,8 @@ static VKAPI_ATTR void VKAPI_CALL Hook_GetDeviceQueue2(VkDevice device,
                                                        const VkDeviceQueueInfo2* pQueueInfo,
                                                        VkQueue* pQueue) {
     DeviceChain* dc = FindDevice(device);
-    if (!dc || !dc->vkGetDeviceQueue2) return;
-    dc->vkGetDeviceQueue2(device, pQueueInfo, pQueue);
+    if (!dc || !dc->table.vkGetDeviceQueue2) return;
+    dc->table.vkGetDeviceQueue2(device, pQueueInfo, pQueue);
     if (pQueueInfo) RememberQueue(dc, *pQueue, pQueueInfo->queueFamilyIndex);
 }
 
@@ -1441,7 +1406,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
         auto it = g_devices.find(device);
         if (it != g_devices.end()) dc = it->second;
     }
-    if (!dc || !dc->vkCreateSwapchainKHR) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!dc || !dc->table.vkCreateSwapchainKHR) return VK_ERROR_INITIALIZATION_FAILED;
 
     // Native HIP supports display-referred SDR, linear scRGB/BT.709 FP16,
     // and PQ/BT.2020 HDR10. Other transfer/primary combinations need their
@@ -1465,13 +1430,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
         SupportedFormat(pCreateInfo->imageFormat))
         m.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
-    VkResult res = dc->vkCreateSwapchainKHR(device, &m, pAllocator, pSwapchain);
+    VkResult res = dc->table.vkCreateSwapchainKHR(device, &m, pAllocator, pSwapchain);
     if (res != VK_SUCCESS || dc->inert || !LayerEnabled()) return res;
 
     uint32_t count = 0;
-    dc->vkGetSwapchainImagesKHR(device, *pSwapchain, &count, nullptr);
+    dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, nullptr);
     std::vector<VkImage> images(count);
-    dc->vkGetSwapchainImagesKHR(device, *pSwapchain, &count, images.data());
+    dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, images.data());
 
     SwapchainState sc{};
     sc.images = std::move(images);
@@ -1511,23 +1476,23 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
     auto it = dc->swapchains.find(swapchain);
     if (it != dc->swapchains.end()) {
         lk.unlock();
-        if (dc->vkDeviceWaitIdle) {
+        if (dc->table.vkDeviceWaitIdle) {
             std::lock_guard<std::mutex> network(dc->networkSubmit);
-            dc->vkDeviceWaitIdle(device);
+            dc->table.vkDeviceWaitIdle(device);
         }
         lk.lock();
         SwapchainState& sc = it->second;
         sc.comp.reset();
-        if (sc.fenceLeg1) dc->vkDestroyFence(device, sc.fenceLeg1, nullptr);
-        if (sc.fenceLeg2) dc->vkDestroyFence(device, sc.fenceLeg2, nullptr);
+        if (sc.fenceLeg1) dc->table.vkDestroyFence(device, sc.fenceLeg1, nullptr);
+        if (sc.fenceLeg2) dc->table.vkDestroyFence(device, sc.fenceLeg2, nullptr);
         for (VkSemaphore semaphore : sc.leg2Done) dc->table.vkDestroySemaphore(device, semaphore, nullptr);
-        if (sc.repaintFence) dc->vkDestroyFence(device, sc.repaintFence, nullptr);
-        if (sc.pool) dc->vkDestroyCommandPool(device, sc.pool, nullptr);
+        if (sc.repaintFence) dc->table.vkDestroyFence(device, sc.repaintFence, nullptr);
+        if (sc.pool) dc->table.vkDestroyCommandPool(device, sc.pool, nullptr);
         if (dc->inLayerLast == &sc) dc->inLayerLast = nullptr;
         dc->swapchains.erase(it);
     }
     lk.unlock();
-    if (dc->vkDestroySwapchainKHR) dc->vkDestroySwapchainKHR(device, swapchain, pAllocator);
+    if (dc->table.vkDestroySwapchainKHR) dc->table.vkDestroySwapchainKHR(device, swapchain, pAllocator);
 }
 
 // ---------------------------------------------------------------------------
@@ -1569,19 +1534,19 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
     cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     cpci.queueFamilyIndex = family;
-    if (dc->vkCreateCommandPool(d, &cpci, nullptr, &sc.pool) != VK_SUCCESS) return false;
+    if (dc->table.vkCreateCommandPool(d, &cpci, nullptr, &sc.pool) != VK_SUCCESS) return false;
     VkCommandBufferAllocateInfo cbai{};
     cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
     cbai.commandPool = sc.pool; cbai.commandBufferCount = 1;
-    if (dc->vkAllocateCommandBuffers(d, &cbai, &sc.cb) != VK_SUCCESS) return false;
+    if (dc->table.vkAllocateCommandBuffers(d, &cbai, &sc.cb) != VK_SUCCESS) return false;
     if (!SetLoaderData(dc, sc.cb)) {
         Log("[layer] vkSetDeviceLoaderData failed for the present command buffer");
         return false;
     }
     VkFenceCreateInfo fci{};
     fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    if (dc->vkCreateFence(d, &fci, nullptr, &sc.fenceLeg1) != VK_SUCCESS) return false;
-    if (dc->vkCreateFence(d, &fci, nullptr, &sc.fenceLeg2) != VK_SUCCESS) return false;
+    if (dc->table.vkCreateFence(d, &fci, nullptr, &sc.fenceLeg1) != VK_SUCCESS) return false;
+    if (dc->table.vkCreateFence(d, &fci, nullptr, &sc.fenceLeg2) != VK_SUCCESS) return false;
     VkSemaphoreCreateInfo sci{};
     sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     sc.leg2Done.resize(sc.images.size());
@@ -1626,7 +1591,7 @@ static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
 static bool BeginLeg(DeviceChain* dc, VkCommandBuffer cb) {
     static constexpr VkCommandBufferBeginInfo kOnce{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO, nullptr,
                                                      VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, nullptr };
-    return NoteVk(dc, dc->vkBeginCommandBuffer(cb, &kOnce), "vkBeginCommandBuffer");
+    return NoteVk(dc, dc->table.vkBeginCommandBuffer(cb, &kOnce), "vkBeginCommandBuffer");
 }
 
 // A fence wait does not make device writes visible to the host, and the host reads what the legs
@@ -1635,18 +1600,18 @@ static bool SubmitLeg(DeviceChain* dc, VkQueue queue, const VkSubmitInfo& si, Vk
     static constexpr VkMemoryBarrier kToHost{ VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr,
                                               VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_HOST_READ_BIT };
     VkCommandBuffer cb = si.pCommandBuffers[0];
-    dc->vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &kToHost,
-                             0, nullptr, 0, nullptr);
-    if (!NoteVk(dc, dc->vkEndCommandBuffer(cb), "vkEndCommandBuffer")) return false;
-    if (!NoteVk(dc, dc->vkQueueSubmit(queue, 1, &si, fence), "vkQueueSubmit")) return false;
+    dc->table.vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT, 0, 1, &kToHost,
+                                   0, nullptr, 0, nullptr);
+    if (!NoteVk(dc, dc->table.vkEndCommandBuffer(cb), "vkEndCommandBuffer")) return false;
+    if (!NoteVk(dc, dc->table.vkQueueSubmit(queue, 1, &si, fence), "vkQueueSubmit")) return false;
     if (waitsConsumed && si.waitSemaphoreCount != 0) *waitsConsumed = true;
     return true;
 }
 
 static bool WaitLeg(DeviceChain* dc, VkFence fence) {
-    if (!NoteVk(dc, dc->vkWaitForFences(dc->self, 1, &fence, VK_TRUE, UINT64_MAX), "vkWaitForFences"))
+    if (!NoteVk(dc, dc->table.vkWaitForFences(dc->self, 1, &fence, VK_TRUE, UINT64_MAX), "vkWaitForFences"))
         return false;
-    dc->vkResetFences(dc->self, 1, &fence);
+    dc->table.vkResetFences(dc->self, 1, &fence);
     return true;
 }
 
@@ -1718,7 +1683,7 @@ static DlsslopNetwork* OpenNetwork(DeviceChain* dc, const SwapchainState& sc, Vk
     device.unlockQueue = [](void* context) { static_cast<DeviceChain*>(context)->networkSubmit.unlock(); };
     device.context = dc;
     device.physicalDispatch = dc->instance->next_gipa;
-    dc->instance->vkGetPhysicalDeviceMemoryProperties(dc->physical, &device.memory);
+    dc->instance->table.vkGetPhysicalDeviceMemoryProperties(dc->physical, &device.memory);
     device.log = NetworkLog;
     DlsslopNetwork* network = g_network.open(&device);
     if (network)
@@ -1777,7 +1742,7 @@ static bool ProcessInLayer(DeviceChain* dc, SwapchainState& sc, VkQueue queue, u
     VkCommandBuffer cb = sc.cb;
     if (!BeginLeg(dc, cb)) return false;
     if (!sc.comp->RecordCapture(cb, sc.images[index], fs)) {
-        dc->vkEndCommandBuffer(cb);
+        dc->table.vkEndCommandBuffer(cb);
         return false;
     }
     // Past the capture, a failure submits what was recorded, as leg 1 alone would be: the
@@ -1795,7 +1760,6 @@ static bool ProcessInLayer(DeviceChain* dc, SwapchainState& sc, VkQueue queue, u
         NetworkFailed(dc);
         return salvage(false);
     }
-    sc.comp->MarkModelFrame();
     if (!sc.comp->RecordCompose(cb, sc.images[index], fs)) return salvage(true);
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = &sc.leg2Done[index];
@@ -1973,7 +1937,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
     // ---- leg 1: the frame the model is shown ----
     if (!BeginLeg(dc, cb)) return false;
     if (!sc.comp->RecordCapture(cb, sc.images[index], fs)) {
-        dc->vkEndCommandBuffer(cb);
+        dc->table.vkEndCommandBuffer(cb);
         return false;
     }
     // This one fence is real: the proxy the helper is about to read is written by these commands,
@@ -1994,14 +1958,13 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
         // what gets presented and nothing else is owed.
         return false;
     }
-    sc.comp->MarkModelFrame();
     sc.comp->SetCaptureInference(dc->shm.hdr->seq_req.load());
     const double tHelper = time ? NowMs() : 0.0;
 
     // ---- leg 2: the answer, composed back ----
     if (!BeginLeg(dc, cb)) return false;
     if (!sc.comp->RecordCompose(cb, sc.images[index], fs)) {
-        dc->vkEndCommandBuffer(cb);
+        dc->table.vkEndCommandBuffer(cb);
         return false;
     }
     // No CPU wait. The present waits on this semaphore, so the image is composed before it is shown
@@ -2043,7 +2006,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
             }
         }
     }
-    if (!dc || !dc->vkQueuePresentKHR) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!dc || !dc->table.vkQueuePresentKHR) return VK_ERROR_INITIALIZATION_FAILED;
     dc->lastPresentMs.store(NowMs(), std::memory_order_relaxed);
 
     // Whether this call's wait semaphores have already been consumed by a submit of ours. They are
@@ -2062,7 +2025,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
     if (!dc->inert && LayerEnabled()) {
         lk = std::unique_lock<std::mutex>(dc->lock);
         PollHotkeys(dc);
-        if (!ShmNeuralEnabled(dc->shm)) return dc->vkQueuePresentKHR(queue, pPresentInfo);
+        if (!ShmNeuralEnabled(dc->shm)) return dc->table.vkQueuePresentKHR(queue, pPresentInfo);
         uint32_t family = 0;
         auto qit = dc->queueFamilies.find(queue);
         if (qit != dc->queueFamilies.end()) family = qit->second;
@@ -2126,14 +2089,14 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
         }
     }
 
-    if (!waitsConsumed && !composedSem) return dc->vkQueuePresentKHR(queue, pPresentInfo);
+    if (!waitsConsumed && !composedSem) return dc->table.vkQueuePresentKHR(queue, pPresentInfo);
 
     // pNext is carried through untouched: present ids, present timing and the rest belong to the
     // caller and none of them are about semaphores.
     VkPresentInfoKHR pi = *pPresentInfo;
     pi.waitSemaphoreCount = composedSem ? 1u : 0u;
     pi.pWaitSemaphores = &composedSem;
-    return dc->vkQueuePresentKHR(queue, &pi);
+    return dc->table.vkQueuePresentKHR(queue, &pi);
 }
 
 static DeviceChain* DeviceForQueue(VkQueue queue) {
@@ -2149,49 +2112,49 @@ static DeviceChain* DeviceForQueue(VkQueue queue) {
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueSubmit(VkQueue queue, uint32_t submitCount,
                                                         const VkSubmitInfo* pSubmits, VkFence fence) {
     DeviceChain* dc = DeviceForQueue(queue);
-    if (!dc || !dc->vkQueueSubmit) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!dc || !dc->table.vkQueueSubmit) return VK_ERROR_INITIALIZATION_FAILED;
     std::lock_guard<std::mutex> lk(dc->lock);
-    return dc->vkQueueSubmit(queue, submitCount, pSubmits, fence);
+    return dc->table.vkQueueSubmit(queue, submitCount, pSubmits, fence);
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueSubmit2(VkQueue queue, uint32_t submitCount,
                                                          const VkSubmitInfo2* pSubmits, VkFence fence) {
     DeviceChain* dc = DeviceForQueue(queue);
-    if (!dc || !dc->vkQueueSubmit2) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!dc || !dc->table.vkQueueSubmit2) return VK_ERROR_INITIALIZATION_FAILED;
     std::lock_guard<std::mutex> lk(dc->lock);
-    return dc->vkQueueSubmit2(queue, submitCount, pSubmits, fence);
+    return dc->table.vkQueueSubmit2(queue, submitCount, pSubmits, fence);
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueWaitIdle(VkQueue queue) {
     DeviceChain* dc = DeviceForQueue(queue);
-    if (!dc || !dc->vkQueueWaitIdle) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!dc || !dc->table.vkQueueWaitIdle) return VK_ERROR_INITIALIZATION_FAILED;
     std::lock_guard<std::mutex> lk(dc->lock);
-    return dc->vkQueueWaitIdle(queue);
+    return dc->table.vkQueueWaitIdle(queue);
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueSubmit2KHR(VkQueue queue, uint32_t submitCount,
                                                             const VkSubmitInfo2* pSubmits, VkFence fence) {
     DeviceChain* dc = DeviceForQueue(queue);
-    if (!dc || !dc->vkQueueSubmit2KHR) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!dc || !dc->table.vkQueueSubmit2KHR) return VK_ERROR_INITIALIZATION_FAILED;
     std::lock_guard<std::mutex> lk(dc->lock);
-    return dc->vkQueueSubmit2KHR(queue, submitCount, pSubmits, fence);
+    return dc->table.vkQueueSubmit2KHR(queue, submitCount, pSubmits, fence);
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueBindSparse(VkQueue queue, uint32_t bindInfoCount,
                                                             const VkBindSparseInfo* pBindInfo, VkFence fence) {
     DeviceChain* dc = DeviceForQueue(queue);
-    if (!dc || !dc->vkQueueBindSparse) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!dc || !dc->table.vkQueueBindSparse) return VK_ERROR_INITIALIZATION_FAILED;
     std::lock_guard<std::mutex> lk(dc->lock);
-    return dc->vkQueueBindSparse(queue, bindInfoCount, pBindInfo, fence);
+    return dc->table.vkQueueBindSparse(queue, bindInfoCount, pBindInfo, fence);
 }
 
 // A device wait may not overlap a submit to any of its queues, and the repaint and the network's
 // build submit under the lock.
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_DeviceWaitIdle(VkDevice device) {
     DeviceChain* dc = FindDevice(device);
-    if (!dc || !dc->vkDeviceWaitIdle) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!dc || !dc->table.vkDeviceWaitIdle) return VK_ERROR_INITIALIZATION_FAILED;
     std::lock_guard<std::mutex> lk(dc->lock);
-    return dc->vkDeviceWaitIdle(device);
+    return dc->table.vkDeviceWaitIdle(device);
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_AcquireNextImageKHR(VkDevice device, VkSwapchainKHR swapchain,
@@ -2203,9 +2166,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_AcquireNextImageKHR(VkDevice device, 
         auto it = g_devices.find(device);
         if (it != g_devices.end()) dc = it->second;
     }
-    if (!dc || !dc->vkAcquireNextImageKHR) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!dc || !dc->table.vkAcquireNextImageKHR) return VK_ERROR_INITIALIZATION_FAILED;
     std::lock_guard<std::mutex> lk(dc->lock);
-    return dc->vkAcquireNextImageKHR(device, swapchain, timeout, semaphore, fence, pImageIndex);
+    return dc->table.vkAcquireNextImageKHR(device, swapchain, timeout, semaphore, fence, pImageIndex);
 }
 
 // ---------------------------------------------------------------------------

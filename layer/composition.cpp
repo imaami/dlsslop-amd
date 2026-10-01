@@ -220,11 +220,9 @@ void Composition::DropAll() {
     _superDown.reset();
     _superSample = false;
     _width = _height = _modelW = _modelH = 0;
-    _haveModel = false;
     _frameCaptured = false;
     _captureRecorded = false;
     _measuredWhitePoint = 0.0f;
-    _meterSteadiness = 0.0f;
 }
 
 bool Composition::FormatSupportsStorage(VkFormat format) const {
@@ -1339,7 +1337,6 @@ void Composition::ConsumeMeter() {
     if (!_meterGpu || !_meterMirror.mapped) return;
     const float* mirror = (const float*) _meterMirror.mapped;
     _measuredWhitePoint = mirror[1];
-    _meterSteadiness = mirror[3];
 }
 
 }  // namespace dlssnr

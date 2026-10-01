@@ -25,8 +25,9 @@ namespace dlssnr {
     X(vkGetPhysicalDeviceQueueFamilyProperties)                                                    \
     X(vkGetPhysicalDeviceSurfaceCapabilitiesKHR)                                                   \
     X(vkEnumerateDeviceExtensionProperties)                                                        \
-    X(vkGetPhysicalDeviceMemoryProperties2)                                                        \
-    X(vkGetPhysicalDeviceProperties2)
+    X(vkGetPhysicalDeviceProperties2)                                                              \
+    X(vkGetPhysicalDeviceFeatures2)                                                                \
+    X(vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR)
 
 #define DLSSNR_DEVICE_FN_LIST(X)                                                                   \
     X(vkDestroyDevice)                                                                             \
@@ -41,9 +42,7 @@ namespace dlssnr {
     X(vkQueueWaitIdle)                                                                             \
     X(vkCreateCommandPool)                                                                         \
     X(vkDestroyCommandPool)                                                                        \
-    X(vkResetCommandPool)                                                                          \
     X(vkAllocateCommandBuffers)                                                                    \
-    X(vkFreeCommandBuffers)                                                                        \
     X(vkBeginCommandBuffer)                                                                        \
     X(vkEndCommandBuffer)                                                                          \
     X(vkCreateFence)                                                                               \
@@ -92,16 +91,11 @@ X(vkCmdBindPipeline)                                                            
     X(vkCmdDispatch)                                                                             \
     X(vkCmdPushConstants)                                                                        \
     X(vkCmdFillBuffer)                                                                           \
-    X(vkGetMemoryHostPointerPropertiesEXT)                                                       \
     X(vkGetMemoryFdKHR)                                                                              \
-    X(vkGetSemaphoreFdKHR)                                                                           \
-    X(vkImportSemaphoreFdKHR)                                                                        \
-    X(vkGetSemaphoreCounterValueKHR)                                                                 \
-    X(vkCreateQueryPool)                                                                           \
-    X(vkDestroyQueryPool)                                                                          \
-    X(vkCmdResetQueryPool)                                                                         \
-    X(vkCmdWriteTimestamp)                                                                         \
-    X(vkGetQueryPoolResults)
+    X(vkAcquireNextImageKHR)                                                                       \
+    X(vkReleaseSwapchainImagesEXT)                                                                 \
+    X(vkQueueSubmit2KHR)                                                                           \
+    X(vkQueueBindSparse)
 
 struct InstanceTable {
     PFN_vkGetInstanceProcAddr next_gipa = nullptr;
@@ -130,7 +124,7 @@ struct DeviceTable {
 };
 
 // What the composition needs to exist at all. Anything absent from this list is either optional
-// (timestamps, queue2) or already checked by the caller.
+// (queue2) or already checked by the caller.
 inline bool DeviceTableComplete(const DeviceTable& t) {
     return t.vkCreateImage && t.vkCreateImageView && t.vkAllocateMemory && t.vkBindImageMemory &&
            t.vkCreateBuffer && t.vkBindBufferMemory && t.vkMapMemory && t.vkCreateSampler &&

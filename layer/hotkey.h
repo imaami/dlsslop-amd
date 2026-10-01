@@ -50,8 +50,6 @@ class Hotkeys {
     // drains a non-blocking read, and the X11 one is a single round trip against a cached connection.
     bool Pressed(uint32_t keyCode);
 
-    const char* Backend() const { return _backend; }
-
   private:
     bool OpenEvdev();
     void RescanEvdev();
@@ -60,7 +58,6 @@ class Hotkeys {
     bool PressedX11(uint32_t keyCode);
 
     bool _opened = false;
-    const char* _backend = "none";
 
     std::vector<int> _fds;              // evdev keyboards
     std::vector<uint32_t> _pending;     // codes seen down since the last ask

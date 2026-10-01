@@ -111,12 +111,10 @@ void Hotkeys::Open() {
     const bool wantX11 = !forced || std::strcmp(forced, "x11") == 0;
 
     if (wantEvdev && OpenEvdev()) {
-        _backend = "evdev";
         Log("[hotkey] watching %zu keyboard(s) through evdev", _fds.size());
         return;
     }
     if (wantX11 && OpenX11()) {
-        _backend = "x11";
         Log("[hotkey] watching XInput2 raw keys on %s", getenv("DISPLAY"));
         return;
     }

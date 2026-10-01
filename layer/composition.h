@@ -187,9 +187,6 @@ class Composition {
     // read, so it restores exactly what the application drew.
     bool RecordRestore(VkCommandBuffer cb, VkImage swapchainImage);
 
-    bool HasModelFrame() const { return _haveModel; }
-    void MarkModelFrame() { _haveModel = true; }
-
     // Write this many matched before/after pairs, starting with the next composed frame.
     void RequestCapture(uint32_t frames, uint32_t controlSeq) { _capture.Begin(frames, controlSeq); }
     void SetCaptureInference(uint32_t seq) { _captureMetadata.inferenceSeq = seq; }
@@ -269,7 +266,6 @@ class Composition {
     bool _linearHdr = false;
     bool _hdrProxy = false;
     uint32_t _hdrTransfer = 0;
-    bool _haveModel = false;
 
     Image _frame{}, _proxy{}, _work{}, _model{}, _composed{};
 
@@ -301,7 +297,6 @@ class Composition {
     VkDescriptorSet _meterDescriptorSet = VK_NULL_HANDLE;
     VkSampler _meterSampler = VK_NULL_HANDLE;
     float _measuredWhitePoint = 0.0f;
-    float _meterSteadiness = 0.0f;
     HostBuffer _download{}, _upload{}, _captureBuf{};
 
     // The exported native transport (EnableExport).

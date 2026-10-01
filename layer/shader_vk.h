@@ -13,17 +13,6 @@
 
 namespace dlssnr {
 
-// Matches NVSDK_NGX_ImageViewInfo_VK, as it does upstream, so an image described here can be handed
-// straight to NGX by anything that later wants to.
-struct VkImageInfo {
-    VkImageView ImageView = VK_NULL_HANDLE;
-    VkImage Image = VK_NULL_HANDLE;
-    VkImageSubresourceRange SubresourceRange {};
-    VkFormat Format = VK_FORMAT_UNDEFINED;
-    unsigned int Width = 0;
-    unsigned int Height = 0;
-};
-
 class Shader_Vk {
   protected:
     std::string _name;
@@ -40,7 +29,6 @@ class Shader_Vk {
 
     VkDescriptorPool _descriptorPool = VK_NULL_HANDLE;
     std::vector<VkDescriptorSet> _descriptorSets;
-    uint32_t _maxFramesInFlight = 3;
 
     VkBuffer _constantBuffer = VK_NULL_HANDLE;
     VkDeviceMemory _constantBufferMemory = VK_NULL_HANDLE;
@@ -63,7 +51,6 @@ class Shader_Vk {
                        VkSamplerAddressMode addressMode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
 
   public:
-    bool IsInit() const { return _init; }
     bool CanRender() const { return _init && _pipeline != VK_NULL_HANDLE; }
 
     Shader_Vk(std::string InName, const DeviceTable* InVk, const InstanceTable* InInstance, VkDevice InDevice,

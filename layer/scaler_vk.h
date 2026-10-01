@@ -56,9 +56,6 @@ class ScalerVk : public Shader_Vk {
              VkPhysicalDevice InPhysicalDevice, bool InUpsample, uint32_t InFilter);
     ~ScalerVk() override = default;
 
-    bool Upsample() const { return _upsample; }
-    uint32_t Filter() const { return _filter; }
-
     // Source must be in SHADER_READ_ONLY_OPTIMAL and destination in GENERAL; the caller states both,
     // as everywhere else here. Records the dispatch and the barrier after it.
     bool Dispatch(VkCommandBuffer cb, VkImageView source, VkImageView dest, uint32_t srcWidth,
