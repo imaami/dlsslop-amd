@@ -259,15 +259,12 @@ Result<std::vector<Dispatch>> merge(const std::vector<Dispatch>& d, Blob& blob, 
             windows += rec[k].windows;
             most = std::max(most, rec[k].windows);
         }
-        // Workgroups by the width's occupancy: C=64 runs of up to 4096 windows
-        // a layer take 384. A downsampling or upsampling run of C=128 or 256
-        // of 65 to kPersistOneMax windows a layer takes one an item, which
-        // leaves its straggler queue nothing.
-        const uint32_t bit = c == 64 ? 1 : c == 128 ? 2 : 4, cap = c == 64 ? 512 : c == 128 ? 256 : 128,
-                       preset = c == 64 && most <= 4096 ? 384 : 0;
-        uint32_t groups = std::min(most, preset ? preset : cap);
-        const bool one = (kPersistOneMask & bit) && most > 64 && most <= kPersistOneMax && !preset;
-        if (one) groups = windows;
+        // Workgroups by the width's occupancy. A downsampling or upsampling
+        // run of C=128 or 256 of 65 to kPersistOneMax windows a layer takes
+        // one an item, which leaves its straggler queue nothing.
+        const uint32_t bit = c == 64 ? 1 : c == 128 ? 2 : 4, cap = c == 64 ? 512 : c == 128 ? 256 : 128;
+        const bool one = (kPersistOneMask & bit) && most > 64 && most <= kPersistOneMax;
+        const uint32_t groups = one ? windows : std::min(most, cap);
         PushPersist p{};
         std::vector<uint32_t> words(rec.size() * sizeof(PersistRec) / 4);
         std::memcpy(words.data(), rec.data(), words.size() * 4);
