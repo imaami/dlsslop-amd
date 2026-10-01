@@ -77,6 +77,11 @@ Result<std::vector<Dispatch>> merge(const std::vector<Dispatch>& lowered, Blob& 
 // (upstream: the arena probe, nr_graph.cpp:3657-3799). CHAINS keeps a value a
 // stretch of tile-counted steps reads until its end.
 Result<uint64_t> share(const std::vector<Dispatch>& dispatches, bool chains, Values& values);
+// DISPATCHES, which end with the post block, without the post block's window
+// rows that start past the picture's HEIGHT, nor the window rows of the plain
+// C=32 layers before it that only those read (upstream: the dead rows of
+// NrSession::build, NR_DEAD_ROWS).
+void trim(std::vector<Dispatch>& dispatches, uint32_t height);
 // Tile counters in place of the barriers between DISPATCHES that they can
 // replace: their tables and records put in BLOB, their counters after the
 // ARENA's end, which grows, and AFTER kNothing for each dispatch they order

@@ -403,6 +403,28 @@ Result<uint64_t> share(const std::vector<Dispatch>& dispatches, bool chains, Val
     return align(high, 256);
 }
 
+void trim(std::vector<Dispatch>& d, uint32_t height)
+{
+    // The post block's window rows that start inside the picture: 8 wy + 4
+    // shift_y < HEIGHT.
+    Dispatch& post = d.back();
+    const auto f = load<PushFSwin>(post);
+    post.groups[1] = std::min(post.groups[1], uint32_t(std::max(1, (int(height) - 4 * f.shift_y + 7) / 8)));
+    // The rows of its input, at half its resolution, that those read; then,
+    // back through the plain C=32 layers that write that input, each read by
+    // the next alone, the window rows that start inside the rows read.
+    int rows = (8 * int(post.groups[1]) + 4 * f.shift_y + 1) / 2;
+    uint32_t input = load<PushUps>(post, sizeof f / 4).p_off;
+    for (size_t i = d.size() - 1; i-- && d[i].kernel == Kernel::kFswin32;) {
+        const auto g = load<PushFSwin>(d[i]);
+        const uint32_t groups = std::min(d[i].groups[1], uint32_t(std::max(1, (rows - 4 * g.shift_y + 7) / 8)));
+        if (g.o_off != input || groups == d[i].groups[1]) break;
+        d[i].groups[1] = groups;
+        rows = 8 * int(groups) + 4 * g.shift_y;
+        input = g.x_off;
+    }
+}
+
 Result<uint32_t> chain(std::vector<Dispatch>& d, Blob& blob, uint64_t& arena)
 {
     arena = align(arena, 256);

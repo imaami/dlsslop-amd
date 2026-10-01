@@ -1056,6 +1056,7 @@ Result<Plan> plan(uint32_t width, uint32_t height, uint64_t storage)
                         return a.kernel == b.kernel && a.first == b.first && a.last == b.last;
                     }))
         return fail("network plan: the network lowered differently over the shared arena");
+    trim(dispatches, height);
     auto counters = chain(dispatches, blob, arena);
     if (!counters && counters.error().rejected) return refuse(width, height, counters.error().what);
     p.counter_words = DLSSLOP_TRY(std::move(counters));
