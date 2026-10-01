@@ -23,17 +23,21 @@ the Vulkan network's launch plan against upstream's graph build: every dispatch
 with its push constants and the activation arena's values and sizes, and at 8
 of them the weight blob packed from a synthetic model pack. Frames that
 upstream fails on, and frames whose arena overflows 32-bit offsets, must be
-rejected. The Vulkan network's digests and goldens were recorded from the
-DLSSNR-AMD fork's host code at `3dfdddc`, which the build neither fetches nor
-compiles. CTest also checks each network kernel's push block and bindings in
-the built SPIR-V against the plan, and the shader build's markers and the model
+rejected. The Vulkan network's weight digests were recorded from the
+DLSSNR-AMD fork's host code at `3dfdddc`, and its plan goldens from the fork's
+host code at `a75ac49` (DLSSNR-AMD `82560c4`) with the schedule changes of
+upstream's `b1419b0` that the port does not take yet switched off. The build
+neither fetches nor compiles that code. CTest also checks each network
+kernel's push block and bindings in the built SPIR-V against the plan, and the
+shader build's markers, the defines it builds the pipelines with and the model
 tools' entry list against what the plan expects. It checks that two writers
-replacing the Vulkan network's pipeline cache at once, as dlsslopd and a game's
-in-layer network can, never leave a reader without the file or with part of
-one. It records the Vulkan network's frames on a fake device: a frame that is
-not submitted must leave the motion history as it was, and the first frame
-after a build must move the network's images into their layouts, as must the
-next one when that frame was not submitted. A network reshaped for another
+replacing the Vulkan network's pipeline cache at once, as dlsslopd and a
+game's in-layer network can, never leave a reader without the file or with
+part of one. It records the Vulkan network's
+frames on a fake device: a frame that is not submitted must leave the motion
+history as it was, and the first frame after a build must move the network's
+images into their layouts, as must the next one when that frame was not
+submitted. A network reshaped for another
 shape of its extent must record no command and make no pipeline, and then
 record the frames of a network built for that shape. Under `strace`, it
 checks that the files `install.py` installs for the Vulkan network are those

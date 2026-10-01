@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Check the Vulkan network's plan against the fork's shader build and model tools: the markers that
-build_network.py writes beside the SPIR-V from pipelines.json must be those the plan expects, and every
-model entry the plan reads must be one that the model tools extract."""
+build_network.py writes beside the SPIR-V from pipelines.json must be those the plan expects, the pipelines
+must be built with the defines the plan assumes, and every model entry the plan reads must be one that the
+model tools extract."""
 import argparse
 import json
 from pathlib import Path
@@ -25,15 +26,24 @@ def run(*options):
 
 
 # build_network.py writes each marker as its lines, or its one line.
-built = [f'{name} {line}' for name, text in json.loads(args.pipelines.read_text())['markers'].items()
+network = json.loads(args.pipelines.read_text())
+built = [f'{name} {line}' for name, text in network['markers'].items()
          for line in (text if isinstance(text, list) else [text])]
 expected = run('--markers')
 assert sorted(built) == sorted(expected) and [l for l in built if l.startswith('shader-constants.txt ')] == \
     [l for l in expected if l.startswith('shader-constants.txt ')], (
     sorted(set(built) - set(expected)), sorted(set(expected) - set(built)))
 
+# Each define the plan assumes, "pipeline define value", as pipelines.json builds that pipeline.
+assumed = run('--defines')
+assert assumed
+for line in assumed:
+    pipeline, define, value = line.split()
+    defines = dict(d.split('=', 1) for d in network['pipelines'][pipeline]['defines'] if '=' in d)
+    assert defines.get(define) == value, (line, defines.get(define))
+
 extracted = set(args.model_files.read_text().split())
 read = run('--entries')
 assert read and set(read) <= extracted, sorted(set(read) - extracted)
-print(f'vulkan-constants: {len(expected)} markers as the shader build writes them; '
-      f'{len(read)} model entries the model tools extract')
+print(f'vulkan-constants: {len(expected)} markers as the shader build writes them; {len(assumed)} defines as '
+      f'it builds the pipelines with; {len(read)} model entries the model tools extract')

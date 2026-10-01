@@ -19,7 +19,7 @@
     "vulkan": {
       "path": "external/vulkan",
       "url": "https://github.com/imaami/DLSSNR-AMD.git",
-      "commit": "49dffcdbee2ffe3aa6133fb7ef73ffd865139cf8",
+      "commit": "a75ac49b0c2165e77fe116d85917cb293b03b49b",
       "sources": [
         "LICENSE",
         "linux/build/build_network.py",
@@ -54,6 +54,7 @@
         "linux/shaders/rdna4/include/coherent_act.glsl",
         "linux/shaders/rdna4/include/coopmm.glsl",
         "linux/shaders/rdna4/include/fswin_body.glsl",
+        "linux/shaders/rdna4/include/fswin_hw_attn.glsl",
         "linux/shaders/rdna4/include/image_input.glsl",
         "linux/shaders/rdna4/include/image_noise.glsl",
         "linux/shaders/rdna4/include/nr_chain.glsl",

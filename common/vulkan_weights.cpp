@@ -62,14 +62,14 @@ constexpr struct {
     {0x83, 2}, {0x81, 1}, {0x80, 1}, {0x81, 1}, {0x80, 897}, {0xff, 64}};
 
 // A C=512 FFN record, and its parts as matrices of eight groups of rows
-// (upstream: A, Q0 and Q2 of the F_FFWD3 lowering, nr_graph.cpp:2706-2747).
+// (upstream: A, Q0 and Q2 of the F_FFWD3 lowering, nr_graph.cpp:2852-2893).
 constexpr size_t kFfwdRecord = 524288;
 constexpr struct {
     uint16_t rows, cols;
 } kFfwdParts[] = {{8 * 64, 512}, {8 * 256, 64}, {8 * 64, 256}};
 // A ViT QKV record: 128 bytes of scales, then Q, K and V of 1024 x 1024.
 constexpr size_t kQkvScales = 128, kQkvRows = 3072, kQkvCols = 1024;
-// Math profile 3's exponent affine on a Swin position bias (nr_graph.cpp:1725-1726).
+// Math profile 3's exponent affine on a Swin position bias (nr_graph.cpp:1775-1776).
 constexpr float kBiasScale = 0.044921875f, kBiasOffset = 1.30078125f;
 
 uint16_t load_half(const uint8_t* p)
@@ -175,7 +175,7 @@ struct Packer {
     }
     // S's COUNT binary16 values (upstream: load_f16): the first ones, or with
     // kPadded those from the ninth on when the first eight are zero
-    // (nr_graph.cpp:1733-1750).
+    // (nr_graph.cpp:1817-1834).
     Result<const uint8_t*> halves(const Segment& s, size_t count)
     {
         const auto bytes = DLSSLOP_TRY(model.read(s.source, entry));
@@ -265,7 +265,7 @@ Result<void> Packer::put(const Segment& s, uint8_t* out)
     case Recipe::kBytes: std::memcpy(out, DLSSLOP_TRY(read(s, s.bytes)).data(), s.bytes); return {};
     case Recipe::kLift: {
         // The lift's [channel][k] as the input kernel addressed its packed
-        // operand (nr_graph.cpp:1988-1995).
+        // operand (nr_graph.cpp:2133-2140).
         const uint8_t* lift = DLSSLOP_TRY(read(s, s.bytes)).data();
         for (size_t ch = 0; ch < 32; ++ch)
             for (size_t k = 0; k < 16; ++k, out += 2) {
@@ -281,7 +281,7 @@ Result<void> Packer::put(const Segment& s, uint8_t* out)
 
 // With kGainTail, an entry of fewer values than the segment's is completed in
 // front by the last values of its layer's residual_scale
-// (nr_graph.cpp:2296-2331).
+// (nr_graph.cpp:2442-2477).
 Result<void> Packer::put_halves(const Segment& s, uint8_t* out)
 {
     const size_t count = s.bytes / 2;

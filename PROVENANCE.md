@@ -35,7 +35,7 @@ the commit listed below and are maintained in this repository.
 | Component | Upstream and base commit | Fork and pinned commit | License |
 |---|---|---|---|
 | Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) `ab722b091071d6d59df56f10d86d4f3005bcad86` | [imaami/DLSS5VKLayer](https://github.com/imaami/DLSS5VKLayer/tree/dlsslop-amd) `680ec8afb96cff206cf6a7608d3a559ca1e9c2f3`, imported | AGPL-3.0; embedded dependencies keep their notices |
-| Vulkan network's SPIR-V sources, shader build and model extractor, and the runtime that dlsslop-amd ports | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) `d1185d25141b1714d7837151b6fa782e6427568b` | [imaami/DLSSNR-AMD](https://github.com/imaami/DLSSNR-AMD/tree/dlsslop-amd-d1185d2) `49dffcdbee2ffe3aa6133fb7ef73ffd865139cf8` | MIT |
+| Vulkan network's SPIR-V sources, shader build and model extractor, and the runtime that dlsslop-amd ports | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) `82560c4fbfaac347fc5e22c22025191402ae916b` | [imaami/DLSSNR-AMD](https://github.com/imaami/DLSSNR-AMD/tree/dlsslop-amd-82560c4) `a75ac49b0c2165e77fe116d85917cb293b03b49b` | MIT |
 | AMD HIP kernels, and the scheduler that dlsslopd ports | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) `ad499a8199c9ce3678d83c9be58fe3bc1bef3498` | [imaami/dlss5-on-amd-9070xt-porting](https://github.com/imaami/dlss5-on-amd-9070xt-porting/tree/dlsslop-amd) `c1908317fb7e7ee9fe4884feba4a67220d93461f` | MIT |
 
 The import took these files of the layer fork at `680ec8a`. It changed only
@@ -132,11 +132,12 @@ dlsslop-amd's per-pass sharpening and color preservation
 (`linux/shaders/passes/pass_stages.comp`); the network mathematics are unchanged.
 The fork's host-side changes let the runtime load its model, SPIR-V and
 pipeline cache from explicit paths and record the new stages after every pass.
-The build fetches only the fork's SPIR-V sources, shader build, model tools and
-license; it neither fetches nor compiles the fork's host code
-(`linux/src/core`), which those changes modify. Of the 65 files that the shader
-build writes, `install.py` installs the 38 that the project's own host code
-names in its tables and reads.
+A frame with those stages does not take upstream's path that samples the
+caller's color in place. The build fetches only the fork's SPIR-V sources,
+shader build, model tools and license; it neither fetches nor compiles the
+fork's host code (`linux/src/core`), which those changes modify. Of the 74
+files that the shader build writes, `install.py` installs the 38 that the
+project's own host code names in its tables and reads.
 
 dlsslopd runs the AMD fork's kernels with its own host code.
 `backend/hip_weights.*`, `backend/hip_plan.*` and `backend/hip_network.*` port
@@ -175,15 +176,21 @@ network launches.
 dlsslopd and the in-layer network run the DLSSNR-AMD fork's SPIR-V with the
 project's own host code. `common/vulkan_weights.*`, `common/vulkan_plan.*`,
 `common/vulkan_schedule.*` and `common/vulkan_runtime.*` port the production
-path of the fork's `linux/src/core` (MIT) at `49dffcd`: `nr_runtime.cpp`,
+path of the fork's `linux/src/core` (MIT) at `a75ac49`: `nr_runtime.cpp`,
 `nr_graph.cpp`, `nrvk.hpp`, `nr_native_plan.cpp` with its layer table,
 `tinlayout.hpp` and `nr_activation_lut.hpp`, including the fork's changes to
 `nr_runtime.cpp`. For the frame formats, pass counts, stages and motion
 estimation that dlsslop-amd uses, the port records each frame's dispatches, push
 constants, barriers and copies as the fork's host code does, and it packs and
 uploads the weights byte for byte as upstream does; the network mathematics are
-unchanged. Like upstream, it takes the model's blend scale, by which the
-temporal post block weights the history, as a constant.
+unchanged. It does so with these schedule changes of upstream's `b1419b0`
+switched off, which it does not take yet: 512 workgroups for the C=64
+persistent runs, a 32x384 tile for the ViT's QKV, `gemmprojw` for the ViT's
+projections from 768 tokens on, no window rows of the post block below the
+picture, tile counters between four pairs of runs on big frames, and the
+kernels without the upper exponent clamp where the weights allow them. Like
+upstream, it takes the model's blend scale, by which the temporal post block
+weights the history, as a constant.
 Unlike upstream, it rejects frames whose working extent is not a
 multiple of 8, on which upstream's build fails, and frames whose activation
 arena needs offsets past 32 bits or does not fit the device's storage buffers,
@@ -211,7 +218,7 @@ than RGBA8 and RGBA16F, the GPU timing that `last_gpu_ms()` and
 `vulkan-plan-abi` and `vulkan-constants` check the fetched shaders and the model
 tools' entry list against the port. `common/vulkan_plan.h` holds the constants
 that the plan takes from `linux/build/arch/rdna4.sh` and from `nr_graph.cpp`'s
-defaults at `49dffcd`; `vulkan-constants` checks those that the markers in
+defaults at `a75ac49`; `vulkan-constants` checks those that the markers in
 `pipelines.json` record, and a change of the pin must re-check the rest.
 
 Preserve `layer/ATTRIBUTION.md` and all inherited notices of upstream

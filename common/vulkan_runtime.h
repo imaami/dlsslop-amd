@@ -125,7 +125,7 @@ struct Pipeline {
 //   after build() or reshape() moves every image there from UNDEFINED, and so
 //   does each frame after it until submitted() says one was submitted.
 // - The invalidate-only barriers between steps rely on gfx1201's caches
-//   below L2 being write-through (upstream: nr_graph.cpp:4230-4258); the
+//   below L2 being write-through (upstream: nr_graph.cpp:4660-4688); the
 //   steps that tile counters order rely on the queue starting consecutive
 //   dispatches' workgroups in order.
 // - The motion history's latch, parity and noise seed change only when

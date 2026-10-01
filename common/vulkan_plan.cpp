@@ -379,7 +379,7 @@ bool vit(const Row& r) { return r.family >= F::kVitExpand && r.family <= F::kVit
 void grow(uint64_t& at, uint64_t bytes) { at = std::max(at, bytes); }
 
 // Each value's size, and the bytes read past it (upstream: the vsize and
-// overread tables, nr_graph.cpp:1234-1345).
+// overread tables, nr_graph.cpp:1284-1395).
 void size_values(const Network& net, Values& v)
 {
     for (const Layer& l : net.layers) {
@@ -447,7 +447,7 @@ uint64_t place_value(Values& v, bool (&placed)[kKeys], int k, uint64_t at)
 }
 
 // Every value its own bytes: the layers' outputs in order, then the others by
-// key (upstream: the plain layout, nr_graph.cpp:1474-1486). A key that is not
+// key (upstream: the plain layout, nr_graph.cpp:1524-1536). A key that is not
 // sized stays at 0.
 void plain_layout(const Network& net, Values& v)
 {
@@ -460,7 +460,7 @@ void plain_layout(const Network& net, Values& v)
 
 // The lowering of the network's layers into dispatches, and of their weights
 // into the blob's segments (upstream: the loop of NrSession::build,
-// nr_graph.cpp:1677-3066), on the path dlsslopd's configuration takes.
+// nr_graph.cpp:1727-3254), on the path dlsslopd's configuration takes.
 class Lowering {
 public:
     Lowering(const Network& net, Values& values, Blob& blob) : net_(net), values_(values), blob_(blob) {}
@@ -560,7 +560,7 @@ Result<void> Lowering::run()
 }
 
 // A Swin body, and the pre and post blocks, downsampling and upsampling
-// around it (upstream: nr_graph.cpp:1684-2588).
+// around it (upstream: nr_graph.cpp:1734-2734).
 Result<void> Lowering::swin(const Layer& l)
 {
     using enum Suffix;
@@ -771,7 +771,7 @@ Result<void> Lowering::swin(const Layer& l)
 }
 
 // The decoder's input: a projection into binary16, then upsampled with the
-// encoder's skip added (upstream: nr_graph.cpp:2589-2653).
+// encoder's skip added (upstream: nr_graph.cpp:2735-2799).
 Result<void> Lowering::decoder(const Layer& l)
 {
     const Row& r = l.row;
@@ -810,7 +810,7 @@ Result<void> Lowering::decoder(const Layer& l)
 }
 
 // The ViT's global attention over its tokens, W x H of them, with the
-// temperatures of the QKV layer before it (upstream: nr_graph.cpp:2656-2705).
+// temperatures of the QKV layer before it (upstream: nr_graph.cpp:2802-2851).
 void Lowering::vit_attention(const Layer& l)
 {
     const Row& r = l.row;
@@ -827,7 +827,7 @@ void Lowering::vit_attention(const Layer& l)
     dispatches.push_back(d);
 }
 
-// The C=512 FFN, over the tile grid (upstream: nr_graph.cpp:2706-2775).
+// The C=512 FFN, over the tile grid (upstream: nr_graph.cpp:2852-2927).
 void Lowering::ffwd(const Layer& l)
 {
     const Row& r = l.row;
@@ -851,13 +851,14 @@ void Lowering::ffwd(const Layer& l)
 }
 
 // The C=512 windowed attention, its 16 heads split kAttentionSplit ways
-// (upstream: nr_graph.cpp:2776-2819).
+// (upstream: nr_graph.cpp:2928-2984).
 void Lowering::attention(const Layer& l)
 {
     const Row& r = l.row;
     auto source = [&](Suffix suffix) { return Source{Directory::kSplitSwin, r.block, r.layer, suffix}; };
     PushAttn p{};
-    p.w_off = put(1536 * 512, Recipe::kMatrix, 0, source(Suffix::kQkv), 256, 1536, 512);
+    // Its QKV matrix N-paired, as attn.comp reads it (NR_ATTN_WPAIR).
+    p.w_off = put(1536 * 512, Recipe::kMatrix, Segment::kNpair, source(Suffix::kQkv), 256, 1536, 512);
     p.b_off = put(16 * 16384, Recipe::kBias, 0, source(Suffix::kAttnPosBias), 16) / 4;
     p.s_off = put(64, Recipe::kBytes, Segment::kExact, source(Suffix::kTail), 16) / 4;
     p.x_off = off(x_src(l));
@@ -875,7 +876,7 @@ void Lowering::attention(const Layer& l)
 }
 
 // The GEMMs: the C=512 projections and head, and the ViT's layers
-// (upstream: nr_graph.cpp:2820-3066).
+// (upstream: nr_graph.cpp:2985-3254).
 Result<void> Lowering::gemm(const Layer& l)
 {
     const Row& r = l.row;

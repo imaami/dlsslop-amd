@@ -96,7 +96,7 @@ enum class Images : uint8_t { kNone, kInput, kOutput };
 // A kernel's SPIR-V stem, its storage buffers in binding order ('a' the
 // activation arena, 'w' the weight blob), its images, and the bytes of its
 // push-constant range (upstream: the Kernel::create calls of NrSession::build,
-// nr_graph.cpp:4057-4116).
+// nr_graph.cpp:4487-4546).
 struct KernelInfo {
     const char* stem;
     const char* buffers;
@@ -134,8 +134,8 @@ inline constexpr KernelInfo kKernels[] = {
 };
 static_assert(std::size(kKernels) == size_t(Kernel::kCount));
 
-// The push blocks, as upstream's host declares them (nr_graph.cpp:123 and
-// 732-814) and the GLSL does: the SPIR-V's contract, field for field. A fused
+// The push blocks, as upstream's host declares them (nr_graph.cpp:144 and
+// 776-858) and the GLSL does: the SPIR-V's contract, field for field. A fused
 // kernel's block is several of them in a row. A kernel that waits on or
 // signals tile counters takes one more word, the u32 index in the weight blob
 // of its record, or ~0 for none. Offsets name the activation arena and the
@@ -233,8 +233,8 @@ struct Source {
 };
 
 // How a segment of the weight blob is made from its entry. Each recipe is one
-// of the put() paths of upstream's NrSession::build (nr_graph.cpp:1650-3071,
-// 3315-3390 and 3643-3824) as the network takes it.
+// of the put() paths of upstream's NrSession::build (nr_graph.cpp:1700-3259,
+// 3525-3600 and 3966-4221) as the network takes it.
 enum class Recipe : uint8_t {
     kZeros,       // Zeros: the noise field that the build fills on the GPU,
                   // and the post block's unread gain.

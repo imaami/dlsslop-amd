@@ -5,4 +5,4 @@
 [submodule "vulkan"]
 	path = external/vulkan
 	url = https://github.com/imaami/DLSSNR-AMD.git
-	branch = dlsslop-amd-d1185d2
+	branch = dlsslop-amd-82560c4

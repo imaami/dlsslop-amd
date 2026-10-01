@@ -76,7 +76,7 @@ uint16_t recode_half(uint16_t half);
 // tin::tile_blocked).
 void tile_blocked(const uint8_t* matrix, size_t rows, size_t cols, uint8_t* out);
 // The same, then each pair of 16-row tiles interleaved in 8-byte runs
-// (upstream: pack_matrix in NrSession::build, nr_graph.cpp:3082-3093).
+// (upstream: pack_matrix in NrSession::build, nr_graph.cpp:3270-3281).
 void npair_blocked(const uint8_t* matrix, size_t rows, size_t cols, uint8_t* out);
 // The bytes of a C=512 FFN record that hold A[g][row][k], Q0[g][j][row] and
 // Q2[g][n][j], upstream's gathers.

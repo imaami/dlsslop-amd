@@ -69,18 +69,18 @@ struct Blob {
 
 // LOWERED with its Swin bodies at C>=64 merged into persistent runs, their
 // tables put in BLOB and their sync regions after the ARENA's end, which
-// grows (upstream: nr_graph.cpp:3156-3427). EPOCH is set when there is a run
+// grows (upstream: nr_graph.cpp:3354-3637). EPOCH is set when there is a run
 // at C=256, whose sync words count the frames that tile counters need.
 Result<std::vector<Dispatch>> merge(const std::vector<Dispatch>& lowered, Blob& blob, uint64_t& arena, bool& epoch);
 // The values' offsets where they share the arena by lifetime, from the plain
 // ones in VALUES and the layers DISPATCHES run; the end of the values
-// (upstream: the arena probe, nr_graph.cpp:3430-3572). CHAINS keeps a value a
+// (upstream: the arena probe, nr_graph.cpp:3657-3799). CHAINS keeps a value a
 // stretch of tile-counted steps reads until its end.
 Result<uint64_t> share(const std::vector<Dispatch>& dispatches, bool chains, Values& values);
 // Tile counters in place of the barriers between DISPATCHES that they can
 // replace: their tables and records put in BLOB, their counters after the
 // ARENA's end, which grows, and AFTER kNothing for each dispatch they order
-// (upstream: nr_graph.cpp:3617-3850); the counters' words.
+// (upstream: nr_graph.cpp:3844-4247); the counters' words.
 Result<uint32_t> chain(std::vector<Dispatch>& dispatches, Blob& blob, uint64_t& arena);
 
 } // namespace dlsslop::vulkan

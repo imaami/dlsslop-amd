@@ -53,7 +53,7 @@ constexpr size_t kTilesX = offsetof(PushFSwin, tiles_x) / 4, kTilesY = offsetof(
 
 // A persistent run's tables of dependencies between its items, a window of
 // one of its layers each (upstream: the NR_PERSIST_DF block,
-// nr_graph.cpp:3328-3392): each item's producers in the layer before, the
+// nr_graph.cpp:3538-3602): each item's producers in the layer before, the
 // up to four consumers each has, and the items no producer holds up; then, for the
 // straggler queue, the layer of each item, and each layer's items that wait
 // with the rank from which the oldest workgroups take them, a fraction

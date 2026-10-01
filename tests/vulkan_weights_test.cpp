@@ -177,7 +177,7 @@ void check_layouts()
     for (const auto& s : shapes) {
         const size_t bytes = s.rows * s.cols, ktiles = s.cols / 16;
         // tin::tile_blocked's order, and the weight layout 3 pass on it
-        // (nr_graph.cpp:3082-3093).
+        // (nr_graph.cpp:3270-3281).
         std::vector<uint32_t> tiled(bytes), paired(bytes);
         for (size_t r = 0; r < s.rows; ++r)
             for (size_t k = 0; k < s.cols; ++k)
@@ -564,7 +564,7 @@ void check_pack_errors(const vulkan::Model& model)
 }
 
 // Residual scales whose first eight values are -0: upstream compared each
-// with 0.0f (nr_graph.cpp:1741-1742), so it read them from the ninth on too.
+// with 0.0f (nr_graph.cpp:1825-1826), so it read them from the ninth on too.
 void check_negative_zeros()
 {
     constexpr size_t kCount = 32;

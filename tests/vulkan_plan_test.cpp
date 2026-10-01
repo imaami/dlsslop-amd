@@ -3,8 +3,9 @@
 // frame extents from 17x17 to 5120x2880, the plan's steps with their push
 // constants and its activation arena's values and sizes are checked against
 // goldens of upstream's own NrSession::build (DLSSNR-AMD's nr_graph.cpp at
-// 3dfdddc, built with its rdna4.sh defines and stopped before the device), and
-// the weight blob packed from a synthetic model pack against upstream's. The
+// 82560c4, built with its rdna4.sh defines and stopped before the device; the
+// schedule changes of b1419b0 that the port leaves out switched off), and the
+// weight blob packed from a synthetic model pack against upstream's. The
 // frames the network cannot take are rejected.
 #include "vulkan_pack.h"
 #include "vulkan_plan.h"
@@ -66,85 +67,85 @@ struct Golden {
 };
 constexpr Golden kGoldens[] = {
     {17, 17, 328, 320, 124, 27948288, 26550272, 155469644, 344224, 6, 99,
-     0x4725b01e932a14e3u, 0x7c39a7c135a6f2abu, 0xeb28c10f4091fed8u, 0x1139783aac0df130u},
+     0x4725b01e932a14e3u, 0x7c39a7c135a6f2abu, 0x71c53e10fc8f04b4u, 0x4114ac85fd6888d0u},
     {1, 400, 320, 448, 123, 36382976, 34963456, 155804972, 348335, 6, 100,
-     0xd1a0a133db128544u, 0x2cf2a0137495ca85u, 0xa550da0f6e50c1b8u, 0xb1c6ce4c696375f0u},
+     0xd1a0a133db128544u, 0x2cf2a0137495ca85u, 0x9402476b06bfbc2cu, 0xb0062690569903d0u},
     {400, 1, 448, 320, 123, 36382976, 34963456, 155804972, 348337, 6, 100,
-     0x2f67053509984e9bu, 0x2cf2a0137495ca85u, 0x503c3301549a4058u, 0x1c03a506ed52aa30u},
+     0x2f67053509984e9bu, 0x2cf2a0137495ca85u, 0x5b8e60e1200fadf4u, 0x49950ae2fd2c7c10u},
     {32, 32, 328, 320, 124, 27948288, 26550272, 155469644, 344224, 6, 99,
-     0x988d942a1062d1f9u, 0x7c39a7c135a6f2abu, 0xeb28c10f4091fed8u, 0x1139783aac0df130u},
+     0x988d942a1062d1f9u, 0x7c39a7c135a6f2abu, 0x71c53e10fc8f04b4u, 0x4114ac85fd6888d0u},
     {64, 64, 336, 320, 123, 28210432, 26796032, 155506540, 348321, 6, 100,
-     0x48a9ac6af3e03f09u, 0xb494e00c5a47741fu, 0x8912ddc4c703e0f1u, 0xb699f14dcf167519u},
+     0x48a9ac6af3e03f09u, 0xb494e00c5a47741fu, 0xe457b097b75c531du, 0x6437cd65fd8c48b9u},
     {160, 120, 320, 320, 123, 26447616, 25034752, 155462844, 348321, 6, 100,
-     0x7d433140eae611c2u, 0xc331ba7fb0e0bb1fu, 0x40b17b38087bc596u, 0xf5b0b1c3500232beu},
+     0x7d433140eae611c2u, 0xc331ba7fb0e0bb1fu, 0x4fa40550e37585aau, 0x6f888f9cccbaf51eu},
     {200, 100, 320, 320, 123, 26447616, 25034752, 155462844, 348321, 6, 100,
-     0x4cbc70b50fed8fadu, 0xc331ba7fb0e0bb1fu, 0x40b17b38087bc596u, 0xf5b0b1c3500232beu},
+     0x4cbc70b50fed8fadu, 0xc331ba7fb0e0bb1fu, 0x4fa40550e37585aau, 0x6f888f9cccbaf51eu},
     {256, 144, 320, 320, 123, 26447616, 25034752, 155462844, 348321, 6, 100,
-     0x00f1373ace19b41cu, 0xc331ba7fb0e0bb1fu, 0x40b17b38087bc596u, 0xf5b0b1c3500232beu},
+     0x00f1373ace19b41cu, 0xc331ba7fb0e0bb1fu, 0x4fa40550e37585aau, 0x6f888f9cccbaf51eu},
     {128, 320, 320, 320, 123, 26447616, 25034752, 155462844, 348321, 6, 100,
-     0x7040a3cb76bb41acu, 0xc331ba7fb0e0bb1fu, 0x40b17b38087bc596u, 0xf5b0b1c3500232beu},
+     0x7040a3cb76bb41acu, 0xc331ba7fb0e0bb1fu, 0x4fa40550e37585aau, 0x6f888f9cccbaf51eu},
     {320, 128, 320, 320, 123, 26447616, 25034752, 155462844, 348321, 6, 100,
-     0x2fd5ef8b3388b3a4u, 0xc331ba7fb0e0bb1fu, 0x40b17b38087bc596u, 0xf5b0b1c3500232beu},
+     0x2fd5ef8b3388b3a4u, 0xc331ba7fb0e0bb1fu, 0x4fa40550e37585aau, 0x6f888f9cccbaf51eu},
     {320, 129, 320, 320, 123, 26447616, 25034752, 155462844, 348321, 6, 100,
-     0xa6d6d9f5b5a57471u, 0xc331ba7fb0e0bb1fu, 0x40b17b38087bc596u, 0xf5b0b1c3500232beu},
+     0xa6d6d9f5b5a57471u, 0xc331ba7fb0e0bb1fu, 0x4fa40550e37585aau, 0x6f888f9cccbaf51eu},
     {320, 180, 320, 320, 123, 26447616, 25034752, 155462844, 348321, 6, 100,
-     0x1cd3cff2da4abbaeu, 0xc331ba7fb0e0bb1fu, 0x40b17b38087bc596u, 0xf5b0b1c3500232beu},
+     0x1cd3cff2da4abbaeu, 0xc331ba7fb0e0bb1fu, 0x4fa40550e37585aau, 0x6f888f9cccbaf51eu},
     {333, 333, 384, 384, 123, 36973824, 35553280, 155839068, 348321, 6, 100,
-     0x2cc11d89a80e579eu, 0x6b33d951c0bcfbc7u, 0x3fecdadf92dac286u, 0x80cae43a7f9b17beu},
+     0x2cc11d89a80e579eu, 0x6b33d951c0bcfbc7u, 0x1222d0cc54c4018au, 0xa4d2f1a667c50b9eu},
     {640, 360, 640, 384, 123, 60683520, 59244544, 156659772, 348351, 6, 100,
-     0x279e3656777f30f6u, 0xd08ba5e9c77522d6u, 0x7b82ae26575a5673u, 0x65b0e14eb89142fbu},
+     0x279e3656777f30f6u, 0xd08ba5e9c77522d6u, 0x9760e4888f5e874fu, 0xb4336d156488c0dbu},
     {640, 480, 640, 512, 123, 80357888, 78905344, 157343020, 348372, 6, 100,
-     0x7e5046473f0b12f2u, 0x4d6a79d85edfccd5u, 0xde6fad53a135a3f2u, 0x8aab40ddd95a2ceau},
+     0x7e5046473f0b12f2u, 0x4d6a79d85edfccd5u, 0xc97bd1c23eb7b876u, 0x3d83b4f1a5bddfcau},
     {800, 450, 832, 512, 123, 104949760, 103481344, 158163244, 348409, 6, 100,
-     0x60fedf5b82beda3fu, 0xc573bd1a9fee5da2u, 0x97b6744e1401a72eu, 0x58b66c5245e5e706u},
+     0x60fedf5b82beda3fu, 0xc573bd1a9fee5da2u, 0x43656c430b7091fau, 0xb6c6a6e21c603b26u},
     {854, 480, 896, 512, 123, 111901696, 110428160, 158436620, 348409, 6, 100,
-     0x274bf8a0db0e5f0eu, 0xa0b017d2a04de8a3u, 0x00aefdab011a0b37u, 0x0c2ea98a0964bcdfu},
+     0x274bf8a0db0e5f0eu, 0xa0b017d2a04de8a3u, 0xd9d069076de0505bu, 0x3fafa51131b4e33fu},
     {960, 540, 960, 576, 123, 136034560, 134545408, 159222220, 348465, 6, 100,
-     0xd247886a5323db1bu, 0x3edaf20da30af3b0u, 0x390312064ae96bd6u, 0xe9c89bf16d84710eu},
+     0xd247886a5323db1bu, 0x3edaf20da30af3b0u, 0xb1688ee20e0ce952u, 0x9921312745f70beeu},
     {1001, 563, 1024, 576, 123, 144888064, 143392768, 159529740, 348465, 6, 100,
-     0x9e2d886f9a16351eu, 0x66e151ad666eb8d5u, 0x9b85c33caf0c6a45u, 0xb322441c81c306fdu},
+     0x9e2d886f9a16351eu, 0x66e151ad666eb8d5u, 0x77036f9e1bf1cbf9u, 0x1ccefa634b00171du},
     {1152, 648, 1152, 704, 123, 198629376, 197099520, 161373804, 348521, 6, 100,
-     0x36c2cb5fb49aa64eu, 0x01f1ddd49336e51fu, 0x548205088e16d335u, 0x6bbab5458a40a96du},
+     0x36c2cb5fb49aa64eu, 0x01f1ddd49336e51fu, 0x72776541b3fbd3e9u, 0xdb173c3f8fc55ccdu},
     {1024, 768, 1088, 768, 123, 204531200, 202997760, 161578476, 348521, 6, 100,
-     0x5bd1f61f738dbabdu, 0x4333b55449e60434u, 0xcf6833b54b714da5u, 0x38e607fbb279972du},
+     0x5bd1f61f738dbabdu, 0x4333b55449e60434u, 0xc6db4eae664e22d9u, 0x80befa61fec03a0du},
     {1152, 720, 1152, 768, 123, 214569984, 213024768, 161988300, 348521, 6, 100,
-     0xd55668499e67c8eeu, 0x05f9d9530045eec9u, 0x1a29d0e1b0dfba41u, 0x1a461c1ff76a97e9u},
+     0xd55668499e67c8eeu, 0x05f9d9530045eec9u, 0x974b091ef369c1b5u, 0x49b328f822091b89u},
     {1280, 720, 1344, 768, 123, 252244224, 250675200, 163217868, 348573, 6, 100,
-     0x810a62ce2256b292u, 0x4006e4a89e059758u, 0xe52b760769a08fcbu, 0x0c5868919aa7b233u},
+     0x810a62ce2256b292u, 0x4006e4a89e059758u, 0xb01ffa1deaa8dc97u, 0x26751fc7a7e1dcd3u},
     {1280, 800, 1280, 832, 123, 200673536, 199098368, 163491788, 348849, 6, 100,
-     0xf554b70922b31732u, 0xddaea6e67fe051dfu, 0xdc961d430e7ad94fu, 0xc3a88fed133290b7u},
+     0xf554b70922b31732u, 0xddaea6e67fe051dfu, 0x99e988dcc66c0763u, 0x78ce7a15b667d157u},
     {1366, 768, 1408, 768, 123, 201331968, 199753728, 163629740, 349085, 6, 100,
-     0xec54bc6993561461u, 0x3caec83201885480u, 0xf105e6fae2ffc580u, 0x0dd7969dfe892788u},
+     0xec54bc6993561461u, 0x3caec83201885480u, 0xdff30c7f6f7ed30cu, 0xe4864c7266f453a8u},
     {1280, 1024, 1344, 1024, 123, 258742272, 257097728, 166105772, 353783, 6, 100,
-     0x165a156f3cbb947eu, 0x94ca7bf838c1f8f0u, 0xf937d3487aedd057u, 0x191edd0f5116933fu},
+     0x165a156f3cbb947eu, 0x94ca7bf838c1f8f0u, 0xf1cf94f34d38a58bu, 0x02ea9e053dd3089fu},
     {1600, 900, 1600, 960, 123, 288875008, 287211520, 167447628, 356346, 6, 100,
-     0x5a335ceb3e36621bu, 0xfc5a22ba254a7b9bu, 0xbd834b7981b71ef3u, 0x98450805839f10ebu},
+     0x5a335ceb3e36621bu, 0xfc5a22ba254a7b9bu, 0x56065c6f10e5fa7fu, 0xea7c31c0aca3560bu},
     {1920, 804, 1920, 832, 123, 300357632, 298680320, 167964652, 357317, 6, 100,
-     0x283dca62a7916cf2u, 0xba97e75454f5b261u, 0xbf2b69b5068761fbu, 0x691354c0df5f7353u},
+     0x283dca62a7916cf2u, 0xba97e75454f5b261u, 0x8d8fa76c6fd6c5afu, 0x8fcc13c637400af3u},
     {1440, 1080, 1472, 1088, 123, 301177088, 299499520, 167997516, 357391, 6, 100,
-     0xbb919f0bbaaee2dbu, 0xda3fc3535c060b8du, 0x7f9f793dd7f54668u, 0xa8f624ff64c6ae90u},
+     0xbb919f0bbaaee2dbu, 0xda3fc3535c060b8du, 0x5e9421cc5a24ab0cu, 0xfe23d6cb14863030u},
     {1707, 960, 1728, 960, 123, 309938432, 308248576, 168479676, 358302, 6, 100,
-     0xf42212778cca9f32u, 0xda824cd32854e759u, 0x6290f9bcb8955bebu, 0xe66674c63c8f6fe3u},
+     0xf42212778cca9f32u, 0xda824cd32854e759u, 0xa89418a5707dc35fu, 0xe3e5354eeec001c3u},
     {1680, 1050, 1728, 1088, 123, 353336832, 351600640, 170336556, 361818, 6, 100,
-     0x119353c5e16603c2u, 0x92dae6258ab9771fu, 0x4668ab4d675b3481u, 0x3dbc7143a79f2259u},
+     0x119353c5e16603c2u, 0x92dae6258ab9771fu, 0xbc71ad0c8e07fd8du, 0x44758a2d329b70b9u},
     {1600, 1200, 1600, 1216, 123, 365540352, 363790336, 170886444, 362851, 6, 100,
-     0x3c50e64e273caffeu, 0x21ea8125c575fb4du, 0x588ba58c42435516u, 0x4f3e75ab52cabc0eu},
+     0x3c50e64e273caffeu, 0x21ea8125c575fb4du, 0xded17ba58a9ef30au, 0x06642908eb6392eeu},
     {1919, 1079, 1920, 1088, 123, 392276224, 390496256, 172090828, 365117, 6, 100,
-     0x56d3a31775b98216u, 0xf161d160a6330aedu, 0x4b6d1ac03758a76eu, 0x08c8349fd4716606u},
+     0x56d3a31775b98216u, 0xf161d160a6330aedu, 0x0c0d174116043112u, 0xc1c5f29ce4acad66u},
     {1080, 1920, 1088, 1920, 123, 392276224, 390496256, 172090828, 365117, 6, 100,
-     0x3069afc077709d3au, 0xf161d160a6330aedu, 0x890c57ba11f78c32u, 0x24ec339d330f553au},
+     0x3069afc077709d3au, 0xf161d160a6330aedu, 0x178b8c46223e9276u, 0x93b2912ae31477dau},
     {1920, 1080, 1920, 1088, 123, 392276224, 390496256, 172090828, 365117, 6, 100,
-     0x6a2c6e4d8945969eu, 0xf161d160a6330aedu, 0x4b6d1ac03758a76eu, 0x08c8349fd4716606u},
+     0x6a2c6e4d8945969eu, 0xf161d160a6330aedu, 0x0c0d174116043112u, 0xc1c5f29ce4acad66u},
     {1920, 1200, 1920, 1216, 123, 438039040, 436207616, 174153932, 369013, 6, 100,
-     0xb872d840cbb5a359u, 0xcb29e66fcd7cdb28u, 0x0a3484d0c0870dc7u, 0x838a13e1c5b6720fu},
+     0xb872d840cbb5a359u, 0xcb29e66fcd7cdb28u, 0x204d6abdf7804133u, 0x9f9afcc72f6157efu},
     {2560, 1080, 2560, 1088, 123, 522446848, 520519680, 177938444, 376187, 6, 100,
-     0xee324eac4500a9feu, 0xcdc4561783fb376du, 0x1faaffeccd2f417du, 0x39bb65ac3b47e675u},
+     0xee324eac4500a9feu, 0xcdc4561783fb376du, 0x0e80a45bbd949d49u, 0x602b39bf35e80fd5u},
     {2560, 1440, 2560, 1472, 123, 701894144, 699760640, 186189772, 391779, 6, 100,
-     0x045eb36e81e4c5a7u, 0x9606066a7e165f97u, 0x8c670db3e6ec5cb9u, 0xfb9390c01c105941u},
+     0x045eb36e81e4c5a7u, 0x9606066a7e165f97u, 0xdd90424b66919b55u, 0x534c0a92c89031a1u},
     {3840, 2160, 3840, 2176, 123, 1545683712, 1543208960, 224109516, 317582, 6, 92,
-     0x192456be83600b76u, 0x4b7752b8d303fce8u, 0x34319496ae9fbc34u, 0x56217f897345a98cu},
+     0x192456be83600b76u, 0x4b7752b8d303fce8u, 0xf0fa2cefffbe0d58u, 0x314278562d49f8ecu},
     {5120, 2880, 5120, 2880, 123, 2756553216, 2753167360, 277339884, 319181, 6, 92,
-     0x14a73f78e985b843u, 0x25c685b892ab46dcu, 0xc1d0785dee3cbcd4u, 0xf7abc97f741ee2acu},
+     0x14a73f78e985b843u, 0x25c685b892ab46dcu, 0xd4e662122bb93850u, 0xdc682c7f6c93aaccu},
 };
 // The extents at which the synthetic model is packed: the smallest planned,
 // which views the post block's input, small ones and odd ones, dlsslopd's 720p
@@ -405,6 +406,23 @@ int markers()
     return 0;
 }
 
+// --defines: what the plan assumes of the defines its pipelines are built
+// with beyond the markers, "pipeline define value" a line: NR_ATTN_WPAIR 1
+// when the 720p plan packs attn's QKV matrix N-paired.
+int defines()
+{
+    const auto p = vulkan::plan(1280, 720);
+    if (!p) return 1;
+    const auto attn = std::ranges::find(p->steps, Kernel::kAttn, &Step::kernel);
+    if (attn == p->steps.end()) return 1;
+    vulkan::PushAttn a;
+    std::memcpy(&a, &p->push[attn->push], sizeof a);
+    const auto weights = std::ranges::find(p->segments, a.w_off, &Segment::offset);
+    if (weights == p->segments.end()) return 1;
+    std::printf("attn NR_ATTN_WPAIR %d\n", weights->flags & Segment::kNpair ? 1 : 0);
+    return 0;
+}
+
 // --entries: the model entries the plans read at the golden extents.
 int list_entries()
 {
@@ -574,16 +592,17 @@ int check_spirv(const std::string& directory)
 int main(int argc, char** argv)
 {
     std::string model, spirv, extent;
-    bool list_markers = false, list_read = false;
+    bool list_markers = false, list_defines = false, list_read = false;
     const option options[] = {{"print", required_argument, nullptr, 'p'},   {"model", required_argument, nullptr, 'm'},
                               {"spirv", required_argument, nullptr, 's'},   {"markers", no_argument, nullptr, 'M'},
-                              {"entries", no_argument, nullptr, 'e'},       {"help", no_argument, nullptr, 'h'},
-                              {nullptr, 0, nullptr, 0}};
-    for (int code; (code = getopt_long(argc, argv, "+p:m:s:Meh", options, nullptr)) != -1;) {
+                              {"defines", no_argument, nullptr, 'D'},       {"entries", no_argument, nullptr, 'e'},
+                              {"help", no_argument, nullptr, 'h'},          {nullptr, 0, nullptr, 0}};
+    for (int code; (code = getopt_long(argc, argv, "+p:m:s:MDeh", options, nullptr)) != -1;) {
         if (code == 'p') extent = optarg;
         else if (code == 'm') model = optarg;
         else if (code == 's') spirv = optarg;
         else if (code == 'M') list_markers = true;
+        else if (code == 'D') list_defines = true;
         else if (code == 'e') list_read = true;
         else if (code == 'h') {
             std::puts("Usage: vulkan-plan-test [OPTION]...\n"
@@ -599,17 +618,22 @@ int main(int argc, char** argv)
                       "                    (default: unset)\n"
                       " -M, --markers      Instead, print the markers the plan expects beside the SPIR-V, each\n"
                       "                    line after its file's name (default: off)\n"
+                      " -D, --defines      Instead, print what the plan assumes of its pipelines' defines beyond\n"
+                      "                    the markers, \"pipeline define value\" a line (default: off)\n"
                       " -e, --entries      Instead, print the model entries the plan reads (default: off)\n"
                       " -h, --help         Show help (default: off)");
             return 0;
         } else
             return 2;
     }
-    if (optind != argc || !extent.empty() + !model.empty() + !spirv.empty() + list_markers + list_read > 1) return 2;
+    if (optind != argc ||
+        !extent.empty() + !model.empty() + !spirv.empty() + list_markers + list_defines + list_read > 1)
+        return 2;
     if (!extent.empty()) return print(extent);
     if (!model.empty()) return check_model(model);
     if (!spirv.empty()) return check_spirv(spirv);
     if (list_markers) return markers();
+    if (list_defines) return defines();
     if (list_read) return list_entries();
     check_goldens();
     check_rejections();
