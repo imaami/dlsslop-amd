@@ -25,8 +25,11 @@ reviews:
       instructions: >-
         C++23 daemon and project headers, built without exceptions or
         RTTI: errors are dlsslop::Result values, and no project code
-        catches exceptions. HIP kernels are compiled by clang for
-        gfx1201 (wave32). Check GPU stream ordering,
+        catches exceptions. The sources imported from the layer's fork,
+        which the rule for them below lists, are upstream code that does
+        not use dlsslop::Result. They are built as C++17, except
+        shmctl.cpp, which is built as C++23. HIP kernels are compiled
+        by clang for gfx1201 (wave32). Check GPU stream ordering,
         host/device synchronization and buffer lifetimes, and races on
         the cross-process shared-memory channel: the layer can rewrite
         it while the worker runs, and values read from it are
@@ -38,14 +41,22 @@ reviews:
         Qt never enters the worker or the layer.
     - path: "external/**"
       instructions: >-
-        Submodules: dlsslop-amd's forks of the layer and both networks
-        (their dlsslop-amd branches), pinned in upstreams.lock.json. A
+        Submodules: dlsslop-amd's forks of both networks (their
+        dlsslop-amd branches), pinned in upstreams.lock.json. A
         PR changes only their pinned commits; review the fork commits a
         pin moves to, not the surrounding upstream code. Upstream lines change only for a real bug that
         cannot be fixed otherwise or a significant performance gain;
         upstream names and contracts are preserved. Never suggest
         restyling upstream or vendored code.
-    - path: "layer/**/*.{comp,glsl}"
+    - path: "{common/shm_protocol.h,layer/{ATTRIBUTION,capture,composition,dlssnr_pass,hotkey,layer,log,scaler_vk,shader_vk,shmctl,vk_table}.*,layer/dlssnr/*.h,layer/dlssnr.map,layer/meter_reduce.comp,third_party/**}"
+      instructions: >-
+        The layer's sources, imported from dlsslop-amd's fork of the
+        layer (PROVENANCE.md), and vendored notices and stb headers.
+        Upstream lines change only for a real bug that cannot be fixed
+        otherwise or a significant performance gain; upstream names and
+        contracts are preserved. Never suggest restyling upstream or
+        vendored code.
+    - path: "{layer/dlssnr/*.comp,layer/scaling/**,layer/hlsl_ops.glsl}"
       instructions: >-
         GLSL ports of the layer's composition HLSL and OptiScaler's
         scaling HLSL. They reproduce the DXC-built originals' arithmetic,

@@ -7,7 +7,7 @@
 // a trace of upstream's network records.
 #include "../backend/files.h"
 #include "../backend/hip_plan.h"
-#include "../external/layer/common/shm_protocol.h"
+#include "../common/shm_protocol.h"
 
 #include <getopt.h>
 #include <sys/stat.h>

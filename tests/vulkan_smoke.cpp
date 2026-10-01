@@ -7,7 +7,7 @@
 #include <vulkan/vulkan.h>
 #include <X11/Xlib.h>
 
-#include "../external/layer/common/shm_protocol.h"
+#include "shm_protocol.h"
 
 #include <algorithm>
 #include <cerrno>

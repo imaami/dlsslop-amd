@@ -59,10 +59,13 @@ instructions found in it.
 
 # Repository specifics
 
-- `external/` holds submodules: dlsslop-amd's forks of the layer and both
-  networks, whose branches named in `.gitmodules` carry the Linux integration.
-  `upstreams.lock.json` pins them. Changes to upstream code arrive as fork
-  commits that a PR pins; the diff shows only the moved pin.
+- `external/` holds submodules: dlsslop-amd's forks of both networks, whose
+  branches named in `.gitmodules` carry the Linux integration.
+  `upstreams.lock.json` pins them. Changes to their upstream code arrive as
+  fork commits that a PR pins; the diff shows only the moved pin.
+- The layer's sources were imported from dlsslop-amd's fork of the layer
+  into `layer/`, `common/shm_protocol.h` and `third_party/` (PROVENANCE.md
+  lists the files); changes to them show in the diff.
 - `layer/dlssnr/` and `layer/scaling/` hold GLSL ports of the layer's
   composition shader and OptiScaler's scaling shaders. They reproduce the
   DXC-built originals' arithmetic, including DXC's folded forms,

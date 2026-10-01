@@ -23,7 +23,7 @@
 
 #include "codec.h"
 #include "codec_math.h"
-#include "../external/layer/common/shm_protocol.h"
+#include "shm_protocol.h"
 
 #include <algorithm>
 #include <cmath>

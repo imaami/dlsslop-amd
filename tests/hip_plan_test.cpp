@@ -9,7 +9,7 @@
 // built kernels' metadata instead.
 #include "../backend/files.h"
 #include "../backend/hip_plan.h"
-#include "../external/layer/common/shm_protocol.h"
+#include "../common/shm_protocol.h"
 
 #include <elf.h>
 #include <getopt.h>

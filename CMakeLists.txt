@@ -31,7 +31,6 @@ include_directories(common)
 find_package(Threads REQUIRED)
 include(CTest)
 
-set(LAYER_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/layer")
 find_path(X11_HEADERS X11/Xlib.h REQUIRED)
 find_path(XINPUT_HEADERS X11/extensions/XInput2.h REQUIRED)
 # Every layer shader is compiled into the build tree, where the layer's quoted
@@ -40,7 +39,6 @@ find_path(XINPUT_HEADERS X11/extensions/XInput2.h REQUIRED)
 # shaderStorageImageWriteWithoutFormat.
 find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 find_program(SPIRV_VAL spirv-val REQUIRED)
-set(SHADER_SOURCE ${LAYER_ROOT}/layer_linux/src)
 set(SHADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
 # The composition and scaling shaders, ported to GLSL from the layer's and
 # OptiScaler's HLSL. Each header holds its module as the unsigned char array
@@ -65,11 +63,11 @@ foreach(name bcus bcds_bicubic bcds_catmull bcds_lanczos2 bcds_lanczos3 bcds_kai
 endforeach()
 set(METER ${SHADER_DIR}/shaders/meter_reduce)
 add_custom_command(OUTPUT ${METER}.h ${METER}.spv
-    COMMAND ${GLSLANG_VALIDATOR} --quiet -V -o ${METER}.spv ${SHADER_SOURCE}/shaders/meter_reduce.comp
+    COMMAND ${GLSLANG_VALIDATOR} --quiet -V -o ${METER}.spv ${CMAKE_CURRENT_SOURCE_DIR}/layer/meter_reduce.comp
     COMMAND ${SPIRV_VAL} --target-env vulkan1.0 ${METER}.spv
     COMMAND ${GLSLANG_VALIDATOR} --quiet -V --vn kMeterReduceSpv -o ${METER}.h
-        ${SHADER_SOURCE}/shaders/meter_reduce.comp
-    DEPENDS ${SHADER_SOURCE}/shaders/meter_reduce.comp VERBATIM)
+        ${CMAKE_CURRENT_SOURCE_DIR}/layer/meter_reduce.comp
+    DEPENDS layer/meter_reduce.comp VERBATIM)
 # Keep upstream's kMeterReduceSpv/kMeterReduceSpvLen header contract.
 file(CONFIGURE OUTPUT ${METER}_spv.h CONTENT [[#pragma once
 #include <cstddef>
@@ -81,34 +79,26 @@ add_custom_target(layer-shaders DEPENDS ${LAYER_SHADERS} ${METER}.h)
 
 # Only layer.cpp differs between the layers; both and the layer tests link
 # the other translation units compiled once.
-add_library(dlsslop-layer-objects OBJECT
-    ${LAYER_ROOT}/layer_linux/src/shader_vk.cpp ${LAYER_ROOT}/layer_linux/src/dlssnr_pass.cpp
-    ${LAYER_ROOT}/layer_linux/src/composition.cpp ${LAYER_ROOT}/layer_linux/src/capture.cpp
-    ${LAYER_ROOT}/layer_linux/src/scaler_vk.cpp ${LAYER_ROOT}/layer_linux/src/hotkey.cpp)
+add_library(dlsslop-layer-objects OBJECT layer/shader_vk.cpp layer/dlssnr_pass.cpp layer/composition.cpp
+    layer/capture.cpp layer/scaler_vk.cpp layer/hotkey.cpp)
 set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_STANDARD 17
     INTERPROCEDURAL_OPTIMIZATION OFF)
 add_dependencies(dlsslop-layer-objects layer-shaders)
-target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC
-    ${LAYER_ROOT}/layer_linux/src ${X11_HEADERS} ${XINPUT_HEADERS})
-# Upstream's bundled third-party headers come after the system's: the layer
-# gets the system Vulkan headers, which the network's features need, and still
-# finds stb_image.h.
-target_compile_options(dlsslop-layer-objects PUBLIC -idirafter ${LAYER_ROOT}/standalone_runner/third_party)
+target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC layer ${X11_HEADERS} ${XINPUT_HEADERS})
 target_link_libraries(dlsslop-layer-objects PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 
 function(add_neural_layer target)
-    add_library(${target} SHARED ${LAYER_ROOT}/layer_linux/src/layer.cpp)
+    add_library(${target} SHARED layer/layer.cpp)
     set_target_properties(${target} PROPERTIES CXX_STANDARD 17 INTERPROCEDURAL_OPTIMIZATION OFF)
-    target_include_directories(${target} PRIVATE layer)
     target_link_libraries(${target} PRIVATE dlsslop-layer-objects)
     target_link_options(${target} PRIVATE
         -static-libstdc++ -static-libgcc -Wl,-Bsymbolic
-        "-Wl,--version-script=${LAYER_ROOT}/layer_linux/dlssnr.map")
+        "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/layer/dlssnr.map")
     target_compile_definitions(${target} PRIVATE DLSSLOP_LAYER_NAME="VK_LAYER_LOCAL_dlsslop_amd")
 endfunction()
 
 add_neural_layer(VkLayer_DLSSLOP_amd)
-add_executable(dlssnr-shmctl ${LAYER_ROOT}/tools/shmctl.cpp)
+add_executable(dlssnr-shmctl layer/shmctl.cpp)
 target_link_options(dlssnr-shmctl PRIVATE -static-libstdc++ -static-libgcc)
 set_target_properties(dlssnr-shmctl PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
 # A command that runs once: its code is built for size.
@@ -145,7 +135,7 @@ target_link_libraries(dlsslop-hip PUBLIC ${CMAKE_DL_LIBS})
 # the layer, which every game loads. It exports its C functions only.
 add_library(dlsslop-network MODULE layer/network_module.cpp backend/processing.cpp backend/options.cpp
     backend/paths.cpp backend/files.cpp)
-target_include_directories(dlsslop-network PRIVATE backend ${LAYER_ROOT}/common)
+target_include_directories(dlsslop-network PRIVATE backend)
 target_link_libraries(dlsslop-network PRIVATE dlsslop-vulkan ${CMAKE_DL_LIBS})
 target_link_options(dlsslop-network PRIVATE -static-libstdc++ -static-libgcc -Wl,-Bsymbolic
     "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/layer/network_module.map")
@@ -157,7 +147,6 @@ add_executable(dlsslopd
     backend/open.cpp backend/hip_engine.cpp backend/self_test.cpp
     backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp
     backend/processing.cpp)
-target_include_directories(dlsslopd PRIVATE ${LAYER_ROOT}/common)
 target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip dlsslop-vulkan Threads::Threads ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)
 target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
@@ -190,7 +179,6 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/worker-cli.py $<TARGET_FILE:dlsslopd>
         $<TARGET_FILE:hip-loader-stub> $<TARGET_FILE:hip-fake-runtime> $<TARGET_FILE:hip-fake-incomplete>)
     add_executable(worker-channel-test tests/worker_channel_test.cpp)
-    target_include_directories(worker-channel-test PRIVATE ${LAYER_ROOT}/common)
     add_test(NAME worker-channel COMMAND worker-channel-test $<TARGET_FILE:dlsslopd>)
     add_test(NAME packaging COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging_test.py)
@@ -199,7 +187,7 @@ if(BUILD_TESTING)
     target_include_directories(vulkan-storage-test PRIVATE ${SHADER_DIR} layer)
     add_test(NAME vulkan-storage COMMAND vulkan-storage-test)
     add_executable(network-module-test tests/network_module_test.cpp)
-    target_include_directories(network-module-test PRIVATE layer ${LAYER_ROOT}/common)
+    target_include_directories(network-module-test PRIVATE layer)
     target_link_libraries(network-module-test PRIVATE ${CMAKE_DL_LIBS})
     add_test(NAME network-module COMMAND network-module-test $<TARGET_FILE:dlsslop-network>)
     # The network's motion history across frames that are and are not
@@ -259,7 +247,6 @@ if(BUILD_TESTING)
     # A fake layer that serves dlsslopd frames for the tracers below; tested
     # against dlsslopd's identity mode.
     add_executable(shmclient tests/shmclient.cpp)
-    target_include_directories(shmclient PRIVATE ${LAYER_ROOT}/common)
     add_test(NAME shmclient COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/shmclient-test.py
         $<TARGET_FILE:shmclient> $<TARGET_FILE:dlsslopd> $<TARGET_FILE:dlssnr-shmctl>)
     # A tracing HIP runtime, which dlsslopd loads as its HIP library, for
@@ -289,6 +276,8 @@ if(BUILD_TESTING)
     target_link_libraries(files-test PRIVATE Threads::Threads)
     add_test(NAME files COMMAND files-test)
     add_executable(capture-writer-test tests/capture_writer_test.cpp)
+    # stb_image.h is a system header here: its unused helpers do not warn.
+    target_include_directories(capture-writer-test SYSTEM PRIVATE third_party/stb)
     target_link_libraries(capture-writer-test PRIVATE dlsslop-layer-objects)
     add_test(NAME capture-writer COMMAND capture-writer-test)
     add_test(NAME color-metrics COMMAND ${Python3_EXECUTABLE}
@@ -311,8 +300,7 @@ if(BUILD_TESTING)
     find_library(VULKAN_LOADER NAMES vulkan libvulkan.so.1 REQUIRED)
     find_library(X11_LIBRARY NAMES X11 libX11.so.6 REQUIRED)
     add_executable(vulkan-smoke tests/vulkan_smoke.cpp)
-    target_include_directories(vulkan-smoke PRIVATE
-        ${LAYER_ROOT}/standalone_runner/third_party ${X11_HEADERS})
+    target_include_directories(vulkan-smoke PRIVATE ${X11_HEADERS})
     target_link_libraries(vulkan-smoke PRIVATE ${VULKAN_LOADER} ${X11_LIBRARY})
     add_executable(hdr-shader-test tests/hdr_shader_test.cpp)
     target_link_libraries(hdr-shader-test PRIVATE dlsslop-layer-objects ${VULKAN_LOADER})

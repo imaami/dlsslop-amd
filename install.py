@@ -49,12 +49,12 @@ SCRIPT_SOURCES = {
 }
 LICENSE_SOURCES = {
     "licenses/AGPL-3.0.txt": "LICENSE",
-    "licenses/GPL-3.0.txt": "external/layer/third_party/optiscaler/LICENSE",
+    "licenses/GPL-3.0.txt": "third_party/optiscaler/LICENSE",
     "licenses/Apache-2.0.txt": "packaging/Apache-2.0.txt",
     "licenses/MIT-integration.txt": "LICENSE.integration",
     "licenses/MIT-amd.txt": "external/amd/LICENSE",
     "licenses/MIT-DLSSNR-AMD.txt": "external/vulkan/LICENSE",
-    "licenses/RenoDX.txt": "external/layer/third_party/optiscaler/RenoDX_ATTRIBUTION.txt",
+    "licenses/RenoDX.txt": "third_party/optiscaler/RenoDX_ATTRIBUTION.txt",
     "licenses/THIRD-PARTY.txt": "packaging/THIRD-PARTY.txt",
 }
 DOCUMENT_SOURCES = {"README.md": "packaging/README.md", **LICENSE_SOURCES}

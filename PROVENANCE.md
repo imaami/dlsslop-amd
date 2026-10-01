@@ -24,28 +24,50 @@ ports in `layer/dlssnr/` and `layer/scaling/`, the HIP host port in `backend/`
 and the Vulkan host port in `common/`) and attribution remain unchanged, as do
 references to NVIDIA DLSS and OptiScaler_DLSSNR.
 
-`.gitmodules` declares dlsslop-amd's forks of three repositories and, for each
-fork, the branch that holds the Linux integration as commits on top of the
-upstream commit listed below. `upstreams.lock.json` records the pinned commits
-and the files fetched from each repository; the build uses them in place under
-`external/`.
+`.gitmodules` declares dlsslop-amd's forks of the two networks' repositories
+and, for each fork, the branch that holds the Linux integration as commits on
+top of the upstream commit listed below. `upstreams.lock.json` records the
+pinned commits and the files fetched from each repository; the build uses them
+in place under `external/`. The layer's sources were imported from its fork at
+the commit listed below and are maintained in this repository.
 
 | Component | Upstream and base commit | Fork and pinned commit | License |
 |---|---|---|---|
-| Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) `ab722b091071d6d59df56f10d86d4f3005bcad86` | [imaami/DLSS5VKLayer](https://github.com/imaami/DLSS5VKLayer/tree/dlsslop-amd) `680ec8afb96cff206cf6a7608d3a559ca1e9c2f3` | AGPL-3.0; embedded dependencies keep their notices |
+| Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) `ab722b091071d6d59df56f10d86d4f3005bcad86` | [imaami/DLSS5VKLayer](https://github.com/imaami/DLSS5VKLayer/tree/dlsslop-amd) `680ec8afb96cff206cf6a7608d3a559ca1e9c2f3`, imported | AGPL-3.0; embedded dependencies keep their notices |
 | Vulkan network's SPIR-V sources, shader build and model extractor, and the runtime that dlsslop-amd ports | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) `d1185d25141b1714d7837151b6fa782e6427568b` | [imaami/DLSSNR-AMD](https://github.com/imaami/DLSSNR-AMD/tree/dlsslop-amd-d1185d2) `49dffcdbee2ffe3aa6133fb7ef73ffd865139cf8` | MIT |
 | AMD HIP kernels, and the scheduler that dlsslopd ports | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) `ad499a8199c9ce3678d83c9be58fe3bc1bef3498` | [imaami/dlss5-on-amd-9070xt-porting](https://github.com/imaami/dlss5-on-amd-9070xt-porting/tree/dlsslop-amd) `c1908317fb7e7ee9fe4884feba4a67220d93461f` | MIT |
+
+The import took these files of the layer fork at `680ec8a`. It changed only
+the include paths that the move broke: one line each in `layer/capture.cpp`,
+`layer/composition.h` and `layer/layer.cpp`.
+
+| Fork path | Path here |
+|---|---|
+| `layer_linux/src/*.cpp`, `layer_linux/src/*.h` | `layer/` |
+| `layer_linux/src/dlssnr/DlssNr_Common.h`, `DlssNr_Layout.h` | `layer/dlssnr/` |
+| `layer_linux/src/shaders/meter_reduce.comp` | `layer/meter_reduce.comp` |
+| `layer_linux/dlssnr.map` | `layer/dlssnr.map` |
+| `tools/shmctl.cpp` | `layer/shmctl.cpp` |
+| `common/shm_protocol.h` | `common/shm_protocol.h` |
+| `ATTRIBUTION.md` | `layer/ATTRIBUTION.md` |
+| `core/stb_image_write.h`, `standalone_runner/third_party/stb_image.h` | `third_party/stb/` |
+| `third_party/optiscaler/LICENSE`, `RenoDX_ATTRIBUTION.txt` | `third_party/optiscaler/` |
+
+The fork's `LICENSE` is the AGPL-3.0 text of [LICENSE](LICENSE). The paths that
+`layer/ATTRIBUTION.md` names are those of the fork's tree. The build uses the
+system's Vulkan headers, so the import left out the fork's copies of the Khronos
+Vulkan and video headers.
 
 The layer's composition shader `layer/dlssnr/dlssnr.comp` is a GLSL port of the
 layer fork's `layer_linux/src/dlssnr/dlssnr.hlsl` (AGPL-3.0). Its RenoDX-derived
 composition is MIT; the notice is
-`external/layer/third_party/optiscaler/RenoDX_ATTRIBUTION.txt`.
+`third_party/optiscaler/RenoDX_ATTRIBUTION.txt`.
 
 The eight scaling filters in `layer/scaling/` are GLSL ports of
 `OptiScaler/shaders/output_scaling/precompile/*.hlsl` from
 [optiscaler/OptiScaler](https://github.com/optiscaler/OptiScaler) at
 `fb41e3e6361ca9ae55b30a821a40c2b4b346f330` (GPL-3.0; the text is
-`external/layer/third_party/optiscaler/LICENSE`). `bcus.comp` also keeps the
+`third_party/optiscaler/LICENSE`). `bcus.comp` also keeps the
 Microsoft MiniEngine MIT notice of its original.
 
 The layer fork adapts Linux loading and transport and extends controls and
@@ -144,11 +166,12 @@ that the plan takes from `linux/build/arch/rdna4.sh` and from `nr_graph.cpp`'s
 defaults at `49dffcd`; `vulkan-constants` checks those that the markers in
 `pipelines.json` record, and a change of the pin must re-check the rest.
 
-Preserve `external/layer/ATTRIBUTION.md` and all inherited notices of upstream
+Preserve `layer/ATTRIBUTION.md` and all inherited notices of upstream
 code. The layer's shader/dispatch lineage includes OptiScaler and
-Dagherbou/OptiScaler_DLSSNR, with RenoDX color-composition attribution. Khronos
-Vulkan/video headers and stb retain their own licenses. The BCUS shader also
-identifies Microsoft MiniEngine/Minigraph and James Stanard.
+Dagherbou/OptiScaler_DLSSNR, with RenoDX color-composition attribution. The
+Khronos Vulkan/video headers and stb retain their own licenses; stb's license
+text ends each header in `third_party/stb/`. The BCUS shader also identifies
+Microsoft MiniEngine/Minigraph and James Stanard.
 
 The native worker integration, codec, tuning/temporal and color-preservation
 modules, Qt Widgets controller, build tools and tests are local additions or

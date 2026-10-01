@@ -1,7 +1,3 @@
-[submodule "layer"]
-	path = external/layer
-	url = https://github.com/imaami/DLSS5VKLayer.git
-	branch = dlsslop-amd
 [submodule "amd"]
 	path = external/amd
 	url = https://github.com/imaami/dlss5-on-amd-9070xt-porting.git

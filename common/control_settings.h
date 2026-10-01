@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "../external/layer/common/shm_protocol.h"
+#include "shm_protocol.h"
 #include <cmath>
 #include <iterator>
 #include <linux/input-event-codes.h>
