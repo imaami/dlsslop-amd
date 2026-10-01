@@ -134,12 +134,6 @@ class Composition {
     bool HdrProxyActive() const { return _hdrProxy; }
     uint32_t HdrTransfer() const { return _hdrProxy ? _hdrTransfer : 0; }
 
-    // Point the transport buffers at the shared-memory pixel regions so the GPU reads and writes
-    // them directly, with no host copy in between. Null pointers fall back to private host-visible
-    // staging. Safe to call every present; buffers are rebuilt only when the mapping changes, and
-    // only between frames (the caller must have waited for the previous frame's work).
-    void SetTransport(void* inRegion, void* outRegion, size_t bytes);
-
     // Native HIP: build the transport pair as exportable device-local memory the worker imports,
     // so the proxy and the answer never leave VRAM. family is the queue family both legs run on.
     void EnableExport(uint32_t family) { _export = true; _exportFamily = family; }
@@ -193,41 +187,6 @@ class Composition {
     // read, so it restores exactly what the application drew.
     bool RecordRestore(VkCommandBuffer cb, VkImage swapchainImage);
 
-    // ---------------------------------------------------------------------
-    // Phase 5: dma-buf transport. When both sides can, the proxy and the answer are device memory
-    // exported as dma-bufs and adopted through /proc -- the pixels never touch host
-    // pages at all. Every step is optional: with no channel, no extension, or a failed import, the
-    // shared-memory transport above carries the frame exactly as before.
-    // ---------------------------------------------------------------------
-
-    // Adopt one of the helper's exported images. The fd is consumed (or closed). Returns false if
-    // it cannot be imported at this raster; the shared-memory path then carries that direction.
-    bool ImportProxy(int fd, uint32_t w, uint32_t h);
-    bool ImportAnswerFd(int fd, uint32_t w, uint32_t h);
-    // True when the imported answer covers the current model raster, so leg 2 can read it directly.
-    bool AnswerImported() const {
-        return _answerXfer.image != VK_NULL_HANDLE && _answerXfer.width == _modelW &&
-               _answerXfer.height == _modelH;
-    }
-    void DropXfer();
-
-    // The channel's readiness, restated every present: the exportable proxy is only built while it
-    // is on, and leg 1 only writes it while it is on. Turning it off mid-run falls back to the
-    // shared-memory transport on the next frame.
-    void SetDmaBuf(bool on) { _dmaBuf = on; }
-    bool DmaBuf() const { return _dmaBuf; }
-
-    // True when leg 1 writes the proxy into the imported image this frame, so the caller must not
-    // also copy it into the shared-memory region -- and the helper reads it through the fd.
-    bool ProxyActive() const {
-        return _dmaBuf && _proxyXfer.image != VK_NULL_HANDLE && _proxyXfer.width == _modelW &&
-               _proxyXfer.height == _modelH;
-    }
-    void SetAnswerViaFd(bool on) { _answerViaFd = on; }
-    bool AnswerViaFd() const { return _dmaBuf && _answerViaFd && AnswerImported(); }
-    // The channel went away: forget both imported surfaces so the next frame falls back whole.
-    void InvalidateXfer() { DropXfer(); _answerViaFd = false; }
-
     bool HasModelFrame() const { return _haveModel; }
     void MarkModelFrame() { _haveModel = true; }
 
@@ -263,18 +222,13 @@ class Composition {
         VkDeviceMemory memory = VK_NULL_HANDLE;
         void* mapped = nullptr;
         size_t size = 0;
-        // Non-null when the allocation is the shared-memory region itself (an imported host
-        // pointer), rather than private pinned memory the transport is copied through.
-        void* hostPtr = nullptr;
         // Nonzero, the allocation size, when the buffer is exported device-local memory.
         VkDeviceSize allocation = 0;
     };
 
     bool MakeImage(Image& img, uint32_t w, uint32_t h, VkFormat format, VkImageUsageFlags usage);
     void DropImage(Image& img);
-    bool ImportFdMemory(int fd, VkImage image, const VkMemoryRequirements& req, VkDeviceMemory* out);
     bool MakeHostBuffer(HostBuffer& buf, size_t bytes, VkBufferUsageFlags usage);
-    bool MakeTransportBuffer(HostBuffer& buf, size_t bytes, VkBufferUsageFlags usage, void* hostPtr);
     bool MakeExportBuffer(HostBuffer& buf, size_t bytes);
     void ExternalOwnership(VkCommandBuffer cb, const HostBuffer& buf, uint32_t from, uint32_t to,
                            VkAccessFlags access);
@@ -350,23 +304,12 @@ class Composition {
     float _meterSteadiness = 0.0f;
     HostBuffer _download{}, _upload{}, _captureBuf{};
 
-    // The shared-memory regions the transport buffers alias, when they alias them at all.
-    void* _transportIn = nullptr;
-    void* _transportOut = nullptr;
-    size_t _transportBytes = 0;
     // The exported native transport (EnableExport).
     bool _export = false;
     bool _transportReady = false;
     int _offer = -1;
     uint32_t _exportFamily = 0;
     uint32_t _transportGen = 0;
-
-    // Phase 5. _proxyXfer is the proxy at the model's raster in exportable device memory;
-    // _answerXfer is the helper's answer, imported from its dma-buf. Both are null when the
-    // channel is not up, and the host transport above carries the frame.
-    Image _proxyXfer{}, _answerXfer{};
-    bool _dmaBuf = false;
-    bool _answerViaFd = false;
 
     CaptureWriter _capture;
     CaptureMetadata _captureMetadata{};

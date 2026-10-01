@@ -427,9 +427,9 @@ static void CheckUnloaded(const std::string& object) {
     std::printf("PASS: the loader unloaded the layer with the last instance.\n");
 }
 
-// run-smoke.py turns the idle repaint and dma-buf off, as the launcher does, so the layer hooks the
-// present but leaves the application's other queue operations to the next layer down -- unless the
-// in-layer network is asked for: its build submits from a thread of its own.
+// run-smoke.py turns the idle repaint off, as the launcher does, so the layer hooks the present but
+// leaves the application's other queue operations to the next layer down -- unless the in-layer
+// network is asked for: its build submits from a thread of its own.
 static void CheckQueueHooks(VkDevice device) {
     const char* inLayer = std::getenv("DLSSLOP_LAYER_NETWORK");
     const bool network = inLayer && !std::strcmp(inLayer, "1");
@@ -440,7 +440,7 @@ static void CheckQueueHooks(VkDevice device) {
         require(dladdr(reinterpret_cast<void*>(vkGetDeviceProcAddr(device, name)), &next) &&
                 (layer == next.dli_fname) == network,
                 network ? "the layer leaves queue operations unhooked while the in-layer network builds"
-                        : "the layer hooks queue operations while the idle repaint and dma-buf are off");
+                        : "the layer hooks queue operations while the idle repaint is off");
     }
 }
 

@@ -8,7 +8,6 @@
 #include <vector>
 #include <unistd.h>
 #include <sys/random.h>
-#include <fcntl.h>
 
 namespace dlssnr {
 
@@ -213,7 +212,6 @@ void Composition::DropAll() {
     DropImage(_composed);
     DropImage(_modelNative);
     DropImage(_meter);
-    DropXfer();
     DropMeterState();
     DropHostBuffer(_download);
     DropHostBuffer(_upload);
@@ -370,92 +368,10 @@ bool Composition::MakeHostBuffer(HostBuffer& buf, size_t bytes, VkBufferUsageFla
 }
 
 void Composition::DropHostBuffer(HostBuffer& buf) {
-    if (buf.mapped && !buf.hostPtr) _vk->vkUnmapMemory(_device, buf.memory);
+    if (buf.mapped) _vk->vkUnmapMemory(_device, buf.memory);
     if (buf.buffer) _vk->vkDestroyBuffer(_device, buf.buffer, nullptr);
     if (buf.memory) _vk->vkFreeMemory(_device, buf.memory, nullptr);
     buf = HostBuffer{};
-}
-
-// A buffer whose device memory IS the shared-memory region, so the GPU writes the proxy straight
-// into the bytes the helper reads and reads the answer straight out of the bytes the helper wrote.
-// The host pointer is the mapping both processes share; the driver tells us which memory type may
-// back it. Anything the driver declines -- no extension, an alignment it will not take -- falls
-// back to private staging in EnsureTransport, which is the arrangement that shipped before.
-bool Composition::MakeTransportBuffer(HostBuffer& buf, size_t bytes, VkBufferUsageFlags usage,
-                                      void* hostPtr) {
-    DropHostBuffer(buf);
-    if (!hostPtr || !_vk->vkGetMemoryHostPointerPropertiesEXT) return false;
-
-    // The driver both names the memory type that may back this pointer and says nothing about its
-    // alignment; the alignment the extension demands is a physical-device property (64 KiB on
-    // NVIDIA). The mappings are made at offsets that satisfy it, but the check stays: a mapping
-    // that arrived misaligned falls back to staging rather than failing the allocation.
-    VkDeviceSize align = 0;
-    if (_instance->vkGetPhysicalDeviceProperties2) {
-        VkPhysicalDeviceExternalMemoryHostPropertiesEXT hostProps{};
-        hostProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT;
-        VkPhysicalDeviceProperties2 props2{};
-        props2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-        props2.pNext = &hostProps;
-        _instance->vkGetPhysicalDeviceProperties2(_physicalDevice, &props2);
-        align = hostProps.minImportedHostPointerAlignment;
-    }
-    if (!align) align = 1;
-    if (reinterpret_cast<uintptr_t>(hostPtr) % align) return false;
-
-    VkMemoryHostPointerPropertiesEXT props{};
-    props.sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT;
-    if (_vk->vkGetMemoryHostPointerPropertiesEXT(
-            _device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, hostPtr, &props) != VK_SUCCESS)
-        return false;
-
-    VkBufferCreateInfo bci{};
-    bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bci.size = bytes;
-    bci.usage = usage;
-    bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    VkExternalMemoryBufferCreateInfo ext{};
-    ext.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO;
-    ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
-    bci.pNext = &ext;
-    if (_vk->vkCreateBuffer(_device, &bci, nullptr, &buf.buffer) != VK_SUCCESS) return false;
-
-    VkMemoryRequirements req{};
-    _vk->vkGetBufferMemoryRequirements(_device, buf.buffer, &req);
-    const uint32_t typeBits = req.memoryTypeBits & props.memoryTypeBits;
-    if (!typeBits) {
-        _vk->vkDestroyBuffer(_device, buf.buffer, nullptr);
-        buf.buffer = VK_NULL_HANDLE;
-        return false;
-    }
-    uint32_t type = 0;
-    while (!(typeBits & (1u << type))) ++type;
-
-    VkImportMemoryHostPointerInfoEXT hpi{};
-    hpi.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT;
-    hpi.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT;
-    hpi.pHostPointer = hostPtr;
-    // The allocation size must be a multiple of the import alignment -- a model raster of, say,
-    // 1920x1080x4 is not. Rounding up is legal (the buffer only reads the bytes it was created for)
-    // and the mapping is rounded to the same figure in ShmMapFrames, so the extra stays inside the
-    // file's pages. Without this the import fails at almost every resolution and the staging path
-    // silently carries every frame.
-    VkMemoryAllocateInfo mai{};
-    mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    mai.pNext = &hpi;
-    mai.allocationSize = (req.size + align - 1) & ~(align - 1);
-    mai.memoryTypeIndex = type;
-    if (_vk->vkAllocateMemory(_device, &mai, nullptr, &buf.memory) != VK_SUCCESS ||
-        _vk->vkBindBufferMemory(_device, buf.buffer, buf.memory, 0) != VK_SUCCESS) {
-        _vk->vkDestroyBuffer(_device, buf.buffer, nullptr);
-        buf = HostBuffer{};
-        return false;
-    }
-
-    buf.mapped = hostPtr;
-    buf.hostPtr = hostPtr;
-    buf.size = bytes;
-    return true;
 }
 
 // Native transport: device-local memory exported as an opaque fd the daemon imports, so neither
@@ -570,49 +486,20 @@ void Composition::ExternalOwnership(VkCommandBuffer cb, const HostBuffer& buf, u
                               0, nullptr, 1, &b, 0, nullptr);
 }
 
-// Build the transport pair against whatever mapping is currently set: imported when the shared
-// memory covers the frame, private host-visible staging otherwise. Called from Prepare (which
-// knows the model size) and from SetTransport (which knows the mapping), so a resize and a remap
-// each land on the right rebuild.
+// Build the transport pair at the model size: exported device-local memory while the export is
+// on, private host-visible staging otherwise. Called from Prepare (which knows the model size)
+// and from DisableExport, after each has dropped the old pair.
 void Composition::EnsureTransport() {
     if (!_frame.image) return;
     const size_t bytes = ModelBytes();
-    if (_download.buffer && _download.hostPtr == _transportIn && _download.size >= bytes &&
-        _upload.buffer && _upload.hostPtr == _transportOut && _upload.size >= bytes)
-        return;
-
     _transportReady = false;
     WithdrawOffer(); // New buffers: any offer was of the old ones.
-    bool imported = false;
+    if (_export && MakeExportBuffer(_download, bytes) && MakeExportBuffer(_upload, bytes)) return;
+    // MakeHostBuffer drops an exported buffer that a failed pair left behind.
     // Both ways: the in-layer network reads the proxy and writes the answer between the copies.
     constexpr VkBufferUsageFlags kTransfer = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-    if (_export) {
-        imported = MakeExportBuffer(_download, bytes) && MakeExportBuffer(_upload, bytes);
-        if (!imported) {
-            DropHostBuffer(_download);
-            DropHostBuffer(_upload);
-        }
-    } else if (_transportIn && _transportOut && _transportBytes >= bytes) {
-        imported =
-            MakeTransportBuffer(_download, bytes, kTransfer, _transportIn) &&
-            MakeTransportBuffer(_upload, bytes, kTransfer, _transportOut);
-        if (!imported) {
-            DropHostBuffer(_download);
-            DropHostBuffer(_upload);
-        }
-    }
-    if (!imported) {
-        MakeHostBuffer(_download, bytes, kTransfer);
-        MakeHostBuffer(_upload, bytes, kTransfer);
-    }
-}
-
-void Composition::SetTransport(void* inRegion, void* outRegion, size_t bytes) {
-    if (inRegion == _transportIn && outRegion == _transportOut && bytes == _transportBytes) return;
-    _transportIn = inRegion;
-    _transportOut = outRegion;
-    _transportBytes = bytes;
-    EnsureTransport();
+    MakeHostBuffer(_download, bytes, kTransfer);
+    MakeHostBuffer(_upload, bytes, kTransfer);
 }
 
 // ---------------------------------------------------------------------------
@@ -960,8 +847,8 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
         MakeImage(_model, modelW, modelH, proxyFormat, sampled | src | dst) &&
         MakeImage(_composed, width, height, work, storage | src);
 
-    // The transport pair is sized to the model raster and rebuilt against whatever mapping is
-    // currently pointed at it -- the shared-memory regions when there are any, staging otherwise.
+    // The transport pair is sized to the model raster: exported device-local memory while the
+    // export is on, staging otherwise.
     _modelW = modelW;
     _modelH = modelH;
     EnsureTransport();
@@ -1016,183 +903,6 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
     return true;
 }
 
-// ---------------------------------------------------------------------------
-// Phase 5: dma-buf transport
-// ---------------------------------------------------------------------------
-// The proxy and the answer as exportable device memory. The layer exports the proxy's memory as a
-// file descriptor and the helper imports it, and the other way round for the answer, so the pixels
-// cross the process boundary as VRAM rather than as host pages -- no GPU->host->GPU round trip at
-// all. The descriptors travel over a unix socket (see fd_channel); the shared-memory transport
-// above stays as the fallback for every step that can fail: no channel, no extension, a driver
-// that refuses the export or the import.
-//
-// The images are CONCURRENT so they may be used by two devices, and each side hands the other one
-// through VK_QUEUE_FAMILY_FOREIGN_EXT: the producer releases to FOREIGN after its last write, the
-// consumer acquires from FOREIGN before its first read. That is the spec's shape for sharing with
-// "another API", which from one driver's point of view the other process's driver is.
-
-// The dma-buf must land in a memory type the driver allows for this handle type, and
-// VkMemoryRequirements does not say which ones those are. Candidates are tried in order; each
-// attempt gets its own duplicate of the descriptor, because a failed import may or may not have
-// consumed the fd depending on the driver. The winner keeps its duplicate, the losers close
-// theirs, and the caller closes the original either way.
-bool Composition::ImportFdMemory(int fd, VkImage image, const VkMemoryRequirements& req, VkDeviceMemory* out) {
-    for (uint32_t type = 0; type < 32; ++type) {
-        if (!(req.memoryTypeBits & (1u << type))) continue;
-        const int dup = fcntl(fd, F_DUPFD_CLOEXEC, 0);
-        if (dup < 0) return false;
-        VkImportMemoryFdInfoKHR imp{};
-        imp.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR;
-        imp.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
-        imp.fd = dup;
-        VkMemoryAllocateInfo mai{};
-        mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        mai.pNext = &imp;
-        mai.allocationSize = req.size;
-        mai.memoryTypeIndex = type;
-        if (_vk->vkAllocateMemory(_device, &mai, nullptr, out) == VK_SUCCESS) {
-            if (_vk->vkBindImageMemory(_device, image, *out, 0) == VK_SUCCESS) return true;
-            _vk->vkFreeMemory(_device, *out, nullptr);
-            *out = VK_NULL_HANDLE;
-        }
-        close(dup);
-    }
-    return false;
-}
-
-bool Composition::ImportProxy(int fd, uint32_t w, uint32_t h) {
-    if (fd < 0 || !_vk->vkAllocateMemory || !w || !h) {
-        if (fd >= 0) close(fd);
-        return false;
-    }
-    // A new descriptor is a new image -- a restarted helper names a fresh buffer behind the same
-    // raster -- so the old import goes away first. Nothing of ours may be in flight against it.
-    if (_proxyXfer.image && _vk->vkDeviceWaitIdle) _vk->vkDeviceWaitIdle(_device);
-    DropImage(_proxyXfer);
-
-    // The proxy is the helper's memory; this device only ever writes it, and the helper reads it
-    // as its own. CONCURRENT because two devices touch it, and the handle type says the fd names a
-    // dma-buf rather than an opaque driver object.
-    VkExternalMemoryImageCreateInfo ext{};
-    ext.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
-    ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
-    VkImageCreateInfo ci{};
-    ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    ci.pNext = &ext;
-    ci.imageType = VK_IMAGE_TYPE_2D;
-    ci.format = _hdrProxy ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
-    ci.extent = { w, h, 1 };
-    ci.mipLevels = 1;
-    ci.arrayLayers = 1;
-    ci.samples = VK_SAMPLE_COUNT_1_BIT;
-    ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-    ci.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-               VK_IMAGE_USAGE_SAMPLED_BIT;
-    // Imported memory is shared between processes, not between queue families on this device.
-    ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    ci.queueFamilyIndexCount = 0;
-    ci.pQueueFamilyIndices = nullptr;
-    ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    if (_vk->vkCreateImage(_device, &ci, nullptr, &_proxyXfer.image) != VK_SUCCESS) {
-        close(fd);
-        return false;
-    }
-    _proxyXfer.format = ci.format;
-    _proxyXfer.width = w;
-    _proxyXfer.height = h;
-
-    VkMemoryRequirements req{};
-    _vk->vkGetImageMemoryRequirements(_device, _proxyXfer.image, &req);
-    if (!ImportFdMemory(fd, _proxyXfer.image, req, &_proxyXfer.memory)) {
-        DropImage(_proxyXfer);
-        close(fd);
-        return false;
-    }
-    close(fd);  // the winning duplicate holds its own reference
-    VkImageViewCreateInfo vi{};
-    vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    vi.image = _proxyXfer.image;
-    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    vi.format = _proxyXfer.format;
-    vi.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    if (_vk->vkCreateImageView(_device, &vi, nullptr, &_proxyXfer.view) != VK_SUCCESS) {
-        DropImage(_proxyXfer);
-        return false;
-    }
-    _proxyXfer.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    Log("[comp] proxy imported at %ux%u (dma-buf)", w, h);
-    return true;
-}
-bool Composition::ImportAnswerFd(int fd, uint32_t w, uint32_t h) {
-    if (fd < 0 || !_vk->vkAllocateMemory || !w || !h) {
-        if (fd >= 0) close(fd);
-        return false;
-    }
-    // As with the proxy: a new descriptor names a new image, and the old import must not outlive
-    // it. The wait covers the resolve that may still be sampling the old surface.
-    if (_answerXfer.image && _vk->vkDeviceWaitIdle) _vk->vkDeviceWaitIdle(_device);
-    DropImage(_answerXfer);
-
-    // The image is created first so its memory requirements say what the import needs; the fd is
-    // then consumed by the allocation that backs it. CONCURRENT because two devices touch it, and
-    // the handle type says the fd is a dma-buf rather than an opaque driver object.
-    VkExternalMemoryImageCreateInfo ext{};
-    ext.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
-    ext.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT;
-    VkImageCreateInfo ci{};
-    ci.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    ci.pNext = &ext;
-    ci.imageType = VK_IMAGE_TYPE_2D;
-    ci.format = _hdrProxy ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;
-    ci.extent = { w, h, 1 };
-    ci.mipLevels = 1;
-    ci.arrayLayers = 1;
-    ci.samples = VK_SAMPLE_COUNT_1_BIT;
-    ci.tiling = VK_IMAGE_TILING_OPTIMAL;
-    ci.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    ci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    ci.queueFamilyIndexCount = 0;
-    ci.pQueueFamilyIndices = nullptr;
-    ci.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    if (_vk->vkCreateImage(_device, &ci, nullptr, &_answerXfer.image) != VK_SUCCESS) {
-        close(fd);
-        return false;
-    }
-    _answerXfer.format = ci.format;
-    _answerXfer.width = w;
-    _answerXfer.height = h;
-
-    VkMemoryRequirements req{};
-    _vk->vkGetImageMemoryRequirements(_device, _answerXfer.image, &req);
-    if (!ImportFdMemory(fd, _answerXfer.image, req, &_answerXfer.memory)) {
-        DropImage(_answerXfer);
-        close(fd);
-        return false;
-    }
-    close(fd);  // the winning duplicate holds its own reference
-    VkImageViewCreateInfo vi{};
-    vi.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    vi.image = _answerXfer.image;
-    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    vi.format = _answerXfer.format;
-    vi.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    if (_vk->vkCreateImageView(_device, &vi, nullptr, &_answerXfer.view) != VK_SUCCESS) {
-        DropImage(_answerXfer);
-        return false;
-    }
-    _answerXfer.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    Log("[comp] answer imported at %ux%u (dma-buf)", w, h);
-    return true;
-}
-
-void Composition::DropXfer() {
-    // The answer surface is sampled by submitted resolves, so nothing may be in flight when it
-    // goes away. This runs on channel loss and on teardown, not per frame -- the wait is free.
-    if ((_proxyXfer.image || _answerXfer.image) && _vk && _vk->vkDeviceWaitIdle)
-        _vk->vkDeviceWaitIdle(_device);
-    DropImage(_proxyXfer);
-    DropImage(_answerXfer);
-}
 void Composition::Transition(VkCommandBuffer cb, Image& img, VkImageLayout to) {
     if (img.layout == to) return;
     VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
@@ -1477,53 +1187,6 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
     region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
     region.imageExtent = { _modelW, _modelH, 1 };
 
-    // dma-buf: the proxy goes to the exportable image and is released to the other process's
-    // driver, which sees it as a foreign consumer. The host transport is skipped entirely -- the
-    // bytes never leave VRAM.
-    if (ProxyActive()) {
-        // Acquire from FOREIGN: the helper was the last user of this memory and released it back
-        // before processing on, so the layout it reports is UNDEFINED and its caches are flushed.
-        VkImageMemoryBarrier pacq{};
-        pacq.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        pacq.srcAccessMask = 0;
-        pacq.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        pacq.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        pacq.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        pacq.srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
-        pacq.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        pacq.image = _proxyXfer.image;
-        pacq.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        _vk->vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                  0, 0, nullptr, 0, nullptr, 1, &pacq);
-        _proxyXfer.layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        VkImageCopy copy{};
-        copy.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        copy.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        copy.extent = { _modelW, _modelH, 1 };
-        _vk->vkCmdCopyImage(cb, source->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, _proxyXfer.image,
-                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-
-        // Release to FOREIGN: the helper's driver acquires from the same domain before it reads.
-        Transition(cb, _proxyXfer, VK_IMAGE_LAYOUT_GENERAL);
-        VkImageMemoryBarrier rel{};
-        rel.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        rel.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        rel.dstAccessMask = 0;
-        rel.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
-        rel.newLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        rel.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        rel.dstQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
-        rel.image = _proxyXfer.image;
-        rel.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        _vk->vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                                  0, 0, nullptr, 0, nullptr, 1, &rel);
-        _proxyXfer.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-        // The helper reads this image through the fd on exactly the frame the flag was set for,
-        // and the flag is set when and only when this branch runs, so the host transport stays
-        // untouched. One decision, one surface, one frame.
-        return true;
-    }
-
     ExternalOwnership(cb, _download, VK_QUEUE_FAMILY_EXTERNAL, _exportFamily, VK_ACCESS_TRANSFER_WRITE_BIT);
     _vk->vkCmdCopyImageToBuffer(cb, source->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, _download.buffer, 1,
                                 &region);
@@ -1537,51 +1200,23 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
 bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, const FrameSettings& s) {
     if (!_usable || !_composed.image) return false;
 
-    // dma-buf: the answer is already device memory this process can read -- the helper released it
-    // before it answered, and the sequence handshake ordered that before this submit. No upload.
-    // The flag is the layer's own decision from before the request went out, so it and the helper
-    // agree on which surface holds this frame's answer.
-    const bool dmaAnswer = AnswerViaFd();
     const bool rawCopy = s.compositionBypass != 0 && s.compareMode == 0 && !_capture.Active() &&
                          !_superSample && !_hdrProxy && !_linearHdr &&
-                         _modelW == _width && _modelH == _height &&
-                         (dmaAnswer ? _answerXfer.format : _model.format) == _workFormat;
-    if (dmaAnswer) {
-        // Acquire from FOREIGN, then into the layout the resolve samples in. The first barrier's
-        // old layout is the one the exporter left it in; the image's own tracking says UNDEFINED
-        // because this device has never written it, which is exactly the state an import starts in.
-        VkImageMemoryBarrier acq{};
-        acq.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        acq.srcAccessMask = 0;
-        acq.dstAccessMask = rawCopy ? VK_ACCESS_TRANSFER_READ_BIT : VK_ACCESS_SHADER_READ_BIT;
-        acq.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        acq.newLayout = rawCopy ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-                                : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        acq.srcQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
-        acq.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        acq.image = _answerXfer.image;
-        acq.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        _vk->vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                                  rawCopy ? VK_PIPELINE_STAGE_TRANSFER_BIT : VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                  0, 0, nullptr, 0, nullptr, 1, &acq);
-        _answerXfer.layout = rawCopy ? VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-                                     : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    } else {
-        Transition(cb, _model, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-        VkBufferImageCopy region{};
-        region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
-        region.imageExtent = { _modelW, _modelH, 1 };
-        ExternalOwnership(cb, _upload, VK_QUEUE_FAMILY_EXTERNAL, _exportFamily, VK_ACCESS_TRANSFER_READ_BIT);
-        _vk->vkCmdCopyBufferToImage(cb, _upload.buffer, _model.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                                    &region);
-        ExternalOwnership(cb, _upload, _exportFamily, VK_QUEUE_FAMILY_EXTERNAL, VK_ACCESS_TRANSFER_READ_BIT);
-        Transition(cb, _model, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    }
+                         _modelW == _width && _modelH == _height && _model.format == _workFormat;
+    Transition(cb, _model, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    VkBufferImageCopy region{};
+    region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    region.imageExtent = { _modelW, _modelH, 1 };
+    ExternalOwnership(cb, _upload, VK_QUEUE_FAMILY_EXTERNAL, _exportFamily, VK_ACCESS_TRANSFER_READ_BIT);
+    _vk->vkCmdCopyBufferToImage(cb, _upload.buffer, _model.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                                &region);
+    ExternalOwnership(cb, _upload, _exportFamily, VK_QUEUE_FAMILY_EXTERNAL, VK_ACCESS_TRANSFER_READ_BIT);
+    Transition(cb, _model, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     // When the model worked above the frame its answer is averaged back to native first, and the
     // composition then sees a native proxy against a native answer -- which is what it should see,
     // because from its point of view the model effectively ran at the frame's own resolution.
-    Image* answer = dmaAnswer ? &_answerXfer : &_model;
+    Image* answer = &_model;
     Image* source = _work.image ? &_work : &_proxy;
     if (rawCopy) {
         Transition(cb, *answer, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -1591,21 +1226,6 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, _width, _height);
         TransitionSwapchain(cb, swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-
-        if (dmaAnswer) {
-            VkImageMemoryBarrier rel{};
-            rel.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            rel.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-            rel.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-            rel.newLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            rel.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            rel.dstQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
-            rel.image = _answerXfer.image;
-            rel.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-            _vk->vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                                      VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &rel);
-            _answerXfer.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-        }
         return true;
     }
     if (_superSample) {
@@ -1652,24 +1272,6 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
     if (!_pass->Dispatch(cb, res, _width, _height, source->view, answer->view, _frame.view, VK_NULL_HANDLE,
                          _composed.view, VK_NULL_HANDLE))
         return false;
-
-    // The answer's memory belongs to the helper's device between frames: hand it back before the
-    // helper's next write, so neither side's caches hold a version the other has moved past.
-    if (dmaAnswer) {
-        VkImageMemoryBarrier rel{};
-        rel.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        rel.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        rel.dstAccessMask = 0;
-        rel.oldLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        rel.newLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        rel.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        rel.dstQueueFamilyIndex = VK_QUEUE_FAMILY_FOREIGN_EXT;
-        rel.image = _answerXfer.image;
-        rel.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-        _vk->vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                                  VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &rel);
-        _answerXfer.layout = VK_IMAGE_LAYOUT_UNDEFINED;
-    }
 
     Transition(cb, _composed, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
     TransitionSwapchain(cb, swapchainImage, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);

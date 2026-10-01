@@ -445,32 +445,17 @@ struct ShmHeader {
     std::atomic<uint32_t> answeredW;
     std::atomic<uint32_t> answeredH;
 
-    // Phase 5: the dma-buf exchange, carried entirely through this header.
-    //
-    // The helper owns both images that cross the boundary -- the proxy it reads and the answer it
-    // writes -- because it is the one process that can hand out a dma-buf descriptor without any
-    // help: Wine's ws2_32 has no AF_UNIX and Wine traps direct syscalls, so SCM_RIGHTS is out, but
-    // vkGetMemoryFdKHR returns a plain Linux fd number that the helper can simply name here. The
-    // layer, native and unrestricted, opens /proc/<pid>/fd/<fd> to take its own reference on the
-    // same buffer. That open needs ptrace_mask off (yama ptrace_scope 0) or a descendant
-    // relationship; where it fails, the shared-memory transport carries the frame instead.
-    //
-    // Each export sequence increments when the fd or the image behind it changes; the importer
-    // re-opens on a new sequence. The layer's flags say which surfaces it is reading and writing
-    // through the fd path, set before seq_req and honoured on exactly that frame.
-    std::atomic<uint32_t> proxyExportSeq;  // helper: proxyPid/proxyFd/proxyGen are current
-    std::atomic<uint32_t> proxyPid;        // the helper's Linux pid
-    std::atomic<uint32_t> proxyFd;         // its fd number for the proxy image
-    std::atomic<uint32_t> proxyGen;        // rebuilt (size or channel) since
-    std::atomic<uint32_t> answerExportSeq; // helper: answerPid/answerFd/answerGen are current
+    // Retired: phase 5's dma-buf exchange. The helper named its exported proxy and answer images
+    // here, and the layer echoed the export sequences it had imported. Nothing uses these fields any
+    // more; they keep their slots so that the layout stays the same.
+    std::atomic<uint32_t> proxyExportSeq;
+    std::atomic<uint32_t> proxyPid;
+    std::atomic<uint32_t> proxyFd;
+    std::atomic<uint32_t> proxyGen;
+    std::atomic<uint32_t> answerExportSeq;
     std::atomic<uint32_t> answerPid;
     std::atomic<uint32_t> answerFd;
     std::atomic<uint32_t> answerGen;
-    // The importer's echo: the export sequence each side has taken a reference at, restated every
-    // frame, 0 for none. The helper reads and writes the fd path only while its own current
-    // sequence is echoed back -- which also means a restarted helper is not read through a
-    // descriptor the layer has not re-opened yet, and a restarted layer is not trusted by the
-    // helper's stale memory.
     std::atomic<uint32_t> layerProxySeq;
     std::atomic<uint32_t> layerAnswerSeq;
 

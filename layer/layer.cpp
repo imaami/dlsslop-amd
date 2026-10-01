@@ -117,10 +117,6 @@ static bool VerboseEnabled() {
     return v;
 }
 
-// This layer only drives the native HIP worker. Its transport is host-staged RGBA8 or RGBA16F;
-// upstream's NGX image import and dma-buf exchange fold away at compile time.
-static constexpr bool NativeHipBackend() { return true; }
-
 static inline double NowMs() {
     return std::chrono::duration<double, std::milli>(
         std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -154,7 +150,7 @@ struct ShmMap {
     uint32_t lastControlSeq = 0;
     uint32_t lastHeartbeat = 0;
     bool dead = false;
-    // The file path, kept so the dma-buf socket can be named beside it.
+    // The file path, kept so the transport socket and the producer lock can be named beside it.
     std::string path;
     int producerFd = -1;
 
@@ -212,53 +208,23 @@ static bool EnsureParentDir(const std::string& path) {
     return true;
 }
 
-// Maps a file range at a hint address, trying successive 2 MiB-aligned slots until one is free.
-// The hint is 64 KiB-aligned and MAP_FIXED_NOREPLACE either takes that exact address or fails, so
-// a success here is a pointer the driver will accept for VK_EXT_external_memory_host -- NVIDIA
-// demands minImportedHostPointerAlignment, which is 64 KiB. If every slot is taken the plain map
-// still works; the composition checks the pointer's alignment and falls back to staging.
-static void* ShmMapAligned(int fd, off_t offset, size_t want, uintptr_t hint) {
-#if defined(MAP_FIXED_NOREPLACE) && UINTPTR_MAX > 0xFFFFFFFFull
-    for (int i = 0; i < 128; ++i) {
-        void* p = mmap((void*) (hint + size_t(i) * (2u << 20)), want, PROT_READ | PROT_WRITE,
-                       MAP_SHARED | MAP_FIXED_NOREPLACE, fd, offset);
-        if (p != MAP_FAILED) return p;
-    }
-#else
-    (void) hint;
-#endif
-    return mmap(nullptr, want, PROT_READ | PROT_WRITE, MAP_SHARED, fd, offset);
-}
-
 // Maps the two pixel regions at the size this frame needs, remapping when the size changes.
 static bool ShmMapFrames(ShmMap& s, size_t bytes) {
     if (s.mappedFrameBytes >= bytes && s.inPixels && s.outPixels) return true;
     if (bytes > kMaxFrame) return false;
 
-    // Round up so a small change in resolution does not remap every frame, and to a 64 KiB multiple so
-    // a host-pointer import of the whole region (whose allocation size must be a multiple of the
-    // driver's import alignment) stays inside the mapping.
-    const size_t kImportAlign = 65536;
-    const size_t want = ((bytes + kImportAlign - 1) / kImportAlign) * kImportAlign;
+    // Round up to 64 KiB so a small change in resolution does not remap every frame.
+    const size_t want = (bytes + 65535) / 65536 * 65536;
 
     if (s.inPixels) munmap(s.inPixels, s.mappedFrameBytes);
     if (s.outPixels) munmap(s.outPixels, s.mappedFrameBytes);
     s.inPixels = s.outPixels = nullptr;
     s.mappedFrameBytes = 0;
 
-    // The file offsets of both regions are already 64 KiB multiples (v7 of the protocol moved the
-    // header to 64 KiB and kMaxFrame is an exact multiple); what the kernel adds is the address.
-#if UINTPTR_MAX > 0xFFFFFFFFull
-    const uintptr_t kHint = UINT64_C(0x200000000000);
-    const uintptr_t outHint = kHint + size_t(130) * (2u << 20) + ((want + ((2u << 20) - 1)) & ~size_t((2u << 20) - 1));
-#else
-    const uintptr_t kHint = 0, outHint = 0;
-#endif
-
-    void* in = ShmMapAligned(s.fd, (off_t) kHeaderBytes, want, kHint);
+    void* in = mmap(nullptr, want, PROT_READ | PROT_WRITE, MAP_SHARED, s.fd, (off_t) kHeaderBytes);
     if (in == MAP_FAILED) { Log("[shm] could not map the input region (%zu bytes)", want); return false; }
 
-    void* out = ShmMapAligned(s.fd, (off_t) (kHeaderBytes + kMaxFrame), want, outHint);
+    void* out = mmap(nullptr, want, PROT_READ | PROT_WRITE, MAP_SHARED, s.fd, (off_t) (kHeaderBytes + kMaxFrame));
     if (out == MAP_FAILED) {
         munmap(in, want);
         Log("[shm] could not map the output region (%zu bytes)", want);
@@ -343,46 +309,6 @@ static bool ShmNeuralEnabled(ShmMap& s) {
     return ::ShmNeuralEnabled(s.hdr);
 }
 
-// One round trip: publish the proxy, wait for the model's answer, copy it back.
-//
-// What crosses is the proxy at the model's own resolution, always R8G8B8A8_UNORM and always
-// display-referred, because the encode has already done that work on the GPU. The helper therefore
-// never has to know what format the game presents in, and the working scale reduces this copy
-// quadratically -- which on this transport is the difference the setting actually buys.
-// Take this process's own reference on a dma-buf another process exported: procfs opens a fresh
-// descriptor for the same buffer. Same uid and a permissive yama setting are what make the open
-// work; where it does not, the caller falls back and nothing else changes.
-// Adopt a descriptor the helper exported. The primary route is pidfd_getfd, which duplicates a
-// descriptor straight out of the helper's table -- the only way to receive a dma-buf, since those
-// live on an anonymous filesystem that cannot be reopened by path. The old route (opening
-// /proc/<pid>/fd/<n>) is kept as a fallback for kernels predating pidfd; it works for ordinary
-// files even though it cannot see dma-bufs. Both need the same uid and a permissive yama.
-static int AdoptPeerFd(uint32_t pid, uint32_t fd) {
-    if (!pid || fd == 0 || fd > 1000000u) return -1;
-#ifdef __NR_pidfd_open
-    const int pidfd = (int)syscall(__NR_pidfd_open, pid, 0);
-    if (pidfd >= 0) {
-        const int dup = (int)syscall(__NR_pidfd_getfd, pidfd, fd, 0);
-        close(pidfd);
-        if (dup >= 0) return dup;
-    }
-#endif
-    char p[64];
-    snprintf(p, sizeof(p), "/proc/%u/fd/%u", pid, fd);
-    return open(p, O_RDWR | O_CLOEXEC);
-}
-
-// The exchange is on unless the environment says off; the helper and driver get the final say by
-// what they publish.
-static bool DmaBufEnabled() {
-    if (NativeHipBackend()) return false;
-    static const bool on = [] {
-        const char* v = getenv("DLSSNR_DMABUF");
-        return !(v && !strcmp(v, "0"));
-    }();
-    return on;
-}
-
 // Whether an idle-repaint thread may run; DLSSNR_IDLE_REPAINT=0 says no. The application's own
 // acquires, submits and queue waits are hooked, and take the device lock, only when one may;
 // otherwise they go straight down the chain instead of queueing behind the round trip.
@@ -394,9 +320,15 @@ static bool IdleRepaintWanted() {
     return wanted;
 }
 
+// One round trip: publish the proxy, wait for the model's answer, and copy it back unless it
+// crossed in the device-local transport.
+//
+// What crosses is the proxy at the model's own resolution: R8G8B8A8_UNORM or, with hdrEncode,
+// R16G16B16A16_SFLOAT, sRGB-encoded at either precision because the encode has already done that
+// work on the GPU. The helper therefore never has to know what format the game presents in, and
+// the working scale reduces this copy quadratically.
 static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, const void* proxy,
-                          void* modelOut, bool proxyInRegion, bool answerFromFd, bool hdrEncode,
-                          uint32_t transportGen) {
+                          void* modelOut, bool hdrEncode, uint32_t transportGen) {
     if (s.dead) return false;
     if (!ShmOpen(s)) { s.dead = true; return false; }
     if (w > kMaxW || h > kMaxH || w < kMinW || h < kMinH) return false;
@@ -406,10 +338,9 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
     const bool time = TimeEnabled();
     const double t0 = NowMs();
     if (!ShmMapFrames(s, bytes)) { s.dead = true; return false; }
-    // When the transport buffer IS this region (the imported case), or the proxy crossed as a
-    // dma-buf instead, the GPU already wrote the bytes where they belong and there is nothing to
-    // copy.
-    if (!proxyInRegion && proxy != (const void*) s.inPixels) std::memcpy(s.inPixels, proxy, bytes);
+    // A request that names a device-local transport generation crosses in the exported buffers:
+    // the GPU already wrote the proxy where the daemon reads it, and there is nothing to copy.
+    if (!transportGen) std::memcpy(s.inPixels, proxy, bytes);
     const double tCopy = NowMs();
     s.hdr->width.store(w);
     s.hdr->height.store(h);
@@ -420,7 +351,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
     s.hdr->transportGen.store(transportGen);
     uint32_t req = s.hdr->seq_req.load() + 1;
     // The release pairs with the helper's acquire on seq_resp: everything this process wrote --
-    // the proxy, whether by the GPU into the imported region or by the memcpy above -- is visible
+    // the proxy, whether by the GPU into the exported buffer or by the memcpy above -- is visible
     // to the helper before it sees the new request number. (The GPU's own write is fenced earlier,
     // by leg 1's vkWaitForFences; this fence covers the host-visible ordering across processes.)
     std::atomic_thread_fence(std::memory_order_release);
@@ -470,7 +401,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
             const bool ok = s.hdr->seq_ok.load() == req && s.hdr->answeredW.load() == w &&
                             s.hdr->answeredH.load() == h;
             if (!ok) Log("[shm] helper could not use frame %u (ok=%u)", req, s.hdr->seq_ok.load());
-            if (ok && !answerFromFd && modelOut != (void*) s.outPixels) std::memcpy(modelOut, s.outPixels, bytes);
+            if (ok && !transportGen) std::memcpy(modelOut, s.outPixels, bytes);
             if (time) {
                 static int frameNo = 0;
                 if (++frameNo % TimeInterval() == 0) {
@@ -673,8 +604,8 @@ struct SwapchainState {
     bool ready = false;
     bool passThrough = false;
 
-    // The pass. Owns every surface it needs, including the transport pair -- the shared-memory
-    // regions themselves when the driver will import them, host-visible staging when it will not.
+    // The pass. Owns every surface it needs, including the transport pair -- exported device-local
+    // memory when the daemon imports it, host-visible staging when it does not.
     std::unique_ptr<dlssnr::Composition> comp;
 };
 
@@ -745,10 +676,6 @@ struct DeviceChain {
     ShmMap shm;
     uint64_t framesComposed = 0;
     uint64_t framesPassedThrough = 0;
-    // Phase 5: the dma-buf exchange. The export sequences last imported; a new sequence means the
-    // image behind the descriptor changed and the reference is taken again.
-    uint32_t proxySeqSeen = 0;
-    uint32_t answerSeqSeen = 0;
 };
 
 static std::unordered_map<VkInstance, InstanceChain> g_instances;
@@ -1033,21 +960,16 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
         if (it != g_phys.end()) ic = it->second;
     }
 
-    // VK_EXT_external_memory_host is what lets the transport buffers BE the shared-memory regions,
-    // so the proxy and the model's answer never pass through a private staging copy. The two fd
-    // extensions do the same job across the process boundary: VK_KHR_external_memory_fd is what
-    // vkGetMemoryFdKHR and the fd imports need, and VK_EXT_external_memory_dma_buf names the handle
-    // type the images are shared as. They are device extensions and the application decides what
-    // the device enables, but a layer may add to that list on the way down -- and does, when the
-    // pass is on, the device offers them, and the app did not already enable them. If any of that
-    // is false the composition falls back to the next transport down.
-    static const char* const kWantExts[] = { VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME,
-                                              VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
-                                              VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME,
+    // VK_KHR_external_memory_fd is what vkGetMemoryFdKHR needs to export the device-local
+    // transport, so the proxy and the model's answer never pass through host memory. It is a device
+    // extension and the application decides what the device enables, but a layer may add to that
+    // list on the way down -- and does, when the pass is on, the device offers it, and the app did
+    // not already enable it. If any of that is false the composition stages frames through host
+    // memory.
+    static const char* const kWantExts[] = { VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME,
                                               // The repaint's, for handing an image back unpresented.
                                               VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME };
     constexpr size_t kWantCount = sizeof(kWantExts) / sizeof(kWantExts[0]);
-    constexpr size_t kExternalMemoryFd = 1;
     const VkDeviceCreateInfo* effective = pCreateInfo;
     bool addedSwapMaint = false;
     VkDeviceCreateInfo modified = *pCreateInfo;
@@ -1067,18 +989,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
             for (size_t k = 0; k < kWantCount; ++k)
                     if (!std::strcmp(pCreateInfo->ppEnabledExtensionNames[i], kWantExts[k])) enabled[k] = true;
         for (size_t k = 0; k < kWantCount; ++k) {
-            // Native HIP never imports host memory (GPU reads of the answer must not alias
-            // memory the worker can overwrite) and shares no dma-buf images: only the fd
-            // export of its device-local transport is wanted.
-            if (k != kExternalMemoryFd && k < 3) continue;
             if (!ic->surfaceMaintenance1 &&
                 !std::strcmp(kWantExts[k], VK_EXT_SWAPCHAIN_MAINTENANCE_1_EXTENSION_NAME))
                 continue;
             if (!available[k] || enabled[k]) continue;
-            // VK_EXT_external_memory_dma_buf requires this device extension.
-            if (!std::strcmp(kWantExts[k], VK_EXT_EXTERNAL_MEMORY_DMA_BUF_EXTENSION_NAME) &&
-                !available[kExternalMemoryFd] && !enabled[kExternalMemoryFd])
-                continue;
             if (enabledExts.empty()) {
                 enabledExts.reserve(pCreateInfo->enabledExtensionCount + kWantCount);
                 for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i)
@@ -1975,31 +1889,6 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
                            (colorMode == kColourAuto && sc.hdrKind != kHdrNone);
     const uint32_t hdrTransfer = linearHdr && sc.hdrKind == kHdrPq10 ? 1u : 0u;
 
-    // Point the transport at the shared-memory regions before Prepare sizes anything, so the first
-    // frame at a new raster imports the mapping instead of building staging that then has to be
-    // thrown away. The regions are mapped at the model's own size, which is what the GPU copies
-    // into and out of.
-    if (!NativeHipBackend() && dc->shm.hdr && ShmOpen(dc->shm)) {
-        uint32_t mw = 0, mh = 0;
-        dlssnr::Composition::ModelExtent(sc.width, sc.height, fs, mw, mh);
-        if (ShmMapFrames(dc->shm, size_t(mw) * mh * (hdrProxy ? 8 : 4)))
-            sc.comp->SetTransport(dc->shm.inPixels, dc->shm.outPixels, dc->shm.mappedFrameBytes);
-        else
-            sc.comp->SetTransport(nullptr, nullptr, 0);
-    } else {
-        sc.comp->SetTransport(nullptr, nullptr, 0);
-    }
-
-        // ---- Phase 5: the dma-buf exchange ----
-    //
-    // The helper owns both images that cross the boundary and names their exported dma-bufs in
-    // the header; this process takes its own reference on each through pidfd_getfd (or /proc on older kernels).
-    // Everything here is best-effort and restated every frame: a descriptor that cannot be opened
-    // or imported leaves that direction on the shared-memory transport, which is the arrangement
-    // that shipped before. The flags written below say which surfaces this frame's bytes travel
-    // through, and the helper honours them on exactly the frame they were set for.
-    sc.comp->SetDmaBuf(!inLayer && DmaBufEnabled());
-
     if (!sc.comp->Prepare(sc.width, sc.height, sc.format, fs, linearHdr, hdrProxy, hdrTransfer)) {
         Log("[layer] composition cannot run here: %s", sc.comp->Reason());
         return false;
@@ -2028,37 +1917,6 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
         // still 8-bit. Publishing HdrProxyActive() here would wait on proxyFormat, which waits on
         // this field, and neither would ever move.
         dc->shm.hdr->hdrActive.store(hdrActive ? 1u : 0u);
-    }
-
-    if (sc.comp->DmaBuf() && dc->shm.hdr) {
-        ShmHeader* hdr = dc->shm.hdr;
-        const uint32_t ps = hdr->proxyExportSeq.load();
-        if (ps && ps != dc->proxySeqSeen) {
-            const int fd = AdoptPeerFd(hdr->proxyPid.load(), hdr->proxyFd.load());
-            if (fd >= 0 && sc.comp->ImportProxy(fd, sc.comp->ModelWidth(), sc.comp->ModelHeight()))
-                dc->proxySeqSeen = ps;
-        } else if (!ps) {
-            dc->proxySeqSeen = 0;
-        }
-        const uint32_t as = hdr->answerExportSeq.load();
-        if (as && as != dc->answerSeqSeen) {
-            const int fd = AdoptPeerFd(hdr->answerPid.load(), hdr->answerFd.load());
-            if (fd >= 0 && sc.comp->ImportAnswerFd(fd, sc.comp->ModelWidth(), sc.comp->ModelHeight()))
-                dc->answerSeqSeen = as;
-        } else if (!as) {
-            dc->answerSeqSeen = 0;
-        }
-    }
-
-    // One decision, made before the request goes out: the echo the helper reads and the surfaces
-    // this frame writes and composes from are the same decision, not two that must agree. The
-    // echo names the export sequence this process holds a reference at, so the helper reads the
-    // fd path only for the very image the layer imported -- not a stale one behind a restart.
-    const bool answerViaFd = sc.comp->AnswerViaFd();
-    sc.comp->SetAnswerViaFd(answerViaFd);
-    if (dc->shm.hdr) {
-        dc->shm.hdr->layerProxySeq.store(sc.comp->ProxyActive() ? dc->proxySeqSeen : 0u);
-        dc->shm.hdr->layerAnswerSeq.store(answerViaFd ? dc->answerSeqSeen : 0u);
     }
 
     // A capture is asked for by writing a frame count into the header; taking it clears the request,
@@ -2128,8 +1986,8 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
 
     // ---- the round trip ----
     if (!ShmProcessFrame(dc->shm, sc.comp->ModelWidth(), sc.comp->ModelHeight(), sc.comp->ModelBytes(),
-                         sc.comp->ProxyPixels(), sc.comp->ModelPixels(), sc.comp->ProxyActive() || transportGen,
-                         answerViaFd || transportGen, sc.comp->HdrProxyActive(), transportGen)) {
+                         sc.comp->ProxyPixels(), sc.comp->ModelPixels(), sc.comp->HdrProxyActive(),
+                         transportGen)) {
         // A restarted worker holds no imports: offer the pair again on the next frame.
         if (transportGen && dc->shm.hdr->transportMiss.load() == transportGen) sc.comp->SetTransportReady(false);
         // Fail-open. Leg 1 already put the image back in PRESENT_SRC_KHR, so the original frame is
