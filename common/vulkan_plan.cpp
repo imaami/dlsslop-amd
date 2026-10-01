@@ -925,16 +925,21 @@ Result<void> Lowering::gemm(const Layer& l)
     p.N = n;
     p.K = k;
     p.W = l.W;
-    // The ViT's products without a residual take the wide tile, the residual
-    // projections theirs (gemmprojw's at many ViT tokens), the rest 64x128.
-    const bool wide = vit(r) && !residual,
+    // The ViT's products without a residual take the wide tile, but its QKV
+    // at up to kQkvsMaxTokens tokens gemmvqkvnorms'; the residual projections
+    // take theirs (gemmprojw's at many ViT tokens), the rest 64x128.
+    const bool qkv = family == F::kVitQkv, qkvs = qkv && m <= kQkvsMaxTokens, wide = vit(r) && !residual,
                projection = !wide && residual && family != F::kProjPool && family != F::kVitExpand,
                projw = projection && family == F::kVitContract && m >= kProjwMinTokens;
-    const uint32_t mt = wide ? kGemmWideMt : projw ? kGemmProjwMt : projection ? kGemmProjMt : 64,
-                   nt = wide ? kGemmWideNt : projw ? kGemmProjwNt : projection ? kGemmProjNt : 128;
+    const auto [mt, nt] = qkvs         ? std::pair(kGemmQkvsMt, kGemmQkvsNt)
+                          : wide       ? std::pair(kGemmWideMt, kGemmWideNt)
+                          : projw      ? std::pair(kGemmProjwMt, kGemmProjwNt)
+                          : projection ? std::pair(kGemmProjMt, kGemmProjNt)
+                                       : std::pair(64u, 128u);
     if (n % nt) return fail("network plan: a GEMM's outputs do not divide its tile");
     Kernel kernel = family == F::kVitExpand ? Kernel::kGemmVact
-                    : family == F::kVitQkv  ? Kernel::kGemmVqkvNorm
+                    : qkvs                  ? Kernel::kGemmVqkvNorms
+                    : qkv                   ? Kernel::kGemmVqkvNorm
                     : !residual             ? Kernel::kGemmNores
                     : projw                 ? Kernel::kGemmProjw
                     : split                 ? Kernel::kGemmProjc
@@ -949,7 +954,7 @@ Result<void> Lowering::gemm(const Layer& l)
     if (family == F::kVitContract || (family == F::kVitProjection && m < kProjwMinTokens) ||
         (family == F::kVitExpand && m <= 1024))
         p.remap = 2;
-    if (family == F::kVitQkv) {
+    if (qkv) {
         // Q normalized and scaled in the GEMM's epilogue, with the record's
         // first 128 bytes, its temperatures.
         p.o_off = uint32_t(at(pool(b)) / 2);

@@ -28,8 +28,9 @@ bool counted_pair(Kernel p, Kernel q)
     auto c512 = [](Kernel k) { return k == kGemmProjc; };
     auto ffn = [](Kernel k) { return k == kFfwd3 || k == kFfwd3w; };
     auto projection = [](Kernel k) { return k == kGemmProj || k == kGemmProjw || k == kGemmProjt; };
+    auto qkv = [](Kernel k) { return k == kGemmVqkvNorm || k == kGemmVqkvNorms; };
     return (p == kAttn && c512(q)) || (c512(p) && ffn(q)) || (ffn(p) && c512(q)) || (c512(p) && q == kAttn) ||
-           (p == kGemmVact && projection(q)) || (projection(p) && q == kGemmVqkvNorm) ||
+           (p == kGemmVact && projection(q)) || (projection(p) && qkv(q)) ||
            (p == kVitAttn && projection(q)) || (projection(p) && q == kGemmVact) ||
            (c512(p) && upsampling_run(q)) || (upsampling_run(p) && (upsampling_run(q) || q == kFswinFusedUp32)) ||
            (p == kFswinDsp32 && q == kFswinPds64) || (p == kFswinPds64 && q == kFswinPds128) ||
@@ -41,8 +42,8 @@ bool counted(Kernel k)
 {
     using enum Kernel;
     return k == kAttn || k == kGemmProjc || k == kFfwd3 || k == kFfwd3w || k == kGemmVact || k == kGemmProj ||
-           k == kGemmProjw || k == kGemmProjt || k == kGemmVqkvNorm || k == kVitAttn || upsampling_run(k) ||
-           k == kFswinFusedUp32 || downsampling_run(k) || k == kFswinDsp32 || k == kFswin32;
+           k == kGemmProjw || k == kGemmProjt || k == kGemmVqkvNorm || k == kGemmVqkvNorms || k == kVitAttn ||
+           upsampling_run(k) || k == kFswinFusedUp32 || downsampling_run(k) || k == kFswinDsp32 || k == kFswin32;
 }
 
 bool same_tiles(const PushFSwin& a, const PushFSwin& b) { return a.tiles_x == b.tiles_x && a.tiles_y == b.tiles_y; }

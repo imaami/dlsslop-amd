@@ -136,7 +136,7 @@ A frame with those stages does not take upstream's path that samples the
 caller's color in place. The build fetches only the fork's SPIR-V sources,
 shader build, model tools and license; it neither fetches nor compiles the
 fork's host code (`linux/src/core`), which those changes modify. Of the 74
-files that the shader build writes, `install.py` installs the 38 that the
+files that the shader build writes, `install.py` installs the 39 that the
 project's own host code names in its tables and reads.
 
 dlsslopd runs the AMD fork's kernels with its own host code.
@@ -184,11 +184,10 @@ estimation that dlsslop-amd uses, the port records each frame's dispatches, push
 constants, barriers and copies as the fork's host code does, and it packs and
 uploads the weights byte for byte as upstream does; the network mathematics are
 unchanged. It does so with these schedule changes of upstream's `b1419b0`
-switched off, which it does not take yet: a 32x384 tile for the ViT's QKV,
-`gemmprojw` for the ViT's projections from 768 tokens on, no window rows of the
-post block below the picture, tile counters between four pairs of runs on big
-frames, and the kernels without the upper exponent clamp where the weights
-allow them. Like
+switched off, which it does not take yet: `gemmprojw` for the ViT's
+projections from 768 tokens on, no window rows of the post block below the
+picture, tile counters between four pairs of runs on big frames, and the
+kernels without the upper exponent clamp where the weights allow them. Like
 upstream, it takes the model's blend scale, by which the temporal post block
 weights the history, as a constant.
 Unlike upstream, it rejects frames whose working extent is not a
@@ -219,7 +218,8 @@ than RGBA8 and RGBA16F, the GPU timing that `last_gpu_ms()` and
 tools' entry list against the port. `common/vulkan_plan.h` holds the constants
 that the plan takes from `linux/build/arch/rdna4.sh` and from `nr_graph.cpp`'s
 defaults at `a75ac49`; `vulkan-constants` checks those that the markers in
-`pipelines.json` record, and a change of the pin must re-check the rest.
+`pipelines.json` record and the tile of `gemmvqkvnorms` that its defines set,
+and a change of the pin must re-check the rest.
 
 Preserve `layer/ATTRIBUTION.md` and all inherited notices of upstream
 code. The layer's shader/dispatch lineage includes OptiScaler and

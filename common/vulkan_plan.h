@@ -22,6 +22,8 @@ inline constexpr uint32_t kGemmWideMt = 64, kGemmWideNt = 256; // The ViT's wide
 inline constexpr uint32_t kGemmProjMt = 32, kGemmProjNt = 128; // The residual projections' tile.
 inline constexpr uint32_t kGemmProjwMt = 64, kGemmProjwNt = 128; // gemmprojw's tile,
 inline constexpr uint32_t kProjwMinTokens = 768;                 // from this many ViT tokens on.
+inline constexpr uint32_t kGemmQkvsMt = 32, kGemmQkvsNt = 384;   // gemmvqkvnorms' tile, the ViT QKV's
+inline constexpr uint32_t kQkvsMaxTokens = 768;                  // up to this many tokens.
 inline constexpr uint32_t kFfwdWgw = 4;             // ffwd3's subgroups a workgroup.
 inline constexpr uint32_t kFfwdFm2MinTokens = 2560; // ffwd3w from this many tokens on.
 inline constexpr uint32_t kDecupsVec = 16;          // decups' channels an invocation.
@@ -86,7 +88,8 @@ enum class Kernel : uint8_t {
     kFswin32, kFswinImagePreds32, kFswinDsp32, kFswinPds64, kFswinPds128, kFswinPds256,
     kFswinPup64, kFswinPup128, kFswinPup256, kFswinFusedUp32, kFswinImagePost32,
     kFfwd3, kFfwd3w, kAttn,
-    kGemmProjc, kGemmPool, kGemmNores, kGemmVact, kGemmProj, kGemmProjw, kGemmProjt, kGemmVqkvNorm, kGemmVqkvs,
+    kGemmProjc, kGemmPool, kGemmNores, kGemmVact, kGemmProj, kGemmProjw, kGemmProjt, kGemmVqkvNorm, kGemmVqkvNorms,
+    kGemmVqkvs,
     kVitAttn, kDecUps, kUpsView, kNoiseField,
     kCount
 };
@@ -126,6 +129,7 @@ inline constexpr KernelInfo kKernels[] = {
     {"gemmprojw", "aaawwawa", Images::kNone, 88},
     {"gemmprojt", "aaawwawa", Images::kNone, 88},
     {"gemmvqkvnorm", "aaawwawa", Images::kNone, 88},
+    {"gemmvqkvnorms", "aaawwawa", Images::kNone, 88},
     {"gemmvqkvs", "aaawwawa", Images::kNone, 84},
     {"vitattn", "awa", Images::kNone, 24},
     {"decups", "aaw", Images::kNone, 28},

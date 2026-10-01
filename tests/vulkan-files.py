@@ -15,7 +15,8 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-# 24x24 runs ffwd3 and upsview, 2560x1440 ffwd3w and gemmprojw, and both every other kernel.
+# 24x24 runs ffwd3, upsview and gemmvqkvnorms, 2560x1440 ffwd3w, gemmprojw and gemmvqkvnorm, and both every
+# other kernel.
 EXTENTS = ("24x24", "2560x1440")
 
 parser = argparse.ArgumentParser(description=__doc__, add_help=False)

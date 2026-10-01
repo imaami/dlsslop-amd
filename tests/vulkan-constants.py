@@ -34,12 +34,17 @@ assert sorted(built) == sorted(expected) and [l for l in built if l.startswith('
     [l for l in expected if l.startswith('shader-constants.txt ')], (
     sorted(set(built) - set(expected)), sorted(set(expected) - set(built)))
 
-# Each define the plan assumes, "pipeline define value", as pipelines.json builds that pipeline.
+# Each define the plan assumes, "pipeline define value", as pipelines.json builds that pipeline. gemm1x1's
+# tile is NR_MTILE = NR_WM * NR_MFRAG * 16 tokens by NR_NTILE = NR_WN * NR_NFRAG * 16 outputs.
+TILE = {'NR_MTILE': ('NR_WM', 'NR_MFRAG'), 'NR_NTILE': ('NR_WN', 'NR_NFRAG')}
 assumed = run('--defines')
 assert assumed
 for line in assumed:
     pipeline, define, value = line.split()
     defines = dict(d.split('=', 1) for d in network['pipelines'][pipeline]['defines'] if '=' in d)
+    if define in TILE:
+        waves, fragments = TILE[define]
+        defines[define] = str(int(defines[waves]) * int(defines[fragments]) * 16)
     assert defines.get(define) == value, (line, defines.get(define))
 
 extracted = set(args.model_files.read_text().split())
