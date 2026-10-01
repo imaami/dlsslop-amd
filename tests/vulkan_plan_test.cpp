@@ -416,13 +416,15 @@ int list_entries()
 }
 
 // A SPIR-V module's interface: its push-constant block's members, a type
-// each ('u' u32, 'i' i32, 'f' f32, '?' anything else) at its offset, and its
+// each ('u' u32, 'i' i32, 'f' f32, '?' anything else) at its offset, its
 // descriptor bindings of set 0 ('b' a storage buffer, 's' a storage image,
-// 't' a sampled one, '?' anything else).
+// 't' a sampled one, '?' anything else), and those of them that an
+// instruction loads, stores or reaches into.
 struct Interface {
     std::string push;
     std::vector<uint32_t> offsets;
     std::map<uint32_t, char> bindings;
+    std::map<uint32_t, bool> used;
 };
 bool interface_of(const std::string& module, Interface& face)
 {
@@ -436,7 +438,7 @@ bool interface_of(const std::string& module, Interface& face)
     std::map<uint32_t, std::map<uint32_t, uint32_t>> offset;      // OpMemberDecorate Offset
     std::map<uint32_t, std::pair<uint32_t, uint32_t>> pointer;    // storage class, type
     std::vector<std::pair<uint32_t, uint32_t>> variables;         // id, pointer type
-    std::map<uint32_t, bool> buffer_block, sampled_image;
+    std::map<uint32_t, bool> buffer_block, sampled_image, reached; // reached: loaded, stored, chained into
     for (size_t i = 5; i < count;) {
         const uint32_t op = w[i] & 0xffff, words = w[i] >> 16;
         if (!words || i + words > count) return false;
@@ -459,6 +461,13 @@ bool interface_of(const std::string& module, Interface& face)
         case 30: members[a[0]].assign(a + 1, a + words - 1); break;
         case 32: pointer[a[0]] = {a[1], a[2]}; break;
         case 59: variables.push_back({a[1], a[0]}); break; // OpVariable
+        case 60: // OpImageTexelPointer
+        case 61: // OpLoad
+        case 65: // OpAccessChain
+        case 66: // OpInBoundsAccessChain
+        case 67: reached[a[2]] = true; break; // OpPtrAccessChain
+        case 62: // OpStore
+        case 63: reached[a[0]] = true; break; // OpCopyMemory
         }
         i += words;
     }
@@ -483,6 +492,7 @@ bool interface_of(const std::string& module, Interface& face)
         else if (storage == 0 && sampled_image[t]) kind = 't';
         else if (storage == 0 && image.count(t)) kind = image[t] == 2 ? 's' : 't';
         face.bindings[binding[id]] = kind;
+        face.used[binding[id]] = reached[id];
     }
     return true;
 }
@@ -516,7 +526,8 @@ std::string push_types(Kernel k)
 }
 
 // --spirv: each kernel's SPIR-V in DIR against the push block and bindings the
-// plan gives it; 77 when DIR is not a built network.
+// plan gives it, and the post block's stores against the images the runtime
+// binds; 77 when DIR is not a built network.
 int check_spirv(const std::string& directory)
 {
     if (!dlsslop::is_regular_file(dlsslop::join(directory, "shader-constants.txt"))) {
@@ -547,6 +558,12 @@ int check_spirv(const std::string& directory)
         for (const auto& [slot, kind] : face.bindings)
             expect(slot < kinds.size() && kinds[slot] == kind, "%s: binding %u is '%c', the plan's '%c'",
                    path.c_str(), slot, kind, slot < kinds.size() ? kinds[slot] : '-');
+        // The post block stores the answer and never its second output, where
+        // the runtime binds a 1x1 image unless the temporal post block writes it.
+        const uint32_t answer = uint32_t(std::strlen(info.buffers));
+        if (info.images == vulkan::Images::kOutput)
+            expect(face.used[answer] && !face.used[answer + 1], "%s: the answer is %sstored, the second output %sstored",
+                   path.c_str(), face.used[answer] ? "" : "not ", face.used[answer + 1] ? "" : "not ");
     }
     if (!failures) std::puts("vulkan-plan test: every kernel's push block and bindings are the plan's");
     return failures ? 1 : 0;
@@ -577,7 +594,8 @@ int main(int argc, char** argv)
                       " -m, --model FILE   Instead, pack the weight blob from the model pack FILE at every golden\n"
                       "                    extent and check it against upstream's (default: unset)\n"
                       " -s, --spirv DIR    Instead, check each kernel's SPIR-V in DIR against the push block and\n"
-                      "                    bindings the plan gives it; exit 77 when DIR holds no network\n"
+                      "                    bindings the plan gives it, and that the post block stores the answer\n"
+                      "                    and not its second output; exit 77 when DIR holds no network\n"
                       "                    (default: unset)\n"
                       " -M, --markers      Instead, print the markers the plan expects beside the SPIR-V, each\n"
                       "                    line after its file's name (default: off)\n"

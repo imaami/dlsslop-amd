@@ -34,6 +34,8 @@ one. It records the Vulkan network's frames on a fake device: a frame that is
 not submitted must leave the motion history as it was, and a network reshaped
 for another shape of its extent must upload nothing, make no pipeline that it
 has and record the frames of a network built for that shape.
+It checks that the post block's SPIR-V never stores into its second output,
+where the runtime may bind a 1x1 image.
 At every tier and preset it checks the HIP network's launch plan against
 traces of upstream's network: every launch with the buffers it uses, on the
 first frame and later ones, the buffer pool, the uploaded weights, and the
@@ -306,7 +308,12 @@ keeps the network it built for more passes when the pass count drops, and
 its frames of fewer passes have other commands than those of a network built
 for their passes. A 1-pass frame there has its input blitted to RGBA32F, the
 alpha pass and its answer blitted out. With pass stages, its RGBA8 answer
-also differs by up to 1 in a color channel.
+also differs by up to 1 in a color channel. Any dlsslopd built before "vulkan:
+bind a 1x1 image where the post block writes nothing" makes the post block's
+second output, an RGBA32F image, of the frame's extent in every build. Every
+frame of a build without motion or with one pass then has the same commands
+but differs in that image's extent, 1x1 since, and the comparison prints
+`DIFFERENT`.
 
 The revision before "vulkan: run the network with the project's own host code"
 runs the host code of the fork in its `external/vulkan`. Its lock pins an older

@@ -700,14 +700,18 @@ Result<void> Runtime::make_images()
     // The input, sampled: the frame's format filled by a copy, or RGBA32F,
     // filled by a blit or by later passes. The answer, which the post block
     // stores in the frame's format or RGBA32F, and its second output, the
-    // model's history. The first pass's input when later passes overwrite
+    // model's history, which only the temporal post block of later passes
+    // writes: the post block's SPIR-V never stores into it, and with one pass
+    // the temporal one stores into the next frame's history. Elsewhere 1x1
+    // stands in for it. The first pass's input when later passes overwrite
     // it, and the pass stages' scratch.
     const VkFormat frame = s.rgba8 ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R16G16B16A16_SFLOAT;
     const uint32_t w = s.width, h = s.height;
+    const VkExtent2D second = s.stored ? VkExtent2D{w, h} : VkExtent2D{1, 1};
     DLSSLOP_TRY(make_image(d, w, h, s.input_direct ? frame : kWide,
                            s.input_direct ? kCopies | VK_IMAGE_USAGE_SAMPLED_BIT : kSampledStorage, o.input));
     DLSSLOP_TRY(make_image(d, w, h, s.answer_direct ? frame : kWide, kStorage, o.answer));
-    DLSSLOP_TRY(make_image(d, w, h, kWide, kStorage, o.second));
+    DLSSLOP_TRY(make_image(d, second.width, second.height, kWide, kStorage, o.second));
     DLSSLOP_TRY(make_image(d, w, h, s.passes > 1 ? kWide : kNone, kSampledStorage, o.shown));
     DLSSLOP_TRY(make_image(d, w, h, s.stages ? kWide : kNone, kStorage, o.scratch));
     // The motion history: this frame's and the last frame's luma pyramids,
