@@ -95,7 +95,18 @@ switch it, its verbose and timing switches, the text of its lines, standard
 error when `DLSSNR_LOG` names no file that opens, lines from several threads,
 its clock, that executed programs do not inherit its file, that it closes the
 file it opened when the process exits, and that a child forked while a thread
-writes a line can still exit. With the tests, the build compiles
+writes a line can still exit. The hotkey test checks the toggle key's
+internals without a real keyboard: that finishing the hotkeys closes the
+keyboards they opened and nothing else, once, and unloads libX11 and libXi;
+that only a key going down counts, read through pipes that stand in for
+keyboards, and that waiting presses are cleared as the layer clears them; and
+that the sweeps of a directory of plain files that stands in for `/dev/input`
+reject, remember and forget its nodes. The test's own `ioctl()` makes some of
+those files answer as keyboards, mice and power buttons do: only keyboards
+open, a live keyboard stays open, one that has gone closes, and one that
+appears later is logged. When Xvfb and libXtst are installed, the test starts
+Xvfb on a free display and checks that the XInput2 backend reads the key
+presses that XTEST sends. With the tests, the build compiles
 `tests/c_headers.c`, which includes as C the headers that C and C++ share.
 
 Two checks disassemble the built HIP modules and need `llvm-objdump`. The
@@ -465,6 +476,13 @@ model coefficients.
   of the game's own frames.
 - Open the Qt controller in the desktop session and check rendering, input,
   connection, live controls and channel replacement behaviour.
+- Launch the game with `DLSSNR_TOGGLE_KEY=F10`, once with
+  `DLSSNR_HOTKEY_BACKEND=evdev` (which needs read access to the keyboard's
+  `/dev/input/event*` node) and once with `DLSSNR_HOTKEY_BACKEND=x11`. The
+  layer log must say `[hotkey] watching N keyboard(s) through evdev` or
+  `[hotkey] watching XInput2 raw keys on DISPLAY`. Each press of F10 must log
+  `[hotkey] F10 -> neural rendering off`, then `on`, and switch the edit off and
+  on, also when the game window does not have the focus.
 
 Use [COLOR-PRESERVATION.md](COLOR-PRESERVATION.md) for the correction algorithm
 and GPU test, and the color diagnostic in packaging/README.md to inspect

@@ -615,16 +615,23 @@ static bool DuplicateLayerCopy() {
     return dup;
 }
 
-// One set of keyboards for the process, however many devices the game creates.
-static dlssnr::Hotkeys g_hotkeys;
+// One set of keyboards for the process, however many devices the game creates. Zeroed, it has
+// opened nothing. Each device polls it under its own lock, so two devices that present at the same
+// time race on it, as they did on upstream's Hotkeys: one present's rescan can move the node table
+// while the other present reads it.
+static struct hotkeys g_hotkeys;
+
+// At unload, which the loader does when the last instance is destroyed, and at exit: closes the
+// keyboards that the hotkeys opened and unloads libX11 and libXi, so that a layer loaded again
+// starts with nothing open.
+[[gnu::destructor]] static void UnloadLayer() {
+    hotkeys_fini(&g_hotkeys);
+}
 
 // The key to watch, from the header if the interface has set one and from the environment otherwise,
 // so it can be bound in a launch option without the interface being involved.
 static uint32_t ToggleKey(const ShmHeader* hdr) {
-    static const uint32_t fromEnv = [] {
-        const char* v = getenv("DLSSNR_TOGGLE_KEY");
-        return v && *v ? dlssnr::KeyCodeFromName(v) : 0u;
-    }();
+    static const uint32_t fromEnv = hotkey_key_code_from_name(getenv("DLSSNR_TOGGLE_KEY"));
     if (fromEnv) return fromEnv;
     return hdr ? hdr->toggleKey.load() : 0u;
 }
@@ -634,12 +641,12 @@ static uint32_t ToggleKey(const ShmHeader* hdr) {
 static void PollHotkeys(DeviceChain* dc) {
     if (!ShmOpen(dc->shm) || !dc->shm.hdr) return;
     const uint32_t key = ToggleKey(dc->shm.hdr);
-    if (!key || !g_hotkeys.Pressed(key)) return;
+    if (!hotkeys_pressed(&g_hotkeys, key)) return;
 
     const bool wasOn = dc->shm.hdr->enabled.load() != 0;
     dc->shm.hdr->enabled.store(wasOn ? 0u : 1u);
     dc->shm.hdr->controlSeq.fetch_add(1);
-    log_printf("[hotkey] %s -> neural rendering %s", dlssnr::KeyNameFromCode(key), wasOn ? "off" : "on");
+    log_printf("[hotkey] %s -> neural rendering %s", hotkey_key_name_from_code(key), wasOn ? "off" : "on");
 }
 
 static bool LayerEnabled() {

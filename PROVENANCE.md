@@ -61,18 +61,19 @@ Vulkan and video headers.
 
 The layer's sources are being ported to C23, one module at a time, under the
 layer's license. `layer/log.h` and `layer/log.c` are the C port of
-`layer_linux/src/log.h`, and `layer/capture.h` and `layer/capture.c` that of
-`capture.h` and `capture.cpp`. The port renames upstream names by one rule: the
-`dlssnr` namespace is dropped, CamelCase becomes snake_case, a class member
-takes its class as a prefix (`Composition::RecordCompose` becomes
-`composition_record_compose`), a free function with external linkage takes its
-module's name as a prefix unless its name begins with it (`Verbose` in log.h
-becomes `log_verbose`), and constants and enumerators become upper snake case
-with the class's prefix (`DlssNrPass::kSlots` becomes `DLSS_NR_PASS_SLOTS`). Log
-texts, environment variables, the loader's entry points, `layer/dlssnr.map` and
-the names in `common/shm_protocol.h`, which dlsslopd, the GUI, the network
-module and the tests share, keep their names. These upstream names do not
-follow the rule:
+`layer_linux/src/log.h`, `layer/capture.h` and `layer/capture.c` that of
+`capture.h` and `capture.cpp`, and `layer/hotkey.h`, `layer/hotkey_priv.h` and
+`layer/hotkey.c` that of `hotkey.h` and `hotkey.cpp`. The port renames upstream
+names by one rule: the `dlssnr` namespace is dropped, CamelCase becomes
+snake_case, a class member takes its class as a prefix
+(`Composition::RecordCompose` becomes `composition_record_compose`), a free
+function with external linkage takes its module's name as a prefix unless its
+name begins with it (`Verbose` in log.h becomes `log_verbose`), and constants
+and enumerators become upper snake case with the class's prefix
+(`DlssNrPass::kSlots` becomes `DLSS_NR_PASS_SLOTS`). Log texts, environment
+variables, the loader's entry points, `layer/dlssnr.map` and the names in
+`common/shm_protocol.h`, which dlsslopd, the GUI, the network module and the
+tests share, keep their names. These upstream names do not follow the rule:
 
 | Upstream name | Port | Why |
 |---|---|---|
@@ -80,6 +81,12 @@ follow the rule:
 | Data members, such as `DlssNrConstants::WhitePoint` and `CaptureWriter::_batchDir` | snake_case without a prefix or a leading underscore: `white_point`, `batch_dir` | a struct scopes its members in C as in C++ |
 | `IsEightBitRgba`, `NeedsChannelSwap` and `BytesPerPixel` in capture.cpp | `encoding` in capture.c | one table of how a format's frames are written |
 | `CaptureWriter::Remaining` | none; the test reads `remaining` | it had no other caller |
+| `Hotkeys::~Hotkeys` | `hotkeys_fini` | C's life cycle: a fini function frees what an object owns |
+| `Hotkeys::OpenEvdev` | part of `hotkeys_open` | it had no other caller |
+| `Hotkeys::_fds`, `_known`, `_knownOrder` and `_notKeyboard` | `struct hotkey_node` entries of `nodes` | one table of the event nodes |
+| `Hotkeys::_pending` | `pending` and `pending_total` | a count per key code |
+| `Hotkeys::_opened` and `_announced` | `HOTKEYS_OPENED` and `HOTKEYS_ANNOUNCED` in `flags` | one flags member |
+| `Hotkeys::_x11`, `_xi`, `_display`, `_xiOpcode` and the `_x*` function pointers | `struct hotkey_x11` | loaded only for the XInput2 backend |
 
 The headers that C and C++ share stay valid C++23. `common/shm_protocol.h`
 declares the channel for both languages, `layer/vk_table.h` the dispatch tables,

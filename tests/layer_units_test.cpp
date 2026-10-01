@@ -507,8 +507,12 @@ void CheckKeyNames() {
         {"KEY_1", KEY_1},
         {"0", 0},
         {"KEY_0", KEY_0},
-        // The code wraps to 32 bits.
+        // The code wraps to 32 bits, up to the largest unsigned long; beyond it, nothing is bound.
         {"4294967297", 1},
+        {"18446744073709551615", UINT32_MAX},
+        {"018446744073709551615", UINT32_MAX},
+        {"18446744073709551616", 0},
+        {"99999999999999999999999999", 0},
         {"12a", 0},
         {" F10", 0},
         {"F10 ", 0},
@@ -517,11 +521,20 @@ void CheckKeyNames() {
         {"z", KEY_Z},
         {"grave", KEY_GRAVE},
         {"SysRq", KEY_SYSRQ},
+        // The longest name, and longer ones, which no key has.
+        {"KEY_SCROLLLOCK", KEY_SCROLLLOCK},
+        {"key_ScrollLock", KEY_SCROLLLOCK},
+        {"KEY_SCROLLLOCK1", 0},
+        {"KEY_SCROLLLOCK12", 0},
+        {"SCROLLLOCK123456", 0},
     };
+    Require(hotkey_key_code_from_name(nullptr) == 0, "hotkey_key_code_from_name(nullptr) is not 0");
+    Require(hotkey_key_code_from_name(("F10" + std::string(4096, ' ')).c_str()) == 0,
+            "a name of 4099 bytes bound a key");
     for (const Key& k : kKeys)
-        Require(dlssnr::KeyCodeFromName(k.name) == k.code,
-                std::string("KeyCodeFromName(\"") + k.name + "\") is " +
-                std::to_string(dlssnr::KeyCodeFromName(k.name)) + ", not " + std::to_string(k.code));
+        Require(hotkey_key_code_from_name(k.name) == k.code,
+                std::string("hotkey_key_code_from_name(\"") + k.name + "\") is " +
+                std::to_string(hotkey_key_code_from_name(k.name)) + ", not " + std::to_string(k.code));
 
     static const Key kCodes[] = {
         {"F1", KEY_F1}, {"F10", KEY_F10}, {"F12", KEY_F12}, {"HOME", KEY_HOME}, {"END", KEY_END},
@@ -531,19 +544,19 @@ void CheckKeyNames() {
         {"?", 0}, {"?", KEY_ESC}, {"?", KEY_F13}, {"?", KEY_KPPLUSMINUS}, {"?", UINT32_MAX},
     };
     for (const Key& k : kCodes)
-        Require(!std::strcmp(dlssnr::KeyNameFromCode(k.code), k.name),
-                "KeyNameFromCode(" + std::to_string(k.code) + ") is " + dlssnr::KeyNameFromCode(k.code));
+        Require(!std::strcmp(hotkey_key_name_from_code(k.code), k.name),
+                "hotkey_key_name_from_code(" + std::to_string(k.code) + ") is " + hotkey_key_name_from_code(k.code));
 
     // Every name the table has reads back as its code, except the digits, which read as numbers.
     // 12 function keys, 10 others, 26 letters and 10 digits.
     uint32_t named = 0;
     for (uint32_t code = 0; code <= KEY_MAX; ++code) {
-        const char* name = dlssnr::KeyNameFromCode(code);
+        const char* name = hotkey_key_name_from_code(code);
         if (!std::strcmp(name, "?")) continue;
         ++named;
         const bool digit = name[0] >= '0' && name[0] <= '9' && !name[1];
         const uint32_t want = digit ? uint32_t(name[0] - '0') : code;
-        Require(dlssnr::KeyCodeFromName(name) == want, std::string("the name ") + name + " does not read back");
+        Require(hotkey_key_code_from_name(name) == want, std::string("the name ") + name + " does not read back");
     }
     Require(named == 58, "the key table has " + std::to_string(named) + " names, not 58");
 }

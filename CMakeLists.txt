@@ -103,7 +103,7 @@ add_custom_target(layer-shaders DEPENDS ${LAYER_SHADERS} ${METER}.h)
 # Only layer.cpp differs between the layers; both and the layer tests link
 # the other translation units compiled once.
 add_library(dlsslop-layer-objects OBJECT layer/shader_vk.cpp layer/dlssnr_pass.cpp layer/composition.cpp
-    layer/capture.c layer/scaler_vk.cpp layer/hotkey.cpp layer/log.c)
+    layer/capture.c layer/scaler_vk.cpp layer/hotkey.c layer/log.c)
 set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_dependencies(dlsslop-layer-objects layer-shaders)
 target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC layer ${X11_HEADERS} ${XINPUT_HEADERS})
@@ -308,6 +308,11 @@ if(BUILD_TESTING)
     add_executable(layer-units-test tests/layer_units_test.cpp)
     target_link_libraries(layer-units-test PRIVATE dlsslop-layer-objects)
     add_test(NAME layer-units COMMAND layer-units-test)
+    # The hotkeys' internals, in C: hotkeys_fini() with fake keyboards, the evdev reads and sweeps,
+    # the choice of a backend, and XInput2 on a private Xvfb if Xvfb and libXtst are installed.
+    add_executable(hotkey-test tests/hotkey_test.c)
+    target_link_libraries(hotkey-test PRIVATE dlsslop-layer-objects)
+    add_test(NAME hotkey COMMAND hotkey-test)
     add_test(NAME color-metrics COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_metrics_test.py)
     add_test(NAME color-orchestrator COMMAND ${Python3_EXECUTABLE}
