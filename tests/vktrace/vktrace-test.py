@@ -14,7 +14,12 @@ hashes come in another order, with one whose setup is split and leaves a
 staging buffer alive and, told to ignore queries, with one whose frames use no
 query pool, and must find each changed field of a frame, those queries, a
 changed state after setup and a setup left unhashed; analyze.py must summarise
-it.
+it. Buffers and an image that another thread destroys, or whose memory it
+frees, after the layer selected them for hashing must be skipped, a sparse
+buffer, where lavapipe supports one, must be hashed, and the validation layer
+must report nothing while a thread creates and destroys buffers during hashed
+submissions. That run names its trace with %p, which the probe has to expand
+as the layer does.
 Exits 77 after the device-free checks when lavapipe or the validation layer is
 missing.
 """
@@ -163,10 +168,11 @@ with tempfile.TemporaryDirectory(prefix='vktrace-test-') as directory:
         print('SKIP: no lavapipe ICD; the device-free checks passed')
         sys.exit(77)
 
-    def trace(name, hash, submits='', options=()):
+    def trace(name, hash, submits='', options=(), pid=False):
         """Runs the probe on lavapipe under the tracing layer, and none of the
-        user's own layers; returns its output and trace."""
-        path = root / f'{name}.trace'
+        user's own layers; returns its output and trace. With PID, the trace's
+        name holds the probe's process ID, through %p in VKTRACE_FILE."""
+        path = root / (f'{name}.%p.trace' if pid else f'{name}.trace')
         result = subprocess.run([str(probe), *options, str(manifests / 'probe.spv')], text=True, capture_output=True,
                                 timeout=120,
                                 env=clean | {'XDG_DATA_HOME': str(root), 'XDG_CONFIG_HOME': str(root),
@@ -182,6 +188,10 @@ with tempfile.TemporaryDirectory(prefix='vktrace-test-') as directory:
         assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
         output = result.stdout + result.stderr
         assert 'Validation Error' not in output and 'VUID' not in output, output
+        if pid:
+            found = sorted(root.glob(f'{name}.[0-9]*.trace'))
+            assert len(found) == 1, found
+            path = found[0]
         return output, path
 
     def calls(path):
@@ -434,6 +444,26 @@ with tempfile.TemporaryDirectory(prefix='vktrace-test-') as directory:
     report = tool('compare.py', hashed, unhashed, expected=1)
     assert 'state after setup: content hashes (all) only in A, though both traces select all\n' in report, report
     assert report.endswith('DIFFERENT\n'), report
+
+    # A buffer and an image destroyed, and a buffer's memory freed, by the
+    # probe's main thread while the layer waits for the submission that
+    # selected them: skipped. A sparse buffer, whose binds the layer does not
+    # see: hashed. Then buffers destroyed at any moment while the layer hashes;
+    # the trace checks that the validation layer saw nothing.
+    output, destroyed = trace('destroyed', 'all', options=['--destroy-during-hash'], pid=True)
+    found = re.search(r'^destroyed during hash, sparse=(\w+)$', output, re.M)
+    assert found, output
+    sparse = found[1]
+    text = destroyed.read_text()
+    sub = re.search(r' QueueSubmit sub=(\d+) q=q1 batch=0 cbs=\[\] wait=\[sem1@0x10000:1\] ', text)[1]
+    patterns = [rf' Hash sub={sub} sel=all res=buf5\+0\+16384 skip=destroyed\n',
+                rf' Hash sub={sub} sel=all res=buf6\+0\+16384 skip=unbound\n',
+                rf' Hash sub={sub} sel=all res=img2 skip=destroyed\n',
+                rf' Hash sub={sub} sel=all res=img1 bytes=16384 fnv={frames[1][3]}\n']
+    if sparse != 'none':
+        patterns.append(rf' Hash sub={sub} sel=all res=buf7\+0\+16384 bytes=16384 fnv={sparse}\n')
+    for pattern in patterns:
+        assert re.search(pattern, text), pattern
 
     tool('analyze.py', storage)
     summary = (root / 'storage.summary.txt').read_text()

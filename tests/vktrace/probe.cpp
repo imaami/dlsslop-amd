@@ -9,18 +9,29 @@
 // lines can be checked against it. One descriptor write and one copy each span
 // two bindings, the result binding has an offset, and the storage image ends
 // frame 0 in SHADER_READ_ONLY_OPTIMAL, from which the layer's hashing has to
-// move it and to which it has to return it. It runs on a CPU device only, with
-// the Khronos validation layer enabled below the tracing layer, and exits 77
-// without either.
+// move it and to which it has to return it. With --destroy-during-hash, a
+// second thread then submits a batch that waits for the host, and the probe
+// destroys a buffer and an image and frees another buffer's memory while the
+// layer waits for that batch before hashing what it selected at the submit.
+// A sparse buffer, where the device supports one, stays and is hashed. Then a
+// second thread creates, binds, destroys and frees buffers while the probe
+// submits empty batches, which the layer hashes. It runs on a CPU device only,
+// with the Khronos validation layer enabled below the tracing layer, and exits
+// 77 without either.
 #include <vulkan/vulkan.h>
 
 #include <getopt.h>
+#include <time.h>
+#include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -44,26 +55,69 @@ struct Mem {
 };
 
 constexpr const char* kUsage = "Usage: vktrace-probe [OPTION]... PROBE.SPV\n";
+
+// The trace's path, as the tracing layer finds it: VKTRACE_FILE or its default,
+// with %p replaced by the process ID.
+std::string trace_path()
+{
+    std::string path = "/tmp/vktrace.%p.log";
+    if (const char* f = std::getenv("VKTRACE_FILE"); f && *f) path = f;
+    if (const size_t at = path.find("%p"); at != std::string::npos) path.replace(at, 2, std::to_string(getpid()));
+    return path;
+}
+
+// Waits until the trace PATH holds a QueueSubmitResult line after the first
+// submit line that waits for a semaphore, which the layer writes out before it
+// waits for that submission. Returns false after 60 s.
+bool submitted(const char* path)
+{
+    for (unsigned tries = 0; tries < 60000; ++tries) {
+        std::string text;
+        if (FILE* f = std::fopen(path, "r")) {
+            char chunk[1 << 16];
+            for (size_t n; (n = std::fread(chunk, 1, sizeof chunk, f));) text.append(chunk, n);
+            std::fclose(f);
+        }
+        const size_t wait = text.find(" wait=[sem");
+        if (wait != std::string::npos && text.find(" QueueSubmitResult ", wait) != std::string::npos) return true;
+        const timespec millisecond{0, 1000000};
+        nanosleep(&millisecond, nullptr);
+    }
+    return false;
+}
 } // namespace
 
 int main(int argc, char** argv)
 {
-    bool split = false;
+    bool split = false, destroy = false;
     const option options[] = {{"split-setup", no_argument, nullptr, 's'},
+                              {"destroy-during-hash", no_argument, nullptr, 'd'},
                               {"help", no_argument, nullptr, 'h'},
                               {nullptr, 0, nullptr, 0}};
-    for (int code; (code = getopt_long(argc, argv, "+sh", options, nullptr)) != -1;) {
+    for (int code; (code = getopt_long(argc, argv, "+sdh", options, nullptr)) != -1;) {
         if (code == 's') {
             split = true;
+        } else if (code == 'd') {
+            destroy = true;
         } else if (code == 'h') {
             std::printf("%s", kUsage);
             std::puts("Runs probe.spv on a CPU Vulkan device as vktrace-test.py describes, printing the FNV-1a 64\n"
                       "of what it uploads and reads back. Exits 77 without a CPU device or the Khronos validation\n"
                       "layer.\n"
-                      " -s, --split-setup  Upload from a staging buffer of its own in a submission of its own, fill\n"
-                      "                    in another, and destroy the staging buffer after the one-shot submission\n"
-                      "                    (default: off; one setup submission from the frames' upload buffer)\n"
-                      " -h, --help         Show this help and exit (default: off)");
+                      " -s, --split-setup          Upload from a staging buffer of its own in a submission of its\n"
+                      "                            own, fill in another, and destroy the staging buffer after the\n"
+                      "                            one-shot submission (default: off; one setup submission from\n"
+                      "                            the frames' upload buffer)\n"
+                      " -d, --destroy-during-hash  After the frames, submit from a second thread a batch that\n"
+                      "                            waits for a timeline semaphore; once the trace shows the\n"
+                      "                            submission, destroy a buffer and an image, free a third\n"
+                      "                            buffer's memory, then signal the semaphore. A sparse buffer,\n"
+                      "                            if the device supports one, stays. Then submit empty batches\n"
+                      "                            while a second thread creates, binds, destroys and frees\n"
+                      "                            buffers. It reads the trace where the tracing layer writes\n"
+                      "                            it: VKTRACE_FILE, or /tmp/vktrace.%p.log when that is unset,\n"
+                      "                            with %p as the process ID (default: off)\n"
+                      " -h, --help                 Show this help and exit (default: off)");
             return 0;
         } else {
             std::fprintf(stderr, "%s(see --help)\n", kUsage);
@@ -119,6 +173,12 @@ int main(int argc, char** argv)
     const VkPhysicalDevice physical = *cpu;
     VkPhysicalDeviceMemoryProperties mp;
     vkGetPhysicalDeviceMemoryProperties(physical, &mp);
+    VkPhysicalDeviceFeatures supported;
+    vkGetPhysicalDeviceFeatures(physical, &supported);
+    VkQueueFamilyProperties family;
+    count = 1;
+    vkGetPhysicalDeviceQueueFamilyProperties(physical, &count, &family);
+    const bool sparse = destroy && supported.sparseBinding && (family.queueFlags & VK_QUEUE_SPARSE_BINDING_BIT);
     const float priority = 1;
     VkDeviceQueueCreateInfo qci{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
     qci.queueFamilyIndex = 0;
@@ -128,8 +188,10 @@ int main(int argc, char** argv)
     f13.synchronization2 = VK_TRUE;
     VkPhysicalDeviceVulkan12Features f12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, &f13};
     f12.shaderInt8 = VK_TRUE;
+    f12.timelineSemaphore = destroy;
     VkPhysicalDeviceFeatures2 f2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &f12};
     f2.features.shaderInt64 = VK_TRUE;
+    f2.features.sparseBinding = sparse;
     VkDeviceCreateInfo dci{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &f2};
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
@@ -435,6 +497,121 @@ int main(int argc, char** argv)
         std::printf("frame %u upload=%016" PRIx64 " result=%016" PRIx64 " image=%016" PRIx64 " b=%016" PRIx64 "\n",
                     frame, fnv(mu.mapped, bytes), fnv(md.mapped, bytes),
                     fnv(static_cast<unsigned char*>(md.mapped) + bytes, bytes), b_fnv(md.mapped));
+    }
+
+    // Three resources that VKTRACE_HASH=all selects at the next submission,
+    // after a setup submission that leaves the image in GENERAL, from which the
+    // layer would copy it. The setup also fills the sparse buffer, which stays.
+    if (destroy) {
+        Mem gone_memory, unbound_memory, gone_image_memory, sparse_memory;
+        VkBuffer gone = buffer(bytes, all, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, false, gone_memory);
+        VkBuffer unbound = buffer(bytes, all, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, false, unbound_memory);
+        VkImage gone_image;
+        CHECK(vkCreateImage(device, &ii, nullptr, &gone_image));
+        vkGetImageMemoryRequirements(device, gone_image, &ireq);
+        gone_image_memory = allocate(ireq, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, false);
+        CHECK(vkBindImageMemory(device, gone_image, gone_image_memory.memory, 0));
+        // Bound through the queue, which the layer does not trace: it has to
+        // copy the buffer as if it were bound.
+        VkBuffer sparse_buffer = VK_NULL_HANDLE;
+        if (sparse) {
+            VkBufferCreateInfo sbi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+            sbi.flags = VK_BUFFER_CREATE_SPARSE_BINDING_BIT;
+            sbi.size = bytes;
+            sbi.usage = all;
+            CHECK(vkCreateBuffer(device, &sbi, nullptr, &sparse_buffer));
+            VkMemoryRequirements req;
+            vkGetBufferMemoryRequirements(device, sparse_buffer, &req);
+            sparse_memory = allocate(req, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, false);
+            const VkSparseMemoryBind bind{0, req.size, sparse_memory.memory, 0, 0};
+            const VkSparseBufferMemoryBindInfo binds{sparse_buffer, 1, &bind};
+            VkBindSparseInfo bsi{VK_STRUCTURE_TYPE_BIND_SPARSE_INFO};
+            bsi.bufferBindCount = 1;
+            bsi.pBufferBinds = &binds;
+            CHECK(vkResetFences(device, 1, &fence));
+            CHECK(vkQueueBindSparse(queue, 1, &bsi, fence));
+            CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
+        }
+        CHECK(vkResetCommandBuffer(cb, 0));
+        CHECK(vkBeginCommandBuffer(cb, &once));
+        if (sparse) vkCmdFillBuffer(cb, sparse_buffer, 0, bytes, kFill);
+        VkImageMemoryBarrier general = ib;
+        general.srcAccessMask = 0;
+        general.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        general.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        general.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        general.image = gone_image;
+        vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                             nullptr, 1, &general);
+        CHECK(vkEndCommandBuffer(cb));
+        submit(cb);
+        // The layer selects them when the waiting batch is submitted and copies
+        // them once it has completed: they are gone by then.
+        VkSemaphoreTypeCreateInfo timeline{VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO};
+        timeline.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+        const VkSemaphoreCreateInfo sci{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, &timeline};
+        VkSemaphore semaphore;
+        CHECK(vkCreateSemaphore(device, &sci, nullptr, &semaphore));
+        CHECK(vkResetFences(device, 1, &fence));
+        std::thread waiter([&] {
+            const uint64_t one = 1;
+            VkTimelineSemaphoreSubmitInfo values{VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO};
+            values.waitSemaphoreValueCount = 1;
+            values.pWaitSemaphoreValues = &one;
+            const VkPipelineStageFlags stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+            VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO, &values};
+            si.waitSemaphoreCount = 1;
+            si.pWaitSemaphores = &semaphore;
+            si.pWaitDstStageMask = &stage;
+            CHECK(vkQueueSubmit(queue, 1, &si, fence));
+        });
+        const std::string trace = trace_path();
+        if (!submitted(trace.c_str())) {
+            std::fprintf(stderr, "probe: no waiting submission in %s\n", trace.c_str());
+            std::exit(1);
+        }
+        vkDestroyBuffer(device, gone, nullptr);
+        vkFreeMemory(device, gone_memory.memory, nullptr);
+        vkFreeMemory(device, unbound_memory.memory, nullptr);
+        vkDestroyImage(device, gone_image, nullptr);
+        vkFreeMemory(device, gone_image_memory.memory, nullptr);
+        const VkSemaphoreSignalInfo signal{VK_STRUCTURE_TYPE_SEMAPHORE_SIGNAL_INFO, nullptr, semaphore, 1};
+        CHECK(vkSignalSemaphore(device, &signal));
+        waiter.join();
+        CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
+        vkDestroyBuffer(device, unbound, nullptr);
+        vkDestroyBuffer(device, sparse_buffer, nullptr);
+        vkFreeMemory(device, sparse_memory.memory, nullptr);
+        vkDestroySemaphore(device, semaphore, nullptr);
+        // The same at any moment: buffers that live for up to 300 us each,
+        // half of them losing their memory first, while each submission is
+        // hashed.
+        std::atomic<bool> stop{false};
+        std::thread churn([&] {
+            for (uint32_t seed = 1; !stop.load(); seed = seed * 1103515245u + 12345u) {
+                Mem m;
+                const VkBuffer c = buffer(4 << 20, all, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, false, m);
+                const timespec hold{0, long(seed >> 16 & 0xffff) % 301 * 1000};
+                nanosleep(&hold, nullptr);
+                if (seed & 1 << 16) {
+                    vkFreeMemory(device, m.memory, nullptr);
+                    vkDestroyBuffer(device, c, nullptr);
+                } else {
+                    vkDestroyBuffer(device, c, nullptr);
+                    vkFreeMemory(device, m.memory, nullptr);
+                }
+            }
+        });
+        const VkSubmitInfo empty{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        for (uint32_t i = 0; i < 300; ++i) {
+            CHECK(vkResetFences(device, 1, &fence));
+            CHECK(vkQueueSubmit(queue, 1, &empty, fence));
+            CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
+        }
+        stop.store(true);
+        churn.join();
+        if (sparse) std::printf("destroyed during hash, sparse=%016" PRIx64 "\n", fnv(filled.data(), bytes));
+        else std::puts("destroyed during hash, sparse=none");
     }
     vkDeviceWaitIdle(device);
     vkDestroyQueryPool(device, qp, nullptr);

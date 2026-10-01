@@ -416,7 +416,14 @@ both or in neither, in the state after setup and in each frame; a kind only one
 of them names is counted and left out. With `--hash all`, that state holds the
 weights with their noise field and the zeroed activation arena. The network's
 images stay undefined until the first frame, and the layer hashes no undefined
-image.
+image. A resource that another thread destroys after the submission that
+selected it and before the copy is logged with `skip=destroyed`, and one whose
+memory that thread frees, or has not bound yet, with `skip=unbound`. A thread
+that destroys a resource or frees memory while the layer copies waits until
+the copies are done. The layer does not see sparse binds, so it copies a
+sparse resource as if it were bound. An image bound to the memory of a
+swapchain image is logged with `skip=external`, as the swapchain's own images
+are.
 Past the network's values, the activation arena ends in counters the kernels
 synchronise through. After a frame, they differ from one run of the same build
 to the next while the answers stay equal, so each frame's hashes of `all`

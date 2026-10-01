@@ -34,7 +34,14 @@
 //   all        every live buffer and image of the device
 // VKTRACE_HASH_SUBMITS limits hashing to submits (per device, 1-based):
 // "A-B,C", or "dispatch" for submits that dispatch anything. Default: all.
-// Items that mean nothing are reported on standard error and ignored.
+// Items that mean nothing are reported on standard error and ignored. A
+// resource that another thread destroys between the submit and the copies is
+// logged with skip=destroyed, and one whose memory it frees, or has not bound
+// yet, with skip=unbound. A thread that destroys a resource or frees memory
+// while the copies run waits until they are done. Sparse binds are not traced,
+// so a sparse resource is copied as if it were bound. An image bound to the
+// memory of a swapchain image is logged with skip=external, as the swapchain's
+// own images are.
 //
 // Environment: VKTRACE_FILE (the log; %p is the pid; default
 // /tmp/vktrace.%p.log), VKTRACE_SPIRV (':'-separated directories scanned
@@ -214,6 +221,8 @@ struct BufferInfo {
     VkDeviceMemory memory = VK_NULL_HANDLE;
     VkDeviceSize offset = 0;
     bool external = false;
+    // Bound through vkQueueBindSparse, which is not traced: memory stays null.
+    bool sparse = false;
     // The queue family the last submitted ownership transfer gave it to;
     // VK_QUEUE_FAMILY_IGNORED until one is seen.
     uint32_t owner = VK_QUEUE_FAMILY_IGNORED;
@@ -228,7 +237,10 @@ struct ImageInfo {
     VkDeviceMemory memory = VK_NULL_HANDLE;
     VkDeviceSize offset = 0;
     VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;  // after the last submitted barrier
-    bool swapchain = false, external = false;
+    // A swapchain's image, or an image bound to the memory of one.
+    bool swapchain = false;
+    bool external = false;
+    bool sparse = false;  // as BufferInfo::sparse
 };
 struct ViewInfo {
     VkImage image = VK_NULL_HANDLE;
@@ -403,7 +415,10 @@ struct DeviceData {
     uint64_t submits = 0;
     std::vector<Pending> pending;
     // Content hashing: a command pool per queue family and a staging buffer,
-    // which hash_lock gives to one submitting thread at a time.
+    // which hash_lock gives to one submitting thread at a time. A thread that
+    // destroys a buffer or an image, or frees memory, holds hash_lock too, so
+    // that nothing a hash copy reads goes away while the copy is recorded,
+    // submitted and waited for.
     std::mutex hash_lock;
     std::map<uint32_t, std::pair<VkCommandPool, VkCommandBuffer>> pools;
     VkBuffer staging = VK_NULL_HANDLE;
@@ -418,7 +433,8 @@ struct DeviceData {
 
 // ---------------------------------------------------------------------------
 // State. One lock guards all of it and the log, except each device's hashing
-// objects, which its hash_lock guards.
+// objects, which its hash_lock guards. A thread that takes both takes
+// hash_lock first.
 
 std::mutex g_lock;
 FILE* g_out = nullptr;
@@ -955,11 +971,17 @@ VKAPI_ATTR VkResult VKAPI_CALL AllocateMemory(VkDevice device, const VkMemoryAll
 VKAPI_ATTR void VKAPI_CALL FreeMemory(VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks* alloc)
 {
     DeviceData* d = dev(device);
+    std::lock_guard hashing(d->hash_lock);
     {
         std::lock_guard lock(g_lock);
         if (memory) {
             emit("FreeMemory", "mem=" + forget(kMemory, memory));
             g_mem.erase(key_of(memory));
+            // The buffers and images bound to it are bound to nothing now.
+            for (auto& [handle, b] : g_buf)
+                if (b.memory == memory) b.memory = VK_NULL_HANDLE;
+            for (auto& [handle, im] : g_img)
+                if (im.memory == memory) im.memory = VK_NULL_HANDLE;
         }
     }
     d->FreeMemory(device, memory, alloc);
@@ -1022,6 +1044,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(VkDevice device, const VkBufferCreat
         b.size = ci->size;
         b.usage = ci->usage;
         b.external = external;
+        b.sparse = ci->flags & VK_BUFFER_CREATE_SPARSE_BINDING_BIT;
         g_buf[key_of(*out)] = b;
     }
     emit("CreateBuffer", format("buf=%s size=%" PRIu64 " usage=%s flags=%s sharing=%d%s rc=%d",
@@ -1034,6 +1057,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateBuffer(VkDevice device, const VkBufferCreat
 VKAPI_ATTR void VKAPI_CALL DestroyBuffer(VkDevice device, VkBuffer buffer, const VkAllocationCallbacks* alloc)
 {
     DeviceData* d = dev(device);
+    std::lock_guard hashing(d->hash_lock);
     {
         std::lock_guard lock(g_lock);
         if (buffer) {
@@ -1138,6 +1162,11 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(VkDevice device, const VkImageCreateI
         im.usage = ci->usage;
         im.layout = ci->initialLayout;
         im.external = external;
+        im.sparse = ci->flags & VK_IMAGE_CREATE_SPARSE_BINDING_BIT;
+        // Bound with VkBindImageMemorySwapchainInfoKHR, to the memory of that swapchain's image.
+        const auto* sc =
+            find_in_chain<VkImageSwapchainCreateInfoKHR>(ci->pNext, VK_STRUCTURE_TYPE_IMAGE_SWAPCHAIN_CREATE_INFO_KHR);
+        im.swapchain = sc && sc->swapchain;
         g_img[key_of(*out)] = im;
     }
     emit("CreateImage",
@@ -1154,6 +1183,7 @@ VKAPI_ATTR VkResult VKAPI_CALL CreateImage(VkDevice device, const VkImageCreateI
 VKAPI_ATTR void VKAPI_CALL DestroyImage(VkDevice device, VkImage image, const VkAllocationCallbacks* alloc)
 {
     DeviceData* d = dev(device);
+    std::lock_guard hashing(d->hash_lock);
     {
         std::lock_guard lock(g_lock);
         if (image) {
@@ -2613,6 +2643,8 @@ struct Job {
     // A buffer another queue family owns (external memory the application released to
     // VK_QUEUE_FAMILY_EXTERNAL): acquired for the copy and released back to it.
     uint32_t owner = VK_QUEUE_FAMILY_IGNORED;
+    // The resource's creation number, which a later resource with the same handle does not have.
+    uint32_t number = 0;
     std::string skip;
 };
 
@@ -2621,6 +2653,8 @@ Job resolve(const Target& t)
 {
     Job j;
     j.target = t;
+    const Kind k = t.image ? kImage : kBuffer;
+    if (auto n = g_names[k].find(t.handle); n != g_names[k].end()) j.number = n->second;
     if (!t.image) {
         auto it = g_buf.find(t.handle);
         j.buffer = VkBuffer(uintptr_t(t.handle));
@@ -2662,13 +2696,42 @@ Job resolve(const Target& t)
     return j;
 }
 
+// Whether the resource HANDLE in INFOS is bound to memory. A sparse resource
+// counts as bound, because its binds are not traced.
+template <class Map> bool bound(const Map& infos, uint64_t handle)
+{
+    const auto it = infos.find(handle);
+    return it != infos.end() && (it->second.memory || it->second.sparse);
+}
+
+// Why the resource J was resolved to can no longer be copied: "destroyed" when
+// its handle names nothing or a newer resource, "unbound" when its memory was
+// freed or never bound (see bound()); nullptr when it can. Caller holds g_lock.
+const char* gone(const Job& j)
+{
+    const Kind k = j.target.image ? kImage : kBuffer;
+    const auto n = g_names[k].find(j.target.handle);
+    if (n == g_names[k].end() || n->second != j.number) return "destroyed";
+    return (j.target.image ? bound(g_img, j.target.handle) : bound(g_buf, j.target.handle)) ? nullptr : "unbound";
+}
+
 // Copies each job's bytes out on QUEUE and logs their FNV. Called without g_lock,
 // on the thread that submitted, with the queue idle. The hashing objects are the
-// device's, so threads that submit to its queues take turns.
+// device's, so threads that submit to its queues take turns. Another thread may
+// have destroyed a job's resource, or freed its memory, since the job was
+// resolved; such a job is skipped. Destruction waits for hash_lock, so the rest
+// stay until their copies are done.
 void run_jobs(DeviceData* d, VkQueue queue, uint32_t family, uint64_t sub, std::vector<Job>& jobs)
 {
     std::vector<std::string> lines;
     std::unique_lock hashing(d->hash_lock);
+    {
+        std::lock_guard lock(g_lock);
+        for (Job& j : jobs) {
+            if (!j.skip.empty()) continue;
+            if (const char* why = gone(j)) j.skip = why;
+        }
+    }
     for (Job& j : jobs) {
         if (j.skip.empty() && !j.bytes) j.skip = "empty";
         if (!j.skip.empty()) {

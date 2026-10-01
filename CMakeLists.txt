@@ -350,7 +350,7 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/vktrace/probe.comp
         DEPENDS tests/vktrace/probe.comp VERBATIM)
     add_executable(vktrace-probe tests/vktrace/probe.cpp ${VKTRACE_DIR}/probe.spv)
-    target_link_libraries(vktrace-probe PRIVATE ${VULKAN_LOADER})
+    target_link_libraries(vktrace-probe PRIVATE ${VULKAN_LOADER} Threads::Threads)
     add_test(NAME vktrace COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/vktrace/vktrace-test.py
         $<TARGET_FILE:vktrace> $<TARGET_FILE:vktrace-probe> $<TARGET_FILE:shmclient>)
     set_tests_properties(color-gpu hip-plan-abi vulkan-plan-abi vulkan-files lds-barriers codec-isa hdr-shader
