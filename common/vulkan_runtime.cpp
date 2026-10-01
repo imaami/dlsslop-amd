@@ -126,6 +126,7 @@ constexpr VkAccessFlags kRead = VK_ACCESS_SHADER_READ_BIT;
 constexpr VkAccessFlags kWrite = VK_ACCESS_SHADER_WRITE_BIT;
 constexpr VkAccessFlags kCopyRead = VK_ACCESS_TRANSFER_READ_BIT;
 constexpr VkAccessFlags kCopyWrite = VK_ACCESS_TRANSFER_WRITE_BIT;
+constexpr VkImageLayout kUndefined = VK_IMAGE_LAYOUT_UNDEFINED;
 constexpr VkImageLayout kGeneral = VK_IMAGE_LAYOUT_GENERAL;
 constexpr VkImageLayout kSampled = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 constexpr VkImageLayout kSource = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
@@ -318,8 +319,8 @@ Result<void> make_buffer(const Device& d, VkDeviceSize bytes, VkBufferUsageFlags
 }
 
 // I as a WIDTH x HEIGHT image of FORMAT for USAGE in its own device-local
-// memory, with its view (upstream: Context::image), or as none for kNone. An
-// image that is so already stays.
+// memory, with its view when it is sampled or stored into (upstream:
+// Context::image), or as none for kNone. An image that is so already stays.
 Result<void> make_image(const Device& d, uint32_t width, uint32_t height, VkFormat format, VkImageUsageFlags usage,
                         Image& i)
 {
@@ -344,6 +345,7 @@ Result<void> make_image(const Device& d, uint32_t width, uint32_t height, VkForm
     if (alloc.memoryTypeIndex == d.memory.memoryTypeCount) return fail("no device-local memory type for an image");
     DLSSLOP_TRY(vk_check(vkAllocateMemory(d.device, &alloc, nullptr, &i.memory), "allocate a network image"));
     DLSSLOP_TRY(vk_check(vkBindImageMemory(d.device, i.image, i.memory, 0), "bind a network image"));
+    if (!(usage & (VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT))) return {};
     VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     view.image = i.image;
     view.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -590,7 +592,7 @@ Runtime::~Runtime()
     for (Image& i : o.flow) destroy(d, i);
     for (auto& pyramid : o.luma)
         for (Image& i : pyramid) destroy(d, i);
-    for (Image* i : {&o.scratch, &o.shown, &o.second, &o.answer, &o.input}) destroy(d, *i);
+    for (Image* i : {&o.frame, &o.scratch, &o.shown, &o.second, &o.answer, &o.input}) destroy(d, *i);
     for (Buffer* b : {&o.params, &o.weights, &o.arena}) destroy(d, *b);
 }
 
@@ -704,7 +706,9 @@ Result<void> Runtime::make_images()
     // writes: the post block's SPIR-V never stores into it, and with one pass
     // the temporal one stores into the next frame's history. Elsewhere 1x1
     // stands in for it. The first pass's input when later passes overwrite
-    // it, and the pass stages' scratch.
+    // it, and the pass stages' scratch. The frame's image, through which
+    // blits convert the answer from RGBA32F and, when the input is RGBA32F,
+    // the proxy into it; an RGBA32F input implies an RGBA32F answer.
     const VkFormat frame = s.rgba8 ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R16G16B16A16_SFLOAT;
     const uint32_t w = s.width, h = s.height;
     const VkExtent2D second = s.stored ? VkExtent2D{w, h} : VkExtent2D{1, 1};
@@ -714,6 +718,7 @@ Result<void> Runtime::make_images()
     DLSSLOP_TRY(make_image(d, second.width, second.height, kWide, kStorage, o.second));
     DLSSLOP_TRY(make_image(d, w, h, s.passes > 1 ? kWide : kNone, kSampledStorage, o.shown));
     DLSSLOP_TRY(make_image(d, w, h, s.stages ? kWide : kNone, kStorage, o.scratch));
+    DLSSLOP_TRY(make_image(d, w, h, s.answer_direct ? kNone : frame, kCopies, o.frame));
     // The motion history: this frame's and the last frame's luma pyramids,
     // the flow between them, the history the pre and post blocks read, one
     // a pass with later passes, a depth nothing writes, and the parameters.
@@ -1009,17 +1014,26 @@ void Runtime::run_step(VkCommandBuffer cmd, const Step& step, size_t pipeline, V
     if (step.after != After::kNothing) compute_barrier(cmd, step.after == After::kInvalidate);
 }
 
-void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool reset)
+void Runtime::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const Controls& c, bool reset,
+                     VkQueryPool queries, uint32_t query)
 {
     const Objects& o = objects_;
     const State& s = state_;
     const uint32_t w = s.width, h = s.height, gx = (w + 7) / 8, gy = (h + 7) / 8;
-    // The frame into the input: copied in its own format, or blitted into
-    // RGBA32F. With later passes, which overwrite the input, the first
-    // pass's input is kept.
-    barrier(cmd, frame, kTarget, kSource, kTransfer, kCopyWrite, kTransfer, kCopyRead);
+    // The proxy into the input: copied straight in the frame's format, or
+    // copied into the frame's image and blitted into RGBA32F. With later
+    // passes, which overwrite the input, the first pass's input is kept.
+    // The frame's image is rewritten whole wherever it is used.
+    const VkBufferImageCopy region{0, 0, 0, kColorLayer, {}, {w, h, 1}};
     barrier(cmd, o.input.image, kSampled, kTarget, kCompute, kRead, kTransfer, kCopyWrite);
-    transfer(cmd, frame, kSource, o.input.image, kTarget, w, h, !s.input_direct);
+    if (s.input_direct) {
+        vkCmdCopyBufferToImage(cmd, proxy, o.input.image, kTarget, 1, &region);
+    } else {
+        barrier(cmd, o.frame.image, kUndefined, kTarget, kTransfer, 0, kTransfer, kCopyWrite);
+        vkCmdCopyBufferToImage(cmd, proxy, o.frame.image, kTarget, 1, &region);
+        barrier(cmd, o.frame.image, kTarget, kSource, kTransfer, kCopyWrite, kTransfer, kCopyRead);
+        transfer(cmd, o.frame.image, kSource, o.input.image, kTarget, w, h, true);
+    }
     barrier(cmd, o.input.image, kTarget, kSampled, kTransfer, kCopyWrite, kCompute, kRead);
     if (s.passes > 1) {
         barrier(cmd, o.input.image, kSampled, kSource, kCompute, kRead, kTransfer, kCopyRead);
@@ -1028,6 +1042,7 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
         barrier(cmd, o.shown.image, kGeneral, kGeneral, kTransfer, kCopyWrite, kCompute, kRead);
         barrier(cmd, o.input.image, kSource, kSampled, kTransfer, kCopyRead, kCompute, kRead);
     }
+    if (queries) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries, query);
     compute_barrier(cmd);
     // The pre and post blocks, which carry the frame's controls, or with
     // motion their temporal variants.
@@ -1083,12 +1098,12 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
         if (pass) {
             // The last pass's answer is this pass's input, and this pass's
             // own history the history.
-            const VkImage answer = in_scratch ? o.scratch.image : o.answer.image;
-            barrier(cmd, answer, kGeneral, kSource, kCompute, kWrite, kTransfer, kCopyRead);
+            const VkImage previous = in_scratch ? o.scratch.image : o.answer.image;
+            barrier(cmd, previous, kGeneral, kSource, kCompute, kWrite, kTransfer, kCopyRead);
             barrier(cmd, o.input.image, kSampled, kTarget, kCompute, kRead, kTransfer, kCopyWrite);
-            transfer(cmd, answer, kSource, o.input.image, kTarget, w, h);
+            transfer(cmd, previous, kSource, o.input.image, kTarget, w, h);
             barrier(cmd, o.input.image, kTarget, kSampled, kTransfer, kCopyWrite, kCompute, kRead);
-            barrier(cmd, answer, kSource, kGeneral, kTransfer, kCopyRead, kCompute, kRead | kWrite);
+            barrier(cmd, previous, kSource, kGeneral, kTransfer, kCopyRead, kCompute, kRead | kWrite);
             if (s.motion) copy_general(cmd, o.history_store[pass].image, o.history[0].image, w, h);
         }
         uint32_t words[32];
@@ -1125,18 +1140,25 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
     }
     // The first pass's history is what the next frame's first pass reads.
     if (s.stored) copy_general(cmd, o.history_store[0].image, o.history[0].image, w, h);
-    // The answer back into the frame, with the frame's alpha, which one pass's
-    // post block restores itself.
-    const VkImage answer = in_scratch ? o.scratch.image : o.answer.image;
+    // The frame's alpha, which one pass's post block restores itself. Then
+    // the answer out into ANSWER: copied straight in the frame's format, or
+    // blitted from RGBA32F into the frame's image and copied from there.
+    const VkImage result = in_scratch ? o.scratch.image : o.answer.image;
     if (!s.post_alpha) {
         const AlphaPush push{w, h, s.rgba8};
         dispatch(cmd, kAlpha, o.alpha_sets[in_scratch], gx, gy, &push, sizeof push);
     }
-    barrier(cmd, answer, kGeneral, kSource, kCompute, kWrite, kTransfer, kCopyRead);
-    barrier(cmd, frame, kSource, kTarget, kTransfer, kCopyRead, kTransfer, kCopyWrite);
-    transfer(cmd, answer, kSource, frame, kTarget, w, h, !s.answer_direct);
-    barrier(cmd, answer, kSource, kGeneral, kTransfer, kCopyRead, kCompute, kRead | kWrite);
-    barrier(cmd, frame, kTarget, kSource, kTransfer, kCopyWrite, kTransfer, kCopyRead);
+    if (queries) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries, query + 1);
+    barrier(cmd, result, kGeneral, kSource, kCompute, kWrite, kTransfer, kCopyRead);
+    if (s.answer_direct) {
+        vkCmdCopyImageToBuffer(cmd, result, kSource, answer, 1, &region);
+    } else {
+        barrier(cmd, o.frame.image, kUndefined, kTarget, kTransfer, 0, kTransfer, kCopyWrite);
+        transfer(cmd, result, kSource, o.frame.image, kTarget, w, h, true);
+        barrier(cmd, o.frame.image, kTarget, kSource, kTransfer, kCopyWrite, kTransfer, kCopyRead);
+        vkCmdCopyImageToBuffer(cmd, o.frame.image, kSource, answer, 1, &region);
+    }
+    barrier(cmd, result, kSource, kGeneral, kTransfer, kCopyRead, kCompute, kRead | kWrite);
 }
 
 void Runtime::submitted() { history_ = recorded_; }

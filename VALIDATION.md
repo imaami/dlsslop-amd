@@ -313,7 +313,16 @@ bind a 1x1 image where the post block writes nothing" makes the post block's
 second output, an RGBA32F image, of the frame's extent in every build. Every
 frame of a build without motion or with one pass then has the same commands
 but differs in that image's extent, 1x1 since, and the comparison prints
-`DIFFERENT`.
+`DIFFERENT`. Any dlsslopd built before "vulkan: copy the proxy straight into
+the network's input" copies the proxy into an image of its own in every frame
+and the network's input from there, and copies or blits the answer back
+through that image. Its frames of one pass then have two more copies and three
+more barriers without pass stages, and one more copy and one more barrier with
+them; its frames of more passes have one barrier fewer. It also writes
+dlsslopd's second and third timestamps, queries 1 and 2, at other points in the
+frame, so the comparison prints `DIFFERENT`. These differences lie outside the
+network's span: against a dlsslopd built from that commit's parent,
+`--span network` must print `MATCH`.
 
 The revision before "vulkan: run the network with the project's own host code"
 runs the host code of the fork in its `external/vulkan`. Its lock pins an older

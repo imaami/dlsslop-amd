@@ -121,7 +121,7 @@ struct Pipeline {
 //   epochs and the tile counters depend on it.
 // - Descriptors are written only by build() and reshape(). Every dispatch
 //   runs with the network's input image in SHADER_READ_ONLY_OPTIMAL and
-//   every other image in GENERAL.
+//   every other image that a set binds in GENERAL.
 // - The invalidate-only barriers between steps rely on gfx1201's caches
 //   below L2 being write-through (upstream: nr_graph.cpp:4230-4258); the
 //   steps that tile counters order rely on the queue starting consecutive
@@ -149,11 +149,15 @@ public:
     // runtime that fails to reshape must be destroyed.
     Result<void> reshape(const VulkanPaths& paths, const Shape& shape);
 
-    // Records a frame of the shape: from FRAME, an image of it in
-    // TRANSFER_DST_OPTIMAL written by transfers, through the network with
-    // CONTROLS and back into FRAME, left in TRANSFER_SRC_OPTIMAL for
-    // transfers. RESET drops the motion history for this frame.
-    void record(VkCommandBuffer cmd, VkImage frame, const Controls& controls, bool reset);
+    // Records a frame of the shape: from PROXY, the frame's pixels packed in
+    // its format, through the network with CONTROLS into ANSWER in the same
+    // form. Transfers read PROXY and write ANSWER, which the caller's
+    // barriers order against the transfers before and after. RESET drops the
+    // motion history for this frame. With QUERIES, writes timestamps QUERY,
+    // once the frame is in the network's input, and QUERY + 1, once the
+    // network is done.
+    void record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const Controls& controls, bool reset,
+                VkQueryPool queries, uint32_t query);
     // Says that the frame record() recorded last was submitted, so that the
     // next frame reads the motion history it writes. A frame that is
     // recorded and not submitted leaves the history as it was.
@@ -170,10 +174,10 @@ private:
     struct Objects {
         Buffer arena, weights, params;
         // The network's input and answer, its second output, the first
-        // pass's input for later passes, the pass stages' scratch, and the
-        // motion history's luma pyramids, flow, histories, depth and one
-        // history a pass.
-        Image input, answer, second, shown, scratch;
+        // pass's input for later passes, the pass stages' scratch, the
+        // frame's image that blits convert through, and the motion history's
+        // luma pyramids, flow, histories, depth and one history a pass.
+        Image input, answer, second, shown, scratch, frame;
         Image luma[2][kLevels], flow[kLevels], history[2], depth, history_store[kMaxPasses];
         VkSampler nearest, linear;
         Pipeline pipelines[kPipelines];
@@ -189,7 +193,7 @@ private:
     struct State {
         uint32_t width, height, passes;
         bool motion, stages, rgba8;
-        // The frame is copied into the input, not blitted; the post block
+        // The proxy is copied into the input, not blitted; the post block
         // stores the answer in the frame's format, which is then copied out;
         // the post block restores the frame's alpha itself.
         bool input_direct, answer_direct, post_alpha;

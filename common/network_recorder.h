@@ -13,9 +13,8 @@
 
 namespace dlsslop {
 
-// The network on one device: its runtime, built for one frame shape at a time,
-// and the frame's image, in the proxy's own format, which the runtime reads
-// and writes back.
+// The network on one device: its runtime, built for one frame shape at a time.
+// The device must have finished the recorder's work before it is destroyed.
 class NetworkRecorder {
 public:
     static constexpr unsigned kMaxPasses = 16;
@@ -24,8 +23,6 @@ public:
     // DEVICE's queue takes the runtime's build.
     NetworkRecorder(const vulkan::Device& device, VulkanPaths paths);
     NetworkRecorder(const NetworkRecorder&) = delete;
-    // The device must have finished the recorder's work.
-    ~NetworkRecorder();
 
     // True when shape() would build.
     bool shape_differs(const VulkanFrame& frame) const;
@@ -44,7 +41,7 @@ public:
     // queue wrote the proxy and read the last answer before, and do after.
     // EXPORTED: both belong to VK_QUEUE_FAMILY_EXTERNAL between frames. With
     // QUERIES, writes timestamps QUERY, once the frame is in the network's
-    // image, and QUERY + 1, once the network is done.
+    // input, and QUERY + 1, once the network is done.
     void record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const VulkanFrame& frame, uint32_t family,
                 bool exported, VkQueryPool queries = VK_NULL_HANDLE, uint32_t query = 0);
     // Says that the frame record() recorded last was submitted, so that the
@@ -55,8 +52,6 @@ public:
 private:
     vulkan::Device device_;
     VulkanPaths paths_;
-    VkImage image_ = VK_NULL_HANDLE;
-    VkDeviceMemory image_memory_ = VK_NULL_HANDLE;
     vulkan::Shape shape_{};
     std::optional<vulkan::Runtime> runtime_;
     // The history's last frame submitted, and the last frame recorded; none
@@ -70,8 +65,6 @@ private:
     std::string rejection_;
 
     Result<void> plan_for(uint32_t width, uint32_t height);
-    Result<void> make_image(const vulkan::Shape& shape);
-    void drop();
 };
 
 }  // namespace dlsslop

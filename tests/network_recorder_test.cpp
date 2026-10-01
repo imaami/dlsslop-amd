@@ -9,10 +9,14 @@
 // parameters and push constants, must equal those of the frame recorded
 // before it. A network reshaped for another shape of its extent must upload
 // nothing, make no pipeline that it has, and record the frames that a network
-// built for that shape records. Takes the directory of the network's SPIR-V.
+// built for that shape records. A frame of one pass without the pass stages
+// must copy the proxy straight into the network's input and its answer
+// straight out, and copy or blit no image. Takes the directory of the
+// network's SPIR-V.
 #include "network_recorder.h"
 #include "vulkan_pack.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -22,6 +26,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -449,6 +454,18 @@ std::string frames_of(dlsslop::NetworkRecorder& recorder, const dlsslop::VulkanF
     return commands + record(recorder, f).commands;
 }
 
+// How many lines of COMMANDS start with HEAD and end with TAIL.
+size_t lines(std::string_view commands, std::string_view head, std::string_view tail = {})
+{
+    size_t n = 0;
+    while (!commands.empty()) {
+        const std::string_view line = commands.substr(0, commands.find('\n'));
+        n += line.starts_with(head) && line.ends_with(tail);
+        commands.remove_prefix(std::min(line.size() + 1, commands.size()));
+    }
+    return n;
+}
+
 // A walk through shapes of 64x64 frames, each a change that the recorder
 // rebuilds for: its passes, more or fewer, format, motion history and
 // stages. Each shape's frames after the reshape must be those of a network
@@ -487,6 +504,14 @@ void check_reshapes(const dlsslop::VulkanPaths& paths)
                           frame.commands.find("fill") == std::string::npos && !remade),
                 ("the reshape for " + what + " uploaded the weights or made a pipeline it had").c_str());
         const std::string after = frames_of(recorder, f);
+        // With one pass and no pass stages, each of the two frames copies the
+        // proxy, #0, into the network's input, #2, the first image it names,
+        // and an image into the answer buffer, #1. It copies or blits no image.
+        require(f.passes > 1 || f.sharpness != 0 ||
+                    (lines(after, "copy buffer to image #0 ", " #2") == 2 &&
+                     lines(after, "copy image to buffer #", " #1") == 2 && lines(after, "copy image #") == 0 &&
+                     lines(after, "blit") == 0),
+                ("the frames of " + what + " do not copy the proxy straight in and the answer straight out").c_str());
         dlsslop::NetworkRecorder built(fake_device(), paths);
         require(built.shape(f).value_or(false), ("cannot build the network for " + what).c_str());
         require(after == frames_of(built, f),
