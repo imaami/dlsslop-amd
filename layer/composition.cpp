@@ -178,10 +178,10 @@ FrameSettings FrameSettings::Read(const ShmHeader* h) {
 // ---------------------------------------------------------------------------
 // Lifetime
 // ---------------------------------------------------------------------------
-Composition::Composition(const DeviceTable* vk, const InstanceTable* instance, VkDevice device,
+Composition::Composition(const device_table* vk, const instance_table* instance, VkDevice device,
                          VkPhysicalDevice physicalDevice)
     : _vk(vk), _instance(instance), _device(device), _physicalDevice(physicalDevice) {
-    if (!DeviceTableComplete(*vk)) {
+    if (!device_table_complete(vk)) {
         _reason = "the device does not expose everything a compute pass needs";
         log_printf("[comp] %s", _reason.c_str());
         return;

@@ -52,7 +52,7 @@ class ScalerVk : public Shader_Vk {
     uint32_t _slot = 0;
 
   public:
-    ScalerVk(const DeviceTable* InVk, const InstanceTable* InInstance, VkDevice InDevice,
+    ScalerVk(const device_table* InVk, const instance_table* InInstance, VkDevice InDevice,
              VkPhysicalDevice InPhysicalDevice, bool InUpsample, uint32_t InFilter);
     ~ScalerVk() override = default;
 

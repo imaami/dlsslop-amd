@@ -112,8 +112,8 @@ struct Context {
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkImage swapchain = VK_NULL_HANDLE;
     VkDeviceMemory swapchainMemory = VK_NULL_HANDLE;
-    dlssnr::InstanceTable instanceTable;
-    dlssnr::DeviceTable deviceTable;
+    struct instance_table instanceTable = {};
+    struct device_table deviceTable = {};
 
     ~Context() {
         if (device) vkDeviceWaitIdle(device);
@@ -192,9 +192,9 @@ struct Context {
         ainfo.commandBufferCount = 1;
         VkCheck(vkAllocateCommandBuffers(device, &ainfo, &cmd), "allocate command buffer");
         instanceTable.next_gipa = vkGetInstanceProcAddr;
-        instanceTable.Load(instance);
+        instance_table_load(&instanceTable, instance);
         deviceTable.next_dpa = vkGetDeviceProcAddr;
-        deviceTable.Load(device);
+        device_table_load(&deviceTable, device);
         tracker.createView = std::exchange(deviceTable.vkCreateImageView, CreateView);
         tracker.destroyView = std::exchange(deviceTable.vkDestroyImageView, DestroyView);
         tracker.allocate = std::exchange(deviceTable.vkAllocateDescriptorSets, Allocate);

@@ -4,3 +4,4 @@
  */
 #include "log.h"
 #include "shm_protocol.h"
+#include "vk_table.h"

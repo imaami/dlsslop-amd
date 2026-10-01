@@ -3,7 +3,7 @@
 
 namespace dlssnr {
 
-Shader_Vk::Shader_Vk(std::string InName, const DeviceTable* InVk, const InstanceTable* InInstance, VkDevice InDevice,
+Shader_Vk::Shader_Vk(std::string InName, const device_table* InVk, const instance_table* InInstance, VkDevice InDevice,
                      VkPhysicalDevice InPhysicalDevice)
     : _name(std::move(InName)), _vk(InVk), _instance(InInstance), _device(InDevice), _physicalDevice(InPhysicalDevice) {}
 

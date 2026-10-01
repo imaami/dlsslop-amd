@@ -58,7 +58,7 @@ const char* ScalerFilterName(uint32_t filter) {
     }
 }
 
-ScalerVk::ScalerVk(const DeviceTable* InVk, const InstanceTable* InInstance, VkDevice InDevice,
+ScalerVk::ScalerVk(const device_table* InVk, const instance_table* InInstance, VkDevice InDevice,
                    VkPhysicalDevice InPhysicalDevice, bool InUpsample, uint32_t InFilter)
     : Shader_Vk(InUpsample ? "dlssnr-enlarge" : "dlssnr-average", InVk, InInstance, InDevice, InPhysicalDevice),
       _upsample(InUpsample),

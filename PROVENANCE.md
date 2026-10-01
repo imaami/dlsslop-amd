@@ -78,9 +78,10 @@ follow the rule:
 | `dlssnr::Log` | `log_printf` | `log` is the C library's natural logarithm |
 
 The headers that C and C++ share stay valid C++23. `common/shm_protocol.h`
-declares the channel for both languages. Its functions that return a
-`std::string` in C++ write into the caller's buffer in C; C++ keeps the string
-versions as overloads, except for `ShmRuntimeDir`, which only a test calls.
+declares the channel for both languages, and `layer/vk_table.h` the dispatch
+tables. The channel header's functions that return a `std::string` in C++ write
+into the caller's buffer in C; C++ keeps the string versions as overloads,
+except for `ShmRuntimeDir`, which only a test calls.
 
 The layer's composition shader `layer/dlssnr/dlssnr.comp` is a GLSL port of the
 layer fork's `layer_linux/src/dlssnr/dlssnr.hlsl` (AGPL-3.0). Its RenoDX-derived

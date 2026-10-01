@@ -3,7 +3,7 @@
 //
 // The original resolves Vulkan through the loader's exported symbols, which a layer must not do: the
 // hooked entry points would recurse and the unhooked ones would re-enter the top of the chain. Every
-// call here goes through the DeviceTable the layer built from pfnNextGetDeviceProcAddr instead. That
+// call here goes through the device_table the layer built from pfnNextGetDeviceProcAddr instead. That
 // is the only difference; the shape of the class, what it creates and in what order, is unchanged, so
 // a fix on either side still reads as the same code.
 #include "vk_table.h"
@@ -18,8 +18,8 @@ class Shader_Vk {
     std::string _name;
     bool _init = false;
 
-    const DeviceTable* _vk = nullptr;
-    const InstanceTable* _instance = nullptr;
+    const device_table* _vk = nullptr;
+    const instance_table* _instance = nullptr;
     VkDevice _device = VK_NULL_HANDLE;
     VkPhysicalDevice _physicalDevice = VK_NULL_HANDLE;
 
@@ -53,7 +53,7 @@ class Shader_Vk {
   public:
     bool CanRender() const { return _init && _pipeline != VK_NULL_HANDLE; }
 
-    Shader_Vk(std::string InName, const DeviceTable* InVk, const InstanceTable* InInstance, VkDevice InDevice,
+    Shader_Vk(std::string InName, const device_table* InVk, const instance_table* InInstance, VkDevice InDevice,
               VkPhysicalDevice InPhysicalDevice);
     virtual ~Shader_Vk();
 

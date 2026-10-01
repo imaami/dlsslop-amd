@@ -461,7 +461,7 @@ struct InstanceChain {
 
     // The instance-level entry points the layer and the composition need, resolved once. Kept here
     // rather than on the device chain because this is where the VkInstance handle is in scope.
-    dlssnr::InstanceTable table;
+    struct instance_table table = {};
 };
 
 struct SwapchainState {
@@ -508,7 +508,7 @@ struct DeviceChain {
     PFN_vkGetDeviceProcAddr next_dpa = nullptr;
 
     // The device-level entry points the layer and the composition need, resolved once.
-    dlssnr::DeviceTable table;
+    struct device_table table = {};
 
     // The loader's hook for installing a dispatch table on a dispatchable object a layer creates.
     // Handed to every layer in its own VkLayerDeviceCreateInfo node; see Hook_CreateDevice.
@@ -683,7 +683,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateInstance(
         chain.apiVersion = pCreateInfo->pApplicationInfo->apiVersion;
 
     chain.table.next_gipa = next_gipa;
-    chain.table.Load(*pInstance);
+    instance_table_load(&chain.table, *pInstance);
 
     std::lock_guard<std::mutex> lk(g_stateMutex);
     g_instances[*pInstance] = chain;
@@ -850,7 +850,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
     dc->next_dpa = next_dpa;
     dc->setDeviceLoaderData = setLoaderData;
     dc->table.next_dpa = next_dpa;
-    dc->table.Load(*pDevice);
+    device_table_load(&dc->table, *pDevice);
     for (uint32_t i = 0; i < effective->enabledExtensionCount; ++i)
         if (!std::strcmp(effective->ppEnabledExtensionNames[i], VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME))
             dc->exportMemory = dc->table.vkGetMemoryFdKHR != nullptr;

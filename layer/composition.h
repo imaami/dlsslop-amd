@@ -97,7 +97,7 @@ bool ColourIsLinearHdr(VkFormat swapchainFormat, uint32_t colourMode);
 
 class Composition {
   public:
-    Composition(const DeviceTable* vk, const InstanceTable* instance, VkDevice device,
+    Composition(const device_table* vk, const instance_table* instance, VkDevice device,
                 VkPhysicalDevice physicalDevice);
     ~Composition();
 
@@ -234,8 +234,8 @@ class Composition {
     DlssNrConstants BaseConstants(const FrameSettings& s) const;
     float ResolvedWhitePoint(const FrameSettings& s) const;
 
-    const DeviceTable* _vk = nullptr;
-    const InstanceTable* _instance = nullptr;
+    const device_table* _vk = nullptr;
+    const instance_table* _instance = nullptr;
     VkDevice _device = VK_NULL_HANDLE;
     VkPhysicalDevice _physicalDevice = VK_NULL_HANDLE;
 

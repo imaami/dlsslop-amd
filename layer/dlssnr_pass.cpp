@@ -9,7 +9,7 @@
 
 namespace dlssnr {
 
-DlssNrPass::DlssNrPass(const DeviceTable* InVk, const InstanceTable* InInstance, VkDevice InDevice,
+DlssNrPass::DlssNrPass(const device_table* InVk, const instance_table* InInstance, VkDevice InDevice,
                        VkPhysicalDevice InPhysicalDevice)
     : Shader_Vk("dlssnr-composition", InVk, InInstance, InDevice, InPhysicalDevice) {
     if (InDevice == VK_NULL_HANDLE || InPhysicalDevice == VK_NULL_HANDLE) {

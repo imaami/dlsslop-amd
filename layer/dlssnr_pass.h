@@ -48,7 +48,7 @@ class DlssNrPass : public Shader_Vk {
                           VkImageLayout sourceLayout, VkImageLayout motionLayout);
 
   public:
-    DlssNrPass(const DeviceTable* InVk, const InstanceTable* InInstance, VkDevice InDevice,
+    DlssNrPass(const device_table* InVk, const instance_table* InInstance, VkDevice InDevice,
                VkPhysicalDevice InPhysicalDevice);
     ~DlssNrPass() override;
 

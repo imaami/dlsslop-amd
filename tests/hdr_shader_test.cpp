@@ -41,8 +41,8 @@ struct Context {
     VkQueue queue = VK_NULL_HANDLE;
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
-    dlssnr::InstanceTable instance_table;
-    dlssnr::DeviceTable device_table;
+    struct instance_table instanceTable = {};
+    struct device_table deviceTable = {};
     std::unique_ptr<dlssnr::DlssNrPass> pass;
 
     ~Context() {
@@ -122,11 +122,11 @@ struct Context {
         ainfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         ainfo.commandBufferCount = 1;
         VkCheck(vkAllocateCommandBuffers(device, &ainfo, &cmd), "allocate command buffer");
-        instance_table.next_gipa = vkGetInstanceProcAddr;
-        instance_table.Load(instance);
-        device_table.next_dpa = vkGetDeviceProcAddr;
-        device_table.Load(device);
-        pass = std::make_unique<dlssnr::DlssNrPass>(&device_table, &instance_table, device, physical);
+        instanceTable.next_gipa = vkGetInstanceProcAddr;
+        instance_table_load(&instanceTable, instance);
+        deviceTable.next_dpa = vkGetDeviceProcAddr;
+        device_table_load(&deviceTable, device);
+        pass = std::make_unique<dlssnr::DlssNrPass>(&deviceTable, &instanceTable, device, physical);
         Check(pass->CanRender(), "composition pass initialization failed");
         return true;
     }
