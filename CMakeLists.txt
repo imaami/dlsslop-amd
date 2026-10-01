@@ -209,6 +209,7 @@ if(BUILD_TESTING)
         common/vulkan_runtime.cpp common/vulkan_plan.cpp common/vulkan_schedule.cpp common/vulkan_weights.cpp
         backend/files.cpp)
     target_include_directories(network-recorder-test PRIVATE backend)
+    target_link_libraries(network-recorder-test PRIVATE Threads::Threads)
     add_dependencies(network-recorder-test vulkan-nr-shaders)
     add_test(NAME network-recorder COMMAND network-recorder-test ${VKNR_SHADERS})
     add_executable(codec-test backend/codec_test.cpp)

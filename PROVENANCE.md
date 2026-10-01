@@ -119,18 +119,20 @@ which upstream did not check. It bounds every read of the model, sends its
 messages to the caller's log instead of standard output and error, and loads
 neither `runtime_transfer.spv` nor `runtime_depth.spv`, which upstream loads but
 never dispatches. Its build leaves the network's input unwritten, where upstream
-uploads a gradient that the first frame overwrites. It saves the pipeline cache
-once it has created every pipeline or failed to create one, where upstream saves
-it before it creates those of the alpha pass, the pass stages, the motion
-estimate and the temporal blocks. It replaces the cache file in one rename of a
-file of its own, where upstream writes a fixed `.tmp` file that another process
-can truncate or rename, and removes the cache file before its rename. It creates
-the motion estimate's finest flow level for sampling as well as storage and
+uploads a gradient that the first frame overwrites. It compiles up to four
+pipelines at once, on no more threads than half the CPUs that its build may run
+on, where upstream compiles them one at a time. It saves the pipeline cache once
+it has created every pipeline or failed to create one, where upstream saves it
+before it creates those of the alpha pass, the pass stages, the motion estimate
+and the temporal blocks. It replaces the cache file in one rename of a file of
+its own, where upstream writes a fixed `.tmp` file that another process can
+truncate or rename, and removes the cache file before its rename. It creates the
+motion estimate's finest flow level for sampling as well as storage and
 transfers, where upstream creates it for storage and transfers only and still
 binds it to the temporal blocks' samplers. It advances the motion history's
 latch, parity and noise seed when its caller says that a recorded frame was
-submitted, where upstream advances them when it records the frame. It leaves
-out what dlsslop-amd never calls, such as control masks, `record_engine`,
+submitted, where upstream advances them when it records the frame. It leaves out
+what dlsslop-amd never calls, such as control masks, `record_engine`,
 per-feature histories, preprocessing, model scales below 1, input formats other
 than RGBA8 and RGBA16F, the GPU timing that `last_gpu_ms()` and
 `average_gpu_ms()` report, and every `NR_*` environment variable.

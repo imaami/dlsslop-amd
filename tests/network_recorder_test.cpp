@@ -17,12 +17,14 @@
 #include "vulkan_pack.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>
 #include <map>
+#include <mutex>
 #include <set>
 #include <span>
 #include <string>
@@ -43,8 +45,11 @@ void require(bool value, const char* message)
 // buffers and allocations, and host memory for the allocations mapped; what
 // each image, buffer, sampler, shader module and pipeline was made as, each
 // view's image, each descriptor set's descriptors by binding, and what each
-// pipeline it made was made as, in order.
-uint64_t handles = 0;
+// pipeline it made was made as, in order. The runtime makes pipelines on
+// several threads at once: shader modules and pipelines are recorded under
+// a lock.
+std::atomic<uint64_t> handles = 0;
+std::mutex making;
 std::map<uint64_t, VkDeviceSize> sizes;
 std::map<uint64_t, std::vector<uint8_t>> host;
 std::map<uint64_t, std::string> made;
@@ -166,6 +171,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(VkDevice, const VkShaderModu
                                                     const VkAllocationCallbacks*, VkShaderModule* module)
 {
     make(module);
+    const std::lock_guard lock(making);
     made[id(*module)] = "pipeline " + std::to_string(vulkan_test::fnv1a(info->pCode, info->codeSize));
     return VK_SUCCESS;
 }
@@ -204,6 +210,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateComputePipelines(VkDevice, VkPipelineCach
                                                         const VkComputePipelineCreateInfo* infos,
                                                         const VkAllocationCallbacks*, VkPipeline* pipelines)
 {
+    const std::lock_guard lock(making);
     for (uint32_t i = 0; i < count; ++i) {
         make(&pipelines[i]);
         made[id(pipelines[i])] = made[id(infos[i].stage.module)];

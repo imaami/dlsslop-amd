@@ -4,10 +4,13 @@
 #include "vulkan_weights.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <iterator>
+#include <pthread.h>
+#include <sched.h>
 #include <span>
 #include <string>
 #include <string_view>
@@ -411,6 +414,46 @@ Result<void> make_pipeline(VkDevice device, VkPipelineCache cache, const std::st
     return vk_check(made, what.c_str());
 }
 
+// The most threads that create pipelines at once, the build's own included:
+// the largest pipelines take seconds each to compile, and in the layer the
+// build runs in the game's process.
+constexpr size_t kCompilers = 4;
+
+// How many threads create pipelines: half the CPUs that the build may run
+// on, from 1 to kCompilers.
+size_t compilers()
+{
+    cpu_set_t cpus;
+    const size_t usable = sched_getaffinity(0, sizeof cpus, &cpus) ? 0 : size_t(CPU_COUNT(&cpus));
+    return std::clamp<size_t>(usable / 2, 1, kCompilers);
+}
+
+// The pipelines MISSING[0..COUNT) made into PIPELINES through CACHE by every
+// thread that runs run(), each taking the next one; MADE[i] says how
+// MISSING[i] went. Once one has failed, no thread takes another.
+struct Compile {
+    VkDevice device;
+    VkPipelineCache cache;
+    const std::string& shaders;
+    const size_t* missing;
+    size_t count;
+    Pipeline* pipelines;
+    Result<void>* made;
+    std::atomic<size_t> next = 0;
+    std::atomic<bool> failed = false;
+
+    static void* run(void* self)
+    {
+        auto& c = *static_cast<Compile*>(self);
+        for (size_t i; !c.failed.load(std::memory_order_relaxed) &&
+                       (i = c.next.fetch_add(1, std::memory_order_relaxed)) < c.count;) {
+            c.made[i] = make_pipeline(c.device, c.cache, c.shaders, c.missing[i], c.pipelines[c.missing[i]]);
+            if (!c.made[i]) c.failed.store(true, std::memory_order_relaxed);
+        }
+        return nullptr;
+    }
+};
+
 // The pipeline cache from PATH, when it holds one; none when the device makes
 // none (upstream: Context::load_pipeline_cache).
 VkPipelineCache load_cache(VkDevice device, const std::string& path)
@@ -763,15 +806,25 @@ Result<void> Runtime::make_pipelines(const VulkanPaths& paths, bool noise)
     for (size_t i = 0; i < kPipelines; ++i)
         if (wanted[i] && !p[i].pipeline) missing[n++] = i;
     if (!n) return {};
-    // Every pipeline goes through the cache, which is saved once every
-    // pipeline exists or one has failed; upstream saves it before it creates
-    // the runtime's own.
+    // Every pipeline goes through the cache, compiled at once on this thread
+    // and compilers() - 1 more; a thread that cannot start leaves its share
+    // to the others. The cache is saved once every pipeline exists or one has
+    // failed; upstream creates them one at a time and saves the cache before
+    // it creates the runtime's own.
     const VkPipelineCache cache = load_cache(d, paths.cache);
-    Result<void> made;
-    for (size_t i = 0; made && i < n; ++i) made = make_pipeline(d, cache, paths.shaders, missing[i], p[missing[i]]);
+    Result<void> made[kPipelines];
+    Compile compile{d, cache, paths.shaders, missing, n, p, made};
+    pthread_t threads[kCompilers - 1];
+    const size_t helpers = std::min(n, compilers()) - 1;
+    size_t started = 0;
+    while (started < helpers && !pthread_create(&threads[started], nullptr, Compile::run, &compile)) ++started;
+    Compile::run(&compile);
+    for (size_t t = 0; t < started; ++t) pthread_join(threads[t], nullptr);
     save_cache(d, cache, paths.cache);
     if (cache) vkDestroyPipelineCache(d, cache, nullptr);
-    return made;
+    for (Result<void>& r : std::span(made, n))
+        if (!r) return std::move(r);
+    return {};
 }
 
 Result<void> Runtime::make_sets()
