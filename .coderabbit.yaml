@@ -27,8 +27,7 @@ reviews:
         RTTI: errors are dlsslop::Result values, and no project code
         catches exceptions. The sources imported from the layer's fork,
         which the rule for them below lists, are upstream code that does
-        not use dlsslop::Result. They are built as C++17, except
-        shmctl.cpp, which is built as C++23. HIP kernels are compiled
+        not use dlsslop::Result. HIP kernels are compiled
         by clang for gfx1201 (wave32). Check GPU stream ordering,
         host/device synchronization and buffer lifetimes, and races on
         the cross-process shared-memory channel: the layer can rewrite

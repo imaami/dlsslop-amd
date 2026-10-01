@@ -1,6 +1,5 @@
 // What DLSSNR-AMD's Vulkan network needs of a device: one table for dlsslopd's
-// own device and for a game's device the layer adds it to. C++17, like the
-// layer that includes it.
+// own device and for a game's device the layer adds it to.
 // SPDX-License-Identifier: MIT
 #pragma once
 #include <vulkan/vulkan.h>

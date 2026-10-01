@@ -4,9 +4,6 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-# The project's own code is C++23. The standard also decides how much of
-# libstdc++, std::string above all, is inlined, so upstream code that a newer
-# one grows keeps the older standard that gives it the smallest binary.
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -23,8 +20,7 @@ add_compile_options(-ffunction-sections -fdata-sections)
 add_compile_options(-fno-exceptions -fno-rtti)
 add_link_options(-Wl,--gc-sections $<$<CONFIG:Release>:-s>)
 # Link-time optimization shrinks the daemon's code by 7% and the GUI's
-# too: the compiler inlines and drops code across files. The layer and
-# dlssnr-shmctl do not shrink, so they are built without it.
+# too: the compiler inlines and drops code across files.
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON CACHE BOOL "Link-time optimization")
 # Project headers shared by the daemon and its tests.
 include_directories(common)
@@ -81,15 +77,13 @@ add_custom_target(layer-shaders DEPENDS ${LAYER_SHADERS} ${METER}.h)
 # the other translation units compiled once.
 add_library(dlsslop-layer-objects OBJECT layer/shader_vk.cpp layer/dlssnr_pass.cpp layer/composition.cpp
     layer/capture.cpp layer/scaler_vk.cpp layer/hotkey.cpp)
-set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_STANDARD 17
-    INTERPROCEDURAL_OPTIMIZATION OFF)
+set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_dependencies(dlsslop-layer-objects layer-shaders)
 target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC layer ${X11_HEADERS} ${XINPUT_HEADERS})
 target_link_libraries(dlsslop-layer-objects PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
 
 function(add_neural_layer target)
     add_library(${target} SHARED layer/layer.cpp)
-    set_target_properties(${target} PROPERTIES CXX_STANDARD 17 INTERPROCEDURAL_OPTIMIZATION OFF)
     target_link_libraries(${target} PRIVATE dlsslop-layer-objects)
     target_link_options(${target} PRIVATE
         -static-libstdc++ -static-libgcc -Wl,-Bsymbolic
@@ -100,7 +94,6 @@ endfunction()
 add_neural_layer(VkLayer_DLSSLOP_amd)
 add_executable(dlssnr-shmctl layer/shmctl.cpp)
 target_link_options(dlssnr-shmctl PRIVATE -static-libstdc++ -static-libgcc)
-set_target_properties(dlssnr-shmctl PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
 # A command that runs once: its code is built for size.
 target_compile_options(dlssnr-shmctl PRIVATE -Os)
 
