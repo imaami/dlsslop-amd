@@ -172,10 +172,11 @@ class Composition {
     // Leg 2. Composes and leaves the swapchain image holding the result, in PRESENT_SRC_KHR.
     bool RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, const FrameSettings& s);
 
-    // Write this many matched before/after pairs, starting with the next composed frame.
-    void RequestCapture(uint32_t frames, uint32_t controlSeq) { _capture.Begin(frames, controlSeq); }
-    void SetCaptureInference(uint32_t seq) { _captureMetadata.inferenceSeq = seq; }
-    bool CaptureActive() const { return _capture.Active(); }
+    // Write this many matched before/after pairs, at most CAPTURE_WRITER_FRAMES, starting with the next
+    // composed frame.
+    void RequestCapture(uint32_t frames, uint32_t controlSeq) { capture_writer_begin(&_capture, frames, controlSeq); }
+    void SetCaptureInference(uint32_t seq) { _captureMetadata.inference_seq = seq; }
+    bool CaptureActive() const { return capture_writer_active(&_capture); }
     // This frame's compose recorded a pair; an active capture without its host buffer records none.
     bool CaptureRecorded() const { return _captureRecorded; }
 
@@ -291,8 +292,8 @@ class Composition {
     uint32_t _exportFamily = 0;
     uint32_t _transportGen = 0;
 
-    CaptureWriter _capture;
-    CaptureMetadata _captureMetadata{};
+    struct capture_writer _capture = {};
+    struct capture_metadata _captureMetadata = capture_metadata();
     bool _captureRecorded = false;
 
     // Frame hold. The freeze point is the raw colour the encode reads, not the proxy: the proxy is

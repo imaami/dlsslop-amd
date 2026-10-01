@@ -48,7 +48,7 @@ reviews:
         cannot be fixed otherwise or a significant performance gain;
         upstream names and contracts are preserved. Never suggest
         restyling upstream or vendored code.
-    - path: "{layer/{ATTRIBUTION,capture,composition,dlssnr_pass,hotkey,layer,scaler_vk,shader_vk,shmctl}.*,layer/dlssnr.map,layer/meter_reduce.comp,third_party/**}"
+    - path: "{layer/{ATTRIBUTION,composition,dlssnr_pass,hotkey,layer,scaler_vk,shader_vk,shmctl}.*,layer/dlssnr.map,layer/meter_reduce.comp,third_party/**}"
       instructions: >-
         The layer's sources, imported from dlsslop-amd's fork of the
         layer (PROVENANCE.md), and vendored notices and stb headers.
@@ -56,7 +56,7 @@ reviews:
         otherwise or a significant performance gain; upstream names and
         contracts are preserved. Never suggest restyling upstream or
         vendored code.
-    - path: "{common/shm_protocol.h,layer/{log.{c,h},vk_table.h,dlssnr/*.h}}"
+    - path: "{common/shm_protocol.h,layer/{capture.{c,h},log.{c,h},vk_table.h,dlssnr/*.h}}"
       instructions: >-
         The C23 port of the layer's sources imported from dlsslop-amd's
         fork of the layer (PROVENANCE.md). AGENTS.md's C sections are

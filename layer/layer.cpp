@@ -1468,7 +1468,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
     // A request published after this frame's settings snapshot belongs to the next frame.
     if (dc->shm.hdr && dc->shm.hdr->controlSeq.load() == fs.controlSeq) {
         if (const uint32_t frames = dc->shm.hdr->captureRequest.exchange(0); frames > 0)
-            sc.comp->RequestCapture(std::min<uint32_t>(frames, 64), fs.controlSeq);
+            sc.comp->RequestCapture(frames, fs.controlSeq);
     }
 
     VkSubmitInfo si{};

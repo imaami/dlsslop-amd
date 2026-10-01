@@ -39,8 +39,8 @@ the commit listed below and are maintained in this repository.
 | AMD HIP kernels, and the scheduler that dlsslopd ports | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) `ad499a8199c9ce3678d83c9be58fe3bc1bef3498` | [imaami/dlss5-on-amd-9070xt-porting](https://github.com/imaami/dlss5-on-amd-9070xt-porting/tree/dlsslop-amd) `c1908317fb7e7ee9fe4884feba4a67220d93461f` | MIT |
 
 The import took these files of the layer fork at `680ec8a`. It changed only
-the include paths that the move broke: one line each in `layer/capture.cpp`,
-`layer/composition.h` and `layer/layer.cpp`.
+the include paths that the move broke: one line each in `layer/capture.cpp`
+(now `capture.c`), `layer/composition.h` and `layer/layer.cpp`.
 
 | Fork path | Path here |
 |---|---|
@@ -61,7 +61,8 @@ Vulkan and video headers.
 
 The layer's sources are being ported to C23, one module at a time, under the
 layer's license. `layer/log.h` and `layer/log.c` are the C port of
-`layer_linux/src/log.h`. The port renames upstream names by one rule: the
+`layer_linux/src/log.h`, and `layer/capture.h` and `layer/capture.c` that of
+`capture.h` and `capture.cpp`. The port renames upstream names by one rule: the
 `dlssnr` namespace is dropped, CamelCase becomes snake_case, a class member
 takes its class as a prefix (`Composition::RecordCompose` becomes
 `composition_record_compose`), a free function with external linkage takes its
@@ -76,7 +77,9 @@ follow the rule:
 | Upstream name | Port | Why |
 |---|---|---|
 | `dlssnr::Log` | `log_printf` | `log` is the C library's natural logarithm |
-| Data members, such as `DlssNrConstants::WhitePoint` | snake_case without a prefix: `white_point` | a struct scopes its members in C as in C++ |
+| Data members, such as `DlssNrConstants::WhitePoint` and `CaptureWriter::_batchDir` | snake_case without a prefix or a leading underscore: `white_point`, `batch_dir` | a struct scopes its members in C as in C++ |
+| `IsEightBitRgba`, `NeedsChannelSwap` and `BytesPerPixel` in capture.cpp | `encoding` in capture.c | one table of how a format's frames are written |
+| `CaptureWriter::Remaining` | none; the test reads `remaining` | it had no other caller |
 
 The headers that C and C++ share stay valid C++23. `common/shm_protocol.h`
 declares the channel for both languages, `layer/vk_table.h` the dispatch tables,

@@ -103,7 +103,7 @@ add_custom_target(layer-shaders DEPENDS ${LAYER_SHADERS} ${METER}.h)
 # Only layer.cpp differs between the layers; both and the layer tests link
 # the other translation units compiled once.
 add_library(dlsslop-layer-objects OBJECT layer/shader_vk.cpp layer/dlssnr_pass.cpp layer/composition.cpp
-    layer/capture.cpp layer/scaler_vk.cpp layer/hotkey.cpp layer/log.c)
+    layer/capture.c layer/scaler_vk.cpp layer/hotkey.cpp layer/log.c)
 set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_dependencies(dlsslop-layer-objects layer-shaders)
 target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC layer ${X11_HEADERS} ${XINPUT_HEADERS})

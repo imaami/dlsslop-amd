@@ -6,7 +6,9 @@
 #define STBI_ONLY_PNG
 #include "stb_image.h"
 
+#include <climits>
 #include <cstdio>
+#include <cstring>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -116,21 +118,62 @@ void check_channel_paths() {
                         : unsetenv("DLSSNR_SHM")) == 0, "restoring DLSSNR_SHM failed");
 }
 
+// capture_writer_directory() as a string. The C form writes what fits and returns the length of
+// the whole path, as snprintf does.
+std::string capture_directory() {
+    char dir[PATH_MAX];
+    const int length = capture_writer_directory(dir, sizeof dir);
+    require(length >= 0 && size_t(length) < sizeof dir && size_t(length) == std::strlen(dir),
+            "the capture directory did not fit");
+    char small[8];
+    check_truncation(capture_writer_directory(small, sizeof small), small, dir,
+                     "the capture directory's C form did not truncate as snprintf does");
+    require(capture_writer_directory(nullptr, 0) == length, "the capture directory's length changed");
+    return dir;
+}
+
+// What the published manifest of the first batch below holds, with its batch directory.
+std::string first_manifest(const std::string& batch) {
+    std::string frame0, frame1;
+    const char* const kFrame =
+        "frame_control_seq 123\ntuning_seq 0\ninference_seq 55\npasses 1\ndebug_view 2\napply_model 0\n"
+        "bypass 0\nhold 1\ncompare 0\ntransfer 0\nmodel_width 0\nmodel_height 0\nhdr_proxy 0\nlinear_hdr 0\n"
+        "hdr_transfer 0\ndetail 0.5\ncolor 0.25\ndebug_scale 1\nbefore_hash c2de31fd48ac5f39\n";
+    std::string frames = kFrame;
+    for (const char* prefix : {"frame_0_", "frame_1_"})
+        for (const char* line = kFrame; *line;) {
+            const char* end = std::strchr(line, '\n') + 1;
+            frames += prefix + std::string(line, end);
+            line = end;
+        }
+    return "capture_metadata_version 2\ncapture_control_seq 123\nbatch_dir " + batch +
+           "\nframes 2\nwidth 1\nheight 1\nvk_format 44\nencoding png\nbytes_per_pixel 4\nrow_pitch 4\n" + frames +
+           "\nbefore_NN is the frame as the game presented it; after_NN is the same frame with\n"
+           "the model's edit composed onto it. Same frame, same run, one variable.\n";
+}
+
+// Whether the log holds the line, after the log's prefix.
+bool logged(const std::string& log, const std::string& line) {
+    return ("\n" + log).find("\n[dlssnr-layer] " + line + "\n") != std::string::npos;
+}
+
 } // namespace
 
 int main() {
     check_channel_paths();
     // Static, so a failed check that exits removes it too.
     static const TemporaryDirectory temporary;
+    // The log reads its variables at its first line, which comes below.
+    const std::string logPath = (temporary.path / "layer.log").string();
+    require(setenv("DLSSNR_ENABLE", "1", 1) == 0 && setenv("DLSSNR_LOG", logPath.c_str(), 1) == 0, "setenv failed");
     require(unsetenv("XDG_STATE_HOME") == 0, "unsetenv failed");
     require(setenv("HOME", temporary.path.c_str(), 1) == 0, "setenv failed");
-    require(dlssnr::CaptureWriter::Directory() == temporary.path / ".local/state/dlssnr/captures",
+    require(capture_directory() == temporary.path / ".local/state/dlssnr/captures",
             "wrong home capture directory");
     require(unsetenv("HOME") == 0, "unsetenv failed");
-    require(dlssnr::CaptureWriter::Directory() == "/tmp/dlssnr-captures",
-            "wrong fallback capture directory");
+    require(capture_directory() == "/tmp/dlssnr-captures", "wrong fallback capture directory");
     require(setenv("XDG_STATE_HOME", temporary.path.c_str(), 1) == 0, "setenv failed");
-    const std::filesystem::path root = dlssnr::CaptureWriter::Directory();
+    const std::filesystem::path root = capture_directory();
     require(root == temporary.path / "dlssnr/captures", "wrong state capture directory");
     std::error_code error;
     std::filesystem::create_directories(root, error);
@@ -139,22 +182,32 @@ int main() {
     std::ofstream(root / "before_00.png") << "old capture";
     std::ofstream(root / "notes.txt") << "keep";
 
-    dlssnr::CaptureWriter writer;
-    dlssnr::CaptureMetadata metadata;
-    metadata.frameControlSeq = 123;
-    metadata.inferenceSeq = 55;
+    // Static: the writer holds its metadata and directory in place.
+    static struct capture_writer writer = {};
+    require(!capture_writer_active(&writer), "a zeroed writer is active");
+    struct capture_metadata metadata = capture_metadata();
+    require(metadata.debug_scale == 1.0f, "the metadata's debug scale does not start at 1");
+    metadata.frame_control_seq = 123;
+    metadata.inference_seq = 55;
     metadata.hold = 1;
     metadata.passes = 1;
-    metadata.debugView = 2;
+    metadata.debug_view = 2;
     metadata.color = 0.25f;
     metadata.detail = 0.5f;
     const unsigned char bgra[] = {17, 32, 64, 255};
-    writer.Begin(2, 123);
-    writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
+    capture_writer_begin(&writer, 2, 123);
+    capture_writer_write_frame(&writer, bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
     require(!std::filesystem::exists(root / "manifest.txt", error) && !error, "published an incomplete batch");
-    require(writer.Remaining() == 1, "wrong remaining frame count");
-    writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
-    require(!writer.Active(), "completed batch remains active");
+    require(writer.remaining == 1, "wrong remaining frame count");
+    // A missing writer, image or record changes nothing.
+    capture_writer_begin(nullptr, 1, 1);
+    capture_writer_write_frame(nullptr, bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
+    capture_writer_write_frame(&writer, nullptr, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
+    capture_writer_write_frame(&writer, bgra, nullptr, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
+    capture_writer_write_frame(&writer, bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, nullptr);
+    require(!capture_writer_active(nullptr) && writer.remaining == 1, "a null pointer changed the batch");
+    capture_writer_write_frame(&writer, bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
+    require(!capture_writer_active(&writer), "completed batch remains active");
     const auto first = read(root / "manifest.txt");
     require(field(first, "capture_metadata_version") == "2", "wrong metadata version");
     require(field(first, "capture_control_seq") == "123", "wrong capture token");
@@ -162,7 +215,12 @@ int main() {
     require(field(first, "frame_1_inference_seq") == "55", "wrong inference provenance");
     require(field(first, "debug_view") == "2", "wrong renderer view");
     require(field(first, "color") == "0.25", "wrong renderer color");
+    // The whole manifest, as the C++ writer wrote it.
+    require(first == first_manifest(field(first, "batch_dir")), "the manifest's text changed");
     const auto batch = root / field(first, "batch_dir");
+    const std::string batchName = "capture-" + std::to_string(getpid()) + "-";
+    require(field(first, "batch_dir").rfind(batchName, 0) == 0 &&
+            field(first, "batch_dir").size() == batchName.size() + 6, "wrong batch name");
     require(read(batch / "manifest.txt") == first, "batch and published manifests differ");
     int width = 0, height = 0, channels = 0;
     unsigned char* png = stbi_load((batch / "before_00.png").c_str(), &width, &height, &channels, 4);
@@ -174,17 +232,17 @@ int main() {
     require(read(root / "before_00.png") == "old capture", "overwrote an existing capture");
     require(read(root / "notes.txt") == "keep", "removed unrelated content");
 
-    writer.Begin(1, 124);
+    capture_writer_begin(&writer, 1, 124);
     require(read(root / "manifest.txt") == first, "changed completion before new batch finished");
-    writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
+    capture_writer_write_frame(&writer, bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
     const auto second = read(root / "manifest.txt");
     require(field(second, "capture_control_seq") == "124", "new completion not published");
     require(field(second, "batch_dir") != field(first, "batch_dir"), "reused batch directory");
     require(read(batch / "manifest.txt") == first, "changed prior batch metadata");
 
-    writer.Begin(1, 125);
+    capture_writer_begin(&writer, 1, 125);
     const unsigned short fp16[] = {0x3800, 0x3800, 0x3800, 0x3c00};
-    writer.WriteFrame(fp16, fp16, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, metadata);
+    capture_writer_write_frame(&writer, fp16, fp16, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, &metadata);
     const auto third = read(root / "manifest.txt");
     require(field(third, "encoding") == "raw", "FP16 capture was not raw");
     require(field(third, "bytes_per_pixel") == "8", "FP16 capture byte count incorrect");
@@ -195,20 +253,89 @@ int main() {
 
     // A failed image write must leave the last completed batch visible.
     const auto priorDirectories = directories(root);
-    writer.Begin(1, 126);
+    capture_writer_begin(&writer, 1, 126);
     for (const auto& directory : directories(root))
         if (!priorDirectories.count(directory)) require(std::filesystem::remove(directory, error), "cannot remove a batch");
-    writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
-    require(!writer.Active(), "failed batch still active");
+    capture_writer_write_frame(&writer, bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
+    require(!capture_writer_active(&writer), "failed batch still active");
     require(read(root / "manifest.txt") == third, "published failed batch as complete");
 
+    // A request for more frames than a batch holds writes as many as it holds. A float is written
+    // with nine significant digits.
+    metadata.detail = 0.1f;
+    capture_writer_begin(&writer, 100, 128);
+    require(writer.remaining == CAPTURE_WRITER_FRAMES, "a batch is not cut to CAPTURE_WRITER_FRAMES");
+    for (uint32_t i = 0; i < CAPTURE_WRITER_FRAMES; ++i) {
+        metadata.inference_seq = i;
+        capture_writer_write_frame(&writer, bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
+    }
+    const auto full = read(root / "manifest.txt");
+    require(!capture_writer_active(&writer) && field(full, "frames") == "64" &&
+            field(full, "frame_63_inference_seq") == "63" && field(full, "frame_63_detail") == "0.100000001",
+            "a full batch was not written");
+    metadata.inference_seq = 55;
+    metadata.detail = 0.5f;
+
+    // A batch directory that cannot be created: the writer stays idle and abandons the batch it was
+    // writing. With a capture directory that does not fit in PATH_MAX bytes itself, nothing is
+    // created, even when only its terminating null does not fit; with one that fits when its batch
+    // does not, the directories are created and only the batch's is not.
+    capture_writer_begin(&writer, 2, 129);
+    require(capture_writer_active(&writer), "the batch before the failing directories did not start");
+    // Components shorter than NAME_MAX, so that only the whole path is too long.
+    std::string tooLong = temporary.path.string(), almost = tooLong, exact = tooLong;
+    while (tooLong.size() < PATH_MAX) tooLong += "/" + std::string(200, 'x');
+    while (almost.size() + 201 < PATH_MAX - 30) almost += "/" + std::string(200, 'y');
+    almost += "/" + std::string(PATH_MAX - 31 - almost.size(), 'y');
+    // A capture directory of exactly PATH_MAX bytes, "/dlssnr/captures" included.
+    while (exact.size() + 201 < PATH_MAX - 16) exact += "/" + std::string(200, 'z');
+    require(exact.size() + 18 <= PATH_MAX, "the temporary directory leaves no room for the exact path");
+    exact += "/" + std::string(PATH_MAX - 17 - exact.size(), 'z');
+    // A capture directory under a file, which mkdir() cannot create.
+    const std::string underFile = (temporary.path / "notes").string();
+    std::ofstream(underFile) << "a file";
+    for (const std::string& state : {tooLong, exact, almost, underFile}) {
+        require(setenv("XDG_STATE_HOME", state.c_str(), 1) == 0, "setenv failed");
+        capture_writer_begin(&writer, 1, 130);
+        require(!capture_writer_active(&writer), "a batch began in a directory that cannot be created");
+        capture_writer_write_frame(&writer, bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
+        require(!capture_writer_active(&writer), "an idle writer wrote a frame");
+    }
+    require(!std::filesystem::exists(temporary.path / std::string(200, 'x'), error),
+            "a directory longer than PATH_MAX was created in part");
+    require(!std::filesystem::exists(temporary.path / std::string(200, 'z'), error),
+            "a directory of exactly PATH_MAX bytes was created in part");
+    const std::string almostCaptures = almost + "/dlssnr/captures";
+    require(std::filesystem::is_directory(almostCaptures, error) && std::filesystem::is_empty(almostCaptures, error),
+            "the capture directory that fits was not created, or holds a batch");
+    require(setenv("XDG_STATE_HOME", temporary.path.c_str(), 1) == 0, "setenv failed");
+
     // A batch publishes where it began, even if the environment moves before it completes.
-    writer.Begin(1, 127);
+    capture_writer_begin(&writer, 1, 127);
     require(setenv("XDG_STATE_HOME", (temporary.path / "moved").c_str(), 1) == 0, "setenv failed");
-    writer.WriteFrame(bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, metadata);
+    capture_writer_write_frame(&writer, bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
     const auto fourth = read(root / "manifest.txt");
     require(field(fourth, "capture_control_seq") == "127", "batch did not publish where it began");
     require(read(root / field(fourth, "batch_dir") / "manifest.txt") == fourth, "wrong batch name");
-    std::printf("PASS: runtime and capture paths, capture publication, provenance, preserved batches, BGRA PNG, FP16 raw, write failure, moved environment\n");
+
+    // The log's lines, which bench and test scripts read.
+    const std::string log = read(logPath);
+    const std::string rootText = root.string();
+    require(logged(log, "[capture] capturing 2 frames, control 123, to " + rootText + "/" + field(first, "batch_dir")),
+            "the first batch's start was not logged");
+    require(logged(log, "[capture] wrote 2 pairs to " + rootText + "/" + field(first, "batch_dir")),
+            "the first batch's end was not logged");
+    require(logged(log, "[capture] capturing 64 frames, control 128, to " + rootText + "/" + field(full, "batch_dir")),
+            "the cut batch's start was not logged");
+    require(log.find("[capture] could not write " + rootText + "/capture-") != std::string::npos &&
+            logged(log, "[capture] batch failed; completion manifest was not published"),
+            "the failed batch was not logged");
+    // The log cuts a line's text to 2047 bytes.
+    const std::string failed = "[capture] cannot create batch directory in ";
+    require(logged(log, (failed + almostCaptures).substr(0, 2047)), "the batch directory that did not fit was not logged");
+    require(logged(log, (failed + tooLong).substr(0, 2047)), "the capture directory longer than PATH_MAX was not logged");
+    require(logged(log, (failed + exact).substr(0, 2047)), "the capture directory of PATH_MAX bytes was not logged");
+    require(logged(log, failed + underFile + "/dlssnr/captures"), "the capture directory under a file was not logged");
+    std::printf("PASS: runtime and capture paths, capture publication, provenance, manifest text, preserved batches, BGRA PNG, FP16 raw, write failure, full batch, failed directories, moved environment, log lines\n");
     return 0;
 }

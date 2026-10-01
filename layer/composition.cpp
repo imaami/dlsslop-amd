@@ -1183,7 +1183,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
 bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, const FrameSettings& s) {
     if (!_usable || !_composed.image) return false;
 
-    const bool rawCopy = s.compositionBypass != 0 && s.compareMode == 0 && !_capture.Active() &&
+    const bool rawCopy = s.compositionBypass != 0 && s.compareMode == 0 && !capture_writer_active(&_capture) &&
                          !_superSample && !_hdrProxy && !_linearHdr &&
                          _modelW == _width && _modelH == _height && _model.format == _workFormat;
     Transition(cb, _model, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
@@ -1265,24 +1265,24 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
     // The pair, taken here because this is the one place that holds both the frame as the game
     // presented it and the frame the model edited, for the same frame.
     _captureRecorded = false;
-    if (_capture.Active()) {
-        _captureMetadata.frameControlSeq = s.controlSeq;
-        _captureMetadata.tuningSeq = s.tuningSeq;
+    if (capture_writer_active(&_capture)) {
+        _captureMetadata.frame_control_seq = s.controlSeq;
+        _captureMetadata.tuning_seq = s.tuningSeq;
         _captureMetadata.passes = s.passes;
-        _captureMetadata.debugView = s.debugView;
-        _captureMetadata.applyModel = s.applyModel;
+        _captureMetadata.debug_view = s.debugView;
+        _captureMetadata.apply_model = s.applyModel;
         _captureMetadata.bypass = s.compositionBypass;
         _captureMetadata.hold = s.holdFrame;
         _captureMetadata.compare = s.compareMode;
         _captureMetadata.transfer = s.transfer;
         _captureMetadata.detail = s.transferStrength;
         _captureMetadata.color = s.colourStrength;
-        _captureMetadata.debugScale = s.debugScale;
-        _captureMetadata.modelWidth = _modelW;
-        _captureMetadata.modelHeight = _modelH;
-        _captureMetadata.hdrProxy = _hdrProxy;
-        _captureMetadata.linearHdr = _linearHdr;
-        _captureMetadata.hdrTransfer = _hdrTransfer;
+        _captureMetadata.debug_scale = s.debugScale;
+        _captureMetadata.model_width = _modelW;
+        _captureMetadata.model_height = _modelH;
+        _captureMetadata.hdr_proxy = _hdrProxy;
+        _captureMetadata.linear_hdr = _linearHdr;
+        _captureMetadata.hdr_transfer = _hdrTransfer;
         const size_t bytes = size_t(_width) * _height * (_workFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 4);
         if (_captureBuf.buffer || MakeHostBuffer(_captureBuf, bytes * 2, VK_BUFFER_USAGE_TRANSFER_DST_BIT)) {
             Transition(cb, _frame, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -1306,7 +1306,8 @@ void Composition::WriteCapturedFrame() {
     _captureRecorded = false;
     const size_t bytes = size_t(_width) * _height * (_workFormat == VK_FORMAT_R16G16B16A16_SFLOAT ? 8 : 4);
     const uint8_t* base = (const uint8_t*) _captureBuf.mapped;
-    _capture.WriteFrame(base, base + bytes, _width, _height, uint32_t(_workFormat), _captureMetadata);
+    capture_writer_write_frame(&_capture, base, base + bytes, _width, _height, uint32_t(_workFormat),
+                               &_captureMetadata);
 }
 
 
