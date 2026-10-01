@@ -31,9 +31,7 @@
 #ifndef DLSSLOP_AMD_COMMON_SHM_PROTOCOL_H_
 #define DLSSLOP_AMD_COMMON_SHM_PROTOCOL_H_
 
-#ifndef _WIN32
-# include <unistd.h>
-#endif
+#include <unistd.h>
 
 #ifdef __cplusplus
 # include <cstddef>
@@ -304,12 +302,7 @@ shm_runtime_path (char            *buf,
 {
 	if (uid && *uid)
 		return SHM_STD(snprintf)(buf, size, "/tmp/dlssnr-%s%s", uid, file);
-#ifdef _WIN32
-	// The helper is always handed DLSSNR_SHM by the launcher, so this is only ever a last resort.
-	return SHM_STD(snprintf)(buf, size, "/tmp/dlssnr%s", file);
-#else
 	return SHM_STD(snprintf)(buf, size, "/tmp/dlssnr-%u%s", (unsigned)getuid(), file);
-#endif
 }
 
 /** @brief Where the mapping lives.
@@ -351,7 +344,6 @@ ShmDefaultPath (char            *buf,
 	return shm_runtime_path(buf, size, SHM_STD(getenv)("DLSSNR_UID"), "/shm.bin");
 }
 
-#ifndef _WIN32
 /** @brief The native tools' default channel, /tmp/dlsslop-amd-UID/shm.bin with the real user ID.
  *
  * Keep the native HIP tools on their own channel, including direct invocations
@@ -399,7 +391,6 @@ ShmNativeChannelPath (char            *buf,
 {
 	return shm_native_channel_path(buf, size, SHM_STD(getenv)("DLSSNR_SHM"));
 }
-#endif
 
 /** @brief The size of the mapping.
  *
@@ -1067,7 +1058,6 @@ ShmDefaultPath ()
 	return path;
 }
 
-# ifndef _WIN32
 /** @brief ShmNativeDefaultPath() as a string.
  *
  * @return The path.
@@ -1092,7 +1082,6 @@ ShmNativeChannelPath ()
 	shm_native_channel_path(path.data(), path.size() + 1, channel);
 	return path;
 }
-# endif
 
 /** @brief ShmTransportPath() as a string.
  *
