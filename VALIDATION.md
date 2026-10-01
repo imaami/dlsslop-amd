@@ -93,10 +93,10 @@ maxima, the swapchain formats the composition takes, the names of the
 downscalers and of the toggle key, and the layer's log: the variables that
 switch it, its verbose and timing switches, the text of its lines, standard
 error when `DLSSNR_LOG` names no file that opens, lines from several threads,
-its clock, that it closes the file it opened when the process exits, and that
-a child forked while a thread writes a line can still exit. With the tests, the
-build compiles `tests/c_headers.c`, which includes as C the headers that C and
-C++ share.
+its clock, that executed programs do not inherit its file, that it closes the
+file it opened when the process exits, and that a child forked while a thread
+writes a line can still exit. With the tests, the build compiles
+`tests/c_headers.c`, which includes as C the headers that C and C++ share.
 
 Two checks disassemble the built HIP modules and need `llvm-objdump`. The
 LDS-barrier check fails when a shared-memory access can still be outstanding at

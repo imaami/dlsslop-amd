@@ -34,7 +34,8 @@ extern "C" {
  * lines that follow. If a thread holds the log's lock at that moment, the
  * file stays open until the process ends. That happens at exit while
  * another thread writes a line, and in a child that fork() made while a
- * thread wrote one.
+ * thread wrote one. The programs that the process executes do not
+ * inherit the file.
  *
  * @param fmt A printf format.
  * @param ... The format's arguments.

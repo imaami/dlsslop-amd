@@ -653,6 +653,23 @@ void RedirectStderr(const std::string& path) {
     close(fd);
 }
 
+// The descriptor through which this process holds path open, -1 if there is none, or -2 if
+// /proc/self/fd cannot be read.
+int DescriptorOf(const char* path) {
+    DIR* fds = opendir("/proc/self/fd");
+    if (!fds) return -2;
+    int found = -1;
+    for (dirent* entry; found < 0 && (entry = readdir(fds));) {
+        char target[PATH_MAX];
+        const std::string link = std::string("/proc/self/fd/") + entry->d_name;
+        const ssize_t n = readlink(link.c_str(), target, sizeof target - 1);
+        if (n > 0 && size_t(n) == std::strlen(path) && !std::memcmp(target, path, size_t(n)))
+            found = std::atoi(entry->d_name);
+    }
+    closedir(fds);
+    return found;
+}
+
 // After the log's destructor, which runs before this one: the child's log file is no longer open,
 // and its standard descriptors still are. A failure ends the child with 3. Static objects with
 // destructors are gone by then, so the path is a plain array.
@@ -663,18 +680,7 @@ bool g_checkAtExit = false;
     if (!g_checkAtExit) return;
     for (int fd = 0; fd < 3; ++fd)
         if (fcntl(fd, F_GETFD) < 0) _exit(3);
-    if (!g_closedAtExit[0]) return;
-    DIR* fds = opendir("/proc/self/fd");
-    if (!fds) _exit(3);
-    for (dirent* entry; (entry = readdir(fds));) {
-        char target[PATH_MAX];
-        const std::string link = std::string("/proc/self/fd/") + entry->d_name;
-        const ssize_t n = readlink(link.c_str(), target, sizeof target - 1);
-        if (n > 0 && size_t(n) == std::strlen(g_closedAtExit) &&
-            !std::memcmp(target, g_closedAtExit, size_t(n)))
-            _exit(3);
-    }
-    closedir(fds);
+    if (g_closedAtExit[0] && DescriptorOf(g_closedAtExit) != -1) _exit(3);
 }
 
 void CheckLogLines(const std::string& dir) {
@@ -696,6 +702,15 @@ void CheckLogLines(const std::string& dir) {
         Require(ReadFile(log) == want, label + ": the log holds \"" + ReadFile(log) + "\"");
         Require(ReadFile(err).empty(), label + ": the log wrote to stderr");
     }
+
+    // The programs that the process executes do not inherit the file.
+    const std::string execLog = dir + "/exec.log";
+    InLogChild("close on exec", {{"DLSSNR_ENABLE", "1"}, {"DLSSNR_LOG", execLog.c_str()}}, [&] {
+        log_printf("[test] %s", "exec");
+        const int fd = DescriptorOf(execLog.c_str());
+        Require(fd >= 0, "close on exec: the log's file is not open");
+        Require(fcntl(fd, F_GETFD) & FD_CLOEXEC, "close on exec: the log's file stays open in executed programs");
+    });
 
     // Not asked for: nothing is written, and DLSSNR_LOG is not created.
     const std::string offLog = dir + "/off.log";

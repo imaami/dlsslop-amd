@@ -32,6 +32,9 @@ static bool            log_time_on;    //!< What log_time_enabled() returns.
 
 /** @brief Opens a log file.
  *
+ * The descriptor is close-on-exec (mode "e"), so the programs that the
+ * process executes do not inherit it.
+ *
  * @param path The file to append to, or nullptr.
  * @return     A log file that owns the opened stream, or one that writes
  *             to stderr if @a path is nullptr or empty or does not open.
@@ -39,7 +42,7 @@ static bool            log_time_on;    //!< What log_time_enabled() returns.
 static struct log_file
 log_file (char const *path)
 {
-	FILE *stream = path && *path ? fopen(path, "a") : nullptr;
+	FILE *stream = path && *path ? fopen(path, "ae") : nullptr;
 	if (!stream)
 		return (struct log_file){ .stream = stderr };
 
