@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <utility>
 
 namespace dlsslop::vulkan {
 
@@ -45,6 +46,16 @@ bool counted(Kernel k)
            k == kGemmProjw || k == kGemmProjt || k == kGemmVqkvNorm || k == kGemmVqkvNorms || k == kVitAttn ||
            upsampling_run(k) || k == kFswinFusedUp32 || downsampling_run(k) || k == kFswinDsp32 || k == kFswin32;
 }
+
+// The pairs of the persistent runs, the fused C=32 downsample and upsample
+// that tile counters order on big frames all the same (upstream:
+// NR_TC_BIG_ALLOW's default): the decoder's C=128 -> C=64 run and C=64 run ->
+// fused C=32 upsample, and the encoder's C=128 -> C=256 run and C=256 run ->
+// first C=512 FFN.
+constexpr std::pair<Kernel, Kernel> kBigFramePairs[] = {{Kernel::kFswinPup128, Kernel::kFswinPup64},
+                                                        {Kernel::kFswinPup64, Kernel::kFswinFusedUp32},
+                                                        {Kernel::kFswinPds128, Kernel::kFswinPds256},
+                                                        {Kernel::kFswinPds256, Kernel::kFfwd3w}};
 
 bool same_tiles(const PushFSwin& a, const PushFSwin& b) { return a.tiles_x == b.tiles_x && a.tiles_y == b.tiles_y; }
 // Words of a PersistRec in the blob: its layer's tile raster and window grid.
@@ -439,7 +450,9 @@ Result<uint32_t> chain(std::vector<Dispatch>& d, Blob& blob, uint64_t& arena)
     // word and the magic word.
     std::vector<std::array<uint32_t, 7>> rec(d.size(), {~0u, 0u, ~0u, ~0u, uint32_t(base), 0u, 0x54434852u});
     if (tick < d.size()) rec[tick][1] = 1;
-    // Persistent runs of more than 4096 windows a layer keep their barriers.
+    // On a big frame, with a persistent run of more than 4096 windows a layer,
+    // the runs and the fused C=32 downsample and upsample keep their barriers
+    // but between kBigFramePairs.
     bool big = false;
     for (const Dispatch& r : d)
         if (persistent(r.kernel)) {
@@ -450,7 +463,8 @@ Result<uint32_t> chain(std::vector<Dispatch>& d, Blob& blob, uint64_t& arena)
     for (size_t i = 0; i < d.size() && tick < d.size(); ++i) {
         if (i + 1 == d.size() || i < tick) continue;
         Dispatch &p = d[i], &q = d[i + 1];
-        if (!counted_pair(p.kernel, q.kernel) || (big && (run(p.kernel) || run(q.kernel)))) continue;
+        const bool kept = std::ranges::find(kBigFramePairs, std::pair(p.kernel, q.kernel)) != std::end(kBigFramePairs);
+        if (!counted_pair(p.kernel, q.kernel) || (big && !kept && (run(p.kernel) || run(q.kernel)))) continue;
         if (DLSSLOP_TRY(input(q, blob)) != DLSSLOP_TRY(output(p, blob))) continue;
         uint32_t itx = 0, ity = 0;
         const bool up = upsampling_run(q.kernel) || q.kernel == Kernel::kFswinFusedUp32;

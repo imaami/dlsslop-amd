@@ -183,10 +183,9 @@ path of the fork's `linux/src/core` (MIT) at `a75ac49`: `nr_runtime.cpp`,
 estimation that dlsslop-amd uses, the port records each frame's dispatches, push
 constants, barriers and copies as the fork's host code does, and it packs and
 uploads the weights byte for byte as upstream does; the network mathematics are
-unchanged. It does so with these schedule changes of upstream's `b1419b0`
-switched off, which it does not take yet: tile counters between four pairs of
-runs on big frames, and the kernels without the upper exponent clamp where the
-weights allow them. Like
+unchanged. It does so with one change of upstream's `b1419b0` switched off,
+which it does not take yet: the kernels without the upper exponent clamp where
+the weights allow them. Like
 upstream, it takes the model's blend scale, by which the temporal post block
 weights the history, as a constant.
 Unlike upstream, it rejects frames whose working extent is not a
