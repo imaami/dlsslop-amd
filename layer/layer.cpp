@@ -912,7 +912,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
         dc->shm.hdr->layerCompositionUp.store(0);
         // The in-layer network's state goes with it.
         if (!dc->networkReason.empty())
-            ShmStoreString(dc->shm.hdr->layerReasonSeq, dc->shm.hdr->layerReason, kReasonBytes, "");
+            ShmStoreString(&dc->shm.hdr->layerReasonSeq, dc->shm.hdr->layerReason, kReasonBytes, "");
     }
     if (dc->table.vkDeviceWaitIdle) {
         std::lock_guard<std::mutex> network(dc->networkSubmit);
@@ -1232,7 +1232,7 @@ static bool CollectLeg2(DeviceChain* dc, SwapchainState& sc) {
 static void PublishFrame(DeviceChain* dc, const SwapchainState& sc, double ms) {
     ShmHeader* const hdr = dc->shm.hdr;
     if (!hdr) return;
-    ShmStore64(hdr->layerFramesLo, hdr->layerFramesHi, ++dc->framesComposed);
+    ShmStore64(&hdr->layerFramesLo, &hdr->layerFramesHi, ++dc->framesComposed);
     hdr->layerWidth.store(sc.width);
     hdr->layerHeight.store(sc.height);
     hdr->layerFormat.store(uint32_t(sc.format));
@@ -1255,7 +1255,7 @@ static void NetworkReason(DeviceChain* dc, const char* what, const char* detail 
         return;
     reason.assign(what).append(detail).append(after);
     log_printf("[layer] %s", reason.c_str());
-    if (dc->shm.hdr) ShmStoreString(dc->shm.hdr->layerReasonSeq, dc->shm.hdr->layerReason, kReasonBytes, reason.c_str());
+    if (dc->shm.hdr) ShmStoreString(&dc->shm.hdr->layerReasonSeq, dc->shm.hdr->layerReason, kReasonBytes, reason.c_str());
 }
 
 // The network failed: frames go to dlsslopd from now on.

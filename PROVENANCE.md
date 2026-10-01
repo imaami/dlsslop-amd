@@ -68,12 +68,19 @@ takes its class as a prefix (`Composition::RecordCompose` becomes
 module's name as a prefix unless its name begins with it (`Verbose` in log.h
 becomes `log_verbose`), and constants and enumerators become upper snake case
 with the class's prefix (`DlssNrPass::kSlots` becomes `DLSS_NR_PASS_SLOTS`). Log
-texts, environment variables, the loader's entry points and `layer/dlssnr.map`
-keep their names. These upstream names do not follow the rule:
+texts, environment variables, the loader's entry points, `layer/dlssnr.map` and
+the names in `common/shm_protocol.h`, which dlsslopd, the GUI, the network
+module and the tests share, keep their names. These upstream names do not
+follow the rule:
 
 | Upstream name | Port | Why |
 |---|---|---|
 | `dlssnr::Log` | `log_printf` | `log` is the C library's natural logarithm |
+
+The headers that C and C++ share stay valid C++23. `common/shm_protocol.h`
+declares the channel for both languages. Its functions that return a
+`std::string` in C++ write into the caller's buffer in C; C++ keeps the string
+versions as overloads, except for `ShmRuntimeDir`, which only a test calls.
 
 The layer's composition shader `layer/dlssnr/dlssnr.comp` is a GLSL port of the
 layer fork's `layer_linux/src/dlssnr/dlssnr.hlsl` (AGPL-3.0). Its RenoDX-derived

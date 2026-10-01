@@ -23,7 +23,7 @@ public:
     ~Mapping();
     void reason(const std::string& text)
     {
-        ShmStoreString(h->helperReasonSeq, h->helperReason, kReasonBytes, text.c_str());
+        ShmStoreString(&h->helperReasonSeq, h->helperReason, kReasonBytes, text.c_str());
     }
 };
 } // namespace dlsslop

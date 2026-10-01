@@ -90,7 +90,7 @@ int main(int argc, char** argv)
     void* memory = mmap(nullptr, kHeaderBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     require(memory != MAP_FAILED, "cannot map a channel header");
     auto* header = static_cast<ShmHeader*>(memory);
-    ShmInitNativeDefaults(header);
+    ShmInitNativeDefaults(header, false);
 
     header->style.store(3);
     require(module.prepare(network, header, 1280, 720, 0) == kDlsslopNetworkRejected &&

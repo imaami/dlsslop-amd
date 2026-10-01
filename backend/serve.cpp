@@ -288,7 +288,7 @@ Result<void> serve(const Options& o, Mapping& mapping, const TransportListener& 
             h->helperEvalMsBits.store(FloatToBits(engine.inference_ms));
             h->helperUploadMsBits.store(FloatToBits(engine.upload_ms));
             h->helperReadbackMsBits.store(FloatToBits(engine.readback_ms));
-            ShmStore64(h->helperFramesLo, h->helperFramesHi, ++frames);
+            ShmStore64(&h->helperFramesLo, &h->helperFramesHi, ++frames);
             h->seq_ok.store(number);
             h->seq_resp.store(number, std::memory_order_release);
             wake(h->seq_resp);

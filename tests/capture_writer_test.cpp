@@ -61,26 +61,59 @@ std::set<std::filesystem::path> directories(const std::filesystem::path& root) {
     return result;
 }
 
+// ShmRuntimeDir(), which has only the C form.
+std::string runtime_dir() {
+    char dir[64];
+    const int length = ShmRuntimeDir(dir, sizeof(dir));
+    require(length >= 0 && size_t(length) < sizeof(dir), "the shared runtime directory did not fit");
+    return dir;
+}
+
+// A C form writes what fits and returns the length of the whole path, as snprintf does.
+void check_truncation(int length, const char (&buffer)[8], const std::string& path, const char* message) {
+    require(length == int(path.size()) && path.substr(0, sizeof(buffer) - 1) == buffer, message);
+}
+
 void check_channel_paths() {
     const char* inherited = std::getenv("DLSSNR_UID");
     const bool hadOverride = inherited != nullptr;
     const std::string originalOverride = inherited ? inherited : "";
+    const char* inheritedChannel = std::getenv("DLSSNR_SHM");
+    const bool hadChannel = inheritedChannel != nullptr;
+    const std::string originalChannel = inheritedChannel ? inheritedChannel : "";
     const std::string uid = std::to_string(static_cast<unsigned>(getuid()));
     const std::string nativePath = "/tmp/dlsslop-amd-" + uid + "/shm.bin";
+    char small[8];
 
     require(unsetenv("DLSSNR_UID") == 0, "unsetenv failed");
-    require(ShmRuntimeDir() == "/tmp/dlssnr-" + uid, "shared runtime default changed");
+    require(runtime_dir() == "/tmp/dlssnr-" + uid, "shared runtime default changed");
     require(ShmDefaultPath() == "/tmp/dlssnr-" + uid + "/shm.bin",
             "shared channel default changed");
     require(ShmNativeDefaultPath() == nativePath, "native channel default changed");
     require(setenv("DLSSNR_UID", "12345", 1) == 0, "setenv failed");
-    require(ShmRuntimeDir() == "/tmp/dlssnr-12345", "shared runtime ignored DLSSNR_UID");
+    require(runtime_dir() == "/tmp/dlssnr-12345", "shared runtime ignored DLSSNR_UID");
     require(ShmDefaultPath() == "/tmp/dlssnr-12345/shm.bin", "shared channel ignored DLSSNR_UID");
+    check_truncation(ShmDefaultPath(small, sizeof(small)), small, "/tmp/dlssnr-12345/shm.bin",
+                     "the shared channel's C form did not truncate as snprintf does");
     require(ShmNativeDefaultPath() == nativePath, "DLSSNR_UID changed the native channel");
     require(setenv("DLSSNR_UID", "", 1) == 0, "setenv failed");
-    require(ShmRuntimeDir() == "/tmp/dlssnr-" + uid, "empty DLSSNR_UID changed the default");
+    require(runtime_dir() == "/tmp/dlssnr-" + uid, "empty DLSSNR_UID changed the default");
     require((hadOverride ? setenv("DLSSNR_UID", originalOverride.c_str(), 1)
                          : unsetenv("DLSSNR_UID")) == 0, "restoring DLSSNR_UID failed");
+
+    // The native channel: nonempty DLSSNR_SHM, at any length, otherwise the native default.
+    const std::string longPath = "/tmp/" + std::string(5000, 'x') + "/shm.bin";
+    require(setenv("DLSSNR_SHM", longPath.c_str(), 1) == 0, "setenv failed");
+    require(ShmNativeChannelPath() == longPath, "the native channel ignored a long DLSSNR_SHM");
+    check_truncation(ShmNativeChannelPath(small, sizeof(small)), small, longPath,
+                     "the native channel's C form did not truncate as snprintf does");
+    require(ShmTransportPath(longPath) == longPath + ".sock", "the transport path changed");
+    check_truncation(ShmTransportPath(small, sizeof(small), longPath.c_str()), small, longPath + ".sock",
+                     "the transport path's C form did not truncate as snprintf does");
+    require(setenv("DLSSNR_SHM", "", 1) == 0, "setenv failed");
+    require(ShmNativeChannelPath() == nativePath, "an empty DLSSNR_SHM changed the native channel");
+    require((hadChannel ? setenv("DLSSNR_SHM", originalChannel.c_str(), 1)
+                        : unsetenv("DLSSNR_SHM")) == 0, "restoring DLSSNR_SHM failed");
 }
 
 } // namespace

@@ -294,7 +294,7 @@ int main(int argc, char** argv)
     void* memory = mmap(nullptr, kHeaderBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     require(memory != MAP_FAILED, "map fixture");
     header = static_cast<ShmHeader*>(memory);
-    ShmInitNativeDefaults(header);
+    ShmInitNativeDefaults(header, false);
     QApplication application(argc, argv);
     QApplication::setStyle(QStyleFactory::create("Fusion"));
     QLocale::setDefault(QLocale::c());

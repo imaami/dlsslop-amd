@@ -55,7 +55,7 @@ struct Options {
 
 void Usage() {
     ShmHeader defaults{};
-    ShmInitNativeDefaults(&defaults);
+    ShmInitNativeDefaults(&defaults, false);
     std::printf(
         "Usage: dlsslopctl [OPTION]...\n"
         "       dlssnr-shmctl [OPTION]...\n"
@@ -296,7 +296,7 @@ bool Attach(ShmHeader* h, bool create, const char* path) {
     if (h->magic.load() == kShmMagic)
         std::fprintf(stderr, "channel '%s' held protocol v%u and is re-initialised as v%u; restart any "
                      "dlsslopd, game or GUI still using it\n", path, h->version.load(), kShmVersion);
-    ShmInitNativeDefaults(h);
+    ShmInitNativeDefaults(h, false);
     return true;
 }
 
@@ -327,7 +327,7 @@ void PrintStatus(const ShmHeader* h) {
                 h->controlSeq.load(), h->tuningSeq.load());
     std::printf("helper_state=%u\nmodel_up=%u\nhelper_frames=%llu\n", h->helperState.load(),
                 h->modelUp.load(),
-                (unsigned long long) ShmLoad64(h->helperFramesLo, h->helperFramesHi));
+                (unsigned long long) ShmLoad64(&h->helperFramesLo, &h->helperFramesHi));
     std::printf("upload_ms=%.3f\nnetwork_ms=%.3f\nreadback_ms=%.3f\n",
                 double(BitsToFloat(h->helperUploadMsBits.load())),
                 double(BitsToFloat(h->helperEvalMsBits.load())),
@@ -335,7 +335,7 @@ void PrintStatus(const ShmHeader* h) {
     std::printf("layer_pid=%u\nlayer_composition_up=%u\nlayer_frames=%llu\nlayer_ms=%.2f\n",
                 h->layerPid.load(),
                 h->layerCompositionUp.load(),
-                (unsigned long long) ShmLoad64(h->layerFramesLo, h->layerFramesHi),
+                (unsigned long long) ShmLoad64(&h->layerFramesLo, &h->layerFramesHi),
                 double(BitsToFloat(h->layerMsBits.load())));
     std::printf("measured_white_point=%g\n", double(BitsToFloat(h->layerMeasuredWhiteBits.load())));
     std::printf("hdr_mode=%u\nhdr_detected=%u\nhdr_active=%u\nproxy_format=%u\nhdr_encode=%u\n",

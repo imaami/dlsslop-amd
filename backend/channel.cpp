@@ -33,7 +33,7 @@ Mapping::Mapping(Descriptor file, void* mapping)
     : file_(std::move(file)), h(static_cast<ShmHeader*>(mapping)), input(static_cast<uint8_t*>(mapping) + kHeaderBytes),
       output(input + kMaxFrame)
 {
-    if (h->magic.load() != kShmMagic || h->version.load() != kShmVersion) ShmInitNativeDefaults(h);
+    if (h->magic.load() != kShmMagic || h->version.load() != kShmVersion) ShmInitNativeDefaults(h, false);
     h->quit.store(0);
     h->modelUp.store(0);
     h->seq_ok.store(0);

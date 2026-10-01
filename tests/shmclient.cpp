@@ -89,7 +89,7 @@ int usage(const char* problem)
 void help()
 {
     ShmHeader defaults{};
-    ShmInitNativeDefaults(&defaults);
+    ShmInitNativeDefaults(&defaults, false);
     std::printf("%s", kUsage);
     std::printf(
         "Create the channel FILE, start DLSSLOPD, which must serve FILE (--shm FILE),\n"
@@ -261,7 +261,7 @@ int main(int argc, char** argv)
         return 1;
     }
     auto* h = static_cast<ShmHeader*>(mapping);
-    ShmInitNativeDefaults(h);
+    ShmInitNativeDefaults(h, false);
     apply(h, changes, 0);
     uint8_t* const input = static_cast<uint8_t*>(mapping) + kHeaderBytes;
     const uint8_t* const output = input + kMaxFrame;

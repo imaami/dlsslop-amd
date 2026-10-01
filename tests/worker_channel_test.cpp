@@ -71,7 +71,7 @@ public:
         mapping_ = mmap(nullptr, ShmTotalBytes(), PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
         require(mapping_ != MAP_FAILED, "map channel");
         h = static_cast<ShmHeader*>(mapping_);
-        ShmInitNativeDefaults(h);
+        ShmInitNativeDefaults(h, false);
         input = static_cast<uint8_t*>(mapping_) + kHeaderBytes;
         output = input + kMaxFrame;
     }

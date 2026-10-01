@@ -48,7 +48,7 @@ reviews:
         cannot be fixed otherwise or a significant performance gain;
         upstream names and contracts are preserved. Never suggest
         restyling upstream or vendored code.
-    - path: "{common/shm_protocol.h,layer/{ATTRIBUTION,capture,composition,dlssnr_pass,hotkey,layer,scaler_vk,shader_vk,shmctl,vk_table}.*,layer/dlssnr/*.h,layer/dlssnr.map,layer/meter_reduce.comp,third_party/**}"
+    - path: "{layer/{ATTRIBUTION,capture,composition,dlssnr_pass,hotkey,layer,scaler_vk,shader_vk,shmctl,vk_table}.*,layer/dlssnr/*.h,layer/dlssnr.map,layer/meter_reduce.comp,third_party/**}"
       instructions: >-
         The layer's sources, imported from dlsslop-amd's fork of the
         layer (PROVENANCE.md), and vendored notices and stb headers.
@@ -56,13 +56,13 @@ reviews:
         otherwise or a significant performance gain; upstream names and
         contracts are preserved. Never suggest restyling upstream or
         vendored code.
-    - path: "layer/log.{c,h}"
+    - path: "{common/shm_protocol.h,layer/log.{c,h}}"
       instructions: >-
         The C23 port of the layer's sources imported from dlsslop-amd's
         fork of the layer (PROVENANCE.md). AGENTS.md's C sections are
         binding. Upstream names follow PROVENANCE.md's naming rule; log
-        texts, environment variables and the loader's entry points are
-        contracts and keep their names.
+        texts, environment variables, the loader's entry points and the
+        channel header's names are contracts and keep their names.
     - path: "{layer/dlssnr/*.comp,layer/scaling/**,layer/hlsl_ops.glsl}"
       instructions: >-
         GLSL ports of the layer's composition HLSL and OptiScaler's

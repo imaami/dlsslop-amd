@@ -58,7 +58,7 @@ int main()
     require(memory != MAP_FAILED, "map fixture");
     header = static_cast<ShmHeader*>(memory);
     rejects(dlsslop_gui::Channel::open(path, true));
-    ShmInitNativeDefaults(header);
+    ShmInitNativeDefaults(header, false);
     // Fixed settings admit only their reset default, only the native tuning
     // values are marked as such, and each label list names its range once.
     for (const auto& s : dlsslop_control::kSettings) {

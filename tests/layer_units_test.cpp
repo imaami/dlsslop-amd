@@ -119,7 +119,7 @@ void Expect(const FrameSettings& got, const FrameSettings& want, const std::stri
 // A header as the daemon creates it, and what the layer reads from that.
 struct Header {
     ShmHeader h{};
-    Header() { ShmInitNativeDefaults(&h); }
+    Header() { ShmInitNativeDefaults(&h, false); }
 };
 
 FrameSettings NativeDefaults() {
