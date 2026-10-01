@@ -31,7 +31,7 @@ class DlssNrPass : public Shader_Vk {
     static constexpr uint32_t kFramesInFlight = 3;
     static constexpr uint32_t kSlots = kSlotsPerFrame * kFramesInFlight;
 
-    VkDeviceSize _slotStride = 0;  // sizeof(DlssNrConstants), rounded up to the device's alignment
+    VkDeviceSize _slotStride = 0;  // sizeof(dlss_nr_constants), rounded up to the device's alignment
     uint32_t _slot = 0;            // next slot to hand out, wrapping
 
     // Stands in for a resource a given mode does not read. One pixel, never sampled for its content,
@@ -57,7 +57,7 @@ class DlssNrPass : public Shader_Vk {
     // Any of the four read views may be VK_NULL_HANDLE, in which case the dummy is bound; the two
     // written views may not, because a mode that writes nothing has no reason to run. This records
     // the dispatch and the barrier that follows it, not the transitions that got them there.
-    bool Dispatch(VkCommandBuffer InCmdList, const DlssNrConstants& InConstants, uint32_t InThreadsX,
+    bool Dispatch(VkCommandBuffer InCmdList, const dlss_nr_constants& InConstants, uint32_t InThreadsX,
                   uint32_t InThreadsY, VkImageView InSource, VkImageView InModel, VkImageView InOriginal,
                   VkImageView InMotion, VkImageView InTarget, VkImageView InKeep,
                   VkImageLayout InSourceLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,

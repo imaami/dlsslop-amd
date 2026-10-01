@@ -337,34 +337,34 @@ Result Run(Context& c, const std::array<float, components>& input, const Options
     native.Transition(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     proxy.Transition(VK_IMAGE_LAYOUT_GENERAL);
     output.Transition(VK_IMAGE_LAYOUT_GENERAL);
-    DlssNrConstants constants{};
-    constants.Width = constants.GuideWidth = width;
-    constants.Height = constants.GuideHeight = height;
-    constants.WhitePoint = o.white;
-    constants.TransferStrength = constants.ColourStrength = 1;
-    constants.MaxRatio = max_ratio;
-    constants.Passthrough = o.sdr;
-    constants.MvScaleX = constants.MvScaleY = 1;
-    constants.CompareSplit = 0.5f;
-    constants.CompareZoom = 1;
-    constants.Transfer = o.transfer;
-    constants.DebugView = o.debugView;
-    constants.DebugScale = 1;
-    constants.ApplyModel = 1;
-    constants.ExposurePreMul = 1;
-    constants.HdrProxy = o.hdrProxy;
-    constants.HdrTransfer = o.pq;
-    constants.ColourTrust = 2;
-    constants.RatioSmooth = 1;
+    dlss_nr_constants constants{};
+    constants.width = constants.guide_width = width;
+    constants.height = constants.guide_height = height;
+    constants.white_point = o.white;
+    constants.transfer_strength = constants.colour_strength = 1;
+    constants.max_ratio = max_ratio;
+    constants.passthrough = o.sdr;
+    constants.mv_scale_x = constants.mv_scale_y = 1;
+    constants.compare_split = 0.5f;
+    constants.compare_zoom = 1;
+    constants.transfer = o.transfer;
+    constants.debug_view = o.debugView;
+    constants.debug_scale = 1;
+    constants.apply_model = 1;
+    constants.exposure_pre_mul = 1;
+    constants.hdr_proxy = o.hdrProxy;
+    constants.hdr_transfer = o.pq;
+    constants.colour_trust = 2;
+    constants.ratio_smooth = 1;
     Check(c.pass->Dispatch(c.cmd, constants, width, height, native.view, VK_NULL_HANDLE,
                           VK_NULL_HANDLE, VK_NULL_HANDLE, proxy.view, VK_NULL_HANDLE), "encode dispatch");
     proxy.Transition(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     Image& source = o.reduced ? small : proxy;
     if (o.reduced) {
         small.Transition(VK_IMAGE_LAYOUT_GENERAL);
-        constants.Mode = DlssNrMode_Downsample;
-        constants.Width = model_width;
-        constants.Height = model_height;
+        constants.mode = DLSS_NR_MODE_DOWNSAMPLE;
+        constants.width = model_width;
+        constants.height = model_height;
         Check(c.pass->Dispatch(c.cmd, constants, model_width, model_height, proxy.view, VK_NULL_HANDLE,
                               VK_NULL_HANDLE, VK_NULL_HANDLE, small.view, VK_NULL_HANDLE), "downsample dispatch");
         small.Transition(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -373,8 +373,8 @@ Result Run(Context& c, const std::array<float, components>& input, const Options
         reduced.imageExtent = {model_width, model_height, 1};
         vkCmdCopyImageToBuffer(c.cmd, small.image, small.layout, staging.buffer, 1, &reduced);
         small.Transition(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        constants.Width = width;
-        constants.Height = height;
+        constants.width = width;
+        constants.height = height;
     }
     proxy.Transition(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
     copy.bufferOffset = proxy_offset;
@@ -410,7 +410,7 @@ Result Run(Context& c, const std::array<float, components>& input, const Options
     upload.imageExtent = {model_width, model_height, 1};
     vkCmdCopyBufferToImage(c.cmd, staging.buffer, model.image, model.layout, 1, &upload);
     model.Transition(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    constants.Mode = DlssNrMode_Resolve;
+    constants.mode = DLSS_NR_MODE_RESOLVE;
     Check(c.pass->Dispatch(c.cmd, constants, width, height, source.view, model.view,
                           native.view, VK_NULL_HANDLE, output.view, VK_NULL_HANDLE), "resolve dispatch");
     output.Transition(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);

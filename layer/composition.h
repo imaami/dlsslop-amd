@@ -231,7 +231,7 @@ class Composition {
                         VkImageLayout dstLayout, uint32_t w, uint32_t h);
 
     bool FormatSupportsStorage(VkFormat format) const;
-    DlssNrConstants BaseConstants(const FrameSettings& s) const;
+    dlss_nr_constants BaseConstants(const FrameSettings& s) const;
     float ResolvedWhitePoint(const FrameSettings& s) const;
 
     const device_table* _vk = nullptr;

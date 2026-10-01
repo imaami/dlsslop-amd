@@ -858,7 +858,7 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
     // of its answer ever reaches the CPU.
     const bool okMeter =
         !linearHdr ||
-        (MakeImage(_meter, kDlssNrMeterGrid, kDlssNrMeterGrid, VK_FORMAT_R32_SFLOAT,
+        (MakeImage(_meter, DLSS_NR_METER_GRID, DLSS_NR_METER_GRID, VK_FORMAT_R32_SFLOAT,
                    VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT) &&
          MakeMeterState());
 
@@ -968,22 +968,22 @@ float Composition::ResolvedWhitePoint(const FrameSettings& s) const {
     return std::min(std::max(wp, 1e-4f), 2000.0f);
 }
 
-DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
-    DlssNrConstants c{};
+dlss_nr_constants Composition::BaseConstants(const FrameSettings& s) const {
+    dlss_nr_constants c{};
 
-    c.WhitePoint = ResolvedWhitePoint(s);
-    c.TransferStrength = s.transferStrength;
-    c.ColourStrength = s.colourStrength;
-    c.MaxRatio = s.maxRatio;
-    c.DebugView = s.debugView;
-    c.DebugScale = s.debugScale;
-    c.Transfer = s.transfer;
-    c.CompareMode = s.compareMode;
-    c.CompareSplit = s.compareSplit;
-    c.CompareZoom = s.compareZoom;
-    c.CompareSwap = s.compareSwap;
-    c.ReversibleMode = s.reversibleMode;
-    c.ApplyModel = s.applyModel;
+    c.white_point = ResolvedWhitePoint(s);
+    c.transfer_strength = s.transferStrength;
+    c.colour_strength = s.colourStrength;
+    c.max_ratio = s.maxRatio;
+    c.debug_view = s.debugView;
+    c.debug_scale = s.debugScale;
+    c.transfer = s.transfer;
+    c.compare_mode = s.compareMode;
+    c.compare_split = s.compareSplit;
+    c.compare_zoom = s.compareZoom;
+    c.compare_swap = s.compareSwap;
+    c.reversible_mode = s.reversibleMode;
+    c.apply_model = s.applyModel;
 
     // The model's answer IS the frame. The raw-answer debug path returns the model's picture ahead of
     // every step of the composition -- no ratio, no guard, no blend, no compare -- and it returns
@@ -1000,30 +1000,30 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
     // composition is on, where the overlay already runs on the composed picture.
     if (s.compositionBypass) {
         if (s.compareMode != 0) {
-            c.ReversibleMode = s.reversibleMode >= 3 ? 4u : 2u;
+            c.reversible_mode = s.reversibleMode >= 3 ? 4u : 2u;
         } else {
-            c.DebugView = 2;
-            c.DebugScale = 1.0f;  // resolve applies the white-point/transfer scale once
+            c.debug_view = 2;
+            c.debug_scale = 1.0f;  // resolve applies the white-point/transfer scale once
         }
     }
 
     // A frame the game already tone mapped goes through the encode untouched, and the composition
     // works in its units rather than normalising by a white point that means nothing here.
-    c.Passthrough = _linearHdr ? 0u : 1u;
+    c.passthrough = _linearHdr ? 0u : 1u;
 
     // No motion vectors and no exposure reach a present-time layer. The guides are declared at the
     // frame's own size so nothing downstream scales by a ratio that does not exist.
-    c.MvScaleX = 1.0f;
-    c.MvScaleY = 1.0f;
-    c.GuideWidth = _width;
-    c.GuideHeight = _height;
-    c.UseGameExposure = 0;
-    c.ExposurePreMul = 1.0f;
+    c.mv_scale_x = 1.0f;
+    c.mv_scale_y = 1.0f;
+    c.guide_width = _width;
+    c.guide_height = _height;
+    c.use_game_exposure = 0;
+    c.exposure_pre_mul = 1.0f;
     // Surface precision and model color domain are independent for native HIP.
-    c.HdrProxy = _hdrProxy ? 2u : 0u;
-    c.HdrTransfer = _hdrTransfer;
-    c.ColourTrust = s.colourTrust;
-    c.RatioSmooth = s.ratioSmooth;
+    c.hdr_proxy = _hdrProxy ? 2u : 0u;
+    c.hdr_transfer = _hdrTransfer;
+    c.colour_trust = s.colourTrust;
+    c.ratio_smooth = s.ratioSmooth;
     return c;
 }
 
@@ -1072,10 +1072,10 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
     Image* source = &_frame;
     if (_proxy.image) {
         Transition(cb, _proxy, VK_IMAGE_LAYOUT_GENERAL);
-        DlssNrConstants enc = BaseConstants(s);
-        enc.Mode = DlssNrMode_Encode;
-        enc.Width = _width;
-        enc.Height = _height;
+        dlss_nr_constants enc = BaseConstants(s);
+        enc.mode = DLSS_NR_MODE_ENCODE;
+        enc.width = _width;
+        enc.height = _height;
         if (!_pass->Dispatch(cb, enc, _width, _height, _frame.view, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
                              _proxy.view, VK_NULL_HANDLE))
             return false;
@@ -1094,11 +1094,11 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
     if (_meter.image && _meterGpu) {
         Transition(cb, _meter, VK_IMAGE_LAYOUT_GENERAL);
 
-        DlssNrConstants meter = BaseConstants(s);
-        meter.Mode = DlssNrMode_Calibrate;
-        meter.Width = kDlssNrMeterGrid;
-        meter.Height = kDlssNrMeterGrid;
-        if (_pass->Dispatch(cb, meter, kDlssNrMeterGrid, kDlssNrMeterGrid, _frame.view, VK_NULL_HANDLE,
+        dlss_nr_constants meter = BaseConstants(s);
+        meter.mode = DLSS_NR_MODE_CALIBRATE;
+        meter.width = DLSS_NR_METER_GRID;
+        meter.height = DLSS_NR_METER_GRID;
+        if (_pass->Dispatch(cb, meter, DLSS_NR_METER_GRID, DLSS_NR_METER_GRID, _frame.view, VK_NULL_HANDLE,
                             VK_NULL_HANDLE, VK_NULL_HANDLE, _meter.view, VK_NULL_HANDLE)) {
             if (!_meterStateCleared) {
                 _vk->vkCmdFillBuffer(cb, _meterState, 0, VK_WHOLE_SIZE, 0);
@@ -1153,10 +1153,10 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
         } else {
             // Reduce, with the module's own area filter -- the model then works on fewer pixels and
             // less crosses the shared memory.
-            DlssNrConstants down = BaseConstants(s);
-            down.Mode = DlssNrMode_Downsample;
-            down.Width = _modelW;
-            down.Height = _modelH;
+            dlss_nr_constants down = BaseConstants(s);
+            down.mode = DLSS_NR_MODE_DOWNSAMPLE;
+            down.width = _modelW;
+            down.height = _modelH;
             if (!_pass->Dispatch(cb, down, _modelW, _modelH, source->view, VK_NULL_HANDLE, VK_NULL_HANDLE,
                                  VK_NULL_HANDLE, _work.view, VK_NULL_HANDLE))
                 return false;
@@ -1224,10 +1224,10 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
     Transition(cb, _frame, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     Transition(cb, _composed, VK_IMAGE_LAYOUT_GENERAL);
 
-    DlssNrConstants res = BaseConstants(s);
-    res.Mode = DlssNrMode_Resolve;
-    res.Width = _width;
-    res.Height = _height;
+    dlss_nr_constants res = BaseConstants(s);
+    res.mode = DLSS_NR_MODE_RESOLVE;
+    res.width = _width;
+    res.height = _height;
 
     // When the meter feeds the white point, the resolve must see the GPU's resolved value, not the
     // host's one-frame-stale mirror of it: copy the four bytes straight from the meter state into
@@ -1236,7 +1236,7 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
     // dispatch's uniform read, and the barrier states that.
     if (_meterGpu && s.whitePointSource == kWhitePointMeasured) {
         const VkDeviceSize slotOff = _pass->ConstantSlotStride() * _pass->NextConstantSlot() +
-                                     offsetof(DlssNrConstants, WhitePoint);
+                                     offsetof(struct dlss_nr_constants, white_point);
         const VkBufferCopy patch{ kMeterResolvedOffset, slotOff, sizeof(float) };
         _vk->vkCmdCopyBuffer(cb, _meterState, _pass->ConstantBuffer(), 1, &patch);
         VkBufferMemoryBarrier b{};

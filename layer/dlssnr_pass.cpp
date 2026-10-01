@@ -29,7 +29,7 @@ DlssNrPass::DlssNrPass(const device_table* InVk, const instance_table* InInstanc
     _instance->vkGetPhysicalDeviceProperties(_physicalDevice, &props);
 
     const VkDeviceSize alignment = std::max<VkDeviceSize>(props.limits.minUniformBufferOffsetAlignment, 1);
-    _slotStride = ((sizeof(DlssNrConstants) + alignment - 1) / alignment) * alignment;
+    _slotStride = ((sizeof(dlss_nr_constants) + alignment - 1) / alignment) * alignment;
 
     if (!CreateBufferResource(&_constantBuffer, &_constantBufferMemory, _slotStride * kSlots,
                               VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -164,7 +164,7 @@ bool DlssNrPass::CreateDummy(VkCommandBuffer cmdList) {
 void DlssNrPass::WriteDescriptors(VkDescriptorSet set, VkDeviceSize constantOffset, VkImageView source,
                                   VkImageView model, VkImageView original, VkImageView motion, VkImageView target,
                                   VkImageView keep, VkImageLayout sourceLayout, VkImageLayout motionLayout) {
-    VkDescriptorBufferInfo bufferInfo { _constantBuffer, constantOffset, sizeof(DlssNrConstants) };
+    VkDescriptorBufferInfo bufferInfo { _constantBuffer, constantOffset, sizeof(dlss_nr_constants) };
 
     const auto readInfo = [&](VkImageView v, VkImageLayout layout) {
         return VkDescriptorImageInfo { _textureSampler, v != VK_NULL_HANDLE ? v : _dummyView,
@@ -206,7 +206,7 @@ void DlssNrPass::WriteDescriptors(VkDescriptorSet set, VkDeviceSize constantOffs
     _vk->vkUpdateDescriptorSets(_device, (uint32_t) (sizeof(writes) / sizeof(writes[0])), writes, 0, nullptr);
 }
 
-bool DlssNrPass::Dispatch(VkCommandBuffer InCmdList, const DlssNrConstants& InConstants, uint32_t InThreadsX,
+bool DlssNrPass::Dispatch(VkCommandBuffer InCmdList, const dlss_nr_constants& InConstants, uint32_t InThreadsX,
                           uint32_t InThreadsY, VkImageView InSource, VkImageView InModel, VkImageView InOriginal,
                           VkImageView InMotion, VkImageView InTarget, VkImageView InKeep, VkImageLayout InSourceLayout,
                           VkImageLayout InMotionLayout) {
@@ -223,7 +223,7 @@ bool DlssNrPass::Dispatch(VkCommandBuffer InCmdList, const DlssNrConstants& InCo
     _slot = (_slot + 1) % kSlots;
 
     const VkDeviceSize offset = _slotStride * slot;
-    std::memcpy((char*) _mappedConstantBuffer + offset, &InConstants, sizeof(DlssNrConstants));
+    std::memcpy((char*) _mappedConstantBuffer + offset, &InConstants, sizeof(dlss_nr_constants));
 
     WriteDescriptors(_descriptorSets[slot], offset, InSource, InModel, InOriginal, InMotion, InTarget, InKeep,
                      InSourceLayout, InMotionLayout);

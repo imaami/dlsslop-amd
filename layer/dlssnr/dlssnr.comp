@@ -30,7 +30,7 @@ layout(set = 0, binding = 0) uniform Params
     float gMaxRatio;
     uint  gPassthrough;
     // The motion vector scale and the guide size are set by the host and read by nothing here; they
-    // stay because the block's layout is the host's DlssNrConstants.
+    // stay because the block's layout is the host's dlss_nr_constants.
     float gMvScaleX;     // motion vector units -> pixels of this dispatch
     float gMvScaleY;
     uint  gGuideWidth;   // the motion texture's valid region
