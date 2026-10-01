@@ -257,7 +257,7 @@ void controls(const char* executable, const std::filesystem::path& directory)
     h->tuningSeq.fetch_add(1);
     const uint32_t control = h->controlSeq.fetch_add(1) + 1;
     require(channel.answered(channel.publish(false, 11), false), "a request after a tuning change failed");
-    // Past the settle time the protocol still carries for the layer.
+    // Past the settle time that the header still carries and dlsslopd does not read.
     std::this_thread::sleep_for(std::chrono::milliseconds(h->rebuildSettleMs.load() + 200));
     require(channel.answered(channel.publish(false, 12), false), "a later request failed");
     require(h->controlSeq.load() == control, "the worker published a control generation");

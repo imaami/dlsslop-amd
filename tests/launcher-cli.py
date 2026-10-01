@@ -95,7 +95,7 @@ def main():
         launch_env = dict(env, PATH=f"{base}:{os.environ['PATH']}",
                           DLSSNR_DISABLE="1", DLSSLOP_AMD_ENABLE="0",
                           DLSSNR_ENABLE="0", DLSSLOP_BACKEND="inherited",
-                          DLSSNR_DMABUF="1", DLSSNR_IDLE_REPAINT="1",
+                          DLSSNR_DMABUF="1",
                           DLSS5_VIT_ADAPTIVE="0", DLSSLOP_HIP_LIBRARY="external library",
                           VKLayer_DLSS5="1", DLSSLOP_LAYER_NETWORK="1", FIXTURE_EXIT="37")
         arguments = ["--shm", "unchanged", "", "two words", "literal '$() ` text"]
@@ -111,7 +111,6 @@ def main():
             assert got["env"]["DLSSLOP_AMD_ENABLE"] == "1"
             assert got["env"]["DLSSNR_ENABLE"] == "1"
             assert got["env"]["DLSSNR_DMABUF"] == "1"
-            assert got["env"]["DLSSNR_IDLE_REPAINT"] == "0"
             assert "DLSSNR_DISABLE" not in got["env"] and "VKLayer_DLSS5" not in got["env"]
             assert "DLSSLOP_SHM" not in got["env"] and "DLSSLOP_LOG" not in got["env"]
             assert got["env"]["DLSS5_VIT_ADAPTIVE"] == "0"

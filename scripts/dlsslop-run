@@ -40,7 +40,7 @@ Environment defaults:
 Relative paths are resolved against the launcher's working directory.
 
 The launcher sets these values for COMMAND, overriding inherited values:
-  DLSSLOP_AMD_ENABLE=1  DLSSNR_ENABLE=1  DLSSNR_IDLE_REPAINT=0
+  DLSSLOP_AMD_ENABLE=1  DLSSNR_ENABLE=1
   DLSSLOP_LAYER_NETWORK=1 with --layer-network; unset without it.
 It prepends the installation's layer manifests to VK_ADD_IMPLICIT_LAYER_PATH
 (${layers:-none: no share/vulkan/implicit_layer.d beside this launcher}).
@@ -102,7 +102,7 @@ case $status in
     0) fail 1 'No live native worker owns this channel; start dlsslopd first.' ;;
     *) fail 1 'Could not inspect the native worker channel.' ;;
 esac
-export DLSSNR_SHM=$channel DLSSNR_LOG=$log DLSSLOP_AMD_ENABLE=1 DLSSNR_ENABLE=1 DLSSNR_IDLE_REPAINT=0
+export DLSSNR_SHM=$channel DLSSNR_LOG=$log DLSSLOP_AMD_ENABLE=1 DLSSNR_ENABLE=1
 if [[ $network ]]; then
     export DLSSLOP_LAYER_NETWORK=1
 else

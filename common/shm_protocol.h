@@ -414,7 +414,8 @@ struct ShmHeader {
     // creation was seen to exhaust the driver's latches on some setups, so the default spaces
     // rebuilds rather than firing them at once; 0 means no spacing -- build the moment the change
     // settles and chain the remaining builds back to back. It is time rather than frames because a
-    // frame-counted wait crawls on a 30 fps game and races on a 144 fps one.
+    // frame-counted wait crawls on a 30 fps game and races on a 144 fps one. dlsslopd, the layer and
+    // the tools do not read it; it stays so that the header's layout does not change.
     std::atomic<uint32_t> rebuildSettleMs;
 
     // The raster the helper actually answered, echoed before seq_resp. More than one swapchain can

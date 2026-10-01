@@ -172,21 +172,6 @@ class Composition {
     // Leg 2. Composes and leaves the swapchain image holding the result, in PRESENT_SRC_KHR.
     bool RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, const FrameSettings& s);
 
-    // Whether a frame has ever been captured from the swapchain.
-    //
-    // Asked by the idle repaint before it takes an image. Composing again means re-running what sits
-    // downstream of the captured frame, and if nothing was ever captured there is nothing to re-run
-    // it over.
-    bool HasCapturedFrame() const { return _frameCaptured; }
-
-    // Put the captured frame back on the screen, untouched.
-    //
-    // For the case where the effect is switched off while the picture is still. The composed result
-    // is what is sitting in the swapchain, and nothing will overwrite it until the application draws
-    // again -- so switching off leaves the edit on screen indefinitely. This is the frame as it was
-    // read, so it restores exactly what the application drew.
-    bool RecordRestore(VkCommandBuffer cb, VkImage swapchainImage);
-
     // Write this many matched before/after pairs, starting with the next composed frame.
     void RequestCapture(uint32_t frames, uint32_t controlSeq) { _capture.Begin(frames, controlSeq); }
     void SetCaptureInference(uint32_t seq) { _captureMetadata.inferenceSeq = seq; }

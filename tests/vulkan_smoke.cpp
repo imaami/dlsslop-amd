@@ -427,21 +427,24 @@ static void CheckUnloaded(const std::string& object) {
     std::printf("PASS: the loader unloaded the layer with the last instance.\n");
 }
 
-// run-smoke.py turns the idle repaint off, as the launcher does, so the layer hooks the present but
-// leaves the application's other queue operations to the next layer down -- unless the in-layer
-// network is asked for: its build submits from a thread of its own.
+// The layer hooks the present but leaves the application's other queue operations to the next layer
+// down, unless the in-layer network is asked for: its build submits from a thread of its own. It
+// never hooks the acquire.
 static void CheckQueueHooks(VkDevice device) {
     const char* inLayer = std::getenv("DLSSLOP_LAYER_NETWORK");
     const bool network = inLayer && !std::strcmp(inLayer, "1");
     const std::string layer = LayerObject(device);
-    for (const char* name : {"vkAcquireNextImageKHR", "vkQueueSubmit", "vkQueueWaitIdle", "vkQueueBindSparse",
-                             "vkDeviceWaitIdle"}) {
+    for (const char* name : {"vkQueueSubmit", "vkQueueWaitIdle", "vkQueueBindSparse", "vkDeviceWaitIdle"}) {
         Dl_info next{};
         require(dladdr(reinterpret_cast<void*>(vkGetDeviceProcAddr(device, name)), &next) &&
                 (layer == next.dli_fname) == network,
                 network ? "the layer leaves queue operations unhooked while the in-layer network builds"
-                        : "the layer hooks queue operations while the idle repaint is off");
+                        : "the layer hooks queue operations without the in-layer network");
     }
+    Dl_info acquire{};
+    require(dladdr(reinterpret_cast<void*>(vkGetDeviceProcAddr(device, "vkAcquireNextImageKHR")), &acquire) &&
+                layer != acquire.dli_fname,
+            "the layer hooks vkAcquireNextImageKHR");
 }
 
 struct Swapchain {

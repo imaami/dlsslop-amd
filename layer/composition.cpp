@@ -800,12 +800,10 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
     //
     // Almost everything here is rebuilt because the *model's* raster changed -- passes, model
     // resolution, the down-leg filter -- while the captured frame stays the swapchain's size in the
-    // swapchain's working format. Dropping it anyway costs nothing while an application is drawing,
-    // because the next frame captures another one a moment later. It costs everything when it is not:
-    // RecordCapture unfreezes the moment _frameCaptured goes false, so the next composition reads the
-    // swapchain image instead -- and on a repaint that image holds the previous composed output, so
-    // the edit lands on top of the edit. Resetting the settings on a paused picture did exactly that,
-    // because a reset changes the model's raster.
+    // swapchain's working format. Dropping it anyway costs nothing while the frame is not held,
+    // because the next frame captures another one. A held frame would be lost: RecordCapture
+    // unfreezes the moment _frameCaptured goes false, so the next composition would read the
+    // swapchain image instead of the held picture.
     const bool keepFrame = _frameCaptured && _frame.image && _width == width && _height == height &&
                            _workFormat == work;
     Image savedFrame{};
@@ -1032,19 +1030,6 @@ DlssNrConstants Composition::BaseConstants(const FrameSettings& s) const {
 // ---------------------------------------------------------------------------
 // Leg 1: the frame the model is shown
 // ---------------------------------------------------------------------------
-bool Composition::RecordRestore(VkCommandBuffer cb, VkImage swapchainImage) {
-    if (!_usable || !_frame.image || !_frameCaptured) return false;
-    Transition(cb, _frame, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-    TransitionSwapchain(cb, swapchainImage, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    CopyWholeImage(cb, _frame.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, swapchainImage,
-                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, _width, _height);
-    // Back to what the presentation engine requires, on every path out.
-    TransitionSwapchain(cb, swapchainImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                        VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-    return true;
-}
-
 bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, const FrameSettings& s) {
     if (!_usable || !_frame.image) return false;
 

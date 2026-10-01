@@ -92,8 +92,6 @@ X(vkCmdBindPipeline)                                                            
     X(vkCmdPushConstants)                                                                        \
     X(vkCmdFillBuffer)                                                                           \
     X(vkGetMemoryFdKHR)                                                                              \
-    X(vkAcquireNextImageKHR)                                                                       \
-    X(vkReleaseSwapchainImagesEXT)                                                                 \
     X(vkQueueSubmit2KHR)                                                                           \
     X(vkQueueBindSparse)
 
