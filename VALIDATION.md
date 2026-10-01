@@ -84,7 +84,13 @@ The composition rebuild test changes the layer's model raster, colour domain
 and downscaler in place and fails when a dispatch binds a descriptor written for
 an image view that has since been destroyed. The smoke, this test and the HDR
 shader test prefer software Vulkan (Mesa lavapipe) and fall back to a hardware
-device; the latter two skip when no suitable device is available.
+device; the latter two skip when no suitable device is available. Without
+Vulkan, the layer-units test checks the settings the layer composes a frame
+with: their defaults, values that are not finite or out of range, and the five
+environment overrides, each in a process of its own because the layer reads
+them once. It also checks the model raster over working scales and native
+maxima, the swapchain formats the composition takes, and the names of the
+downscalers and of the toggle key.
 
 Two checks disassemble the built HIP modules and need `llvm-objdump`. The
 LDS-barrier check fails when a shared-memory access can still be outstanding at

@@ -273,6 +273,11 @@ if(BUILD_TESTING)
     target_include_directories(capture-writer-test SYSTEM PRIVATE third_party/stb)
     target_link_libraries(capture-writer-test PRIVATE dlsslop-layer-objects)
     add_test(NAME capture-writer COMMAND capture-writer-test)
+    # The layer's settings snapshot, model raster, format table, scaler names and key names, on
+    # the host.
+    add_executable(layer-units-test tests/layer_units_test.cpp)
+    target_link_libraries(layer-units-test PRIVATE dlsslop-layer-objects)
+    add_test(NAME layer-units COMMAND layer-units-test)
     add_test(NAME color-metrics COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_metrics_test.py)
     add_test(NAME color-orchestrator COMMAND ${Python3_EXECUTABLE}
