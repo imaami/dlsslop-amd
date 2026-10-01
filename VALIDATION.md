@@ -18,33 +18,37 @@ byte for byte against digests of upstream's packers on synthetic weights, and
 the weight sizes the network expects against the model import's manifest. It
 checks the Vulkan network's weight packing byte for byte against digests of
 what upstream's graph build packed from a synthetic model pack, and its model
-reader on damaged packs. At 40 frame extents from 17x17 to 5120x2880 it checks
-the Vulkan network's launch plan against upstream's graph build: every dispatch
-with its push constants and the activation arena's values and sizes, and at 8
-of them the weight blob packed from a synthetic model pack. Frames that
+reader on damaged packs, and its audit of the exponent's upper clamp in the
+Swin attention on crafted layers. At 40 frame extents from 17x17 to 5120x2880
+it checks the Vulkan network's launch plan against upstream's graph build:
+every dispatch with its push constants, as planned and with the kernels built
+without that clamp that the real model's weights allow, the tables of the
+weight blob with the heads that model frees, and the activation arena's values
+and sizes, and at 8 of them the weight blob packed from a synthetic model pack,
+whose weights free no layer of the clamp. Frames that
 upstream fails on, and frames whose arena overflows 32-bit offsets, must be
-rejected. The Vulkan network's weight digests were recorded from the
-DLSSNR-AMD fork's host code at `3dfdddc`, and its plan goldens from the fork's
-host code at `a75ac49` (DLSSNR-AMD `82560c4`) with the schedule changes of
-upstream's `b1419b0` that the port does not take yet switched off. The build
-neither fetches nor compiles that code. CTest also checks each network
-kernel's push block and bindings in the built SPIR-V against the plan, and the
-shader build's markers, the defines it builds the pipelines with and the model
-tools' entry list against what the plan expects. It checks that two writers
-replacing the Vulkan network's pipeline cache at once, as dlsslopd and a
-game's in-layer network can, never leave a reader without the file or with
-part of one. It records the Vulkan network's
-frames on a fake device: a frame that is not submitted must leave the motion
-history as it was, and the first frame after a build must move the network's
-images into their layouts, as must the next one when that frame was not
-submitted. A network reshaped for another
+rejected. The Vulkan network's weight digests were recorded from the DLSSNR-AMD
+fork's host code at `3dfdddc`, and its plan goldens from the fork's host code
+at `a75ac49` (DLSSNR-AMD `82560c4`). The build neither fetches nor compiles
+that code. CTest also checks each network kernel's push block and bindings in
+the built SPIR-V against the plan, and the shader build's markers, the defines
+it builds the pipelines with and the model tools' entry list against what the
+plan expects. It checks that two writers replacing the Vulkan network's
+pipeline cache at once, as dlsslopd and a game's in-layer network can, never
+leave a reader without the file or with part of one. It records the Vulkan
+network's frames on a fake device: a frame that is not submitted must leave the
+motion history as it was, and the first frame after a build must move the
+network's images into their layouts, as must the next one when that frame was
+not submitted. A network reshaped for another
 shape of its extent must record no command and make no pipeline, and then
-record the frames of a network built for that shape. Under `strace`, it
-checks that the files `install.py` installs for the Vulkan network are those
-that the network's builds on that fake device open, at extents whose plans run
-every kernel; without `strace` that check skips. A build there without two of
-the kernels' files must fail and name the first of them in the kernel table,
-whichever of the threads that make the pipelines meets it.
+record the frames of a network built for that shape. From a model whose weights
+free every Swin layer of the upper clamp, a frame must run the kernels and the
+temporal pre block built without it. Under `strace`, it checks that the files
+`install.py` installs for the Vulkan network are those that the network's
+builds on that fake device open, at extents whose plans, one of them from that
+model, run every kernel; without `strace` that check skips. A build there
+without two of the kernels' files must fail and name the first of them in the
+kernel table, whichever of the threads that make the pipelines meets it.
 It checks that the post block's SPIR-V never stores into its second output,
 where the runtime may bind a 1x1 image.
 At every tier and preset it checks the HIP network's launch plan against
@@ -178,15 +182,17 @@ deterministic output are basic sanity checks; the self-test does not measure
 visual quality or game performance.
 
 Without a GPU, the Vulkan network's weight blob can be checked against
-upstream's packing of the real model at every extent the plan test covers:
+upstream's packing of the real model at every extent the plan test covers, and
+the heads that the model's weights free of the exponent's upper clamp against
+upstream's audit:
 
 ```bash
 ./build/vulkan-plan-test --model ~/.local/share/dlsslop-amd/dlssnr.bin
 ```
 
-`vulkan-plan-test --print WxH` prints the plan for WxH frames, a line a
-dispatch and a line a value, in the form of the dumps of upstream's build that
-its goldens were recorded from.
+`vulkan-plan-test --print WxH` prints the plan for WxH frames with the real
+model's kernels, a line a dispatch and a line a value, in the form of the dumps
+of upstream's build that its goldens were recorded from.
 
 When the game renders on the worker's RX 9070 XT, its layer log (beside the
 channel file) must report `device-local transport ready`: proxy and answer then
@@ -393,11 +399,37 @@ fork and lists only the files that the older fork's build needs. After
 for `vulkan` into `external/vulkan`, run
 `git -C external/vulkan sparse-checkout disable` and check that commit out. A
 dlsslopd built that way gives traces that must match the current revision's
-with `--ignore-queries --skip-setup`, except that its motion frames differ in
-the finest flow level's usage, as described above. To compare the rest of those
-frames, change `usage=0xb` to `usage=0xf` in that dlsslopd's traces, in the
-CreateImage of the R32G32_SFLOAT image of a quarter of the frame's width and
-height.
+with `--ignore-queries --skip-setup --span network`, except that its motion
+frames differ in the finest flow level's usage, and its other frames in the
+post block's second output, as described above. To compare the rest of the
+motion frames, change `usage=0xb` to `usage=0xf` in that dlsslopd's traces, in
+the CreateImage of the R32G32_SFLOAT image of a quarter of the frame's width
+and height. The weights it uploads in each build must equal those that the
+current revision uploads. In a game's trace of the in-layer network, the
+submission of the current revision's build counts as a frame, so the current
+revision's frame N + 1 compares with frame N of the older revision's trace, as
+in `--frames 0-463:1-464`. The older revision's layer sends dlsslopd other
+proxies than the current layer does, so the traces of dlsslopd behind the two
+layers must differ in the answers alone.
+
+Upstream's graph build at `82560c4` has switches for most of the changes that
+the commits after "external: pin the Vulkan fork rebased on DLSSNR-AMD
+82560c4" port one at a time, so that each revision can be traced against it.
+Run that dlsslopd with `NR_EXP_NOHI=0` against a revision before "vulkan: take
+the kernels without the upper clamp where the weights allow"; add
+`NR_TC_BIG_ALLOW=` (empty) before "vulkan: keep four tile-counter pairs on big
+frames", and `NR_DEAD_ROWS=0` before "vulkan: leave out the post block's window
+rows below the picture". Before "vulkan: give the C=64 persistent runs up to
+512 workgroups", also add `NR_PERSIST_WG_64=384` for frames whose C=64 runs
+have at most 4096 windows a layer; those revisions gave larger runs 512
+workgroups, as that dlsslopd does without the variable. Before "vulkan: run the
+ViT's projections on gemmprojw from 768 tokens on", frames of 768 ViT tokens or
+more differ in the ViT's projections: upstream takes `gemmprojw` for them by a
+compile-time define (`NR_PROJW_PROJ`), and its graph build's `--no-projw` also
+moves the ViT's contractions off it. Before "vulkan: run the ViT's QKV on a
+32x384 tile up to 768 tokens", the ViT's QKV dispatches differ: upstream
+switches that tile off only with its graph build's `--no-qkvs`, which its
+runtime does not pass.
 
 A frame is a submission that dispatches and is not a build's one-shot, whose
 command pool is created after the previous submission and destroyed before the

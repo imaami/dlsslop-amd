@@ -194,10 +194,6 @@ constexpr Row kRows[] = {
 constexpr size_t kLayers = std::size(kRows);
 static_assert(kLayers == 152);
 
-// The network's blocks: 0 the pre block to 70 the post block.
-constexpr int kBlocks = 71;
-static_assert(kKeys == 8 * kBlocks);
-
 uint32_t up(uint32_t n, uint32_t alignment) { return (n + alignment - 1) / alignment * alignment; }
 uint64_t align(uint64_t n, uint64_t alignment) { return (n + alignment - 1) / alignment * alignment; }
 uint64_t pad4(uint64_t n) { return align(n, 4); }
@@ -1087,6 +1083,26 @@ Result<Plan> plan(uint32_t width, uint32_t height, uint64_t storage)
         if (values.size[k] || values.first[k] >= 0)
             p.values.push_back({uint16_t(k), values.offset[k], values.size[k], values.overread[k]});
     return p;
+}
+
+void unclamp(Plan& plan, const ClampFree& free)
+{
+    for (Step& s : plan.steps) {
+        const auto twin = std::ranges::find(kUnclamped, s.kernel, &std::pair<Kernel, Kernel>::first);
+        if (twin != std::end(kUnclamped) && (free.heads[s.block] & 1)) s.kernel = twin->second;
+    }
+    // A run's records in the blob, a layer each from its first on.
+    for (const Step& s : plan.steps) {
+        if (!persistent(s.kernel)) continue;
+        PushPersist r;
+        std::memcpy(&r, &plan.push[s.push], sizeof r);
+        const auto records = std::ranges::find_if(plan.segments, [&](const Segment& g) {
+            return g.recipe == Recipe::kTable && g.offset == 4ull * r.layers_off;
+        });
+        for (uint32_t k = 0; k < r.n_layers; ++k)
+            plan.tables[records->index + k * (sizeof(PersistRec) / 4) + offsetof(PersistRec, windows) / 4] =
+                free.heads[kRows[s.first + k].block];
+    }
 }
 
 } // namespace dlsslop::vulkan

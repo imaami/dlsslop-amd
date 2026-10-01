@@ -13,10 +13,14 @@
 // and make no pipeline, and then record the frames that a network built for
 // that shape records. A frame of one pass without the pass stages must copy
 // the proxy straight into the network's input and its answer straight out,
-// and copy or blit no image. Takes the directory of the network's SPIR-V.
+// and copy or blit no image. From a model whose weights free every Swin layer
+// of the exponent's upper clamp, a frame must run the kernels and the temporal
+// pre block without that clamp. Takes the directory of the network's SPIR-V.
 // With --build, it only builds the network for one extent, which makes every
-// pipeline of the runtime's own, so that tests/vulkan-files.py can see the
-// files that a build opens.
+// pipeline of the runtime's own but the temporal pre block that the plan's
+// pre block is not, so that tests/vulkan-files.py can see the files that a
+// build opens; with --unclamped too, from a synthetic model whose weights
+// free every Swin layer of the exponent's upper clamp.
 #include "network_recorder.h"
 #include "vulkan_pack.h"
 
@@ -524,21 +528,62 @@ void check_reshapes(const dlsslop::VulkanPaths& paths)
                 ("the frames after the reshape for " + what + " differ from those of a build").c_str());
     }
 }
+
+// From a model whose weights free every Swin layer of the exponent's upper
+// clamp, a frame runs the C=32 kernels without that clamp, and with motion the
+// temporal pre block without it, never their twins with the clamp.
+void check_unclamped(const std::string& spirv)
+{
+    const auto plan = vulkan::plan(64, 64);
+    vulkan_test::Pack model;
+    require(plan && vulkan_test::synthetic_model(*plan, model, true), "cannot make the unclamped model");
+    // A pipeline as a frame names it at its first use.
+    auto named = [&](const std::string& file) {
+        const auto code = dlsslop::read_file(dlsslop::join(spirv, file));
+        require(bool(code), ("cannot read " + file).c_str());
+        return "(pipeline " + std::to_string(vulkan_test::fnv1a(code->data(), code->size())) + ")";
+    };
+    for (const bool motion : {false, true}) {
+        dlsslop::VulkanFrame f;
+        f.width = f.height = 64;
+        f.motion = motion;
+        dlsslop::NetworkRecorder recorder(fake_device(), {model.path, spirv, ""});
+        require(recorder.shape(f).value_or(false), "cannot build the network from the unclamped model");
+        const std::string commands = record(recorder, f).commands;
+        std::vector<std::pair<std::string, std::string>> twins;
+        if (motion) twins.push_back({"temporal/temporal_pre_fp32.spv", "temporal/temporal_pre_fp32nh.spv"});
+        else
+            for (const auto& [kernel, twin] : vulkan::kUnclamped)
+                twins.push_back({std::string("g_") + vulkan::kKernels[size_t(kernel)].stem + ".spv",
+                                 std::string("g_") + vulkan::kKernels[size_t(twin)].stem + ".spv"});
+        for (const auto& [clamped, unclamped] : twins)
+            require(lines(commands, "pipeline #", named(unclamped)) == 1 &&
+                        !lines(commands, "pipeline #", named(clamped)),
+                    ("a frame from the unclamped model does not run " + unclamped + " instead of " + clamped).c_str());
+    }
+}
 } // namespace
 
 int main(int argc, char** argv)
 {
     std::string extent;
-    const option options[] = {{"build", required_argument, nullptr, 'b'}, {"help", no_argument, nullptr, 'h'},
+    bool unclamped = false;
+    const option options[] = {{"build", required_argument, nullptr, 'b'},
+                              {"unclamped", no_argument, nullptr, 'u'},
+                              {"help", no_argument, nullptr, 'h'},
                               {nullptr, 0, nullptr, 0}};
-    for (int code; (code = getopt_long(argc, argv, "+b:h", options, nullptr)) != -1;) {
+    for (int code; (code = getopt_long(argc, argv, "+b:uh", options, nullptr)) != -1;) {
         if (code == 'b') extent = optarg;
+        else if (code == 'u') unclamped = true;
         else if (code == 'h') {
             std::puts("Usage: network-recorder-test [OPTION]... SPIRV-DIRECTORY\n"
                       "Checks the Vulkan network's motion history and reshapes on a fake device, from a synthetic\n"
                       "model and the network's SPIR-V in SPIRV-DIRECTORY (required). No GPU or model needed.\n"
                       " -b, --build WxH   Instead, build the network for WxH frames, which makes every pipeline of\n"
-                      "                   the runtime's own (default: unset)\n"
+                      "                   the runtime's own but one of the temporal pre blocks (default: unset)\n"
+                      " -u, --unclamped   Build from a synthetic model whose position biases and head scales are\n"
+                      "                   zero, which frees every Swin layer of the exponent's upper clamp\n"
+                      "                   (default: off)\n"
                       " -h, --help        Show help (default: off)");
             return 0;
         } else
@@ -551,7 +596,7 @@ int main(int argc, char** argv)
     const auto plan = vulkan::plan(width, height);
     require(bool(plan), "cannot plan the frames");
     vulkan_test::Pack model;
-    require(vulkan_test::synthetic_model(*plan, model), "cannot make the synthetic model");
+    require(vulkan_test::synthetic_model(*plan, model, unclamped), "cannot make the synthetic model");
     const dlsslop::VulkanPaths paths{model.path, argv[optind], ""};
     if (!extent.empty()) {
         dlsslop::VulkanFrame f;
@@ -564,7 +609,9 @@ int main(int argc, char** argv)
     }
     for (const unsigned passes : {1u, 2u}) check(paths, passes);
     check_reshapes(paths);
-    std::printf("network-recorder test: frames not submitted leave the motion history as it was, and a "
-                "reshaped network records the frames of a built one\n");
+    check_unclamped(argv[optind]);
+    std::printf("network-recorder test: frames not submitted leave the motion history as it was, a reshaped "
+                "network records the frames of a built one, and weights free of the upper clamp run the kernels "
+                "without it\n");
     return 0;
 }

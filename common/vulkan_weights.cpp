@@ -71,12 +71,24 @@ constexpr struct {
 constexpr size_t kQkvScales = 128, kQkvRows = 3072, kQkvCols = 1024;
 // Math profile 3's exponent affine on a Swin position bias (nr_graph.cpp:1775-1776).
 constexpr float kBiasScale = 0.044921875f, kBiasOffset = 1.30078125f;
+// A Swin head's logits are at most 1.2 |s| + 0.05 for its scale s, and the
+// exponent's input, its baked bias plus kBiasScale times its logit, is
+// clamped at kExpUpper (upstream: the audit of NR_EXP_NOHI).
+constexpr double kLogitPerScale = 1.2, kLogitMargin = 0.05, kExpUpper = 1.5693359375;
 
 uint16_t load_half(const uint8_t* p)
 {
     uint16_t h;
     std::memcpy(&h, p, 2);
     return h;
+}
+// A position bias as the blob holds it: widened, and with AFFINE through math
+// profile 3's affine. A NaN stays the NaN that widening makes.
+uint32_t baked(uint16_t half, bool affine)
+{
+    const uint32_t wide = widen_half(half);
+    const float value = std::bit_cast<float>(wide);
+    return affine && value == value ? std::bit_cast<uint32_t>(std::fma(value, kBiasScale, kBiasOffset)) : wide;
 }
 void store_half(uint8_t* p, uint16_t h) { std::memcpy(p, &h, 2); }
 void store_word(uint8_t* p, uint32_t w) { std::memcpy(p, &w, 4); }
@@ -231,20 +243,14 @@ Result<void> Packer::put(const Segment& s, uint8_t* out)
         return {};
     }
     case Recipe::kBias: {
-        // Each head's values reordered to [i][j] (upstream: deswizzle_bias),
-        // widened, and with kAffine through math profile 3's affine. A NaN
-        // stays the NaN that widening makes.
+        // Each head's values reordered to [i][j] (upstream: deswizzle_bias)
+        // and baked.
         const size_t heads = s.bytes / 16384;
         const uint8_t* biases = DLSSLOP_TRY(read(s, heads * 8192)).data();
         for (size_t h = 0; h < heads; ++h, biases += 8192)
             for (size_t i = 0; i < 64; ++i)
-                for (size_t j = 0; j < 64; ++j, out += 4) {
-                    const uint32_t wide = widen_half(load_half(biases + 2 * bias_source(i, j)));
-                    const float value = std::bit_cast<float>(wide);
-                    store_word(out, s.flags & Segment::kAffine && value == value
-                                        ? std::bit_cast<uint32_t>(std::fma(value, kBiasScale, kBiasOffset))
-                                        : wide);
-                }
+                for (size_t j = 0; j < 64; ++j, out += 4)
+                    store_word(out, baked(load_half(biases + 2 * bias_source(i, j)), s.flags & Segment::kAffine));
         return {};
     }
     case Recipe::kScales: {
@@ -374,6 +380,30 @@ Result<void> pack(std::span<const Segment> segments, std::span<const uint32_t> t
     }
     std::memset(blob.data() + at, 0, blob.size() - at);
     return {};
+}
+
+Result<ClampFree> clamp_free(std::span<const Segment> segments, const Model& model)
+{
+    ClampFree free{};
+    Packer packer{model, {}, {}, {}, {}};
+    for (const Segment& s : segments) {
+        if (s.recipe != Recipe::kBias || !(s.flags & Segment::kAffine)) continue;
+        const size_t heads = s.bytes / 16384;
+        const uint8_t* biases = DLSSLOP_TRY(packer.read(s, heads * 8192)).data();
+        const Source of{s.source.directory, s.source.block, s.source.layer, Suffix::kScalarsB};
+        const auto scales = DLSSLOP_TRY(model.read(of, packer.tail));
+        DLSSLOP_TRY(packer.check(of, scales.size(), 4 * heads, false));
+        for (size_t h = 0; h < heads; ++h, biases += 8192) {
+            float scale;
+            std::memcpy(&scale, scales.data() + 4 * h, 4);
+            const double reach = kBiasScale * (kLogitPerScale * std::fabs(double(scale)) + kLogitMargin);
+            bool clear = true;
+            for (size_t i = 0; i < 4096 && clear; ++i)
+                clear = double(std::bit_cast<float>(baked(load_half(biases + 2 * i), true))) + reach <= kExpUpper;
+            free.heads[s.source.block] |= uint32_t(clear) << h;
+        }
+    }
+    return free;
 }
 
 uint8_t requantise(uint8_t code) { return code == 0 ? 0x80 : code == 0xff ? 0x7f : code; }

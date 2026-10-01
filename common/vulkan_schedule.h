@@ -48,7 +48,7 @@ void store(Dispatch& d, const T& part, size_t at = 0)
 // their readers reach past them, their offsets, and the first and last layers
 // whose lowering names them, -1 when none does (upstream: vsize, overread,
 // voff.m and voff.used).
-inline constexpr int kKeys = 71 * 8;
+inline constexpr int kKeys = 8 * kBlocks;
 struct Values {
     uint64_t size[kKeys], overread[kKeys], offset[kKeys];
     int16_t first[kKeys], last[kKeys];

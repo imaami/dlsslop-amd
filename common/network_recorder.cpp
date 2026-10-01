@@ -70,10 +70,10 @@ Result<bool> NetworkRecorder::shape(const VulkanFrame& frame)
         }
     } else {
         DLSSLOP_TRY(plan_for(frame.width, frame.height));
-        // The plan is not kept: the runtime copies the steps and push words it records.
-        const vulkan::Plan plan = *std::exchange(plan_, std::nullopt);
+        // The plan is not kept: the runtime takes the steps and push words it records.
+        vulkan::Plan plan = *std::exchange(plan_, std::nullopt);
         runtime_.reset();
-        runtime_.emplace(DLSSLOP_TRY(vulkan::Runtime::build(device_, paths_, shape, plan)));
+        runtime_.emplace(DLSSLOP_TRY(vulkan::Runtime::build(device_, paths_, shape, std::move(plan))));
     }
     shape_ = shape;
     last_.reset();

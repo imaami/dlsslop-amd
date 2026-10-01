@@ -60,6 +60,14 @@ private:
 Result<void> pack(std::span<const Segment> segments, std::span<const uint32_t> tables, const Model& model,
                   std::span<uint8_t> blob);
 
+// Which heads of the Swin layers whose position biases a plan's SEGMENTS bake
+// (kBias with kAffine) MODEL's weights keep below the exponent's upper clamp
+// (ClampFree), from the head's biases as the blob holds them and its scale in
+// the layer's scalars_b (upstream: the audit in NrSession::build). A NaN bias
+// frees no head. An entry must hold at least the bytes the audit reads; the
+// errors name MODEL's path and the entry.
+Result<ClampFree> clamp_free(std::span<const Segment> segments, const Model& model);
+
 // The packing's primitives, exposed for the tests.
 
 // An E4M3 code through upstream's round trip (upstream:

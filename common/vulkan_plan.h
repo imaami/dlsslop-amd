@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <utility>
 #include <vector>
 
 namespace dlsslop::vulkan {
@@ -87,6 +88,7 @@ inline constexpr struct {
 enum class Kernel : uint8_t {
     kFswin32, kFswinImagePreds32, kFswinDsp32, kFswinPds64, kFswinPds128, kFswinPds256,
     kFswinPup64, kFswinPup128, kFswinPup256, kFswinFusedUp32, kFswinImagePost32,
+    kFswin32Nh, kFswinImagePreds32Nh, kFswinDsp32Nh, kFswinFusedUp32Nh,
     kFfwd3, kFfwd3w, kAttn,
     kGemmProjc, kGemmPool, kGemmNores, kGemmVact, kGemmProj, kGemmProjw, kGemmProjt, kGemmVqkvNorm, kGemmVqkvNorms,
     kGemmVqkvs,
@@ -118,6 +120,10 @@ inline constexpr KernelInfo kKernels[] = {
     {"fswinpup256", "aawwwa", Images::kNone, 36},
     {"fswinfusedup32", "aawww", Images::kNone, 128},
     {"fswinimagepost32", "aawww", Images::kOutput, 128},
+    {"fswin32nh", "aawwwa", Images::kNone, 84},
+    {"fswinimagepreds32nh", "aawwwa", Images::kInput, 128},
+    {"fswindsp32nh", "aawwwa", Images::kNone, 128},
+    {"fswinfusedup32nh", "aawww", Images::kNone, 128},
     {"ffwd3", "aaawwa", Images::kNone, 32},
     {"ffwd3w", "aaawwa", Images::kNone, 32},
     {"attn", "aawwa", Images::kNone, 48},
@@ -137,6 +143,15 @@ inline constexpr KernelInfo kKernels[] = {
     {"noisefield", "w", Images::kNone, 20},
 };
 static_assert(std::size(kKernels) == size_t(Kernel::kCount));
+// The C=32 kernels and their twins built without the upper clamp of the Swin
+// attention's exponent (upstream: the "nh" pipelines of NR_EXP_NOHI), which
+// take the same push blocks and bindings.
+inline constexpr std::pair<Kernel, Kernel> kUnclamped[] = {{Kernel::kFswin32, Kernel::kFswin32Nh},
+                                                           {Kernel::kFswinImagePreds32, Kernel::kFswinImagePreds32Nh},
+                                                           {Kernel::kFswinDsp32, Kernel::kFswinDsp32Nh},
+                                                           {Kernel::kFswinFusedUp32, Kernel::kFswinFusedUp32Nh}};
+// Whether K runs a persistent run of Swin layers.
+inline constexpr bool persistent(Kernel k) { return k >= Kernel::kFswinPds64 && k <= Kernel::kFswinPup256; }
 
 // The push blocks, as upstream's host declares them (nr_graph.cpp:144 and
 // 776-858) and the GLSL does: the SPIR-V's contract, field for field. A fused
@@ -343,5 +358,24 @@ struct Plan {
 // caller keeps the plan it checked an extent with, and remembers an extent
 // that was rejected.
 Result<Plan> plan(uint32_t width, uint32_t height, uint64_t storage = UINT64_MAX);
+
+// The network's blocks: 0 the pre block to 70 the post block.
+inline constexpr int kBlocks = 71;
+// Each block's Swin heads, bit h for head h, whose attention never reaches
+// the upper clamp of its exponent (upstream: g_nohi_heads), as the model's
+// weights bound it: every baked position bias of the head, plus 0.044921875
+// times 1.2 |s| + 0.05 with s the head's scale, is at most 1.5693359375.
+// vulkan_weights.h's clamp_free() audits a model.
+struct ClampFree {
+    uint32_t heads[kBlocks];
+};
+// PLAN where FREE allows it (upstream: NR_EXP_NOHI): the C=32 steps whose
+// block's one head is free take their kUnclamped twins, and the records of a
+// persistent run's layers carry their blocks' free heads in their window
+// counts, which the kernels do not read. fswinfusedup32nh also leaves out the
+// tests of its tiles: the fused upsample's grid is unshifted and covers its
+// tile raster whole at every extent, which upstream checks before it takes
+// that twin.
+void unclamp(Plan& plan, const ClampFree& free);
 
 } // namespace dlsslop::vulkan

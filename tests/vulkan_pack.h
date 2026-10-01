@@ -161,8 +161,10 @@ inline std::map<std::string, Source> entries(const Plan& p)
 // A model pack of synthetic entries (synthetic_entry()), of the
 // real model's names and sizes, holding every entry the plan reads: the pack
 // that upstream's synthetic goldens came from, but for the entries no plan
-// reads.
-inline bool synthetic_model(const Plan& p, Pack& pack)
+// reads. Its weights free no Swin head of the exponent's upper clamp; with
+// UNCLAMPED, every position bias and head scale is zero, which frees every
+// head.
+inline bool synthetic_model(const Plan& p, Pack& pack, bool unclamped = false)
 {
     const auto read = entries(p);
     std::string index = pack_header(uint32_t(read.size()));
@@ -173,7 +175,10 @@ inline bool synthetic_model(const Plan& p, Pack& pack)
         offset += model_bytes(source);
     }
     pack.write(index);
-    for (const auto& [name, source] : read) pack.write(synthetic_entry(name, model_bytes(source)));
+    for (const auto& [name, source] : read)
+        pack.write(unclamped && (source.suffix == Suffix::kAttnPosBias || source.suffix == Suffix::kScalarsB)
+                       ? std::string(model_bytes(source), '\0')
+                       : synthetic_entry(name, model_bytes(source)));
     return pack.ok;
 }
 

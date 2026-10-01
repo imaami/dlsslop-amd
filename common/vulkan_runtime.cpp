@@ -90,13 +90,15 @@ struct Bindings {
 // adapters of nr_runtime.cpp and the temporal variants of the pre and post
 // blocks): the alpha pass, which restores the frame's alpha when later passes
 // overwrote the input; dlsslop-amd's pass stages; the motion estimate's luma
-// pyramid and flow; the pre and post blocks with motion history.
+// pyramid and flow; the pre block with motion history, with the upper clamp
+// and without; the post block with motion history.
 constexpr Bindings kAdapterBindings[] = {
     {"", "st", sizeof(AlphaPush), "runtime/runtime_alpha.spv"},
     {"", "sts", sizeof(StagePush), "runtime/pass_stages.spv"},
     {"", "tss", sizeof(LumaPush), "temporal/motion_luma.spv"},
     {"", "ssss", sizeof(FlowPush), "temporal/motion_estimate.spv"},
     {"aawwwap", "tttt", sizeof(PushFSwin) + sizeof(PushPreImage), "temporal/temporal_pre_fp32.spv"},
+    {"aawwwap", "tttt", sizeof(PushFSwin) + sizeof(PushPreImage), "temporal/temporal_pre_fp32nh.spv"},
     {"aawwwp", "ssttt", sizeof(PushFSwin) + sizeof(PushUps) + sizeof(PushImageTail),
      "temporal/temporal_post_fp32.spv"},
 };
@@ -589,7 +591,7 @@ uint64_t storage_limit(const Device& device)
     return std::min<uint64_t>(properties.properties.limits.maxStorageBufferRange, allocation.maxMemoryAllocationSize);
 }
 
-Result<Runtime> Runtime::build(const Device& device, const VulkanPaths& paths, const Shape& shape, const Plan& plan)
+Result<Runtime> Runtime::build(const Device& device, const VulkanPaths& paths, const Shape& shape, Plan plan)
 {
     Runtime runtime(device);
     DLSSLOP_TRY(runtime.make(paths, shape, plan));
@@ -621,7 +623,7 @@ Runtime::~Runtime()
     for (Buffer* b : {&o.params, &o.weights, &o.arena}) destroy(d, *b);
 }
 
-Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, const Plan& plan)
+Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, Plan& plan)
 {
     const auto start = std::chrono::steady_clock::now();
     if (plan.width != shape.width || plan.height != shape.height || plan.steps.size() < 2 ||
@@ -633,6 +635,7 @@ Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, const P
     DLSSLOP_TRY(check_constants(join(paths.shaders, "temporal")));
     DLSSLOP_TRY(check_markers(paths.shaders));
     const Model model = DLSSLOP_TRY(Model::open(paths.model));
+    unclamp(plan, DLSSLOP_TRY(clamp_free(plan.segments, model)));
     steps_ = plan.steps;
     push_ = plan.push;
     DLSSLOP_TRY(adopt(shape));
@@ -766,13 +769,15 @@ Result<void> Runtime::make_pipelines(const VulkanPaths& paths)
     const VkDevice d = device_.device;
     Pipeline* p = objects_.pipelines;
     // The noise field's, which the build runs, the kernels' of the steps, and
-    // every one of the runtime's own, so that no reshape makes a pipeline.
-    // With motion, the temporal variants replace the pre and post blocks,
-    // whose kernels' pipelines are made all the same.
+    // every one of the runtime's own but the temporal pre block that the
+    // steps' pre block is not, so that no reshape makes a pipeline. With
+    // motion, the temporal variants replace the pre and post blocks, whose
+    // kernels' pipelines are made all the same.
     bool wanted[kPipelines] = {};
     wanted[size_t(Kernel::kNoiseField)] = true;
     for (const Step& step : steps_) wanted[size_t(step.kernel)] = true;
     std::fill(wanted + kAlpha, wanted + kPipelines, true);
+    wanted[temporal_pre() == kPre ? kPreNh : kPre] = false;
     size_t which[kPipelines], n = 0;
     for (size_t i = 0; i < kPipelines; ++i)
         if (wanted[i]) which[n++] = i;
@@ -850,7 +855,8 @@ Result<void> Runtime::make_sets()
         // A pass reads history c and writes the next frame's into the other
         // or, with later passes, into the second output.
         for (uint32_t c = 0; c < (s.pingpong ? 2u : 1u); ++c) {
-            sets.push_back({kPre, &o.pre_sets[c], {input, linear(o.flow[0]), linear(o.history[c]), linear(o.depth)}});
+            sets.push_back(
+                {temporal_pre(), &o.pre_sets[c], {input, linear(o.flow[0]), linear(o.history[c]), linear(o.depth)}});
             sets.push_back({kPost,
                             &o.post_sets[c],
                             {stored(o.answer), stored(s.pingpong ? o.history[c ^ 1] : o.second), input,
@@ -1079,7 +1085,7 @@ void Runtime::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const
     VkDescriptorSet pre_set = o.kernel_sets[pre], post_set = o.kernel_sets[post];
     uint32_t seed = 0;
     if (s.motion) {
-        pre = kPre;
+        pre = temporal_pre();
         post = kPost;
         pre_set = o.pre_sets[history_.current];
         post_set = o.post_sets[history_.current];
@@ -1186,6 +1192,11 @@ void Runtime::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const
         vkCmdCopyImageToBuffer(cmd, o.frame.image, kSource, answer, 1, &region);
     }
     barrier(cmd, result, kSource, kGeneral, kTransfer, kCopyRead, kCompute, kRead | kWrite);
+}
+
+size_t Runtime::temporal_pre() const
+{
+    return steps_.front().kernel == Kernel::kFswinImagePreds32Nh ? kPreNh : kPre;
 }
 
 void Runtime::submitted()

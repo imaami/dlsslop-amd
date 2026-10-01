@@ -12,7 +12,6 @@ namespace {
 
 uint64_t align(uint64_t n, uint64_t alignment) { return (n + alignment - 1) / alignment * alignment; }
 
-bool persistent(Kernel k) { return k >= Kernel::kFswinPds64 && k <= Kernel::kFswinPup256; }
 bool downsampling_run(Kernel k) { return k >= Kernel::kFswinPds64 && k <= Kernel::kFswinPds256; }
 bool upsampling_run(Kernel k) { return k >= Kernel::kFswinPup64 && k <= Kernel::kFswinPup256; }
 bool gemm(Kernel k) { return k >= Kernel::kGemmProjc && k <= Kernel::kGemmVqkvs; }

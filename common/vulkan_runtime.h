@@ -134,12 +134,12 @@ struct Pipeline {
 class Runtime {
 public:
     // The network for SHAPE on DEVICE, from PLAN, which is of SHAPE's extent
-    // on DEVICE's storage_limit(): its SPIR-V from PATHS.shaders, its weights
-    // from PATHS.model and its pipeline cache at PATHS.cache, with the
-    // pipelines of every shape of that extent. The queue must be free of the
-    // frames of a runtime being replaced.
-    static Result<Runtime> build(const Device& device, const VulkanPaths& paths, const Shape& shape,
-                                 const Plan& plan);
+    // on DEVICE's storage_limit(), with the kernels without the upper clamp
+    // that the model's weights allow (unclamp()): its SPIR-V from
+    // PATHS.shaders, its weights from PATHS.model and its pipeline cache at
+    // PATHS.cache, with the pipelines of every shape of that extent. The queue
+    // must be free of the frames of a runtime being replaced.
+    static Result<Runtime> build(const Device& device, const VulkanPaths& paths, const Shape& shape, Plan plan);
     Runtime(Runtime&& other) noexcept;
     Runtime& operator=(Runtime&&) = delete;
     ~Runtime();
@@ -168,7 +168,7 @@ public:
 
 private:
     // The network's kernels' pipelines, then the runtime's own.
-    enum Adapter : size_t { kAlpha = size_t(Kernel::kCount), kStages, kLuma, kFlow, kPre, kPost, kPipelines };
+    enum Adapter : size_t { kAlpha = size_t(Kernel::kCount), kStages, kLuma, kFlow, kPre, kPreNh, kPost, kPipelines };
     static constexpr size_t kAdapters = kPipelines - kAlpha;
     static constexpr uint32_t kLevels = 4; // the motion estimate's pyramid
     static constexpr uint32_t kMaxPasses = 16;
@@ -232,7 +232,10 @@ private:
     struct Setup;
 
     explicit Runtime(const Device& device) : device_(device) {}
-    Result<void> make(const VulkanPaths& paths, const Shape& shape, const Plan& plan);
+    Result<void> make(const VulkanPaths& paths, const Shape& shape, Plan& plan);
+    // The pre block with motion history: kPreNh when the plan's pre block is
+    // without the upper clamp, else kPre.
+    size_t temporal_pre() const;
     Result<void> adopt(const Shape& shape);
     Result<void> make_images();
     Result<void> make_pipelines(const VulkanPaths& paths);

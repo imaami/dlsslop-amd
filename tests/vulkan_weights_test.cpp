@@ -590,6 +590,67 @@ void check_negative_zeros()
     expect(packed && blob == expected, "residual scales after eight -0 values are not read from the ninth on");
 }
 
+// The audit of the exponent's upper clamp on crafted Swin layers of one or two
+// heads. A head is free when each of its biases, baked, plus 0.044921875 *
+// (1.2 |s| + 0.05) for its scale s is at most 1.5693359375. A last bias of
+// 0x4554, 5.328125, bakes to 1.540130615234375: with the largest scale that
+// frees it, 0x1.000ed6p-1, it reaches 1.56933593559..., and with one ulp
+// more, 1.56933593880..., past the limit, also with the scale negative. The
+// other biases, 0x4500, stay below it. A NaN frees no head. With s = 0 the
+// largest free bias is 0x45ed, and the heads of a layer are free each on its
+// own. The C=512 attention's biases, which have no affine, are not audited.
+void check_clamp_free()
+{
+    constexpr struct {
+        uint8_t block, heads;
+        float scales[4];
+        uint16_t biases[2], last; // each head's biases, and head 0's last one
+        uint32_t free;
+    } kLayers[] = {{1, 1, {0x1.000ed6p-1f}, {0x4500}, 0x4554, 1},  {2, 1, {0x1.000ed8p-1f}, {0x4500}, 0x4554, 0},
+                   {3, 1, {-0x1.000ed8p-1f}, {0x4500}, 0x4554, 0}, {4, 1, {}, {}, 0x7e00, 0},
+                   {5, 2, {}, {0x45ed, 0x45ee}, 0x45ed, 1}};
+    std::vector<vulkan_test::Entry> entries;
+    std::vector<Segment> segments;
+    vulkan::ClampFree expected{};
+    for (const auto& l : kLayers) {
+        std::string biases;
+        for (uint32_t h = 0; h < l.heads; ++h)
+            for (size_t i = 0; i < 4096; ++i) biases += bytes_of(i == 4095 && !h ? l.last : l.biases[h]);
+        const Source bias{Directory::kUnpacked, l.block, 0, Suffix::kAttnPosBias},
+            scales{Directory::kUnpacked, l.block, 0, Suffix::kScalarsB};
+        entries.push_back({vulkan::entry_name(bias), biases});
+        entries.push_back({vulkan::entry_name(scales), {reinterpret_cast<const char*>(l.scales), sizeof l.scales}});
+        segments.push_back({0, 16384u * l.heads, Recipe::kBias, kAffine, bias, 0, 0, 0});
+        expected.heads[l.block] = l.free;
+    }
+    const Source attention{Directory::kSplitSwin, 23, 2, Suffix::kAttnPosBias};
+    entries.push_back({vulkan::entry_name(attention), std::string(16 * 8192, '\0')});
+    segments.push_back({0, 16 * 16384, Recipe::kBias, 0, attention, 0, 0, 0});
+    {
+        const Pack pack(pack_bytes(entries));
+        const auto model = vulkan::Model::open(pack.path);
+        if (!expect(bool(model), "opening the pack of audited layers: %s", model ? "" : model.error().what.c_str()))
+            return;
+        const auto free = vulkan::clamp_free(segments, *model);
+        expect(free && std::ranges::equal(free->heads, expected.heads),
+               "the heads free of the upper clamp differ from upstream's audit%s%s", free ? "" : ": ",
+               free ? "" : free.error().what.c_str());
+    }
+    // Entries short of what the audit reads, and one missing: block 1's scale,
+    // block 5's biases and block 2's scales.
+    const std::string short_scale = entries[1].name, short_biases = entries[8].name, missing = entries[3].name;
+    entries[1].data.resize(2);
+    entries[8].data.resize(16383);
+    entries.erase(entries.begin() + 3);
+    const Pack pack(pack_bytes(entries));
+    const auto model = vulkan::Model::open(pack.path);
+    if (!expect(bool(model), "opening the damaged pack: %s", model ? "" : model.error().what.c_str())) return;
+    auto audit = [&](size_t layer) { return vulkan::clamp_free(std::span(&segments[layer], 1), *model); };
+    expect_error(audit(0), pack.path + ": " + short_scale + " has 2 bytes, 4 needed");
+    expect_error(audit(4), pack.path + ": " + short_biases + " has 16383 bytes, 16384 needed");
+    expect_error(audit(1), pack.path + ": missing " + missing);
+}
+
 // The model reader on packs good and damaged.
 void check_model()
 {
@@ -648,6 +709,7 @@ int main(int argc, char** argv)
     check_activation_table();
     check_model();
     check_negative_zeros();
+    check_clamp_free();
     const Pack pack(synthetic_pack());
     const auto model = vulkan::Model::open(pack.path);
     if (expect(bool(model), "opening the synthetic pack: %s", model ? "" : model.error().what.c_str())) {

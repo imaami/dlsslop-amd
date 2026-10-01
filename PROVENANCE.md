@@ -136,7 +136,7 @@ A frame with those stages does not take upstream's path that samples the
 caller's color in place. The build fetches only the fork's SPIR-V sources,
 shader build, model tools and license; it neither fetches nor compiles the
 fork's host code (`linux/src/core`), which those changes modify. Of the 74
-files that the shader build writes, `install.py` installs the 39 that the
+files that the shader build writes, `install.py` installs the 44 that the
 project's own host code names in its tables and reads.
 
 dlsslopd runs the AMD fork's kernels with its own host code.
@@ -183,11 +183,12 @@ path of the fork's `linux/src/core` (MIT) at `a75ac49`: `nr_runtime.cpp`,
 estimation that dlsslop-amd uses, the port records each frame's dispatches, push
 constants, barriers and copies as the fork's host code does, and it packs and
 uploads the weights byte for byte as upstream does; the network mathematics are
-unchanged. It does so with one change of upstream's `b1419b0` switched off,
-which it does not take yet: the kernels without the upper exponent clamp where
-the weights allow them. Like
-upstream, it takes the model's blend scale, by which the temporal post block
-weights the history, as a constant.
+unchanged. Like upstream, it audits the model's position biases and head
+scales when it builds, runs the C=32 layers whose heads never reach the upper
+clamp of the attention's exponent with the kernels built without that clamp,
+and writes each persistent run's layers' clamp-free heads into their records,
+which the kernels do not read. It also takes the model's blend scale, by which
+the temporal post block weights the history, as a constant, as upstream does.
 Unlike upstream, it rejects frames whose working extent is not a
 multiple of 8, on which upstream's build fails, and frames whose activation
 arena needs offsets past 32 bits or does not fit the device's storage buffers,
