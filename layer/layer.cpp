@@ -12,7 +12,6 @@
 #include <vulkan/vk_layer.h>
 
 #include <atomic>
-#include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -28,6 +27,7 @@
 #include "../common/shm_protocol.h"
 #include "composition.h"
 #include "hotkey.h"
+#include "log.h"
 #include "vk_table.h"
 #include "device_features.h"
 #include "network_module.h"
@@ -62,65 +62,12 @@
 // ---------------------------------------------------------------------------
 // Logging
 // ---------------------------------------------------------------------------
-static bool LayerRequestedForLogging() {
-    static const bool enabled = [] {
-        const char* mixed = getenv("VKLayer_DLSS5");
-        const char* upper = getenv("VKLAYER_DLSS5");
-        const char* legacy = getenv("DLSSNR_ENABLE");
-        return (mixed && mixed[0] == '1') || (upper && upper[0] == '1') ||
-               (legacy && legacy[0] == '1');
-    }();
-    return enabled;
-}
-
-static void Log(const char* fmt, ...) {
-    if (!LayerRequestedForLogging()) return;
-    static FILE* f = [] {
-        const char* p = getenv("DLSSNR_LOG");
-        FILE* output = p && *p ? fopen(p, "a") : nullptr;
-        return output ? output : stderr;
-    }();
-    char buf[2048];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
-    va_end(args);
-    // One mutex for the sink, not one per line: the previous form allocated a fresh
-    // std::mutex on every call and leaked it, which at present rates is a leak per frame.
-    static std::mutex sinkMutex;
-    std::lock_guard<std::mutex> lk(sinkMutex);
-    fprintf(f, "[dlssnr-layer] %s\n", buf);
-    fflush(f);
-}
-
-static bool TimeEnabled() {
-    static const bool v = [] {
-        const char* p = getenv("DLSSNR_TIME");
-        return p && p[0] == '1';
-    }();
-    return v;
-}
-
-static int TimeInterval() {
-    static const int v = [] {
-        const char* p = getenv("DLSSNR_TIME_EVERY");
-        return p && *p ? atoi(p) : 30;
-    }();
-    return v > 0 ? v : 30;
-}
-
-static bool VerboseEnabled() {
-    static const bool v = [] {
-        const char* p = getenv("DLSSNR_VERBOSE");
-        return p && p[0] == '1';
-    }();
-    return v;
-}
-
-static inline double NowMs() {
-    return std::chrono::duration<double, std::milli>(
-        std::chrono::steady_clock::now().time_since_epoch()).count();
-}
+// log.h's sink, which the composition and the passes write through too.
+using dlssnr::Log;
+using dlssnr::NowMs;
+using dlssnr::TimeEnabled;
+using dlssnr::TimeInterval;
+using dlssnr::Verbose;
 
 // ---------------------------------------------------------------------------
 // Shared memory transport
@@ -2071,7 +2018,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
             waitsConsumed = waitsConsumed || submittedWaits;
             if (composed) composedSem = sc.leg2Done[pPresentInfo->pImageIndices[i]];
             else ++dc->framesPassedThrough;
-            if (VerboseEnabled()) {
+            if (Verbose()) {
                 Log("[present] swapchain=%p image=%u seq=%u composed=%d",
                     (void*)pPresentInfo->pSwapchains[i], pPresentInfo->pImageIndices[i],
                     dc->shm.hdr ? dc->shm.hdr->seq_req.load() : 0u, int(composed));
