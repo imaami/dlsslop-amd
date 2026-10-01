@@ -682,6 +682,7 @@ Result<void> Runtime::adopt(const VulkanPaths& paths, const Shape& shape)
     s.answer_direct = caps.answer_direct;
     s.post_alpha = s.passes == 1;
     s.pingpong = s.motion && s.passes == 1;
+    s.stored = s.motion && s.passes > 1;
     s.level_width[0] = (s.width + kMotionBase - 1) / kMotionBase;
     s.level_height[0] = (s.height + kMotionBase - 1) / kMotionBase;
     for (uint32_t k = 1; k < kLevels; ++k) {
@@ -726,8 +727,7 @@ Result<void> Runtime::make_images()
         DLSSLOP_TRY(make_image(d, w, h, motion(kWide, !c || s.pingpong), kSampledStorage, o.history[c]));
     DLSSLOP_TRY(make_image(d, w, h, motion(VK_FORMAT_R32_SFLOAT), kSampledStorage, o.depth));
     for (uint32_t pass = 0; pass < kMaxPasses; ++pass)
-        DLSSLOP_TRY(make_image(d, w, h, motion(kWide, s.passes > 1 && pass < s.passes), kStorage,
-                               o.history_store[pass]));
+        DLSSLOP_TRY(make_image(d, w, h, s.stored && pass < s.passes ? kWide : kNone, kStorage, o.history_store[pass]));
     // The parameters and the sampler stay once made.
     if (!s.motion || o.linear) return {};
     DLSSLOP_TRY(make_buffer(d, 4 * kTemporalParams, kBuffers, false, "the network's motion parameters", o.params));
@@ -980,7 +980,7 @@ std::string Runtime::described() const
 {
     const State& s = state_;
     return std::to_string(s.width) + "x" + std::to_string(s.height) + (s.rgba8 ? " RGBA8" : " FP16") +
-           (s.passes > 1 ? ", up to " + std::to_string(s.passes) + " passes" : "") +
+           (s.passes > 1 ? ", " + std::to_string(s.passes) + " passes" : "") +
            (s.stages ? ", pass stages" : "") + (s.motion ? ", motion" : "") + ": input " +
            (s.input_direct ? "copied" : "blitted to RGBA32F") + ", answer " +
            (s.answer_direct ? "stored in the frame's format" : "blitted from RGBA32F");
@@ -1010,7 +1010,6 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
     const Objects& o = objects_;
     const State& s = state_;
     const uint32_t w = s.width, h = s.height, gx = (w + 7) / 8, gy = (h + 7) / 8;
-    const uint32_t passes = std::clamp(c.passes, 1u, s.passes);
     // The frame into the input: copied in its own format, or blitted into
     // RGBA32F. With later passes, which overwrite the input, the first
     // pass's input is kept.
@@ -1076,7 +1075,7 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
         vkCmdPipelineBarrier(cmd, kTransfer, kCompute, 0, 0, nullptr, 1, &b, 0, nullptr);
     }
     bool in_scratch = false; // the pass stages left the answer in the scratch
-    for (uint32_t pass = 0; pass < passes; ++pass) {
+    for (uint32_t pass = 0; pass < s.passes; ++pass) {
         if (pass) {
             // The last pass's answer is this pass's input, and this pass's
             // own history the history.
@@ -1100,9 +1099,9 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
         std::copy_n(push_.data() + last.push, last.words, words);
         patch_post(words, c, s.post_alpha, s.rgba8);
         run_step(cmd, last, post, post_set, words);
-        if (s.motion && !s.pingpong) {
-            // The history is what the model wrote into the second output.
-            const VkImage history = passes > 1 ? o.history_store[pass].image : o.history[0].image;
+        if (s.stored) {
+            // The pass's history is what the model wrote into the second output.
+            const VkImage history = o.history_store[pass].image;
             barrier(cmd, o.second.image, kGeneral, kSource, kCompute, kWrite, kTransfer, kCopyRead);
             barrier(cmd, history, kGeneral, kGeneral, kCompute, kRead, kTransfer, kCopyWrite);
             transfer(cmd, o.second.image, kSource, history, kGeneral, w, h);
@@ -1121,7 +1120,7 @@ void Runtime::record(VkCommandBuffer cmd, VkImage frame, const Controls& c, bool
             }
     }
     // The first pass's history is what the next frame's first pass reads.
-    if (s.motion && passes > 1) copy_general(cmd, o.history_store[0].image, o.history[0].image, w, h);
+    if (s.stored) copy_general(cmd, o.history_store[0].image, o.history[0].image, w, h);
     // The answer back into the frame, with the frame's alpha, which one pass's
     // post block restores itself.
     const VkImage answer = in_scratch ? o.scratch.image : o.answer.image;

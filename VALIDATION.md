@@ -300,7 +300,13 @@ change" builds the whole network again when only those change, such as at the
 first motion or FP16 frame, since dlsslopd builds for RGBA8 frames without
 motion when it starts. Its setup uploads then hold the weights once more per
 such build, so the comparison prints `setup uploads differ` and `DIFFERENT`
-even when every frame matches; `--skip-setup` compares the frames alone.
+even when every frame matches; `--skip-setup` compares the frames alone. Any
+dlsslopd built before "vulkan: rebuild the network when the pass count drops"
+keeps the network it built for more passes when the pass count drops, and
+its frames of fewer passes have other commands than those of a network built
+for their passes. A 1-pass frame there has its input blitted to RGBA32F, the
+alpha pass and its answer blitted out. With pass stages, its RGBA8 answer
+also differs by up to 1 in a color channel.
 
 The revision before "vulkan: run the network with the project's own host code"
 runs the host code of the fork in its `external/vulkan`. Its lock pins an older

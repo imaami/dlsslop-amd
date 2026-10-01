@@ -34,9 +34,11 @@ void NetworkRecorder::drop()
 
 bool NetworkRecorder::shape_differs(const VulkanFrame& frame) const
 {
-    return !runtime_ || std::tie(shape_.width, shape_.height, shape_.fp16, shape_.motion) !=
-                            std::tie(frame.width, frame.height, frame.fp16, frame.motion) ||
-           shape_.passes < passes_of(frame) || (uses_stages(frame) && !shape_.stages);
+    // Pass stages stay built for frames without them: such a frame blits its answer out instead of copying it.
+    return !runtime_ ||
+           std::tuple(shape_.width, shape_.height, shape_.fp16, shape_.motion, shape_.passes) !=
+               std::tuple(frame.width, frame.height, frame.fp16, frame.motion, passes_of(frame)) ||
+           (uses_stages(frame) && !shape_.stages);
 }
 
 Result<void> NetworkRecorder::plan(const VulkanFrame& frame)
@@ -142,9 +144,9 @@ void NetworkRecorder::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answe
     if (queries) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries, query);
 
     // The runtime takes the frame as the copy left it and leaves its answer ready to copy out.
-    // The motion history starts over when the frame's settings change.
-    const vulkan::Controls controls{std::clamp(frame.passes, 1u, unsigned(shape_.passes)),
-                                    frame.style,
+    // The motion history starts over when the frame's settings change, and at a build for
+    // another pass count.
+    const vulkan::Controls controls{frame.style,
                                     std::min(frame.intensity, kMaxControl),
                                     std::min(frame.local_tone, kMaxControl),
                                     std::min(frame.local_structure, kMaxControl),
@@ -153,7 +155,7 @@ void NetworkRecorder::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answe
                                     frame.sharpness,
                                     frame.color_preserve};
     const auto settings = [](const VulkanFrame& f) {
-        return std::tie(f.passes, f.intensity, f.local_tone, f.local_structure, f.style, f.skin_structure, f.auto_mask);
+        return std::tie(f.intensity, f.local_tone, f.local_structure, f.style, f.skin_structure, f.auto_mask);
     };
     runtime_->record(cmd, image_, controls, !last_ || settings(*last_) != settings(frame));
     if (queries) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries, query + 1);

@@ -450,8 +450,9 @@ std::string frames_of(dlsslop::NetworkRecorder& recorder, const dlsslop::VulkanF
 }
 
 // A walk through shapes of 64x64 frames, each a change that the recorder
-// rebuilds for: its passes, format, motion history and stages. Each shape's
-// frames after the reshape must be those of a network built for the shape.
+// rebuilds for: its passes, more or fewer, format, motion history and
+// stages. Each shape's frames after the reshape must be those of a network
+// built for the shape.
 void check_reshapes(const dlsslop::VulkanPaths& paths)
 {
     const struct {
@@ -460,7 +461,8 @@ void check_reshapes(const dlsslop::VulkanPaths& paths)
         float sharpness;
     } walk[] = {{1, false, false, 0}, {1, false, false, 0.5f}, {2, false, false, 0.5f}, {2, false, true, 0.5f},
                 {2, true, true, 0.5f}, {1, true, false, 0},    {1, false, true, 0},     {3, false, true, 0},
-                {3, true, true, 0.5f}, {1, true, false, 0},    {1, false, false, 0},    {2, false, false, 0}};
+                {3, true, true, 0.5f}, {1, true, true, 0.5f},  {1, true, false, 0},     {1, false, false, 0},
+                {2, false, false, 0},  {1, false, false, 0}};
     dlsslop::NetworkRecorder recorder(fake_device(), paths);
     std::set<std::string> kept; // what each pipeline the recorder made was made as
     for (const auto& step : walk) {

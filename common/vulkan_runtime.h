@@ -71,18 +71,18 @@ struct Device {
 uint64_t storage_limit(const Device& device);
 
 // What a runtime is built for: frames of WIDTH x HEIGHT, RGBA8 or with FP16
-// RGBA16F, up to PASSES chained evaluations, with or without motion history
-// and the pass stages.
+// RGBA16F, PASSES chained evaluations, with or without motion history and
+// the pass stages.
 struct Shape {
     uint32_t width, height;
     bool fp16, motion, stages;
     uint8_t passes;
 };
 
-// A frame's controls (upstream: nr::Controls), in the ranges dlsslopd's
-// settings allow. PASSES is at most the build's.
+// A frame's controls (upstream: nr::Controls, whose pass count is the
+// Shape's here), in the ranges dlsslopd's settings allow.
 struct Controls {
-    uint32_t passes, style;
+    uint32_t style;
     float intensity, tone, structure;
     // The skin's local structure under the automatic mask; below 0 it follows
     // STRUCTURE.
@@ -194,8 +194,10 @@ private:
         // the post block restores the frame's alpha itself.
         bool input_direct, answer_direct, post_alpha;
         // One pass with motion: the post block writes the history the next
-        // frame reads, in turn into history[0] and history[1].
-        bool pingpong;
+        // frame reads, in turn into history[0] and history[1]. More passes
+        // with motion: each pass's post block writes its history into the
+        // second output, which that pass's history_store keeps.
+        bool pingpong, stored;
         uint32_t level_width[kLevels], level_height[kLevels];
     };
     // The motion history that the next frame reads.
