@@ -66,11 +66,20 @@ composition and presentation through a separate test layer that also admits
 software devices. It checks transport and composition, not HIP inference.
 Every mode runs under the Khronos validation layer (`vulkan-validationlayers`)
 with synchronization validation and fails on any validation error; the smoke
-skips when that layer is not installed. It then stops the worker, and later
-kills one, and checks that presents neither publish to a stopped worker nor wait
-more than a moment for a killed one. Each mode then destroys its device and
-fails if the layer still holds a descriptor or mapping of the channel or its
-producer lock.
+skips when that layer is not installed. Its lifecycle modes re-create the
+swapchain 20 times with `oldSwapchain`, present a smaller second swapchain
+beside the first, present from two devices in turn (the second on a queue from
+`vkGetDeviceQueue2`), and keep two instances alive at once before destroying all
+of them, which unloads the layer, and creating a new one. The smoke skips the
+unload check under `VK_LOADER_DISABLE_DYNAMIC_LIBRARY_UNLOADING=1`, which keeps
+the layer loaded for a leak checker. Only the largest swapchain may compose, and
+every composed present must publish exactly one request; a second copy of the
+layer, under a second manifest, must stand aside. After every swapchain, device
+and instance teardown, descriptor 0 must still be the file the smoke put there.
+The smoke then stops the worker, and later kills one, and checks that presents
+neither publish to a stopped worker nor wait more than a moment for a killed
+one. Each mode destroys its devices and fails if the layer still holds a
+descriptor or mapping of the channel or its producer lock.
 The composition rebuild test changes the layer's model raster, colour domain
 and downscaler in place and fails when a dispatch binds a descriptor written for
 an image view that has since been destroyed. The smoke, this test and the HDR
