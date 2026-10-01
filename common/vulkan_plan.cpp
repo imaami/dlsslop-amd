@@ -927,10 +927,14 @@ Result<void> Lowering::gemm(const Layer& l)
     p.W = l.W;
     // The ViT's products without a residual take the wide tile, but its QKV
     // at up to kQkvsMaxTokens tokens gemmvqkvnorms'; the residual projections
-    // take theirs (gemmprojw's at many ViT tokens), the rest 64x128.
+    // take theirs, the rest 64x128. At many ViT tokens, its contractions and
+    // its projections but the last, which stores the decoder's raster, take
+    // gemmprojw's.
     const bool qkv = family == F::kVitQkv, qkvs = qkv && m <= kQkvsMaxTokens, wide = vit(r) && !residual,
                projection = !wide && residual && family != F::kProjPool && family != F::kVitExpand,
-               projw = projection && family == F::kVitContract && m >= kProjwMinTokens;
+               last = b == 38 && r.layer == 4,
+               projw = projection && m >= kProjwMinTokens &&
+                       (family == F::kVitContract || (family == F::kVitProjection && !last));
     const auto [mt, nt] = qkvs         ? std::pair(kGemmQkvsMt, kGemmQkvsNt)
                           : wide       ? std::pair(kGemmWideMt, kGemmWideNt)
                           : projw      ? std::pair(kGemmProjwMt, kGemmProjwNt)
@@ -964,7 +968,7 @@ Result<void> Lowering::gemm(const Layer& l)
         p.o_off = off(key(b, r.layer));
         p.r_off = scales;
     }
-    if (b == 38 && r.layer == 4) {
+    if (last) {
         // The last projection stores in the raster the decoder reads.
         if (kernel != Kernel::kGemmProj || l.W % 4 || l.H % 4)
             return fail("network plan: the ViT's output does not fold into its projection");
