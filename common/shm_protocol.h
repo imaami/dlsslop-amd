@@ -245,26 +245,6 @@ struct PassControl {
     std::atomic<uint32_t> autoMask;
 };
 
-// A pass's settings after the global values and its own overrides have been merged. Plain floats:
-// this is the resolved answer, not shared state.
-struct PassTuning {
-    float intensity = 1.0f;
-    float localTone = 1.0f;
-    float localStructure = 1.0f;
-    float skinStructure = -1.0f;  // -1 follows local structure; it is not a strength of zero
-    float sharpness = 0.0f;
-    uint32_t style = 0;
-    uint32_t preset = 0;
-    uint32_t autoMask = 1;
-
-    bool SameCreateParams(const PassTuning& o) const {
-        // Everything the model latches when its feature is built. Sharpness is absent because it is
-        // read at evaluate, and so is the only one of these a running feature will actually follow.
-        return intensity == o.intensity && localTone == o.localTone && localStructure == o.localStructure &&
-               skinStructure == o.skinStructure && style == o.style && preset == o.preset && autoMask == o.autoMask;
-    }
-};
-
 struct ShmHeader {
     std::atomic<uint32_t> magic;
     std::atomic<uint32_t> version;
@@ -638,87 +618,6 @@ inline std::string ShmLoadString(const std::atomic<uint32_t>& seq, const char* s
     return std::string();
 }
 
-inline void ShmInitDefaults(ShmHeader* h);
-
-// Put the settings back to their defaults and leave everything else exactly as it was.
-//
-// Distinct from ShmInitDefaults, which begins by clearing the whole header -- appropriate when a
-// mapping is being created, and destructive when it is not. Resetting settings on a live session
-// through that path takes the transport's sequence numbers, the helper's status and the layer's
-// status down with the settings, and the layer only republishes its own when it next composes a
-// frame. A paused player does not compose another frame, so the interface reported nothing attached
-// until playback resumed: settings reset, picture still edited, status reading Inactive.
-//
-// Written as save-and-restore rather than as a second list of defaults on purpose. A list would have
-// to name every setting, and a setting left off it would silently stop being reset -- whereas a field
-// left off this list is merely reset along with the settings, which is the failure worth having.
-inline void ShmResetSettings(ShmHeader* h) {
-    if (!h) return;
-    struct Saved {
-        uint32_t seq_req, seq_resp, width, height, quit, heartbeat, controlSeq, tuningSeq, seq_ok;
-        uint32_t helperState, modelUp, helperFramesLo, helperFramesHi, helperEvalMsBits;
-        uint32_t helperUploadMsBits, helperReadbackMsBits, helperVramMB, helperFeatures;
-        uint32_t helperPassCeiling, helperReasonSeq;
-        uint32_t layerPid, layerFramesLo, layerFramesHi, layerWidth, layerHeight, layerFormat;
-        uint32_t layerCompositionUp, layerMsBits, layerMeasuredWhiteBits, layerHeartbeat;
-        uint32_t layerReasonSeq, gameNameSeq;
-        uint32_t answeredW, answeredH;
-        uint32_t proxyExportSeq, proxyPid, proxyFd, proxyGen;
-        uint32_t answerExportSeq, answerPid, answerFd, answerGen;
-        uint32_t layerProxySeq, layerAnswerSeq;
-        uint32_t hdrDetected, hdrActive, proxyFormat, hdrEncode;
-    } v;
-#define DLSSNR_SAVE(f) v.f = h->f.load()
-    DLSSNR_SAVE(seq_req); DLSSNR_SAVE(seq_resp); DLSSNR_SAVE(width); DLSSNR_SAVE(height);
-    DLSSNR_SAVE(quit); DLSSNR_SAVE(heartbeat); DLSSNR_SAVE(controlSeq); DLSSNR_SAVE(tuningSeq);
-    DLSSNR_SAVE(seq_ok);
-    DLSSNR_SAVE(helperState); DLSSNR_SAVE(modelUp); DLSSNR_SAVE(helperFramesLo);
-    DLSSNR_SAVE(helperFramesHi); DLSSNR_SAVE(helperEvalMsBits); DLSSNR_SAVE(helperUploadMsBits);
-    DLSSNR_SAVE(helperReadbackMsBits); DLSSNR_SAVE(helperVramMB); DLSSNR_SAVE(helperFeatures);
-    DLSSNR_SAVE(helperPassCeiling); DLSSNR_SAVE(helperReasonSeq);
-    DLSSNR_SAVE(layerPid); DLSSNR_SAVE(layerFramesLo); DLSSNR_SAVE(layerFramesHi);
-    DLSSNR_SAVE(layerWidth); DLSSNR_SAVE(layerHeight); DLSSNR_SAVE(layerFormat);
-    DLSSNR_SAVE(layerCompositionUp); DLSSNR_SAVE(layerMsBits); DLSSNR_SAVE(layerMeasuredWhiteBits);
-    DLSSNR_SAVE(layerHeartbeat); DLSSNR_SAVE(layerReasonSeq); DLSSNR_SAVE(gameNameSeq);
-    DLSSNR_SAVE(answeredW); DLSSNR_SAVE(answeredH);
-    DLSSNR_SAVE(proxyExportSeq); DLSSNR_SAVE(proxyPid); DLSSNR_SAVE(proxyFd); DLSSNR_SAVE(proxyGen);
-    DLSSNR_SAVE(answerExportSeq); DLSSNR_SAVE(answerPid); DLSSNR_SAVE(answerFd);
-    DLSSNR_SAVE(answerGen); DLSSNR_SAVE(layerProxySeq); DLSSNR_SAVE(layerAnswerSeq);
-    DLSSNR_SAVE(hdrDetected); DLSSNR_SAVE(hdrActive); DLSSNR_SAVE(proxyFormat); DLSSNR_SAVE(hdrEncode);
-#undef DLSSNR_SAVE
-    char helperReason[kReasonBytes], layerReason[kReasonBytes], gameName[kNameBytes];
-    std::memcpy(helperReason, h->helperReason, sizeof(helperReason));
-    std::memcpy(layerReason, h->layerReason, sizeof(layerReason));
-    std::memcpy(gameName, h->gameName, sizeof(gameName));
-
-    ShmInitDefaults(h);
-
-#define DLSSNR_LOAD(f) h->f.store(v.f)
-    DLSSNR_LOAD(seq_req); DLSSNR_LOAD(seq_resp); DLSSNR_LOAD(width); DLSSNR_LOAD(height);
-    DLSSNR_LOAD(quit); DLSSNR_LOAD(heartbeat); DLSSNR_LOAD(seq_ok);
-    DLSSNR_LOAD(helperState); DLSSNR_LOAD(modelUp); DLSSNR_LOAD(helperFramesLo);
-    DLSSNR_LOAD(helperFramesHi); DLSSNR_LOAD(helperEvalMsBits); DLSSNR_LOAD(helperUploadMsBits);
-    DLSSNR_LOAD(helperReadbackMsBits); DLSSNR_LOAD(helperVramMB); DLSSNR_LOAD(helperFeatures);
-    DLSSNR_LOAD(helperPassCeiling); DLSSNR_LOAD(helperReasonSeq);
-    DLSSNR_LOAD(layerPid); DLSSNR_LOAD(layerFramesLo); DLSSNR_LOAD(layerFramesHi);
-    DLSSNR_LOAD(layerWidth); DLSSNR_LOAD(layerHeight); DLSSNR_LOAD(layerFormat);
-    DLSSNR_LOAD(layerCompositionUp); DLSSNR_LOAD(layerMsBits); DLSSNR_LOAD(layerMeasuredWhiteBits);
-    DLSSNR_LOAD(layerHeartbeat); DLSSNR_LOAD(layerReasonSeq); DLSSNR_LOAD(gameNameSeq);
-    DLSSNR_LOAD(answeredW); DLSSNR_LOAD(answeredH);
-    DLSSNR_LOAD(proxyExportSeq); DLSSNR_LOAD(proxyPid); DLSSNR_LOAD(proxyFd); DLSSNR_LOAD(proxyGen);
-    DLSSNR_LOAD(answerExportSeq); DLSSNR_LOAD(answerPid); DLSSNR_LOAD(answerFd);
-    DLSSNR_LOAD(answerGen); DLSSNR_LOAD(layerProxySeq); DLSSNR_LOAD(layerAnswerSeq);
-    DLSSNR_LOAD(hdrDetected); DLSSNR_LOAD(hdrActive); DLSSNR_LOAD(proxyFormat); DLSSNR_LOAD(hdrEncode);
-#undef DLSSNR_LOAD
-    std::memcpy(h->helperReason, helperReason, sizeof(helperReason));
-    std::memcpy(h->layerReason, layerReason, sizeof(layerReason));
-    std::memcpy(h->gameName, gameName, sizeof(gameName));
-
-    // Announced last, so both readers see the settled values rather than a half-applied header.
-    h->controlSeq.store(v.controlSeq + 1);
-    h->tuningSeq.store(v.tuningSeq + 1);
-}
-
 inline void ShmInitDefaults(ShmHeader* h) {
     std::memset(static_cast<void*>(h), 0, sizeof(ShmHeader));
     h->magic.store(kShmMagic);
@@ -820,33 +719,6 @@ inline uint32_t ShmPasses(const ShmHeader* h) {
 
 inline bool ShmNeuralEnabled(const ShmHeader* h) { return h->enabled.load() != 0; }
 
-// The global settings with one pass's overrides applied. A field the pass does not name follows the
-// global value, which is what keeps a sparse override sparse.
-inline PassTuning ShmResolvePass(const ShmHeader* h, uint32_t pass) {
-    PassTuning t;
-    t.intensity = BitsToFloat(h->intensityBits.load());
-    t.localTone = BitsToFloat(h->localToneBits.load());
-    t.localStructure = BitsToFloat(h->localStructureBits.load());
-    t.skinStructure = BitsToFloat(h->skinStructureBits.load());
-    t.sharpness = BitsToFloat(h->sharpnessBits.load());
-    t.style = h->style.load();
-    t.preset = h->preset.load();
-    t.autoMask = h->autoMask.load();
-
-    if (pass >= kMaxPasses) return t;
-    const uint32_t mask = h->pass[pass].overrideMask.load();
-    if (mask == 0) return t;
-    if (mask & kOverrideIntensity) t.intensity = BitsToFloat(h->pass[pass].intensityBits.load());
-    if (mask & kOverrideLocalTone) t.localTone = BitsToFloat(h->pass[pass].localToneBits.load());
-    if (mask & kOverrideLocalStructure) t.localStructure = BitsToFloat(h->pass[pass].localStructureBits.load());
-    if (mask & kOverrideSkinStructure) t.skinStructure = BitsToFloat(h->pass[pass].skinStructureBits.load());
-    if (mask & kOverrideSharpness) t.sharpness = BitsToFloat(h->pass[pass].sharpnessBits.load());
-    if (mask & kOverrideStyle) t.style = h->pass[pass].style.load();
-    if (mask & kOverridePreset) t.preset = h->pass[pass].preset.load();
-    if (mask & kOverrideAutoMask) t.autoMask = h->pass[pass].autoMask.load();
-    return t;
-}
-
 inline uint64_t ShmLoad64(const std::atomic<uint32_t>& lo, const std::atomic<uint32_t>& hi) {
     return (uint64_t(hi.load()) << 32) | uint64_t(lo.load());
 }
@@ -854,13 +726,6 @@ inline uint64_t ShmLoad64(const std::atomic<uint32_t>& lo, const std::atomic<uin
 inline void ShmStore64(std::atomic<uint32_t>& lo, std::atomic<uint32_t>& hi, uint64_t v) {
     hi.store(uint32_t(v >> 32));
     lo.store(uint32_t(v & 0xFFFFFFFFu));
-}
-
-inline bool ShmMVecEnabled(const ShmHeader* h) { return h->mvecEnabled.load() != 0; }
-
-inline uint32_t ShmMVecScaleMode(const ShmHeader* h) {
-    const uint32_t m = h->mvecScaleMode.load();
-    return m <= kMVecUv01 ? m : kMVecNormalized;
 }
 
 inline uint32_t ShmMVecQuality(const ShmHeader* h) {
