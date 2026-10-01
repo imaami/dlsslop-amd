@@ -26,6 +26,9 @@ struct MeterPush {
     uint32_t hold;
 };
 static_assert(sizeof(MeterPush) == 24, "must match the push_constant block in meter_reduce.comp");
+
+// The layout of the source and motion views that every dispatch of the pass states.
+constexpr VkImageLayout kReadOnly = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -162,7 +165,7 @@ FrameSettings FrameSettings::Read(const ShmHeader* h) {
 
     // Above 1.0 the model supersamples, up to upstream's 2x ceiling.
     s.workingScale = clamp(s.workingScale, 0.25f, 2.0f, 1.0f);
-    if (s.downscaler >= kScalerCount || s.downscaler == kScalerFsr1) s.downscaler = kScalerLanczos3;
+    if (s.downscaler >= SCALER_VK_COUNT || s.downscaler == SCALER_VK_FSR1) s.downscaler = SCALER_VK_LANCZOS3;
 
     // Native + edit is mode 2; the clamp used to stop at 1 and silently killed it.
     if (s.transfer > 2) s.transfer = 2;
@@ -187,10 +190,9 @@ Composition::Composition(const device_table* vk, const instance_table* instance,
         return;
     }
 
-    _pass = std::make_unique<DlssNrPass>(vk, instance, device, physicalDevice);
-    if (!_pass->CanRender()) {
+    if (dlss_nr_pass_init(&_pass, vk, instance, device, physicalDevice) != VK_SUCCESS) {
         _reason = "the composition pipeline could not be built";
-        _pass.reset();
+        dlss_nr_pass_fini(&_pass);
         return;
     }
 
@@ -200,7 +202,7 @@ Composition::Composition(const device_table* vk, const instance_table* instance,
 Composition::~Composition() {
     DropAll();
     DropMeterObjects();
-    _pass.reset();
+    dlss_nr_pass_fini(&_pass);
 }
 
 void Composition::DropAll() {
@@ -216,8 +218,8 @@ void Composition::DropAll() {
     DropHostBuffer(_download);
     DropHostBuffer(_upload);
     WithdrawOffer();
-    _superUp.reset();
-    _superDown.reset();
+    scaler_vk_fini(&_superUp);
+    scaler_vk_fini(&_superDown);
     _superSample = false;
     _width = _height = _modelW = _modelH = 0;
     _frameCaptured = false;
@@ -870,17 +872,17 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
     bool okSuper = true;
     if (superSample) {
         okSuper = MakeImage(_modelNative, width, height, proxyFormat, sampled | storage);
-        _superUp = std::make_unique<ScalerVk>(_vk, _instance, _device, _physicalDevice, true, s.downscaler);
-        _superDown = std::make_unique<ScalerVk>(_vk, _instance, _device, _physicalDevice, false, s.downscaler);
-        if (!_superUp->CanRender() || !_superDown->CanRender()) {
+        // DropAll left both empty.
+        const VkResult up = scaler_vk_init(&_superUp, _vk, _instance, _device, _physicalDevice, true,
+                                           s.downscaler);
+        const VkResult down = scaler_vk_init(&_superDown, _vk, _instance, _device, _physicalDevice, false,
+                                             s.downscaler);
+        if (up != VK_SUCCESS || down != VK_SUCCESS) {
             log_printf("[comp] the resampling filters could not be built; supersampling is unavailable");
-            _superUp.reset();
-            _superDown.reset();
+            scaler_vk_fini(&_superUp);
+            scaler_vk_fini(&_superDown);
             okSuper = false;
         }
-    } else {
-        _superUp.reset();
-        _superDown.reset();
     }
 
     if (!ok || !okTransport || !okWork || !okMeter || !okSuper) {
@@ -902,7 +904,7 @@ bool Composition::Prepare(uint32_t width, uint32_t height, VkFormat swapchainFor
 void Composition::Transition(VkCommandBuffer cb, Image& img, VkImageLayout to) {
     if (img.layout == to) return;
     VkImageSubresourceRange range{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
-    _pass->SetImageLayout(cb, img.image, img.layout, to, range);
+    shader_vk_set_image_layout(&_pass.shader, cb, img.image, img.layout, to, range);
     img.layout = to;
 }
 
@@ -1076,8 +1078,8 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
         enc.mode = DLSS_NR_MODE_ENCODE;
         enc.width = _width;
         enc.height = _height;
-        if (!_pass->Dispatch(cb, enc, _width, _height, _frame.view, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                             _proxy.view, VK_NULL_HANDLE))
+        if (!dlss_nr_pass_dispatch(&_pass, cb, &enc, _width, _height, _frame.view, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                   VK_NULL_HANDLE, _proxy.view, VK_NULL_HANDLE, kReadOnly, kReadOnly))
             return false;
         source = &_proxy;
     }
@@ -1098,8 +1100,9 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
         meter.mode = DLSS_NR_MODE_CALIBRATE;
         meter.width = DLSS_NR_METER_GRID;
         meter.height = DLSS_NR_METER_GRID;
-        if (_pass->Dispatch(cb, meter, DLSS_NR_METER_GRID, DLSS_NR_METER_GRID, _frame.view, VK_NULL_HANDLE,
-                            VK_NULL_HANDLE, VK_NULL_HANDLE, _meter.view, VK_NULL_HANDLE)) {
+        if (dlss_nr_pass_dispatch(&_pass, cb, &meter, DLSS_NR_METER_GRID, DLSS_NR_METER_GRID, _frame.view,
+                                  VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, _meter.view, VK_NULL_HANDLE,
+                                  kReadOnly, kReadOnly)) {
             if (!_meterStateCleared) {
                 _vk->vkCmdFillBuffer(cb, _meterState, 0, VK_WHOLE_SIZE, 0);
                 // The reduce reads and writes what the fill cleared.
@@ -1148,7 +1151,7 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
 
         if (_superSample) {
             // Enlarge, so the model has more pixels to synthesise into than the frame has.
-            if (!_superUp->Dispatch(cb, source->view, _work.view, _width, _height, _modelW, _modelH))
+            if (!scaler_vk_dispatch(&_superUp, cb, source->view, _work.view, _width, _height, _modelW, _modelH))
                 return false;
         } else {
             // Reduce, with the module's own area filter -- the model then works on fewer pixels and
@@ -1157,8 +1160,9 @@ bool Composition::RecordCapture(VkCommandBuffer cb, VkImage swapchainImage, cons
             down.mode = DLSS_NR_MODE_DOWNSAMPLE;
             down.width = _modelW;
             down.height = _modelH;
-            if (!_pass->Dispatch(cb, down, _modelW, _modelH, source->view, VK_NULL_HANDLE, VK_NULL_HANDLE,
-                                 VK_NULL_HANDLE, _work.view, VK_NULL_HANDLE))
+            if (!dlss_nr_pass_dispatch(&_pass, cb, &down, _modelW, _modelH, source->view, VK_NULL_HANDLE,
+                                       VK_NULL_HANDLE, VK_NULL_HANDLE, _work.view, VK_NULL_HANDLE, kReadOnly,
+                                       kReadOnly))
                 return false;
         }
         source = &_work;
@@ -1213,7 +1217,8 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
     }
     if (_superSample) {
         Transition(cb, _modelNative, VK_IMAGE_LAYOUT_GENERAL);
-        if (!_superDown->Dispatch(cb, answer->view, _modelNative.view, _modelW, _modelH, _width, _height))
+        if (!scaler_vk_dispatch(&_superDown, cb, answer->view, _modelNative.view, _modelW, _modelH, _width,
+                                _height))
             return false;
         Transition(cb, _modelNative, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         answer = &_modelNative;
@@ -1235,25 +1240,24 @@ bool Composition::RecordCompose(VkCommandBuffer cb, VkImage swapchainImage, cons
     // host memcpy ran before submit, so this transfer write is the last writer ahead of the
     // dispatch's uniform read, and the barrier states that.
     if (_meterGpu && s.whitePointSource == kWhitePointMeasured) {
-        const VkDeviceSize slotOff = _pass->ConstantSlotStride() * _pass->NextConstantSlot() +
-                                     offsetof(struct dlss_nr_constants, white_point);
+        const VkDeviceSize slotOff = _pass.slot_stride * _pass.slot + offsetof(struct dlss_nr_constants, white_point);
         const VkBufferCopy patch{ kMeterResolvedOffset, slotOff, sizeof(float) };
-        _vk->vkCmdCopyBuffer(cb, _meterState, _pass->ConstantBuffer(), 1, &patch);
+        _vk->vkCmdCopyBuffer(cb, _meterState, _pass.shader.constant_buffer, 1, &patch);
         VkBufferMemoryBarrier b{};
         b.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
         b.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         b.dstAccessMask = VK_ACCESS_UNIFORM_READ_BIT;
         b.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        b.buffer = _pass->ConstantBuffer();
+        b.buffer = _pass.shader.constant_buffer;
         b.offset = slotOff;
         b.size = sizeof(float);
         _vk->vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                   0, 0, nullptr, 1, &b, 0, nullptr);
     }
 
-    if (!_pass->Dispatch(cb, res, _width, _height, source->view, answer->view, _frame.view, VK_NULL_HANDLE,
-                         _composed.view, VK_NULL_HANDLE))
+    if (!dlss_nr_pass_dispatch(&_pass, cb, &res, _width, _height, source->view, answer->view, _frame.view,
+                               VK_NULL_HANDLE, _composed.view, VK_NULL_HANDLE, kReadOnly, kReadOnly))
         return false;
 
     Transition(cb, _composed, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);

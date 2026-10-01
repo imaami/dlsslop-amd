@@ -26,7 +26,6 @@
 
 #include "../common/shm_protocol.h"
 
-#include <memory>
 #include <string>
 
 namespace dlssnr {
@@ -59,7 +58,7 @@ struct FrameSettings {
     uint32_t reversibleMode = kReversibleKnee;
     uint32_t applyModel = 1;
     uint32_t holdFrame = 0;
-    uint32_t downscaler = kScalerLanczos3;
+    uint32_t downscaler = SCALER_VK_LANCZOS3;
     // 1: present the model's raw answer as the frame -- no blend, no guard, no compare.
     uint32_t compositionBypass = 0;
 
@@ -240,7 +239,7 @@ class Composition {
     VkDevice _device = VK_NULL_HANDLE;
     VkPhysicalDevice _physicalDevice = VK_NULL_HANDLE;
 
-    std::unique_ptr<DlssNrPass> _pass;
+    struct dlss_nr_pass _pass = {};
     bool _usable = false;
     std::string _reason;
 
@@ -260,9 +259,9 @@ class Composition {
     // would read the larger answer through a bilinear sampler and alias, which is the reason upstream
     // gave this its own filter rather than reusing the resolve's.
     Image _modelNative{};
-    std::unique_ptr<ScalerVk> _superUp, _superDown;
+    struct scaler_vk _superUp = {}, _superDown = {};
     bool _superSample = false;
-    uint32_t _scalerFilter = kScalerLanczos3;
+    uint32_t _scalerFilter = SCALER_VK_LANCZOS3;
 
     // The white point meter: a grid of tile peak luminances measured off the captured frame, and the
     // percentile taken across it -- on the GPU. The reduce pass keeps the percentile, the history

@@ -88,7 +88,7 @@ constexpr WordField kWords[] = {
     {"reversibleMode", &FrameSettings::reversibleMode, kReversibleKnee},
     {"applyModel", &FrameSettings::applyModel, 1},
     {"holdFrame", &FrameSettings::holdFrame, 0},
-    {"downscaler", &FrameSettings::downscaler, dlssnr::kScalerLanczos3},
+    {"downscaler", &FrameSettings::downscaler, SCALER_VK_LANCZOS3},
     {"compositionBypass", &FrameSettings::compositionBypass, 0},
 };
 
@@ -310,10 +310,10 @@ void CheckRead() {
         {&ShmHeader::reversibleMode, kReversibleModeCount - 1, &FrameSettings::reversibleMode,
          kReversibleModeCount - 1},
         {&ShmHeader::reversibleMode, kReversibleModeCount, &FrameSettings::reversibleMode, kReversibleKnee},
-        {&ShmHeader::scalingDownscaler, dlssnr::kScalerBicubic, &FrameSettings::downscaler, dlssnr::kScalerBicubic},
-        {&ShmHeader::scalingDownscaler, dlssnr::kScalerMagic, &FrameSettings::downscaler, dlssnr::kScalerMagic},
-        {&ShmHeader::scalingDownscaler, dlssnr::kScalerFsr1, &FrameSettings::downscaler, dlssnr::kScalerLanczos3},
-        {&ShmHeader::scalingDownscaler, dlssnr::kScalerCount, &FrameSettings::downscaler, dlssnr::kScalerLanczos3},
+        {&ShmHeader::scalingDownscaler, SCALER_VK_BICUBIC, &FrameSettings::downscaler, SCALER_VK_BICUBIC},
+        {&ShmHeader::scalingDownscaler, SCALER_VK_MAGIC, &FrameSettings::downscaler, SCALER_VK_MAGIC},
+        {&ShmHeader::scalingDownscaler, SCALER_VK_FSR1, &FrameSettings::downscaler, SCALER_VK_LANCZOS3},
+        {&ShmHeader::scalingDownscaler, SCALER_VK_COUNT, &FrameSettings::downscaler, SCALER_VK_LANCZOS3},
         {&ShmHeader::controlSeq, 77, &FrameSettings::controlSeq, 77},
         {&ShmHeader::tuningSeq, 78, &FrameSettings::tuningSeq, 78},
         {&ShmHeader::passes, 99, &FrameSettings::passes, 99},
@@ -479,13 +479,13 @@ void CheckFormats() {
 void CheckScalerNames() {
     static const char* const kNames[] = {"lanczos3", "bicubic", "catmull-rom", "lanczos2",
                                          "lanczos3", "kaiser2", "kaiser3", "magic"};
-    static_assert(std::size(kNames) == dlssnr::kScalerCount);
-    for (uint32_t filter = 0; filter != dlssnr::kScalerCount; ++filter)
-        Require(!std::strcmp(dlssnr::ScalerFilterName(filter), kNames[filter]),
-                "ScalerFilterName(" + std::to_string(filter) + ")");
-    for (const uint32_t filter : {uint32_t(dlssnr::kScalerCount), 100u, UINT32_MAX})
-        Require(!std::strcmp(dlssnr::ScalerFilterName(filter), "lanczos3"),
-                "ScalerFilterName(" + std::to_string(filter) + ")");
+    static_assert(std::size(kNames) == SCALER_VK_COUNT);
+    for (uint32_t filter = 0; filter != SCALER_VK_COUNT; ++filter)
+        Require(!std::strcmp(scaler_vk_filter_name(filter), kNames[filter]),
+                "scaler_vk_filter_name(" + std::to_string(filter) + ")");
+    for (const uint32_t filter : {uint32_t(SCALER_VK_COUNT), 100u, UINT32_MAX})
+        Require(!std::strcmp(scaler_vk_filter_name(filter), "lanczos3"),
+                "scaler_vk_filter_name(" + std::to_string(filter) + ")");
 }
 
 void CheckKeyNames() {

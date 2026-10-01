@@ -321,12 +321,12 @@ int main() {
     // Every step changes the model raster, the colour domain or the downscaler, so Prepare
     // destroys and recreates the composition surfaces while the pass and its sets live on.
     const Step steps[] = {
-        {1.0f, false, dlssnr::kScalerLanczos3}, {0.5f, false, dlssnr::kScalerLanczos3},
-        {1.0f, false, dlssnr::kScalerLanczos3}, {0.5f, false, dlssnr::kScalerLanczos3},
-        {0.75f, false, dlssnr::kScalerLanczos3}, {1.5f, false, dlssnr::kScalerLanczos3},
-        {1.5f, false, dlssnr::kScalerCatmullRom}, {1.0f, true, dlssnr::kScalerLanczos3},
-        {0.5f, true, dlssnr::kScalerLanczos3}, {1.0f, false, dlssnr::kScalerLanczos3},
-        {0.5f, false, dlssnr::kScalerLanczos3}, {0.75f, false, dlssnr::kScalerLanczos3},
+        {1.0f, false, SCALER_VK_LANCZOS3}, {0.5f, false, SCALER_VK_LANCZOS3},
+        {1.0f, false, SCALER_VK_LANCZOS3}, {0.5f, false, SCALER_VK_LANCZOS3},
+        {0.75f, false, SCALER_VK_LANCZOS3}, {1.5f, false, SCALER_VK_LANCZOS3},
+        {1.5f, false, SCALER_VK_CATMULL_ROM}, {1.0f, true, SCALER_VK_LANCZOS3},
+        {0.5f, true, SCALER_VK_LANCZOS3}, {1.0f, false, SCALER_VK_LANCZOS3},
+        {0.5f, false, SCALER_VK_LANCZOS3}, {0.75f, false, SCALER_VK_LANCZOS3},
     };
     unsigned composed = 0;
     for (const Step& step : steps) {

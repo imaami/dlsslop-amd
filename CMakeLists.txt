@@ -102,8 +102,8 @@ add_custom_target(layer-shaders DEPENDS ${LAYER_SHADERS} ${METER}.h)
 
 # Only layer.cpp differs between the layers; both and the layer tests link
 # the other translation units compiled once.
-add_library(dlsslop-layer-objects OBJECT layer/shader_vk.cpp layer/dlssnr_pass.cpp layer/composition.cpp
-    layer/capture.c layer/scaler_vk.cpp layer/hotkey.c layer/log.c)
+add_library(dlsslop-layer-objects OBJECT layer/shader_vk.c layer/dlssnr_pass.c layer/composition.cpp
+    layer/capture.c layer/scaler_vk.c layer/hotkey.c layer/log.c)
 set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_dependencies(dlsslop-layer-objects layer-shaders)
 target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC layer ${X11_HEADERS} ${XINPUT_HEADERS})
@@ -313,6 +313,13 @@ if(BUILD_TESTING)
     add_executable(hotkey-test tests/hotkey_test.c)
     target_link_libraries(hotkey-test PRIVATE dlsslop-layer-objects)
     add_test(NAME hotkey COMMAND hotkey-test)
+    # The composition and scaling passes in C, on a fake device: what each build creates and each
+    # fini destroys, after a failure at any step too, and what a dispatch records.
+    add_executable(shader-passes-test tests/shader_passes_test.c)
+    add_dependencies(shader-passes-test layer-shaders)
+    target_include_directories(shader-passes-test PRIVATE ${SHADER_DIR})
+    target_link_libraries(shader-passes-test PRIVATE dlsslop-layer-objects)
+    add_test(NAME shader-passes COMMAND shader-passes-test)
     add_test(NAME color-metrics COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_metrics_test.py)
     add_test(NAME color-orchestrator COMMAND ${Python3_EXECUTABLE}

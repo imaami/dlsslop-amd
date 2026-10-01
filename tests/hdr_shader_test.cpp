@@ -10,7 +10,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -20,6 +19,7 @@ constexpr uint32_t width = 16, height = 8;
 constexpr size_t components = width * height * 4;
 constexpr size_t float_bytes = components * sizeof(float);
 constexpr float max_ratio = 2;  // the resolve's guard
+constexpr VkImageLayout read_only = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
 [[noreturn]] void Fail(const std::string& message) {
     std::fprintf(stderr, "hdr-shader-test: %s\n", message.c_str());
@@ -43,11 +43,11 @@ struct Context {
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     struct instance_table instanceTable = {};
     struct device_table deviceTable = {};
-    std::unique_ptr<dlssnr::DlssNrPass> pass;
+    struct dlss_nr_pass pass = {};
 
     ~Context() {
         if (device) vkDeviceWaitIdle(device);
-        pass.reset();
+        dlss_nr_pass_fini(&pass);
         if (pool) vkDestroyCommandPool(device, pool, nullptr);
         if (device) vkDestroyDevice(device, nullptr);
         if (instance) vkDestroyInstance(instance, nullptr);
@@ -126,8 +126,8 @@ struct Context {
         instance_table_load(&instanceTable, instance);
         deviceTable.next_dpa = vkGetDeviceProcAddr;
         device_table_load(&deviceTable, device);
-        pass = std::make_unique<dlssnr::DlssNrPass>(&deviceTable, &instanceTable, device, physical);
-        Check(pass->CanRender(), "composition pass initialization failed");
+        pass = dlss_nr_pass(&deviceTable, &instanceTable, device, physical);
+        Check(pass.error == VK_SUCCESS, "composition pass initialization failed");
         return true;
     }
 
@@ -356,8 +356,9 @@ Result Run(Context& c, const std::array<float, components>& input, const Options
     constants.hdr_transfer = o.pq;
     constants.colour_trust = 2;
     constants.ratio_smooth = 1;
-    Check(c.pass->Dispatch(c.cmd, constants, width, height, native.view, VK_NULL_HANDLE,
-                          VK_NULL_HANDLE, VK_NULL_HANDLE, proxy.view, VK_NULL_HANDLE), "encode dispatch");
+    Check(dlss_nr_pass_dispatch(&c.pass, c.cmd, &constants, width, height, native.view, VK_NULL_HANDLE,
+                                VK_NULL_HANDLE, VK_NULL_HANDLE, proxy.view, VK_NULL_HANDLE, read_only, read_only),
+          "encode dispatch");
     proxy.Transition(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     Image& source = o.reduced ? small : proxy;
     if (o.reduced) {
@@ -365,8 +366,10 @@ Result Run(Context& c, const std::array<float, components>& input, const Options
         constants.mode = DLSS_NR_MODE_DOWNSAMPLE;
         constants.width = model_width;
         constants.height = model_height;
-        Check(c.pass->Dispatch(c.cmd, constants, model_width, model_height, proxy.view, VK_NULL_HANDLE,
-                              VK_NULL_HANDLE, VK_NULL_HANDLE, small.view, VK_NULL_HANDLE), "downsample dispatch");
+        Check(dlss_nr_pass_dispatch(&c.pass, c.cmd, &constants, model_width, model_height, proxy.view,
+                                    VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, small.view, VK_NULL_HANDLE,
+                                    read_only, read_only),
+              "downsample dispatch");
         small.Transition(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
         VkBufferImageCopy reduced = copy;
         reduced.bufferOffset = small_offset;
@@ -411,8 +414,9 @@ Result Run(Context& c, const std::array<float, components>& input, const Options
     vkCmdCopyBufferToImage(c.cmd, staging.buffer, model.image, model.layout, 1, &upload);
     model.Transition(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     constants.mode = DLSS_NR_MODE_RESOLVE;
-    Check(c.pass->Dispatch(c.cmd, constants, width, height, source.view, model.view,
-                          native.view, VK_NULL_HANDLE, output.view, VK_NULL_HANDLE), "resolve dispatch");
+    Check(dlss_nr_pass_dispatch(&c.pass, c.cmd, &constants, width, height, source.view, model.view, native.view,
+                                VK_NULL_HANDLE, output.view, VK_NULL_HANDLE, read_only, read_only),
+          "resolve dispatch");
     output.Transition(VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
     copy.bufferOffset = float_bytes;
     vkCmdCopyImageToBuffer(c.cmd, output.image, output.layout, staging.buffer, 1, &copy);

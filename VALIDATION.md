@@ -106,8 +106,18 @@ those files answer as keyboards, mice and power buttons do: only keyboards
 open, a live keyboard stays open, one that has gone closes, and one that
 appears later is logged. When Xvfb and libXtst are installed, the test starts
 Xvfb on a free display and checks that the XInput2 backend reads the key
-presses that XTEST sends. With the tests, the build compiles
-`tests/c_headers.c`, which includes as C the headers that C and C++ share.
+presses that XTEST sends. The shader-passes test builds the composition and
+scaling passes on a fake device. It checks that finishing a pass destroys what
+its build created, once, also when any step of the build fails and leaves its
+output undefined, and that empty passes and passes without a device own
+nothing. It checks that each pass runs the SPIR-V of its shader, which for an
+average is the one that its filter value selects, and the constant ring's
+stride. It checks that a dispatch writes its constants into its slot and every
+binding of the slot's set, dispatches the shader's groups and makes the
+placeholder only once, that the dispatch after a failed placeholder makes it
+again, and that the passes refuse dispatches that miss a command buffer or an
+image. With the tests, the build compiles `tests/c_headers.c`, which includes
+as C the headers that C and C++ share.
 
 Two checks disassemble the built HIP modules and need `llvm-objdump`. The
 LDS-barrier check fails when a shared-memory access can still be outstanding at
