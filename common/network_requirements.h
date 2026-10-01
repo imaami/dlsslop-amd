@@ -60,9 +60,6 @@ constexpr NetworkFeature kNetworkFeatures[] = {
     {"subgroupSizeControl", DLSSLOP_ALONE(VkPhysicalDeviceSubgroupSizeControlFeatures, SUBGROUP_SIZE_CONTROL_FEATURES,
                                           subgroupSizeControl),
      DLSSLOP_CORE(13, 1_3, subgroupSizeControl), nullptr},
-    {"synchronization2", DLSSLOP_ALONE(VkPhysicalDeviceSynchronization2Features, SYNCHRONIZATION_2_FEATURES,
-                                       synchronization2),
-     DLSSLOP_CORE(13, 1_3, synchronization2), nullptr},
     {"workgroupMemoryExplicitLayout",
      DLSSLOP_ALONE(VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR, WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR,
                    workgroupMemoryExplicitLayout),
@@ -129,8 +126,7 @@ class NetworkFeatureChain {
     VkPhysicalDeviceVulkanMemoryModelFeatures memory_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES,
                                                       &subgroup_};
     VkPhysicalDeviceSubgroupSizeControlFeatures subgroup_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES,
-                                                          &sync2_};
-    VkPhysicalDeviceSynchronization2Features sync2_{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES, &layout_};
+                                                          &layout_};
     VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR layout_{
         VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR};
 
@@ -141,7 +137,7 @@ public:
     // The structure of TYPE, whatever a caller has since linked it to.
     void* structure(VkStructureType type)
     {
-        void* const all[] = {&coop_, &fp8_, &storage16_, &storage8_, &float16_, &memory_, &subgroup_, &sync2_, &layout_};
+        void* const all[] = {&coop_, &fp8_, &storage16_, &storage8_, &float16_, &memory_, &subgroup_, &layout_};
         for (void* s : all)
             if (StructureType(s) == type) return s;
         return nullptr;

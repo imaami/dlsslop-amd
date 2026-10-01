@@ -110,6 +110,7 @@ class DeviceFeatureRequest {
             COPY(VkDeviceGroupDeviceCreateInfo, VK_STRUCTURE_TYPE_DEVICE_GROUP_DEVICE_CREATE_INFO);
             COPY(VkPhysicalDeviceSwapchainMaintenance1FeaturesEXT,
                  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SWAPCHAIN_MAINTENANCE_1_FEATURES_EXT);
+            COPY(VkPhysicalDeviceSynchronization2Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES);
             // The network's own structures, which a game may chain itself.
             COPY(VkPhysicalDeviceCooperativeMatrixFeaturesKHR,
                  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COOPERATIVE_MATRIX_FEATURES_KHR);
@@ -120,7 +121,6 @@ class DeviceFeatureRequest {
             COPY(VkPhysicalDeviceVulkanMemoryModelFeatures, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_MEMORY_MODEL_FEATURES);
             COPY(VkPhysicalDeviceSubgroupSizeControlFeatures,
                  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_FEATURES);
-            COPY(VkPhysicalDeviceSynchronization2Features, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES);
             COPY(VkPhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR,
                  VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_WORKGROUP_MEMORY_EXPLICIT_LAYOUT_FEATURES_KHR);
 #undef COPY
