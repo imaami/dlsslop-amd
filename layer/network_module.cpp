@@ -117,7 +117,10 @@ int dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader* channel, uint32_
     settings->fp16 = fp16 != 0;
     const unsigned passes = std::min(ShmPasses(channel), NetworkRecorder::kMaxPasses);
     const auto frame = dlsslop::vulkan_frame(width, height, passes, *settings);
-    if (!n->recorder.shape_differs(frame)) {
+    // A frame of the network's extent: of its shape, or of another that it is reshaped for here,
+    // between frames, with no GPU work.
+    if (n->recorder.has_extent(frame)) {
+        if (auto shaped = n->recorder.shape(frame); !shaped) return n->fail(std::move(shaped).error().what);
         n->prepared = frame;
         return kDlsslopNetworkReady;
     }

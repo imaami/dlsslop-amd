@@ -410,14 +410,14 @@ size_t compilers()
     return std::clamp<size_t>(usable / 2, 1, kCompilers);
 }
 
-// The pipelines MISSING[0..COUNT) made into PIPELINES through CACHE by every
-// thread that runs run(), each taking the next one; MADE[i] says how
-// MISSING[i] went. Once one has failed, no thread takes another.
+// The pipelines WHICH[0..COUNT) made into PIPELINES through CACHE by every
+// thread that runs run(), each taking the next one; MADE[i] says how WHICH[i]
+// went. Once one has failed, no thread takes another.
 struct Compile {
     VkDevice device;
     VkPipelineCache cache;
     const std::string& shaders;
-    const size_t* missing;
+    const size_t* which;
     size_t count;
     Pipeline* pipelines;
     Result<void>* made;
@@ -429,7 +429,7 @@ struct Compile {
         auto& c = *static_cast<Compile*>(self);
         for (size_t i; !c.failed.load(std::memory_order_relaxed) &&
                        (i = c.next.fetch_add(1, std::memory_order_relaxed)) < c.count;) {
-            c.made[i] = make_pipeline(c.device, c.cache, c.shaders, c.missing[i], c.pipelines[c.missing[i]]);
+            c.made[i] = make_pipeline(c.device, c.cache, c.shaders, c.which[i], c.pipelines[c.which[i]]);
             if (!c.made[i]) c.failed.store(true, std::memory_order_relaxed);
         }
         return nullptr;
@@ -561,7 +561,7 @@ void settle(std::vector<VkImageMemoryBarrier>& layouts, const Image& image, VkIm
 
 } // namespace
 
-// What a build's or a reshape's submission uses, and frees once it has run:
+// What a build's submission uses, and frees once it has run:
 // never while the device may still read it, so a submission that is not
 // known to have ended leaks it.
 struct Runtime::Setup {
@@ -598,8 +598,8 @@ Result<Runtime> Runtime::build(const Device& device, const VulkanPaths& paths, c
 
 Runtime::Runtime(Runtime&& other) noexcept
     : device_(other.device_), objects_(std::exchange(other.objects_, {})), state_(other.state_),
-      history_(other.history_), recorded_(other.recorded_), steps_(std::move(other.steps_)),
-      push_(std::move(other.push_))
+      history_(other.history_), recorded_(other.recorded_), settled_(other.settled_),
+      steps_(std::move(other.steps_)), push_(std::move(other.push_))
 {
 }
 
@@ -630,11 +630,12 @@ Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, const P
         return fail("network plan: not a plan of the frames the network is built for");
     // What the build reads and what the device offers, before any object.
     DLSSLOP_TRY(check_constants(paths.shaders));
+    DLSSLOP_TRY(check_constants(join(paths.shaders, "temporal")));
     DLSSLOP_TRY(check_markers(paths.shaders));
     const Model model = DLSSLOP_TRY(Model::open(paths.model));
     steps_ = plan.steps;
     push_ = plan.push;
-    DLSSLOP_TRY(adopt(paths, shape));
+    DLSSLOP_TRY(adopt(shape));
     // What stays while the runtime lives: the activation arena, the weights
     // and the input's sampler.
     const Device& d = device_;
@@ -643,11 +644,11 @@ Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, const P
     DLSSLOP_TRY(make_buffer(d, plan.blob_bytes, kBuffers, false, "the network's weights", o.weights));
     DLSSLOP_TRY(make_sampler(d.device, VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT, o.nearest));
     const auto compiling = std::chrono::steady_clock::now();
-    DLSSLOP_TRY(make_pipelines(paths, true));
+    DLSSLOP_TRY(make_pipelines(paths));
     const double compiled = seconds_since(compiling);
     DLSSLOP_TRY(make_sets());
-    // One submission: every image into the layout frames use it in, the
-    // weights and the arena, and a barrier before anything after it.
+    // One submission: the weights and the arena, and a barrier before
+    // anything after it.
     const auto setting_up = std::chrono::steady_clock::now();
     Setup setup{d.device};
     DLSSLOP_TRY(begin_setup(setup));
@@ -669,34 +670,25 @@ Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, const P
     return {};
 }
 
-Result<void> Runtime::reshape(const VulkanPaths& paths, const Shape& shape)
+Result<void> Runtime::reshape(const Shape& shape)
 {
     const auto start = std::chrono::steady_clock::now();
     if (shape.width != state_.width || shape.height != state_.height)
         return fail("network reshape: frames of another extent need a build");
-    DLSSLOP_TRY(adopt(paths, shape));
-    const auto compiling = std::chrono::steady_clock::now();
-    DLSSLOP_TRY(make_pipelines(paths, false));
-    const double compiled = seconds_since(compiling);
+    DLSSLOP_TRY(adopt(shape));
     DLSSLOP_TRY(make_sets());
-    // One submission: every image into the layout frames use it in.
-    const auto setting_up = std::chrono::steady_clock::now();
-    Setup setup{device_.device};
-    DLSSLOP_TRY(begin_setup(setup));
-    DLSSLOP_TRY(end_setup(setup));
     history_ = recorded_ = {};
+    settled_ = false;
     char line[512];
-    std::snprintf(line, sizeof line,
-                  "rebuilt the network in %.3f s (pipelines %.3f s, GPU %.3f s) for %s; its weights stay",
-                  seconds_since(start), compiled, seconds_since(setting_up), described().c_str());
+    std::snprintf(line, sizeof line, "reshaped the network in %.3f ms for %s; its weights and pipelines stay",
+                  seconds_since(start) * 1e3, described().c_str());
     write_log(device_, line);
     return {};
 }
 
 // The state of SHAPE, from what the device offers it, and its images.
-Result<void> Runtime::adopt(const VulkanPaths& paths, const Shape& shape)
+Result<void> Runtime::adopt(const Shape& shape)
 {
-    if (shape.motion) DLSSLOP_TRY(check_constants(join(paths.shaders, "temporal")));
     const Capabilities caps = DLSSLOP_TRY(query(device_, shape));
     State& s = state_;
     s.width = shape.width;
@@ -768,26 +760,22 @@ Result<void> Runtime::make_images()
     return make_sampler(d.device, VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, o.linear);
 }
 
-Result<void> Runtime::make_pipelines(const VulkanPaths& paths, bool noise)
+Result<void> Runtime::make_pipelines(const VulkanPaths& paths)
 {
     static_assert(std::size(kAdapterBindings) == kAdapters);
     const VkDevice d = device_.device;
     Pipeline* p = objects_.pipelines;
-    const State& s = state_;
-    // The pipelines that are wanted and not made yet: with NOISE the noise
-    // field's, which the build runs, then the kernels' of the steps, and the
-    // runtime's own that the shape wants. With motion, the temporal variants
-    // replace the pre and post blocks, whose kernels' pipelines are made all
-    // the same: they depend on the extent alone. A pipeline stays once made.
+    // The noise field's, which the build runs, the kernels' of the steps, and
+    // every one of the runtime's own, so that no reshape makes a pipeline.
+    // With motion, the temporal variants replace the pre and post blocks,
+    // whose kernels' pipelines are made all the same.
     bool wanted[kPipelines] = {};
-    wanted[size_t(Kernel::kNoiseField)] = noise;
+    wanted[size_t(Kernel::kNoiseField)] = true;
     for (const Step& step : steps_) wanted[size_t(step.kernel)] = true;
-    const bool own[kAdapters] = {s.passes > 1, s.stages, s.motion, s.motion, s.motion, s.motion};
-    std::ranges::copy(own, wanted + kAlpha);
-    size_t missing[kPipelines], n = 0;
+    std::fill(wanted + kAlpha, wanted + kPipelines, true);
+    size_t which[kPipelines], n = 0;
     for (size_t i = 0; i < kPipelines; ++i)
-        if (wanted[i] && !p[i].pipeline) missing[n++] = i;
-    if (!n) return {};
+        if (wanted[i]) which[n++] = i;
     // Every pipeline goes through the cache, compiled at once on this thread
     // and compilers() - 1 more; a thread that cannot start leaves its share
     // to the others. The cache is saved once every pipeline exists or one has
@@ -795,7 +783,7 @@ Result<void> Runtime::make_pipelines(const VulkanPaths& paths, bool noise)
     // it creates the runtime's own.
     const VkPipelineCache cache = load_cache(d, paths.cache);
     Result<void> made[kPipelines];
-    Compile compile{d, cache, paths.shaders, missing, n, p, made};
+    Compile compile{d, cache, paths.shaders, which, n, p, made};
     pthread_t threads[kCompilers - 1];
     const size_t helpers = std::min(n, compilers()) - 1;
     size_t started = 0;
@@ -933,13 +921,27 @@ Result<void> Runtime::make_sets()
     return {};
 }
 
-// Starts SETUP's commands: every image into the layout frames use it in.
-// Each frame fills the input before any dispatch reads it, so a setup leaves
-// it unwritten.
+// Every image into the layout frames use it in, from nothing as though new.
+// Each frame fills the input before any dispatch reads it.
+void Runtime::settle_images(VkCommandBuffer cmd) const
+{
+    const Objects& o = objects_;
+    std::vector<VkImageMemoryBarrier> layouts;
+    settle(layouts, o.input, kSampled);
+    for (const Image* i : {&o.answer, &o.second, &o.shown, &o.scratch, &o.depth}) settle(layouts, *i, kGeneral);
+    for (const auto& pyramid : o.luma)
+        for (const Image& i : pyramid) settle(layouts, i, kGeneral);
+    for (const Image& i : o.flow) settle(layouts, i, kGeneral);
+    for (const Image& i : o.history) settle(layouts, i, kGeneral);
+    for (const Image& i : o.history_store) settle(layouts, i, kGeneral);
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 0,
+                         nullptr, uint32_t(layouts.size()), layouts.data());
+}
+
+// Starts SETUP's commands.
 Result<void> Runtime::begin_setup(Setup& setup) const
 {
     const VkDevice d = device_.device;
-    const Objects& o = objects_;
     VkCommandPoolCreateInfo pool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
     pool.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
     pool.queueFamilyIndex = device_.family;
@@ -951,18 +953,7 @@ Result<void> Runtime::begin_setup(Setup& setup) const
     DLSSLOP_TRY(vk_check(vkAllocateCommandBuffers(d, &alloc, &setup.cmd), "allocate the network's build commands"));
     VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    DLSSLOP_TRY(vk_check(vkBeginCommandBuffer(setup.cmd, &begin), "begin the network's build commands"));
-    std::vector<VkImageMemoryBarrier> layouts;
-    settle(layouts, o.input, kSampled);
-    for (const Image* i : {&o.answer, &o.second, &o.shown, &o.scratch, &o.depth}) settle(layouts, *i, kGeneral);
-    for (const auto& pyramid : o.luma)
-        for (const Image& i : pyramid) settle(layouts, i, kGeneral);
-    for (const Image& i : o.flow) settle(layouts, i, kGeneral);
-    for (const Image& i : o.history) settle(layouts, i, kGeneral);
-    for (const Image& i : o.history_store) settle(layouts, i, kGeneral);
-    vkCmdPipelineBarrier(setup.cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0,
-                         nullptr, 0, nullptr, uint32_t(layouts.size()), layouts.data());
-    return {};
+    return vk_check(vkBeginCommandBuffer(setup.cmd, &begin), "begin the network's build commands");
 }
 
 // A build's part of SETUP: the weights packed straight into the staging
@@ -1055,6 +1046,7 @@ void Runtime::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const
     const Objects& o = objects_;
     const State& s = state_;
     const uint32_t w = s.width, h = s.height, gx = (w + 7) / 8, gy = (h + 7) / 8;
+    if (!settled_) settle_images(cmd);
     // The proxy into the input: copied straight in the frame's format, or
     // copied into the frame's image and blitted into RGBA32F. With later
     // passes, which overwrite the input, the first pass's input is kept.
@@ -1196,6 +1188,10 @@ void Runtime::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const
     barrier(cmd, result, kSource, kGeneral, kTransfer, kCopyRead, kCompute, kRead | kWrite);
 }
 
-void Runtime::submitted() { history_ = recorded_; }
+void Runtime::submitted()
+{
+    history_ = recorded_;
+    settled_ = true;
+}
 
 } // namespace dlsslop::vulkan

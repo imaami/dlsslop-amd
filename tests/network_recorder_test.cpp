@@ -7,14 +7,16 @@
 // set by what it holds. A frame that is recorded and not submitted must leave
 // the history as it was: the next frame's commands, with its motion
 // parameters and push constants, must equal those of the frame recorded
-// before it. A network reshaped for another shape of its extent must upload
-// nothing, make no pipeline that it has, and record the frames that a network
-// built for that shape records. A frame of one pass without the pass stages
-// must copy the proxy straight into the network's input and its answer
-// straight out, and copy or blit no image. Takes the directory of the
-// network's SPIR-V. With --build, it only builds the network for one extent
-// with every pipeline of the runtime's own, so that tests/vulkan-files.py can
-// see the files that a build opens.
+// before it. The first frame after a build moves the network's images into
+// their layouts, and so does the next one when that frame was not submitted.
+// A network reshaped for another shape of its extent must record no command
+// and make no pipeline, and then record the frames that a network built for
+// that shape records. A frame of one pass without the pass stages must copy
+// the proxy straight into the network's input and its answer straight out,
+// and copy or blit no image. Takes the directory of the network's SPIR-V.
+// With --build, it only builds the network for one extent, which makes every
+// pipeline of the runtime's own, so that tests/vulkan-files.py can see the
+// files that a build opens.
 #include "network_recorder.h"
 #include "vulkan_pack.h"
 
@@ -28,7 +30,6 @@
 #include <initializer_list>
 #include <map>
 #include <mutex>
-#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -401,6 +402,22 @@ Frame record(dlsslop::NetworkRecorder& recorder, const dlsslop::VulkanFrame& f)
     return frame;
 }
 
+// How many lines of COMMANDS start with HEAD and end with TAIL.
+size_t lines(std::string_view commands, std::string_view head, std::string_view tail = {})
+{
+    size_t n = 0;
+    while (!commands.empty()) {
+        const std::string_view line = commands.substr(0, commands.find('\n'));
+        n += line.starts_with(head) && line.ends_with(tail);
+        commands.remove_prefix(std::min(line.size() + 1, commands.size()));
+    }
+    return n;
+}
+
+// The barrier that moves the network's images into their layouts from
+// UNDEFINED: from the top of the pipe to all commands.
+constexpr std::string_view kSettle = "barrier 1 65536 0";
+
 // A frame's gate and seed as a message.
 std::string history(const Frame& f)
 {
@@ -420,6 +437,7 @@ void check(const dlsslop::VulkanPaths& paths, unsigned passes)
     // submitted, so the second starts the history too.
     const Frame first = record(recorder, f);
     require(first.gate == 0 && first.seed == 0, ("the first frame has " + history(first)).c_str());
+    require(lines(first.commands, kSettle) == 1, "the first frame does not move the images into their layouts");
     const Frame again = record(recorder, f);
     require(again.commands == first.commands,
             ("a frame after one that was not submitted differs from that one: " + history(again)).c_str());
@@ -427,6 +445,7 @@ void check(const dlsslop::VulkanPaths& paths, unsigned passes)
     recorder.submitted();
     const Frame second = record(recorder, f);
     require(second.gate == 1 && second.seed == 1, ("the second frame has " + history(second)).c_str());
+    require(lines(second.commands, kSettle) == 0, "the second frame moves the images into their layouts again");
     // A frame with another intensity starts the history over, but is not
     // submitted: the next frame is the second frame again.
     dlsslop::VulkanFrame other = f;
@@ -450,18 +469,6 @@ std::string frames_of(dlsslop::NetworkRecorder& recorder, const dlsslop::VulkanF
     return commands + record(recorder, f).commands;
 }
 
-// How many lines of COMMANDS start with HEAD and end with TAIL.
-size_t lines(std::string_view commands, std::string_view head, std::string_view tail = {})
-{
-    size_t n = 0;
-    while (!commands.empty()) {
-        const std::string_view line = commands.substr(0, commands.find('\n'));
-        n += line.starts_with(head) && line.ends_with(tail);
-        commands.remove_prefix(std::min(line.size() + 1, commands.size()));
-    }
-    return n;
-}
-
 // A walk through shapes of 64x64 frames, each a change that the recorder
 // rebuilds for: its passes, more or fewer, format, motion history and
 // stages. Each shape's frames after the reshape must be those of a network
@@ -477,7 +484,6 @@ void check_reshapes(const dlsslop::VulkanPaths& paths)
                 {3, true, true, 0.5f}, {1, true, true, 0.5f},  {1, true, false, 0},     {1, false, false, 0},
                 {2, false, false, 0},  {1, false, false, 0}};
     dlsslop::NetworkRecorder recorder(fake_device(), paths);
-    std::set<std::string> kept; // what each pipeline the recorder made was made as
     for (const auto& step : walk) {
         dlsslop::VulkanFrame f;
         f.width = f.height = 64;
@@ -493,13 +499,17 @@ void check_reshapes(const dlsslop::VulkanPaths& paths)
         const auto reshaped = recorder.shape(f);
         require(reshaped && *reshaped, ("the network was not rebuilt for " + what).c_str());
         // The first shape is a build; every other keeps the weights, the
-        // arena and the pipelines, and makes none that the recorder has.
-        bool remade = false;
-        for (size_t i = pipelines; i < pipelines_made.size(); ++i) remade |= !kept.insert(pipelines_made[i]).second;
-        require(first || (frame.commands.find("copy buffer") == std::string::npos &&
-                          frame.commands.find("fill") == std::string::npos && !remade),
-                ("the reshape for " + what + " uploaded the weights or made a pipeline it had").c_str());
+        // arena and the pipelines, records nothing and makes no pipeline.
+        require(first || (frame.commands.empty() && pipelines_made.size() == pipelines),
+                ("the reshape for " + what + " recorded a command or made a pipeline").c_str());
+        // A frame that is not submitted leaves the images' layouts to the next.
+        require(lines(record(recorder, f).commands, kSettle) == 1,
+                ("the first frame after the reshape for " + what + " does not move the images into their layouts")
+                    .c_str());
         const std::string after = frames_of(recorder, f);
+        require(lines(after, kSettle) == 1,
+                ("the frames after the reshape for " + what + " do not move the images into their layouts once")
+                    .c_str());
         // With one pass and no pass stages, each of the two frames copies the
         // proxy, #0, into the network's input, #2, the first image it names,
         // and an image into the answer buffer, #1. It copies or blits no image.
@@ -527,9 +537,8 @@ int main(int argc, char** argv)
             std::puts("Usage: network-recorder-test [OPTION]... SPIRV-DIRECTORY\n"
                       "Checks the Vulkan network's motion history and reshapes on a fake device, from a synthetic\n"
                       "model and the network's SPIR-V in SPIRV-DIRECTORY (required). No GPU or model needed.\n"
-                      " -b, --build WxH   Instead, build the network for WxH frames of 2 passes with motion history\n"
-                      "                   and pass stages, and so every pipeline of the runtime's own\n"
-                      "                   (default: unset)\n"
+                      " -b, --build WxH   Instead, build the network for WxH frames, which makes every pipeline of\n"
+                      "                   the runtime's own (default: unset)\n"
                       " -h, --help        Show help (default: off)");
             return 0;
         } else
@@ -548,9 +557,6 @@ int main(int argc, char** argv)
         dlsslop::VulkanFrame f;
         f.width = width;
         f.height = height;
-        f.passes = 2;
-        f.motion = true;
-        f.sharpness = 0.5f;
         dlsslop::NetworkRecorder recorder(fake_device(), paths);
         const auto built = recorder.shape(f);
         require(built && *built, built ? "the network was not built" : built.error().what.c_str());

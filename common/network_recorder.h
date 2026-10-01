@@ -24,17 +24,21 @@ public:
     NetworkRecorder(const vulkan::Device& device, VulkanPaths paths);
     NetworkRecorder(const NetworkRecorder&) = delete;
 
-    // True when shape() would build.
+    // True when shape() would build or reshape.
     bool shape_differs(const VulkanFrame& frame) const;
+    // True when the runtime is built for the frame's extent, so that shape()
+    // at most reshapes it: a fraction of a millisecond, and no GPU work.
+    bool has_extent(const VulkanFrame& frame) const;
     // Plans the network for the frame's extent, unless the runtime is built for
     // it or the recorder holds its plan: milliseconds of work. An extent the
     // network does not take on the device is rejected, and then again without
     // planning.
     Result<void> plan(const VulkanFrame& frame);
     // Builds the network for a frame's shape, unless it has it: seconds of work
-    // for a new extent, milliseconds for another shape of the same extent, which
-    // keeps the weights. True after a build. The device must have finished the
-    // recorder's work. A rejected extent keeps the network as it was.
+    // for a new extent; for another shape of the same extent, a reshape that
+    // keeps the weights and pipelines. True after a build or reshape. The
+    // device must have finished the recorder's work. A rejected extent keeps
+    // the network as it was.
     Result<bool> shape(const VulkanFrame& frame);
     // Records one frame of the shape it has: from PROXY, w x h RGBA8 or RGBA16F,
     // through the network, into ANSWER in the same form. Transfers on FAMILY's

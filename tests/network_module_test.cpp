@@ -4,8 +4,9 @@
 // says which, a missing model fails the network for good, naming the model's
 // path and how to get it, and a frame of an extent the network does not take,
 // by its working extent or by the device's storage buffers, is rejected,
-// naming it, without a build. The model is the one dlsslopd's config file
-// names, and a config file dlsslopd refuses fails the network. Takes the
+// naming it, without a build, and so is another shape of that extent, which
+// no network was built for to reshape. The model is the one dlsslopd's config
+// file names, and a config file dlsslopd refuses fails the network. Takes the
 // module's path.
 #include "network_module.h"
 #include "shm_protocol.h"
@@ -112,10 +113,13 @@ int main(int argc, char** argv)
     require(file && !std::fclose(file), "cannot write a model file");
     network = module.open(&device);
     require(network, "the module did not open");
-    for (int frame = 0; frame < 2; ++frame)
+    for (uint32_t passes = 1; passes <= 2; ++passes) {
+        header->passes.store(passes);
         require(module.prepare(network, header, 16, 16, 0) == kDlsslopNetworkRejected &&
                     std::strstr(module.error(network), "does not take 16x16 frames"),
-                "a frame of an extent the network does not take was not rejected, naming it");
+                "a frame of an extent the network does not take, or another shape of it, was not rejected, naming it");
+    }
+    header->passes.store(1);
     module.close(network);
     device.physicalDispatch = small_storage;
     network = module.open(&device);
@@ -134,6 +138,6 @@ int main(int argc, char** argv)
             "a config file dlsslopd refuses did not fail the network, naming it");
     munmap(memory, kHeaderBytes);
     std::puts("network module: out-of-range settings rejected, a missing model fails for good, extents the "
-              "network or the device's storage buffers do not take rejected, and the model is the one dlsslopd's "
-              "config file names");
+              "network or the device's storage buffers do not take rejected in any shape, and the model is the one "
+              "dlsslopd's config file names");
 }

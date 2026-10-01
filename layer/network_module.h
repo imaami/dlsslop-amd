@@ -47,9 +47,10 @@ enum DlsslopNetworkState {
 // The network on DEVICE, not yet built; null without memory.
 DlsslopNetwork* dlsslop_network_open(const DlsslopNetworkDevice* device);
 // Readies the network for the next frame: WIDTH x HEIGHT, RGBA8 or with FP16
-// RGBA16F, with the channel's settings. A frame of another shape starts a
-// build, which must not overlap the network's recorded work: the caller has
-// waited for its last frame.
+// RGBA16F, with the channel's settings. A frame of another extent starts a
+// build in the background; one of another shape of the same extent reshapes
+// the network here, in a fraction of a millisecond. Neither may overlap the
+// network's recorded work: the caller has waited for its last frame.
 int dlsslop_network_prepare(DlsslopNetwork* network, const ShmHeader* channel, uint32_t width, uint32_t height,
                             int fp16);
 // Records the frame prepare() readied: the proxy the composition captured

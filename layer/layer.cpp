@@ -1842,7 +1842,7 @@ static bool ProcessInLayer(DeviceChain* dc, SwapchainState& sc, VkQueue queue, u
     // The previous frame's meter, whose fence the frame waited for.
     sc.comp->ConsumeMeter();
     // A swapchain that takes over, a resized one, has not waited for its predecessor's last frame,
-    // which may still run the network that a build at the new shape frees.
+    // which may still run the network that a build or a reshape at the new shape frees.
     SwapchainState* const last = dc->inLayerLast;
     if (last && last != &sc && last->leg2Pending && !CollectLeg2(dc, *last)) return false;
     dc->inLayerLast = &sc;

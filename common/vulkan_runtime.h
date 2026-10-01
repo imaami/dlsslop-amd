@@ -121,7 +121,9 @@ struct Pipeline {
 //   epochs and the tile counters depend on it.
 // - Descriptors are written only by build() and reshape(). Every dispatch
 //   runs with the network's input image in SHADER_READ_ONLY_OPTIMAL and
-//   every other image that a set binds in GENERAL.
+//   every other image that a set binds in GENERAL. The first frame recorded
+//   after build() or reshape() moves every image there from UNDEFINED, and so
+//   does each frame after it until submitted() says one was submitted.
 // - The invalidate-only barriers between steps rely on gfx1201's caches
 //   below L2 being write-through (upstream: nr_graph.cpp:4230-4258); the
 //   steps that tile counters order rely on the queue starting consecutive
@@ -133,8 +135,9 @@ class Runtime {
 public:
     // The network for SHAPE on DEVICE, from PLAN, which is of SHAPE's extent
     // on DEVICE's storage_limit(): its SPIR-V from PATHS.shaders, its weights
-    // from PATHS.model and its pipeline cache at PATHS.cache. The queue must
-    // be free of the frames of a runtime being replaced.
+    // from PATHS.model and its pipeline cache at PATHS.cache, with the
+    // pipelines of every shape of that extent. The queue must be free of the
+    // frames of a runtime being replaced.
     static Result<Runtime> build(const Device& device, const VulkanPaths& paths, const Shape& shape,
                                  const Plan& plan);
     Runtime(Runtime&& other) noexcept;
@@ -142,12 +145,12 @@ public:
     ~Runtime();
 
     // Makes the runtime what build() makes for SHAPE, of the extent it was
-    // built for, in milliseconds: its images, its own pipelines and every
-    // descriptor set as SHAPE wants them, in one submission. The weights, the
-    // arena and the network's pipelines stay, and so does each image that
-    // SHAPE wants as it is, its contents discarded as a new image's are. A
-    // runtime that fails to reshape must be destroyed.
-    Result<void> reshape(const VulkanPaths& paths, const Shape& shape);
+    // built for: its images and every descriptor set as SHAPE wants them. It
+    // makes no pipeline and submits nothing; the next frame moves the images
+    // into their layouts. The weights, the arena and the pipelines stay, and
+    // so does each image that SHAPE wants as it is, its contents discarded as
+    // a new image's are. A runtime that fails to reshape must be destroyed.
+    Result<void> reshape(const Shape& shape);
 
     // Records a frame of the shape: from PROXY, the frame's pixels packed in
     // its format, through the network with CONTROLS into ANSWER in the same
@@ -219,18 +222,22 @@ private:
     // The history after the last frame submitted, and after the last frame
     // recorded.
     History history_{}, recorded_{};
+    // A frame submitted since the last build or reshape moved the images into
+    // their layouts.
+    bool settled_ = false;
     std::vector<Step> steps_;
     std::vector<uint32_t> push_;
 
-    // The commands of a build or a reshape, submitted once.
+    // The commands of a build, submitted once.
     struct Setup;
 
     explicit Runtime(const Device& device) : device_(device) {}
     Result<void> make(const VulkanPaths& paths, const Shape& shape, const Plan& plan);
-    Result<void> adopt(const VulkanPaths& paths, const Shape& shape);
+    Result<void> adopt(const Shape& shape);
     Result<void> make_images();
-    Result<void> make_pipelines(const VulkanPaths& paths, bool noise);
+    Result<void> make_pipelines(const VulkanPaths& paths);
     Result<void> make_sets();
+    void settle_images(VkCommandBuffer cmd) const;
     Result<void> begin_setup(Setup& setup) const;
     Result<void> upload(const Plan& plan, const Model& model, Setup& setup) const;
     Result<void> end_setup(Setup& setup);

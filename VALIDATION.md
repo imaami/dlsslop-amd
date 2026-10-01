@@ -31,9 +31,11 @@ tools' entry list against what the plan expects. It checks that two writers
 replacing the Vulkan network's pipeline cache at once, as dlsslopd and a game's
 in-layer network can, never leave a reader without the file or with part of
 one. It records the Vulkan network's frames on a fake device: a frame that is
-not submitted must leave the motion history as it was, and a network reshaped
-for another shape of its extent must upload nothing, make no pipeline that it
-has and record the frames of a network built for that shape. Under `strace`, it
+not submitted must leave the motion history as it was, and the first frame
+after a build must move the network's images into their layouts, as must the
+next one when that frame was not submitted. A network reshaped for another
+shape of its extent must record no command and make no pipeline, and then
+record the frames of a network built for that shape. Under `strace`, it
 checks that the files `install.py` installs for the Vulkan network are those
 that the network's builds on that fake device open, at extents whose plans run
 every kernel; without `strace` that check skips. A build there without two of
@@ -327,7 +329,16 @@ them; its frames of more passes have one barrier fewer. It also writes
 dlsslopd's second and third timestamps, queries 1 and 2, at other points in the
 frame, so the comparison prints `DIFFERENT`. These differences lie outside the
 network's span: against a dlsslopd built from that commit's parent,
-`--span network` must print `MATCH`.
+`--span network` must print `MATCH`. Any dlsslopd built before "vulkan: reshape
+the in-layer network without dropping frames" moves the network's images into
+their layouts in its build's submission and in a submission of each reshape of
+its own, and makes the runtime's own pipelines only for the shapes that use
+them. Since then, a build makes every pipeline, and the first frame after a
+build or a reshape moves the images into their layouts with a barrier before
+it copies the proxy into the network's input. Those frames have one barrier
+more, so the comparison prints `DIFFERENT`; with `--span network` it must
+print `MATCH`. With `--hash all`, the state after its setup also holds the
+network's images, which since then stay undefined until the first frame.
 
 The revision before "vulkan: run the network with the project's own host code"
 runs the host code of the fork in its `external/vulkan`. Its lock pins an older
@@ -388,8 +399,9 @@ build's staging buffers do not count however the build splits its
 submissions. A kind that both traces' `--hash` selectors name must be hashed in
 both or in neither, in the state after setup and in each frame; a kind only one
 of them names is counted and left out. With `--hash all`, that state holds the
-weights with their noise field, the zeroed activation arena and the images
-after the network's build.
+weights with their noise field and the zeroed activation arena. The network's
+images stay undefined until the first frame, and the layer hashes no undefined
+image.
 Past the network's values, the activation arena ends in counters the kernels
 synchronise through. After a frame, they differ from one run of the same build
 to the next while the answers stay equal, so each frame's hashes of `all`
@@ -420,7 +432,9 @@ model coefficients.
   raster, with `device-local transport ready` logged again.
 - With `--layer-network`, repeat for a DXVK and a vkd3d-proton game. The layer
   log must report the network in the layer, frame pacing must stay even, and a
-  tier switch must rebuild it while the game presents its own frames.
+  tier switch must rebuild it while the game presents its own frames. A change
+  of passes, sharpness, color preservation, motion or HDR mode must show none
+  of the game's own frames.
 - Open the Qt controller in the desktop session and check rendering, input,
   connection, live controls and channel replacement behaviour.
 

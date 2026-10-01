@@ -27,10 +27,15 @@ bool NetworkRecorder::shape_differs(const VulkanFrame& frame) const
            (uses_stages(frame) && !shape_.stages);
 }
 
+bool NetworkRecorder::has_extent(const VulkanFrame& frame) const
+{
+    return runtime_ && shape_.width == frame.width && shape_.height == frame.height;
+}
+
 Result<void> NetworkRecorder::plan(const VulkanFrame& frame)
 {
     // The runtime's extent was planned before, and shape() reshapes for it without a plan.
-    if (runtime_ && shape_.width == frame.width && shape_.height == frame.height) return {};
+    if (has_extent(frame)) return {};
     return plan_for(frame.width, frame.height);
 }
 
@@ -57,9 +62,9 @@ Result<bool> NetworkRecorder::shape(const VulkanFrame& frame)
     if (!shape_differs(frame)) return false;
     const vulkan::Shape shape{frame.width, frame.height, frame.fp16, frame.motion, uses_stages(frame),
                               passes_of(frame)};
-    // A runtime of the frame's extent keeps its weights and the network's pipelines.
-    if (runtime_ && shape_.width == shape.width && shape_.height == shape.height) {
-        if (auto reshaped = runtime_->reshape(paths_, shape); !reshaped) {
+    // A runtime of the frame's extent keeps its weights and pipelines.
+    if (has_extent(frame)) {
+        if (auto reshaped = runtime_->reshape(shape); !reshaped) {
             runtime_.reset();
             return forward(std::move(reshaped).error());
         }
