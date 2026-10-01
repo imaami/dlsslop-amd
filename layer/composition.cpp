@@ -16,9 +16,7 @@ namespace dlssnr {
 // the MeterState block in shaders/meter_reduce.comp.
 namespace {
 constexpr size_t kMeterStateBytes = 128;
-constexpr VkDeviceSize kMeterMeasuredOffset = 4;
 constexpr VkDeviceSize kMeterResolvedOffset = 8;
-constexpr VkDeviceSize kMeterSteadinessOffset = 12;
 
 struct MeterPush {
     float manual;
@@ -96,14 +94,6 @@ FrameSettings FrameSettings::Read(const ShmHeader* h) {
     s.holdFrame = h->holdFrame.load();
     s.downscaler = h->scalingDownscaler.load();
     s.compositionBypass = h->compositionBypass.load();
-    {
-        // DLSSNR_SETTLE, in the same hundredths, so the ramp can be swept from a launch option --
-        // including back to 100, which is the behaviour before it existed.
-        static const int forced = [] {
-            const char* v = getenv("DLSSNR_SETTLE");
-            return v && *v ? atoi(v) : -1;
-        }();
-    }
     {
         static const int forced = [] {
             const char* v = getenv("DLSSNR_GHOST_SLACK");

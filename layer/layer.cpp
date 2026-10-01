@@ -126,14 +126,6 @@ static inline double NowMs() {
         std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-static inline void CpuYield() {
-#if defined(__x86_64__) || defined(__i386__)
-    __asm__ __volatile__("pause" ::: "memory");
-#else
-    std::this_thread::yield();
-#endif
-}
-
 // ---------------------------------------------------------------------------
 // Shared memory transport
 // ---------------------------------------------------------------------------
