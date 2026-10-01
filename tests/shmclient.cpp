@@ -21,7 +21,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <stdfloat>
 #include <string>
 #include <thread>
 #include <vector>
@@ -64,7 +63,7 @@ constexpr uint8_t kFlat[4] = {255, 64, 191, 255};
 void widen(uint8_t* out, const uint8_t* rgba, size_t values)
 {
     for (size_t i = 0; i < values; ++i) {
-        const auto v = static_cast<std::float16_t>(float(rgba[i]) / 255.0f);
+        const auto v = static_cast<_Float16>(float(rgba[i]) / 255.0f);
         std::memcpy(out + i * sizeof v, &v, sizeof v);
     }
 }
