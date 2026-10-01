@@ -344,8 +344,8 @@ VKAPI_ATTR void VKAPI_CALL vkCmdWriteTimestamp(VkCommandBuffer, VkPipelineStageF
 } // extern "C"
 
 namespace {
-// The physical device: one queue family for everything, FP8 cooperative
-// matrices, every format feature and storage buffers of 4 GiB. The runtime
+// The physical device: one queue family for everything, every format feature
+// and storage buffers of 4 GiB. The runtime
 // chains at most one structure to a query, which the fakes access through
 // its own type: the link-time optimizer inlines them into the runtime, and
 // access through VkBaseOutStructure breaks the aliasing rules it relies on.
@@ -369,20 +369,6 @@ VKAPI_ATTR void VKAPI_CALL format_properties(VkPhysicalDevice, VkFormat, VkForma
     if (features && features->sType == VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_3)
         features->optimalTilingFeatures = ~VkFormatFeatureFlags2(0);
 }
-VKAPI_ATTR VkResult VKAPI_CALL matrix_properties(VkPhysicalDevice, uint32_t* count,
-                                                 VkCooperativeMatrixPropertiesKHR* matrices)
-{
-    if (matrices && *count) {
-        VkCooperativeMatrixPropertiesKHR& m = matrices[0];
-        m.MSize = m.NSize = m.KSize = 16;
-        m.AType = m.BType = VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT;
-        m.CType = m.ResultType = VK_COMPONENT_TYPE_FLOAT32_KHR;
-        m.saturatingAccumulation = VK_FALSE;
-        m.scope = VK_SCOPE_SUBGROUP_KHR;
-    }
-    *count = 1;
-    return VK_SUCCESS;
-}
 
 vulkan::Device fake_device()
 {
@@ -396,7 +382,7 @@ vulkan::Device fake_device()
     d.memory.memoryTypes[1].propertyFlags =
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
     d.memory.memoryHeapCount = 1;
-    d.functions = {queue_families, properties, format_properties, matrix_properties};
+    d.functions = {queue_families, properties, format_properties};
     return d;
 }
 

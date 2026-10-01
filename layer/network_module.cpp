@@ -49,9 +49,7 @@ dlsslop::vulkan::Device network_device(const DlsslopNetworkDevice& d)
         reinterpret_cast<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(
             find("vkGetPhysicalDeviceQueueFamilyProperties")),
         reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2>(find("vkGetPhysicalDeviceProperties2")),
-        reinterpret_cast<PFN_vkGetPhysicalDeviceFormatProperties2>(find("vkGetPhysicalDeviceFormatProperties2")),
-        reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR>(
-            find("vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"))};
+        reinterpret_cast<PFN_vkGetPhysicalDeviceFormatProperties2>(find("vkGetPhysicalDeviceFormatProperties2"))};
     device.log = d.log;
     return device;
 }

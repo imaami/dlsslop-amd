@@ -198,9 +198,8 @@ Result<std::vector<uint32_t>> read_spirv(const std::string& path)
 }
 
 // What the device offers the network (upstream: the checks of the Runtime
-// constructor and nrvk's require_matrix_config): whether the input can be
-// the frame's format filled by a copy, and whether the post block can store
-// the answer in that format.
+// constructor): whether the input can be the frame's format filled by a copy,
+// and whether the post block can store the answer in that format.
 struct Capabilities {
     bool input_direct, answer_direct;
 };
@@ -213,7 +212,6 @@ Result<Capabilities> query(const Device& d, const Shape& shape)
     const char* missing = !f.queue_families      ? "vkGetPhysicalDeviceQueueFamilyProperties"
                           : !f.properties        ? "vkGetPhysicalDeviceProperties2"
                           : !f.format_properties ? "vkGetPhysicalDeviceFormatProperties2"
-                          : !f.matrix_properties ? "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"
                                                  : nullptr;
     if (missing) return fail(std::string("the network cannot query its device: ") + missing + " is unavailable");
     // A queue that blits the frame's format into RGBA32F and back.
@@ -224,22 +222,6 @@ Result<Capabilities> query(const Device& d, const Shape& shape)
     const VkQueueFlags need = VK_QUEUE_GRAPHICS_BIT | VK_QUEUE_COMPUTE_BIT;
     if (d.family >= count || (families[d.family].queueFlags & need) != need)
         return fail("the network's queue family has no graphics and compute");
-    // The FP8 cooperative matrices every network kernel multiplies with.
-    uint32_t configs = 0;
-    DLSSLOP_TRY(vk_check(f.matrix_properties(d.physical, &configs, nullptr),
-                         "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"));
-    std::vector<VkCooperativeMatrixPropertiesKHR> matrices(configs,
-                                                           {VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR});
-    if (const VkResult listed = f.matrix_properties(d.physical, &configs, matrices.data()); listed != VK_INCOMPLETE)
-        DLSSLOP_TRY(vk_check(listed, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"));
-    matrices.resize(std::min<size_t>(configs, matrices.size()));
-    if (std::ranges::none_of(matrices, [](const VkCooperativeMatrixPropertiesKHR& m) {
-            return m.MSize == 16 && m.NSize == 16 && m.KSize == 16 && m.scope == VK_SCOPE_SUBGROUP_KHR &&
-                   m.AType == VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT && m.BType == VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT &&
-                   m.CType == VK_COMPONENT_TYPE_FLOAT32_KHR && m.ResultType == VK_COMPONENT_TYPE_FLOAT32_KHR &&
-                   !m.saturatingAccumulation;
-        }))
-        return fail("the device has no e4m3 16x16x16 cooperative-matrix configuration");
     // One pass samples the frame in its own format, copied into the input,
     // and without the pass stages the post block stores it in that format.
     const VkFormat frame = shape.fp16 ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM;

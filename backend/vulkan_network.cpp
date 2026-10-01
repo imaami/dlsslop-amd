@@ -18,12 +18,14 @@ namespace {
 
 void log_line(const char* line) { std::fprintf(stderr, "%s\n", line); }
 
-// What stops the network running on a device, or empty.
-std::string unsuitable(VkPhysicalDevice physical, uint32_t& family)
+// What stops the network running on a device, or empty. MATRICES is the
+// instance's vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR.
+std::string unsuitable(VkPhysicalDevice physical, PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR matrices,
+                       uint32_t& family)
 {
     // External memory: the layer's device-local frames are imported.
     if (const char* missing = NetworkUnsupported(physical, vkGetPhysicalDeviceProperties2, vkGetPhysicalDeviceFeatures2,
-                                                 vkEnumerateDeviceExtensionProperties,
+                                                 vkEnumerateDeviceExtensionProperties, matrices,
                                                  VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME))
         return std::string(missing) + " unavailable";
     uint32_t count = 0;
@@ -138,12 +140,14 @@ Result<VulkanNetwork> VulkanNetwork::create(const VulkanPaths& paths, int device
     DLSSLOP_TRY(vk_check(vkEnumeratePhysicalDevices(s.instance, &count, nullptr), "enumerate Vulkan devices"));
     std::vector<VkPhysicalDevice> devices(count);
     DLSSLOP_TRY(vk_check(vkEnumeratePhysicalDevices(s.instance, &count, devices.data()), "enumerate Vulkan devices"));
+    const auto matrices = reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR>(
+        vkGetInstanceProcAddr(s.instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"));
     std::string reasons;
     for (uint32_t i = 0; i < count && !s.physical; ++i) {
         if (device >= 0 && i != unsigned(device)) continue;
         VkPhysicalDeviceProperties p;
         vkGetPhysicalDeviceProperties(devices[i], &p);
-        const std::string why = unsuitable(devices[i], s.family);
+        const std::string why = unsuitable(devices[i], matrices, s.family);
         if (why.empty()) {
             s.physical = devices[i];
             s.index = i;
@@ -199,9 +203,7 @@ Result<VulkanNetwork> VulkanNetwork::create(const VulkanPaths& paths, int device
     on.family = s.family;
     on.memory = s.memory;
     on.functions = {vkGetPhysicalDeviceQueueFamilyProperties, vkGetPhysicalDeviceProperties2,
-                    vkGetPhysicalDeviceFormatProperties2,
-                    reinterpret_cast<PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR>(
-                        vkGetInstanceProcAddr(s.instance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"))};
+                    vkGetPhysicalDeviceFormatProperties2};
     on.log = log_line;
     s.recorder.emplace(on, s.paths);
     return network;

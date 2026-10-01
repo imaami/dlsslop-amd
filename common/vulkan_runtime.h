@@ -41,11 +41,11 @@ struct PhysicalFunctions {
     PFN_vkGetPhysicalDeviceQueueFamilyProperties queue_families;
     PFN_vkGetPhysicalDeviceProperties2 properties;
     PFN_vkGetPhysicalDeviceFormatProperties2 format_properties;
-    PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR matrix_properties;
 };
 
 // The device the network runs on, which it does not own: dlsslopd's, or a
-// game's in the layer, with every feature of network_requirements.h enabled.
+// game's in the layer, which NetworkUnsupported() accepted, with every feature
+// of network_requirements.h enabled.
 // Its device-level functions are the loader's.
 struct Device {
     VkInstance instance;

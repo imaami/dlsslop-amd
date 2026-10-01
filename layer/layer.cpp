@@ -616,6 +616,7 @@ struct InstanceChain {
     PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties = nullptr;
     PFN_vkGetPhysicalDeviceProperties2 vkGetPhysicalDeviceProperties2 = nullptr;
     PFN_vkGetPhysicalDeviceFeatures2 vkGetPhysicalDeviceFeatures2 = nullptr;
+    PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR = nullptr;
 };
 
 #define DEVICE_FN_LIST(X) \
@@ -910,6 +911,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateInstance(
     chain.vkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)next_gipa(*pInstance, "vkGetPhysicalDeviceMemoryProperties");
     chain.vkGetPhysicalDeviceProperties2 = (PFN_vkGetPhysicalDeviceProperties2)next_gipa(*pInstance, "vkGetPhysicalDeviceProperties2");
     chain.vkGetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2)next_gipa(*pInstance, "vkGetPhysicalDeviceFeatures2");
+    chain.vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR = (PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR)next_gipa(
+        *pInstance, "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR");
     if (pCreateInfo->pApplicationInfo && pCreateInfo->pApplicationInfo->apiVersion)
         chain.apiVersion = pCreateInfo->pApplicationInfo->apiVersion;
 
@@ -1096,7 +1099,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
     const bool network = LayerEnabled() && ic && dlssnr::NetworkRequested() &&
                          !(networkOff = dlssnr::NetworkUnavailable(
                                physicalDevice, ic->apiVersion, ic->vkGetPhysicalDeviceProperties2,
-                               ic->vkGetPhysicalDeviceFeatures2, ic->vkEnumerateDeviceExtensionProperties));
+                               ic->vkGetPhysicalDeviceFeatures2, ic->vkEnumerateDeviceExtensionProperties,
+                               ic->vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR));
     if (networkOff) Log("[layer] in-layer network unavailable: needs %s", networkOff);
     if (network && dlssnr::AddNetworkExtensions(modified, enabledExts)) effective = &modified;
     // The extension does nothing unless its feature is asked for.

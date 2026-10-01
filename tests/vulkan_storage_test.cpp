@@ -9,6 +9,7 @@
 #include "scaling/bcds_kaiser3_Shader_Vk.h"
 #include "scaling/bcds_magc_Shader_Vk.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -240,6 +241,14 @@ uint32_t api = VK_API_VERSION_1_3;
 uint32_t minimumSubgroup = 32, maximumSubgroup = 64;
 std::vector<std::string> extensions;
 const char* unsupported = nullptr;  // a feature the device lacks
+// The cooperative-matrix configurations it lists, the last LATE of them only
+// after the count was taken.
+constexpr VkCooperativeMatrixPropertiesKHR kNetworkMatrix{
+    VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR, nullptr, 16, 16, 16, VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT,
+    VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT, VK_COMPONENT_TYPE_FLOAT32_KHR, VK_COMPONENT_TYPE_FLOAT32_KHR, VK_FALSE,
+    VK_SCOPE_SUBGROUP_KHR};
+std::vector<VkCooperativeMatrixPropertiesKHR> matrices;
+uint32_t late = 0;
 
 void VKAPI_CALL Properties2(VkPhysicalDevice, VkPhysicalDeviceProperties2* properties) {
     properties->properties.apiVersion = api;
@@ -265,20 +274,71 @@ VkResult VKAPI_CALL Extensions(VkPhysicalDevice, const char*, uint32_t* count, V
     return VK_SUCCESS;
 }
 
+VkResult VKAPI_CALL Matrices(VkPhysicalDevice, uint32_t* count, VkCooperativeMatrixPropertiesKHR* properties) {
+    if (!properties) {
+        *count = uint32_t(matrices.size()) - late;
+        return VK_SUCCESS;
+    }
+    *count = std::min(*count, uint32_t(matrices.size()));
+    std::copy_n(matrices.begin(), *count, properties);
+    return *count < matrices.size() ? VK_INCOMPLETE : VK_SUCCESS;
+}
+
 const char* Unavailable(uint32_t instance) {
-    return dlssnr::NetworkUnavailable(VK_NULL_HANDLE, instance, Properties2, Features2, Extensions);
+    return dlssnr::NetworkUnavailable(VK_NULL_HANDLE, instance, Properties2, Features2, Extensions, Matrices);
 }
 }  // namespace stub
 
 static bool Same(const char* a, const char* b) { return a && b && !std::strcmp(a, b); }
 
+// A device that lists the network's FP8 configuration among others is given the
+// network, also when it counts fewer configurations than it lists and returns
+// VK_INCOMPLETE. One that lists it with any one field changed, or that cannot
+// be asked, is refused, naming what it lacks.
+static void NetworkMatrices() {
+    using Matrix = VkCooperativeMatrixPropertiesKHR;
+    Matrix fp16 = stub::kNetworkMatrix;
+    fp16.AType = fp16.BType = VK_COMPONENT_TYPE_FLOAT16_KHR;
+    Matrix fp16Only = fp16;
+    fp16Only.CType = fp16Only.ResultType = VK_COMPONENT_TYPE_FLOAT16_KHR;
+    stub::matrices = {fp16Only, fp16, stub::kNetworkMatrix};
+    Check(!stub::Unavailable(VK_API_VERSION_1_3), "a device that lists the network's FP8 matrices was refused");
+    stub::matrices = {stub::kNetworkMatrix, fp16, fp16Only};
+    stub::late = 1;
+    Check(!stub::Unavailable(VK_API_VERSION_1_3), "a device that counted fewer matrices than it lists was refused");
+    stub::late = 0;
+    void (*const changes[])(Matrix&) = {
+        [](Matrix& m) { m.MSize = 8; },
+        [](Matrix& m) { m.NSize = 8; },
+        [](Matrix& m) { m.KSize = 32; },
+        [](Matrix& m) { m.AType = VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT; },
+        [](Matrix& m) { m.BType = VK_COMPONENT_TYPE_FLOAT8_E5M2_EXT; },
+        [](Matrix& m) { m.CType = VK_COMPONENT_TYPE_FLOAT16_KHR; },
+        [](Matrix& m) { m.ResultType = VK_COMPONENT_TYPE_FLOAT16_KHR; },
+        [](Matrix& m) { m.saturatingAccumulation = VK_TRUE; },
+        [](Matrix& m) { m.scope = VK_SCOPE_WORKGROUP_KHR; },
+    };
+    for (const auto change : changes) {
+        stub::matrices = {fp16Only, fp16, stub::kNetworkMatrix};
+        change(stub::matrices.back());
+        Check(Same(stub::Unavailable(VK_API_VERSION_1_3), "e4m3 16x16x16 cooperative matrices"),
+              "a device without the network's FP8 matrices was given the network");
+    }
+    stub::matrices = {stub::kNetworkMatrix};
+    Check(Same(dlssnr::NetworkUnavailable(VK_NULL_HANDLE, VK_API_VERSION_1_3, stub::Properties2, stub::Features2,
+                                          stub::Extensions, nullptr),
+               "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"),
+          "a device was given the network without a cooperative-matrix query");
+}
+
 static void NetworkAvailability() {
     const auto all = NetworkExtensions();
     stub::extensions.assign(all.begin(), all.end());
+    stub::matrices = {stub::kNetworkMatrix};
     Check(!stub::Unavailable(VK_API_VERSION_1_3), "a capable device was refused the network");
     Check(Same(stub::Unavailable(VK_API_VERSION_1_2), "a Vulkan 1.3 instance") &&
           Same(dlssnr::NetworkUnavailable(VK_NULL_HANDLE, VK_API_VERSION_1_3, nullptr, stub::Features2,
-                                          stub::Extensions), "a Vulkan 1.3 instance"),
+                                          stub::Extensions, stub::Matrices), "a Vulkan 1.3 instance"),
           "a Vulkan 1.2 instance, or one without the 1.1 queries, was given the network");
     stub::api = VK_API_VERSION_1_2;
     Check(Same(stub::Unavailable(VK_API_VERSION_1_3), "Vulkan 1.3"), "a Vulkan 1.2 device was given the network");
@@ -295,13 +355,14 @@ static void NetworkAvailability() {
     }
     stub::extensions.assign(all.begin(), all.end());
     Check(Same(dlsslop::NetworkUnsupported(VK_NULL_HANDLE, stub::Properties2, stub::Features2, stub::Extensions,
-                                           VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME),
+                                           stub::Matrices, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME),
                VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME),
           "the extension dlsslopd needs besides was not named");
     stub::minimumSubgroup = 64;
     Check(Same(stub::Unavailable(VK_API_VERSION_1_3), "32-lane compute subgroups"),
           "a device without 32-lane subgroups was given the network");
     stub::minimumSubgroup = 32;
+    NetworkMatrices();
 
     // The network's extensions join the list once each, behind the game's.
     const char* game[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME, VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME};
@@ -325,8 +386,8 @@ static void NetworkAvailability() {
     Check(!request.Enable(hidden, true) && request.Enable(hidden, false) &&
           dlssnr::HasFormatlessStorageWrites(hidden) && hidden.pNext == &opaque && !late.shaderInt8,
           "a request that declined the network did not fall back to formatless storage alone");
-    std::puts("device features: the network is refused for each missing requirement, its extensions are added "
-              "once, and a declined request falls back");
+    std::puts("device features: the network is refused for each missing requirement, its FP8 matrices included, "
+              "its extensions are added once, and a declined request falls back");
 }
 
 int main() {

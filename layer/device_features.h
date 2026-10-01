@@ -60,9 +60,10 @@ inline bool NetworkRequested() {
 inline const char* NetworkUnavailable(VkPhysicalDevice physical, uint32_t instanceVersion,
                                       PFN_vkGetPhysicalDeviceProperties2 properties2,
                                       PFN_vkGetPhysicalDeviceFeatures2 features2,
-                                      PFN_vkEnumerateDeviceExtensionProperties extensions) {
+                                      PFN_vkEnumerateDeviceExtensionProperties extensions,
+                                      PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR matrices) {
     if (instanceVersion < VK_API_VERSION_1_3 || !properties2 || !features2) return "a Vulkan 1.3 instance";
-    return dlsslop::NetworkUnsupported(physical, properties2, features2, extensions, nullptr);
+    return dlsslop::NetworkUnsupported(physical, properties2, features2, extensions, matrices, nullptr);
 }
 
 // Adds the network's extensions the request lacks: EXTENSIONS holds the

@@ -155,13 +155,39 @@ inline bool AppendNetworkExtensions(std::vector<const char*>& list)
     return list.size() != before;
 }
 
+// Whether MATRICES lists for PHYSICAL the FP8 cooperative matrices that every
+// network kernel multiplies with: e4m3 times e4m3 into FP32, 16x16x16, in a
+// subgroup (upstream: nrvk's require_matrix_config). The shaders also declare
+// an e4m3 accumulator that RADV lists in no configuration and accepts, so it is
+// not required.
+inline bool ListsNetworkMatrices(VkPhysicalDevice physical,
+                                 PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR matrices)
+{
+    uint32_t count = 0;
+    if (matrices(physical, &count, nullptr) != VK_SUCCESS) return false;
+    std::vector<VkCooperativeMatrixPropertiesKHR> listed(count, {VK_STRUCTURE_TYPE_COOPERATIVE_MATRIX_PROPERTIES_KHR});
+    // VK_INCOMPLETE leaves out configurations beyond those counted.
+    const VkResult result = matrices(physical, &count, listed.data());
+    if (result != VK_SUCCESS && result != VK_INCOMPLETE) return false;
+    listed.resize(count);
+    return std::any_of(listed.begin(), listed.end(), [](const VkCooperativeMatrixPropertiesKHR& m) {
+        return m.MSize == 16 && m.NSize == 16 && m.KSize == 16 && m.scope == VK_SCOPE_SUBGROUP_KHR &&
+               m.AType == VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT && m.BType == VK_COMPONENT_TYPE_FLOAT8_E4M3_EXT &&
+               m.CType == VK_COMPONENT_TYPE_FLOAT32_KHR && m.ResultType == VK_COMPONENT_TYPE_FLOAT32_KHR &&
+               !m.saturatingAccumulation;
+    });
+}
+
 // What stops the network running on PHYSICAL, or null: a feature's or an
-// extension's name, "Vulkan 1.3" or "32-lane compute subgroups". ALSO names an
-// extension the caller needs besides, or is null. The functions are the
+// extension's name, "Vulkan 1.3", "32-lane compute subgroups", "e4m3 16x16x16
+// cooperative matrices", or the name of MATRICES when that is null. ALSO names
+// an extension the caller needs besides, or is null. The functions are the
 // caller's route to the device: the loader's, or the next layer's.
 inline const char* NetworkUnsupported(VkPhysicalDevice physical, PFN_vkGetPhysicalDeviceProperties2 properties2,
                                       PFN_vkGetPhysicalDeviceFeatures2 features2,
-                                      PFN_vkEnumerateDeviceExtensionProperties extensions, const char* also)
+                                      PFN_vkEnumerateDeviceExtensionProperties extensions,
+                                      PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR matrices,
+                                      const char* also)
 {
     VkPhysicalDeviceSubgroupSizeControlProperties subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_SIZE_CONTROL_PROPERTIES};
     VkPhysicalDeviceProperties2 properties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &subgroup};
@@ -187,6 +213,8 @@ inline const char* NetworkUnsupported(VkPhysicalDevice physical, PFN_vkGetPhysic
     if (subgroup.minSubgroupSize > 32 || subgroup.maxSubgroupSize < 32 ||
         !(subgroup.requiredSubgroupSizeStages & VK_SHADER_STAGE_COMPUTE_BIT))
         return "32-lane compute subgroups";
+    if (!matrices) return "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR";
+    if (!ListsNetworkMatrices(physical, matrices)) return "e4m3 16x16x16 cooperative matrices";
     return nullptr;
 }
 
