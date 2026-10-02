@@ -406,6 +406,7 @@ hotkey_x11_open (struct hotkey_x11 *x)
 
 #define X_SYMBOL(lib, name) ((typeof (name) *)dlsym(lib, #name))
 	typeof (XOpenDisplay) *const open_display = X_SYMBOL(x->x11, XOpenDisplay);
+	typeof (XCloseDisplay) *const close_display = X_SYMBOL(x->x11, XCloseDisplay);
 	typeof (XQueryExtension) *const query_extension = X_SYMBOL(x->x11, XQueryExtension);
 	typeof (XFlush) *const flush = X_SYMBOL(x->x11, XFlush);
 	typeof (XIQueryVersion) *const query_version = X_SYMBOL(x->xi, XIQueryVersion);
@@ -415,23 +416,33 @@ hotkey_x11_open (struct hotkey_x11 *x)
 	x->get_event_data = X_SYMBOL(x->x11, XGetEventData);
 	x->free_event_data = X_SYMBOL(x->x11, XFreeEventData);
 #undef X_SYMBOL
-	if (!open_display || !query_extension || !flush || !query_version || !select_events
+	if (!open_display || !close_display || !query_extension || !flush || !query_version || !select_events
 	    || !x->pending || !x->next_event || !x->get_event_data || !x->free_event_data)
 		return false;
 
-	Display *const display = open_display(nullptr);
+	Display *display = open_display(nullptr);
 	if (!display)
 		return false;
 
+	// A display that cannot serve the backend is closed before its libraries are unloaded. The server
+	// has just answered, so the close does not meet one that has gone.
 	int event = 0;
 	int error = 0;
-	if (!query_extension(display, "XInputExtension", &x->opcode, &event, &error))
+	if (!query_extension(display, "XInputExtension", &x->opcode, &event, &error)) {
+		close_display(display);
+		display = nullptr;
 		return false;
+	}
 
+	// The version the server speaks, which is at most the one asked for. Raw events reach a client
+	// that has no grab from 2.1 on, and the backend asks for 2.2.
 	int major = 2;
 	int minor = 2;
-	if (query_version(display, &major, &minor) != Success)
+	if (query_version(display, &major, &minor) != Success || major < 2 || (major == 2 && minor < 2)) {
+		close_display(display);
+		display = nullptr;
 		return false;
+	}
 
 	unsigned char mask[4] = {0};
 	XISetMask(mask, XI_RawKeyPress);
