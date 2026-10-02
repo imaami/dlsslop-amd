@@ -541,7 +541,9 @@ composition_disable_export (struct composition *c);
  * @param cb              The command buffer to record into.
  * @param swapchain_image The swapchain image, in PRESENT_SRC_KHR.
  * @param s               The frame's settings.
- * @return                true if leg 1 was recorded.
+ * @return                true if leg 1 was recorded. false if a step could not be recorded: what was
+ *                        is valid, and the composition's layouts and flags count it as run, so the
+ *                        caller submits it.
  */
 extern bool
 composition_record_capture (struct composition                      *c,
@@ -616,7 +618,9 @@ composition_model_pixels (struct composition *c)
  * @param cb              The command buffer to record into.
  * @param swapchain_image The swapchain image, in PRESENT_SRC_KHR.
  * @param s               The frame's settings.
- * @return                true if leg 2 was recorded.
+ * @return                true if leg 2 was recorded. false if a step could not be recorded: what was
+ *                        is valid, leaves the swapchain image in PRESENT_SRC_KHR, and the
+ *                        composition's layouts and flags count it as run, so the caller submits it.
  */
 extern bool
 composition_record_compose (struct composition                      *c,

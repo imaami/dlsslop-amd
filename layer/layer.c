@@ -2750,10 +2750,31 @@ use_in_layer_network (struct device_chain          *dc,
 	return false;
 }
 
-/** @brief Submits what a frame through the in-layer network recorded once it failed past the capture.
+/** @brief Passes a swapchain through for good once a leg could not be submitted or waited for.
+ *
+ * What the composition tracks then need not be what the device ran, and the command buffer and leg
+ * 1's fence may still be in use, so nothing records into them again.
+ *
+ * @param dc The device's chain.
+ * @param sc The swapchain's state.
+ * @return   false: the game's own frame is presented.
+ */
+static bool
+abandon_swapchain (struct device_chain    *dc,
+                   struct swapchain_state *sc)
+{
+	log_printf("[layer] swapchain %#" PRIx64 ": a leg could not be submitted or waited for; passing this "
+	           "swapchain through", (uint64_t)sc->handle);
+	sc->flags |= SWAPCHAIN_STATE_PASS_THROUGH;
+	release_primary(dc->self, sc->handle);
+	return false;
+}
+
+/** @brief Submits what a leg recorded before one of its steps failed, and waits for it.
  *
  * What was recorded is submitted as leg 1 alone would be: the composition's state moved with it, and
- * the image is back in PRESENT_SRC_KHR.
+ * the image is back in PRESENT_SRC_KHR. A submit or a wait that fails passes the swapchain through
+ * (abandon_swapchain()).
  *
  * @param dc             The device's chain.
  * @param sc             The swapchain's state.
@@ -2773,10 +2794,11 @@ salvage (struct device_chain    *dc,
          bool                    network)
 {
 	if (!submit_leg(dc, queue, si, sc->fence_leg1, waits_consumed))
-		return false;
+		return abandon_swapchain(dc, sc);
 	if (network)
 		g_network.submitted(dc->in_layer);
-	wait_leg(dc, sc->fence_leg1);
+	if (!wait_leg(dc, sc->fence_leg1))
+		return abandon_swapchain(dc, sc);
 	return false;
 }
 
@@ -2832,11 +2854,9 @@ process_in_layer (struct device_chain                     *dc,
 	VkCommandBuffer const cb = sc->cb;
 	if (!begin_leg(dc, cb))
 		return false;
-	if (!composition_record_capture(&sc->comp, cb, sc->images[index], fs)) {
-		dc->table.vkEndCommandBuffer(cb);
-		return false;
-	}
-	// Past the capture, a failure submits what was recorded (salvage()).
+	// A failure submits what was recorded (salvage()): the composition's state moved with it.
+	if (!composition_record_capture(&sc->comp, cb, sc->images[index], fs))
+		return salvage(dc, sc, queue, si, waits_consumed, false);
 	if (g_network.record(dc->in_layer, cb, composition_proxy_buffer(&sc->comp),
 	                     composition_answer_buffer(&sc->comp), sc->family,
 	                     composition_transport_exported(&sc->comp)) != DLSSLOP_NETWORK_READY) {
@@ -2848,7 +2868,7 @@ process_in_layer (struct device_chain                     *dc,
 	si->signalSemaphoreCount = 1;
 	si->pSignalSemaphores = &sc->leg2_done[index];
 	if (!submit_leg(dc, queue, si, sc->fence_leg2, waits_consumed))
-		return false;
+		return abandon_swapchain(dc, sc);
 	// The network's motion history takes in only the frames that reached the queue.
 	g_network.submitted(dc->in_layer);
 	sc->flags |= SWAPCHAIN_STATE_LEG2_PENDING;
@@ -3037,16 +3057,13 @@ process_present_ (struct device_chain    *dc,
 	// ---- leg 1: the frame the model is shown ----
 	if (!begin_leg(dc, cb))
 		return false;
-	if (!composition_record_capture(&sc->comp, cb, sc->images[index], &fs)) {
-		dc->table.vkEndCommandBuffer(cb);
-		return false;
-	}
+	// A failure submits what was recorded (salvage()): the composition's state moved with it.
+	if (!composition_record_capture(&sc->comp, cb, sc->images[index], &fs))
+		return salvage(dc, sc, queue, &si, waits_consumed, false);
 	// This one fence is real: the proxy the helper is about to read is written by these commands, and
 	// the sequence number must not outrun the pixels it announces.
-	if (!submit_leg(dc, queue, &si, sc->fence_leg1, waits_consumed))
-		return false;
-	if (!wait_leg(dc, sc->fence_leg1))
-		return false;
+	if (!submit_leg(dc, queue, &si, sc->fence_leg1, waits_consumed) || !wait_leg(dc, sc->fence_leg1))
+		return abandon_swapchain(dc, sc);
 	si.waitSemaphoreCount = 0;
 	si.pWaitSemaphores = nullptr;
 	si.pWaitDstStageMask = nullptr;
@@ -3071,17 +3088,16 @@ process_present_ (struct device_chain    *dc,
 	// ---- leg 2: the answer, composed back ----
 	if (!begin_leg(dc, cb))
 		return false;
-	if (!composition_record_compose(&sc->comp, cb, sc->images[index], &fs)) {
-		dc->table.vkEndCommandBuffer(cb);
-		return false;
-	}
+	// The submission holds no waits or signal by now: leg 1 took the waits.
+	if (!composition_record_compose(&sc->comp, cb, sc->images[index], &fs))
+		return salvage(dc, sc, queue, &si, waits_consumed, false);
 	// No CPU wait. The present waits on this semaphore, so the image is composed before it is shown
 	// without the CPU ever parking here; the fence is collected at the top of the next frame, where
 	// the reused surfaces actually need it.
 	si.signalSemaphoreCount = 1;
 	si.pSignalSemaphores = &sc->leg2_done[index];
 	if (!submit_leg(dc, queue, &si, sc->fence_leg2, waits_consumed))
-		return false;
+		return abandon_swapchain(dc, sc);
 	sc->flags |= SWAPCHAIN_STATE_LEG2_PENDING;
 	// A diagnostic request must finish even if a paused application presents no subsequent frame.
 	// Frames without a recorded pair keep the asynchronous leg-2 path, including every frame of a
