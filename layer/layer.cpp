@@ -11,15 +11,11 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
 
-#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
-#include <mutex>
 #include <new>
-#include <string>
-#include <vector>
 
 #include "../common/list.h"
 #include "../common/shm_protocol.h"
@@ -32,7 +28,10 @@
 
 #include <dlfcn.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <linux/futex.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <sys/mman.h>
 #include <sys/file.h>
 #include <sys/stat.h>
@@ -86,7 +85,7 @@ struct ShmMap {
     uint32_t lastHeartbeat = 0;
     bool dead = false;
     // The file path, kept so the transport socket and the producer lock can be named beside it.
-    std::string path;
+    char path[PATH_MAX];
     int producerFd = -1;
 
     ~ShmMap() {
@@ -109,30 +108,37 @@ struct ShmMap {
 // flock(s.producerFd, LOCK_UN). Never waits.
 static bool ShmLockProducer(ShmMap& s) {
     if (!s.hdr) return false;
-    if (s.producerFd < 0)
-        s.producerFd = open((s.path + ".producer.lock").c_str(),
-                            O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (s.producerFd < 0) {
+        // A name cut to fit would be another file; the kernel refuses a path this long anyway.
+        char lock[PATH_MAX];
+        if (size_t(snprintf(lock, sizeof lock, "%s.producer.lock", s.path)) >= sizeof lock) return false;
+        s.producerFd = open(lock, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+    }
     return !flock(s.producerFd, LOCK_EX | LOCK_NB);
 }
 
 // The directory now lives under /tmp, which is world-writable, so it is worth checking that what we
 // are about to open really is ours: a directory, owned by this uid, with nothing granted to anyone
-// else. Anything else and we refuse rather than create the file inside it.
-static bool EnsureParentDir(const std::string& path) {
-    size_t slash = path.find_last_of('/');
-    if (slash == std::string::npos || slash == 0) return true;
-    std::string dir = path.substr(0, slash);
-    size_t pos = 1;
-    while ((pos = dir.find('/', pos)) != std::string::npos) {
-        mkdir(dir.substr(0, pos).c_str(), 0700);
-        pos += 1;
+// else. Anything else and we refuse rather than create the file inside it. PATH fits in PATH_MAX.
+static bool EnsureParentDir(const char* path) {
+    const char* const slash = strrchr(path, '/');
+    if (!slash || slash == path) return true;
+    char dir[PATH_MAX];
+    const size_t length = size_t(slash - path);
+    memcpy(dir, path, length);
+    dir[length] = '\0';
+    // Each ancestor, then the directory itself.
+    for (char* end = strchr(dir + 1, '/'); end; end = strchr(end + 1, '/')) {
+        *end = '\0';
+        mkdir(dir, 0700);
+        *end = '/';
     }
-    mkdir(dir.c_str(), 0700);
+    mkdir(dir, 0700);
 
     struct stat st{};
-    if (lstat(dir.c_str(), &st) != 0) { log_printf("[shm] %s is missing", dir.c_str()); return false; }
+    if (lstat(dir, &st) != 0) { log_printf("[shm] %s is missing", dir); return false; }
     if (!S_ISDIR(st.st_mode) || st.st_uid != getuid() || (st.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
-        log_printf("[shm] refusing %s: it is not a private directory owned by this user", dir.c_str());
+        log_printf("[shm] refusing %s: it is not a private directory owned by this user", dir);
         return false;
     }
     return true;
@@ -170,10 +176,13 @@ static bool ShmMapFrames(ShmMap& s, size_t bytes) {
 static bool ShmOpen(ShmMap& s) {
     if (s.hdr) return true;
     const char* path = getenv("DLSSNR_SHM");
-    std::string p = (path && *path) ? path : ShmDefaultPath();
+    char p[sizeof s.path];
+    const int length = (path && *path) ? snprintf(p, sizeof p, "%s", path) : ShmDefaultPath(p, sizeof p);
+    // A path cut to fit would name another file; the kernel refuses one this long anyway.
+    if (size_t(length) >= sizeof p) { log_printf("[shm] open %s failed", p); return false; }
     if (!EnsureParentDir(p)) return false;
-    int fd = open(p.c_str(), O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
-    if (fd < 0) { log_printf("[shm] open %s failed", p.c_str()); return false; }
+    int fd = open(p, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+    if (fd < 0) { log_printf("[shm] open %s failed", p); return false; }
     // The file still spans the whole protocol -- the offsets are fixed and both sides agree on them --
     // but it is sparse, so the size on disk is what has actually been written.
     size_t total = ShmTotalBytes();
@@ -194,26 +203,26 @@ static bool ShmOpen(ShmMap& s) {
     // composing with its old field set and every setting the newer side writes is invisible. That is
     // indistinguishable from "the new feature does nothing", which is how a stale layer reads until
     // someone checks the log.
-    if (s.hdr->magic.load() != kShmMagic || s.hdr->version.load() != kShmVersion ||
-        s.hdr->passes.load() == 0) {
-        if (s.hdr->magic.load() == kShmMagic && s.hdr->version.load() != kShmVersion)
+    if (atomic_load(&s.hdr->magic) != kShmMagic || atomic_load(&s.hdr->version) != kShmVersion ||
+        atomic_load(&s.hdr->passes) == 0) {
+        if (atomic_load(&s.hdr->magic) == kShmMagic && atomic_load(&s.hdr->version) != kShmVersion)
             log_printf("[shm] header is version %u but this layer is v%u -- another process is out of date, "
                        "re-initialising it; update the layer, the helper and the GUI together",
-                       s.hdr->version.load(), kShmVersion);
+                       atomic_load(&s.hdr->version), kShmVersion);
         ShmInitDefaults(s.hdr);
     }
-    s.lastHeartbeat = s.hdr->heartbeat.load();
+    s.lastHeartbeat = atomic_load(&s.hdr->heartbeat);
     s.firstHeartbeat = s.lastHeartbeat;
-    s.path = p;
-    log_printf("[shm] attached %s seq_req=%u seq_resp=%u", p.c_str(),
-               s.hdr->seq_req.load(), s.hdr->seq_resp.load());
+    memcpy(s.path, p, size_t(length) + 1);
+    log_printf("[shm] attached %s seq_req=%u seq_resp=%u", p,
+               atomic_load(&s.hdr->seq_req), atomic_load(&s.hdr->seq_resp));
     return true;
 }
 
 static bool ShmNeuralEnabled(ShmMap& s) {
     if (!ShmOpen(s)) return true;
-    if (s.hdr->quit.load()) { s.dead = true; return false; }
-    const uint32_t ctrl = s.hdr->controlSeq.load();
+    if (atomic_load(&s.hdr->quit)) { s.dead = true; return false; }
+    const uint32_t ctrl = atomic_load(&s.hdr->controlSeq);
     if (ctrl != s.lastControlSeq) {
         s.lastControlSeq = ctrl;
         if (s.dead && ::ShmNeuralEnabled(s.hdr)) {
@@ -222,7 +231,7 @@ static bool ShmNeuralEnabled(ShmMap& s) {
             log_printf("[shm] control changed, re-enabling");
         }
     }
-    const uint32_t hb = s.hdr->heartbeat.load();
+    const uint32_t hb = atomic_load(&s.hdr->heartbeat);
     if (hb != s.lastHeartbeat) {
         s.lastHeartbeat = hb;
         // A heartbeat alone is not a reason to try again immediately. The helper ticks it while it
@@ -252,7 +261,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
     if (!ShmOpen(s)) { s.dead = true; return false; }
     if (w > kMaxW || h > kMaxH || w < kMinW || h < kMinH) return false;
     if (bytes != size_t(w) * h * 4 && bytes != size_t(w) * h * 8) return false;
-    if (s.hdr->quit.load()) { s.dead = true; return false; }
+    if (atomic_load(&s.hdr->quit)) { s.dead = true; return false; }
 
     const bool time = log_time_enabled();
     const double t0 = log_now_ms();
@@ -261,20 +270,20 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
     // the GPU already wrote the proxy where the daemon reads it, and there is nothing to copy.
     if (!transportGen) std::memcpy(s.inPixels, proxy, bytes);
     const double tCopy = log_now_ms();
-    s.hdr->width.store(w);
-    s.hdr->height.store(h);
-    s.hdr->format.store(1u);  // RGBA byte order either way; the float path keeps the same swizzle
+    atomic_store(&s.hdr->width, w);
+    atomic_store(&s.hdr->height, h);
+    atomic_store(&s.hdr->format, 1u);  // RGBA byte order either way; the float path keeps the same swizzle
     // Say what the bytes ARE before announcing them: the helper sizes its read by this, never by
     // what it hopes the layer has switched to. The release fence below covers it like the pixels.
-    s.hdr->hdrEncode.store(hdrEncode ? 1u : 0u);
-    s.hdr->transportGen.store(transportGen);
-    uint32_t req = s.hdr->seq_req.load() + 1;
+    atomic_store(&s.hdr->hdrEncode, hdrEncode ? 1u : 0u);
+    atomic_store(&s.hdr->transportGen, transportGen);
+    uint32_t req = atomic_load(&s.hdr->seq_req) + 1;
     // The release pairs with the helper's acquire on seq_resp: everything this process wrote --
     // the proxy, whether by the GPU into the exported buffer or by the memcpy above -- is visible
     // to the helper before it sees the new request number. (The GPU's own write is fenced earlier,
     // by leg 1's vkWaitForFences; this fence covers the host-visible ordering across processes.)
-    std::atomic_thread_fence(std::memory_order_release);
-    s.hdr->seq_req.store(req);
+    atomic_thread_fence(memory_order_release);
+    atomic_store(&s.hdr->seq_req, req);
     syscall(SYS_futex, &s.hdr->seq_req, FUTEX_WAKE, 1, nullptr, nullptr, 0);
 
     // How long this frame may wait, which is a question about whether anyone is listening.
@@ -286,7 +295,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
     // Is anything listening? The helper says so itself, from the moment it attaches until it exits,
     // which is the only signal that stays true while it is busy. Heartbeats do not: it stops ticking
     // them precisely while it is building the model's feature.
-    const bool helperPresent = s.hdr->helperState.load() != kHelperStopped;
+    const bool helperPresent = atomic_load(&s.hdr->helperState) != kHelperStopped;
 
     // The first frame of a size is not like the others. It makes the helper load the model and build
     // a feature -- measured at 194 ms for a small frame and more for a large one -- against about 4 ms
@@ -300,16 +309,16 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
 
     // Wait for the helper (fail-open: present the original frame on timeout).
     const double tSignal = log_now_ms();
-    uint32_t beat = s.hdr->heartbeat.load();
+    uint32_t beat = atomic_load(&s.hdr->heartbeat);
     double beatAt = 0.0;
     for (;;) {
-        const uint32_t response = s.hdr->seq_resp.load(std::memory_order_acquire);
+        const uint32_t response = atomic_load_explicit(&s.hdr->seq_resp, memory_order_acquire);
         if (response == req) {
             s.timeouts = 0;
             s.everAnswered = true;
             // The helper's GPU wrote the answer into this region (or the memcpy below reads the
             // staging copy of it); the acquire pairs with the helper's release before seq_resp.
-            std::atomic_thread_fence(std::memory_order_acquire);
+            atomic_thread_fence(memory_order_acquire);
             // The helper answers even when it could not use the frame. seq_ok says whether the
             // answer is worth composing; when it is not, the game's own frame is what to present.
             // The echo says the answer was made for this raster: another swapchain (the Steam
@@ -317,9 +326,9 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
             // the meantime, and seq_resp only counts. Composing that answer here would copy a
             // different number of bytes into these surfaces -- the row-shifted colour garbage this
             // check exists to refuse.
-            const bool ok = s.hdr->seq_ok.load() == req && s.hdr->answeredW.load() == w &&
-                            s.hdr->answeredH.load() == h;
-            if (!ok) log_printf("[shm] helper could not use frame %u (ok=%u)", req, s.hdr->seq_ok.load());
+            const bool ok = atomic_load(&s.hdr->seq_ok) == req && atomic_load(&s.hdr->answeredW) == w &&
+                            atomic_load(&s.hdr->answeredH) == h;
+            if (!ok) log_printf("[shm] helper could not use frame %u (ok=%u)", req, atomic_load(&s.hdr->seq_ok));
             if (ok && !transportGen) std::memcpy(modelOut, s.outPixels, bytes);
             if (time) {
                 static int frameNo = 0;
@@ -331,13 +340,13 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
             }
             return ok;
         }
-        if (s.hdr->quit.load()) { s.dead = true; return false; }
+        if (atomic_load(&s.hdr->quit)) { s.dead = true; return false; }
         const double elapsed = log_now_ms() - tSignal;
         if (elapsed >= budgetMs) break;
         // The worker ticks its heartbeat every 100 ms, also mid-frame. One that
         // exits or dies (even by SIGKILL) will not answer; stop waiting for it.
-        if (s.hdr->helperState.load() != kHelperRunning) break;
-        if (const uint32_t b = s.hdr->heartbeat.load(); b != beat) {
+        if (atomic_load(&s.hdr->helperState) != kHelperRunning) break;
+        if (const uint32_t b = atomic_load(&s.hdr->heartbeat); b != beat) {
             beat = b;
             beatAt = elapsed;
         } else if (elapsed - beatAt > 500.0) {
@@ -352,7 +361,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
     }
     log_printf("[shm] worker did not answer frame %u in %.0f ms (state=%u heartbeat=%u); "
                "presenting original frames until it answers", req, log_now_ms() - tSignal,
-               s.hdr->helperState.load(), s.hdr->heartbeat.load());
+               atomic_load(&s.hdr->helperState), atomic_load(&s.hdr->heartbeat));
     // Four rather than eight, and with a pause before the next attempt, so giving up costs a
     // fraction of a second and retrying costs that again only every few seconds.
     if (++s.timeouts >= 4) {
@@ -361,7 +370,7 @@ static bool ShmProcessFrame(ShmMap& s, uint32_t w, uint32_t h, size_t bytes, con
         log_printf("[shm] no answer in %.0f ms x4 (helper %s); passing frames through, retrying in 5s "
                    "(seq_req=%u seq_resp=%u heartbeat=%u)",
                    budgetMs, helperPresent ? "is present but silent" : "not running",
-                   s.hdr->seq_req.load(), s.hdr->seq_resp.load(), s.hdr->heartbeat.load());
+                   atomic_load(&s.hdr->seq_req), atomic_load(&s.hdr->seq_resp), atomic_load(&s.hdr->heartbeat));
     }
     return false;
 }
@@ -374,9 +383,7 @@ static void StartWorker(ShmMap& s) {
     s.startAfterMs = now + 2000.0;
     sockaddr_un address{};
     address.sun_family = AF_UNIX;
-    const std::string path = ShmTransportPath(s.path);
-    if (path.size() >= sizeof address.sun_path) return;
-    std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
+    if (size_t(ShmTransportPath(address.sun_path, sizeof address.sun_path, s.path)) >= sizeof address.sun_path) return;
     const int sock = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
     connect(sock, reinterpret_cast<const sockaddr*>(&address), sizeof address);
     close(sock);
@@ -392,9 +399,9 @@ enum class Offer { kReady, kDeclined, kWaiting, kLater };
 static int SendOffer(ShmMap& s, struct composition& comp) {
     sockaddr_un address{};
     address.sun_family = AF_UNIX;
-    const std::string path = ShmTransportPath(s.path);
-    if (path.size() >= sizeof address.sun_path || !ShmOpen(s)) return -1;
-    std::memcpy(address.sun_path, path.c_str(), path.size() + 1);
+    if (size_t(ShmTransportPath(address.sun_path, sizeof address.sun_path, s.path)) >= sizeof address.sun_path ||
+        !ShmOpen(s))
+        return -1;
     ShmTransportOffer offer{};
     offer.magic = kShmMagic;
     int fds[2];
@@ -432,7 +439,7 @@ static Offer OfferTransport(ShmMap& s, struct composition& comp, double& expires
     if (composition_offer_connection(&comp) < 0) {
         const int connection = SendOffer(s, comp);
         if (connection < 0)
-            return s.hdr->helperState.load(std::memory_order_acquire) == kHelperRunning ? Offer::kDeclined
+            return atomic_load_explicit(&s.hdr->helperState, memory_order_acquire) == kHelperRunning ? Offer::kDeclined
                                                                                     : Offer::kLater;
         composition_await_answer(&comp, connection);
         expires = log_now_ms() + 5000.0;
@@ -475,7 +482,8 @@ struct DeviceQueue {
 struct SwapchainState {
     struct list node;  // In DeviceChain::swapchains.
     VkSwapchainKHR handle = VK_NULL_HANDLE;
-    std::vector<VkImage> images;
+    VkImage* images = nullptr;
+    uint32_t imageCount = 0;
     // The present queue's family: the composition's, and the in-layer network's, which converts
     // formats with blits and so needs a graphics family.
     uint32_t family = 0;
@@ -498,11 +506,13 @@ struct SwapchainState {
     double offerExpires = 0.0;
     // Per image: leg 2 signals it and the present waits on it. Queue order alone does not order a
     // present behind earlier work, and an image is acquired again only after its present waited.
-    std::vector<VkSemaphore> leg2Done;
+    // Null until CreateResources allocates it.
+    VkSemaphore* leg2Done = nullptr;
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer cb = VK_NULL_HANDLE;
-    // Reused by the present path; resizing only occurs when an unusual caller supplies more waits.
-    std::vector<VkPipelineStageFlags> waitStages;
+    // Reused by the present path; it grows only when an unusual caller supplies more waits.
+    VkPipelineStageFlags* waitStages = nullptr;
+    uint32_t waitStageCount = 0;
     bool ready = false;
     bool passThrough = false;
 
@@ -525,11 +535,13 @@ struct DeviceChain {
     // The loader's hook for installing a dispatch table on a dispatchable object a layer creates.
     // Handed to every layer in its own VkLayerDeviceCreateInfo node; see Hook_CreateDevice.
     PFN_vkSetDeviceLoaderData setDeviceLoaderData = nullptr;
-    std::atomic<bool> inert{false};
-    std::mutex lock;
+    _Atomic(bool) inert;
+    // Both mutexes are initialized once the device exists, in Hook_CreateDevice, and destroyed with
+    // the chain, in Hook_DestroyDevice.
+    pthread_mutex_t lock;
     // Held by the in-layer network's build around each of its submits, and by the layer's own
     // device waits, which run outside the lock: a device wait may not overlap a submit.
-    std::mutex networkSubmit;
+    pthread_mutex_t networkSubmit;
 
     bool exportMemory = false;       // VK_KHR_external_memory_fd was enabled
     // The ledger: the in-layer network was asked for and its features and
@@ -542,8 +554,8 @@ struct DeviceChain {
     uint32_t inLayerFamily = 0;
     // The swapchain whose frame last reached the network. A build frees what that frame used.
     SwapchainState* inLayerLast = nullptr;
-    // What the channel's layer reason last said of it.
-    std::string networkReason;
+    // What the channel's layer reason last said of it, as much as one log line shows.
+    char networkReason[2048];
     // The SwapchainStates of the swapchains the layer tracks.
     struct list swapchains;
     // The DeviceQueues of the queues the game took, in queueStore: one entry for each queue the
@@ -560,7 +572,7 @@ struct DeviceChain {
 // The InstanceChains and the DeviceChains, under g_stateMutex.
 static struct list g_instances = LIST_INIT(g_instances);
 static struct list g_devices = LIST_INIT(g_devices);
-static std::mutex g_stateMutex;
+static pthread_mutex_t g_stateMutex = PTHREAD_MUTEX_INITIALIZER;
 // The in-layer network's module (layer/network_module.h), beside the layer,
 // loaded once for the first device that enabled the network.
 static network_module g_network;
@@ -615,9 +627,9 @@ static DeviceChain* FindDevice_(VkDevice device) {
 
 // The chain of DEVICE, or null.
 static DeviceChain* FindDevice(VkDevice device) {
-    g_stateMutex.lock();
+    pthread_mutex_lock(&g_stateMutex);
     DeviceChain* const dc = FindDevice_(device);
-    g_stateMutex.unlock();
+    pthread_mutex_unlock(&g_stateMutex);
     return dc;
 }
 
@@ -642,18 +654,18 @@ static DeviceChain* DeviceForQueue_(VkQueue queue) {
     if (struct list* const only = list_only(&g_devices)) return container_of(only, DeviceChain, node);
     DeviceChain* dc;
     list_foreach(dc, &g_devices, DeviceChain, node) {
-        dc->lock.lock();
+        pthread_mutex_lock(&dc->lock);
         const bool found = FindQueue(dc, queue);
-        dc->lock.unlock();
+        pthread_mutex_unlock(&dc->lock);
         if (found) return dc;
     }
     return nullptr;
 }
 
 static DeviceChain* DeviceForQueue(VkQueue queue) {
-    g_stateMutex.lock();
+    pthread_mutex_lock(&g_stateMutex);
     DeviceChain* const dc = DeviceForQueue_(queue);
-    g_stateMutex.unlock();
+    pthread_mutex_unlock(&g_stateMutex);
     return dc;
 }
 
@@ -661,9 +673,9 @@ static DeviceChain* DeviceForQueue(VkQueue queue) {
 // wait may not overlap the in-layer network's submits.
 static void WaitDeviceIdle(DeviceChain* dc) {
     if (!dc->table.vkDeviceWaitIdle) return;
-    dc->networkSubmit.lock();
+    pthread_mutex_lock(&dc->networkSubmit);
     dc->table.vkDeviceWaitIdle(dc->self);
-    dc->networkSubmit.unlock();
+    pthread_mutex_unlock(&dc->networkSubmit);
 }
 
 // The one swapchain allowed to drive the neural round trip, chosen as the largest in the process.
@@ -681,7 +693,7 @@ struct PrimarySwap {
 static PrimarySwap g_primary;
 // Its own mutex, never nested with dc->lock or g_stateMutex, so the lock order in the present hook
 // cannot invert against the device hooks.
-static std::mutex g_primaryMutex;
+static pthread_mutex_t g_primaryMutex = PTHREAD_MUTEX_INITIALIZER;
 
 // ClaimPrimary without the lock; the caller holds g_primaryMutex.
 static bool ClaimPrimary_(VkDevice device, VkSwapchainKHR swapchain, uint32_t w, uint32_t h) {
@@ -696,24 +708,25 @@ static bool ClaimPrimary_(VkDevice device, VkSwapchainKHR swapchain, uint32_t w,
 
 // Adopts a larger swapchain; a present from anything else passes through untouched.
 static bool ClaimPrimary(VkDevice device, VkSwapchainKHR swapchain, uint32_t w, uint32_t h) {
-    g_primaryMutex.lock();
+    pthread_mutex_lock(&g_primaryMutex);
     const bool primary = ClaimPrimary_(device, swapchain, w, h);
-    g_primaryMutex.unlock();
+    pthread_mutex_unlock(&g_primaryMutex);
     return primary;
 }
 
 static void ReleasePrimary(VkDevice device, VkSwapchainKHR swapchain) {
-    g_primaryMutex.lock();
+    pthread_mutex_lock(&g_primaryMutex);
     if (g_primary.swapchain == swapchain && g_primary.device == device) g_primary = PrimarySwap{};
-    g_primaryMutex.unlock();
+    pthread_mutex_unlock(&g_primaryMutex);
 }
 
-// Where this copy of the layer was loaded from, for the duplicate check below.
-static std::string LayerObjectPath() {
+// Where this copy of the layer was loaded from, for the duplicate check below; empty if dladdr cannot
+// tell. The dynamic linker's record of the path (dladdr's dli_fname), which lasts as long as the
+// layer stays loaded.
+static const char* LayerObjectPath() {
     Dl_info info{};
-    if (dladdr((const void*)&LayerObjectPath, &info) && info.dli_fname && *info.dli_fname)
-        return info.dli_fname;
-    return std::string();
+    if (dladdr((const void*)&LayerObjectPath, &info) && info.dli_fname) return info.dli_fname;
+    return "";
 }
 
 // True when a *different* copy of this layer is already in the chain.
@@ -726,20 +739,18 @@ static std::string LayerObjectPath() {
 //
 // The claim is the object's own path rather than a bare flag, so a second call into the same copy --
 // which is legal, the loader may negotiate more than once -- is told apart from a second copy.
+// Asked once, by ReadLayerEnabled.
 static bool DuplicateLayerCopy() {
-    static const bool dup = [] {
-        const std::string self = LayerObjectPath();
-        const char* claimed = getenv("DLSSNR_LAYER_OBJECT");
-        if (claimed && *claimed) {
-            if (self.empty() || self == claimed) return false;
-            log_printf("[layer] another copy is already loaded from %s; this copy (%s) stays inert. "
-                       "Remove one of the implicit-layer manifests.", claimed, self.c_str());
-            return true;
-        }
-        if (!self.empty()) setenv("DLSSNR_LAYER_OBJECT", self.c_str(), 0);
-        return false;
-    }();
-    return dup;
+    const char* const self = LayerObjectPath();
+    const char* claimed = getenv("DLSSNR_LAYER_OBJECT");
+    if (claimed && *claimed) {
+        if (!*self || !strcmp(self, claimed)) return false;
+        log_printf("[layer] another copy is already loaded from %s; this copy (%s) stays inert. "
+                   "Remove one of the implicit-layer manifests.", claimed, self);
+        return true;
+    }
+    if (*self) setenv("DLSSNR_LAYER_OBJECT", self, 0);
+    return false;
 }
 
 // One set of keyboards for the process, however many devices the game creates. Zeroed, it has
@@ -755,12 +766,20 @@ static struct hotkeys g_hotkeys;
     hotkeys_fini(&g_hotkeys);
 }
 
+// DLSSNR_TOGGLE_KEY's key, read once by ReadToggleKey; 0 if none.
+static pthread_once_t g_toggleKeyOnce = PTHREAD_ONCE_INIT;
+static uint32_t g_toggleKeyFromEnv;
+
+static void ReadToggleKey() {
+    g_toggleKeyFromEnv = hotkey_key_code_from_name(getenv("DLSSNR_TOGGLE_KEY"));
+}
+
 // The key to watch, from the header if the interface has set one and from the environment otherwise,
 // so it can be bound in a launch option without the interface being involved.
 static uint32_t ToggleKey(const ShmHeader* hdr) {
-    static const uint32_t fromEnv = hotkey_key_code_from_name(getenv("DLSSNR_TOGGLE_KEY"));
-    if (fromEnv) return fromEnv;
-    return hdr ? hdr->toggleKey.load() : 0u;
+    pthread_once(&g_toggleKeyOnce, ReadToggleKey);
+    if (g_toggleKeyFromEnv) return g_toggleKeyFromEnv;
+    return hdr ? atomic_load(&hdr->toggleKey) : 0u;
 }
 
 // Polled before anything asks whether the pass is enabled, because asking first would make turning it
@@ -770,22 +789,27 @@ static void PollHotkeys(DeviceChain* dc) {
     const uint32_t key = ToggleKey(dc->shm.hdr);
     if (!hotkeys_pressed(&g_hotkeys, key)) return;
 
-    const bool wasOn = dc->shm.hdr->enabled.load() != 0;
-    dc->shm.hdr->enabled.store(wasOn ? 0u : 1u);
-    dc->shm.hdr->controlSeq.fetch_add(1);
+    const bool wasOn = atomic_load(&dc->shm.hdr->enabled) != 0;
+    atomic_store(&dc->shm.hdr->enabled, wasOn ? 0u : 1u);
+    atomic_fetch_add(&dc->shm.hdr->controlSeq, 1);
     log_printf("[hotkey] %s -> neural rendering %s", hotkey_key_name_from_code(key), wasOn ? "off" : "on");
 }
 
+// Whether this copy of the layer works, read once by ReadLayerEnabled.
+static pthread_once_t g_layerEnabledOnce = PTHREAD_ONCE_INIT;
+static bool g_layerEnabled;
+
+static void ReadLayerEnabled() {
+    if (DuplicateLayerCopy()) return;
+    const char* v = getenv("VKLayer_DLSS5");
+    const char* upper = getenv("VKLAYER_DLSS5");
+    const char* o = getenv("DLSSNR_ENABLE");
+    g_layerEnabled = (v && v[0] == '1') || (upper && upper[0] == '1') || (o && o[0] == '1');
+}
+
 static bool LayerEnabled() {
-    static const bool e = [] {
-        if (DuplicateLayerCopy()) return false;
-        const char* v = getenv("VKLayer_DLSS5");
-        const char* upper = getenv("VKLAYER_DLSS5");
-        if ((v && v[0] == '1') || (upper && upper[0] == '1')) return true;
-        const char* o = getenv("DLSSNR_ENABLE");
-        return o && o[0] == '1';
-    }();
-    return e;
+    pthread_once(&g_layerEnabledOnce, ReadLayerEnabled);
+    return g_layerEnabled;
 }
 
 // ---------------------------------------------------------------------------
@@ -828,10 +852,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateInstance(
     chain->table.next_gipa = next_gipa;
     instance_table_load(&chain->table, *pInstance);
 
-    g_stateMutex.lock();
+    pthread_mutex_lock(&g_stateMutex);
     list_append(&g_instances, &chain->node);
     log_printf("[layer] vkCreateInstance -> %p", (void*)*pInstance);
-    g_stateMutex.unlock();
+    pthread_mutex_unlock(&g_stateMutex);
     return VK_SUCCESS;
 }
 
@@ -848,22 +872,22 @@ static void Hook_DestroyInstance_(VkInstance instance, const VkAllocationCallbac
 
 static VKAPI_ATTR void VKAPI_CALL Hook_DestroyInstance(VkInstance instance,
                                                        const VkAllocationCallbacks* pAllocator) {
-    g_stateMutex.lock();
+    pthread_mutex_lock(&g_stateMutex);
     Hook_DestroyInstance_(instance, pAllocator);
-    g_stateMutex.unlock();
+    pthread_mutex_unlock(&g_stateMutex);
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_EnumeratePhysicalDevices(
     VkInstance instance, uint32_t* pCount, VkPhysicalDevice* pPhysicalDevices) {
-    g_stateMutex.lock();
+    pthread_mutex_lock(&g_stateMutex);
     InstanceChain* const chain = FindInstance(instance);
-    g_stateMutex.unlock();
+    pthread_mutex_unlock(&g_stateMutex);
     if (!chain || !chain->table.vkEnumeratePhysicalDevices) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult res = chain->table.vkEnumeratePhysicalDevices(instance, pCount, pPhysicalDevices);
     if (res != VK_SUCCESS || !pPhysicalDevices) return res;
-    g_stateMutex.lock();
+    pthread_mutex_lock(&g_stateMutex);
     const bool remembered = RememberPhysical(chain, pPhysicalDevices, *pCount);
-    g_stateMutex.unlock();
+    pthread_mutex_unlock(&g_stateMutex);
     if (!remembered) log_printf("[layer] vkEnumeratePhysicalDevices: out of host memory; a device created "
                                 "on these physical devices before a later enumeration records them "
                                 "presents untouched");
@@ -899,24 +923,6 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
         }
     }
 
-    // The layer's state, before the device, so that running out leaves nothing to destroy: the
-    // chain, and an entry for each queue the device is created with.
-    uint32_t queueCount = 0;
-    for (uint32_t i = 0; i < pCreateInfo->queueCreateInfoCount; ++i)
-        queueCount += pCreateInfo->pQueueCreateInfos[i].queueCount;
-    DeviceChain* const dc = new (std::nothrow) DeviceChain();
-    DeviceQueue* const queues = (DeviceQueue*)calloc(queueCount, sizeof *queues);
-    if (!dc || !queues) {
-        delete dc;
-        free(queues);
-        log_printf("[layer] vkCreateDevice: out of host memory for the layer's state");
-        return VK_ERROR_OUT_OF_HOST_MEMORY;
-    }
-
-    g_stateMutex.lock();
-    InstanceChain* const ic = InstanceForPhysical(physicalDevice);
-    g_stateMutex.unlock();
-
     // VK_KHR_external_memory_fd is what vkGetMemoryFdKHR needs to export the device-local
     // transport, so the proxy and the model's answer never pass through host memory. It is a device
     // extension and the application decides what the device enables, but a layer may add to that
@@ -925,36 +931,60 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
     // memory.
     static const char* const kWantExts[] = { VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME };
     constexpr size_t kWantCount = sizeof(kWantExts) / sizeof(kWantExts[0]);
+
+    // The layer's state, before the device, so that running out leaves nothing to destroy: the
+    // chain, an entry for each queue the device is created with, and a list with room for the
+    // game's extensions and the ones the layer adds, kWantExts and the network's.
+    uint32_t queueCount = 0;
+    for (uint32_t i = 0; i < pCreateInfo->queueCreateInfoCount; ++i)
+        queueCount += pCreateInfo->pQueueCreateInfos[i].queueCount;
+    DeviceChain* const dc = new (std::nothrow) DeviceChain();
+    DeviceQueue* const queues = (DeviceQueue*)calloc(queueCount, sizeof *queues);
+    const char** const extensions = (const char**)calloc(
+        size_t(pCreateInfo->enabledExtensionCount) + kWantCount + NETWORK_FEATURE_COUNT, sizeof *extensions);
+    if (!dc || !queues || !extensions) {
+        delete dc;
+        free(queues);
+        free(extensions);
+        log_printf("[layer] vkCreateDevice: out of host memory for the layer's state");
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+
+    pthread_mutex_lock(&g_stateMutex);
+    InstanceChain* const ic = InstanceForPhysical(physicalDevice);
+    pthread_mutex_unlock(&g_stateMutex);
+
     const VkDeviceCreateInfo* effective = pCreateInfo;
     VkDeviceCreateInfo modified = *pCreateInfo;
-    std::vector<const char*> enabledExts;
     if (LayerEnabled() && ic && ic->table.vkEnumerateDeviceExtensionProperties) {
         bool available[kWantCount] = {};
         bool enabled[kWantCount] = {};
         uint32_t n = 0;
         ic->table.vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &n, nullptr);
-        std::vector<VkExtensionProperties> avail(n);
-        if (n && ic->table.vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &n,
-                                                                avail.data()) == VK_SUCCESS) {
+        // One more than counted, so that a device that offers none does not read as running out.
+        VkExtensionProperties* const avail = (VkExtensionProperties*)calloc(size_t(n) + 1, sizeof *avail);
+        if (!avail) {
+            log_printf("[layer] vkCreateDevice: out of host memory to list the device's extensions; "
+                       "adding none for the transport");
+        } else if (n && ic->table.vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &n,
+                                                                       avail) == VK_SUCCESS) {
             for (uint32_t i = 0; i < n; ++i)
                 for (size_t k = 0; k < kWantCount; ++k)
                     if (!std::strcmp(avail[i].extensionName, kWantExts[k])) available[k] = true;
         }
+        free(avail);
         for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i)
             for (size_t k = 0; k < kWantCount; ++k)
                     if (!std::strcmp(pCreateInfo->ppEnabledExtensionNames[i], kWantExts[k])) enabled[k] = true;
-        for (size_t k = 0; k < kWantCount; ++k) {
-            if (!available[k] || enabled[k]) continue;
-            if (enabledExts.empty()) {
-                enabledExts.reserve(pCreateInfo->enabledExtensionCount + kWantCount);
-                for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i)
-                    enabledExts.push_back(pCreateInfo->ppEnabledExtensionNames[i]);
-            }
-            enabledExts.push_back(kWantExts[k]);
-        }
-        if (!enabledExts.empty()) {
-            modified.enabledExtensionCount = uint32_t(enabledExts.size());
-            modified.ppEnabledExtensionNames = enabledExts.data();
+        // The added ones go behind the game's, which are copied in front once there are any.
+        uint32_t count = pCreateInfo->enabledExtensionCount;
+        for (size_t k = 0; k < kWantCount; ++k)
+            if (available[k] && !enabled[k]) extensions[count++] = kWantExts[k];
+        if (count != pCreateInfo->enabledExtensionCount) {
+            for (uint32_t i = 0; i < pCreateInfo->enabledExtensionCount; ++i)
+                extensions[i] = pCreateInfo->ppEnabledExtensionNames[i];
+            modified.enabledExtensionCount = count;
+            modified.ppEnabledExtensionNames = extensions;
             effective = &modified;
         }
     }
@@ -966,12 +996,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
                                ic->table.vkGetPhysicalDeviceFeatures2, ic->table.vkEnumerateDeviceExtensionProperties,
                                ic->table.vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR));
     if (networkOff) log_printf("[layer] in-layer network unavailable: needs %s", networkOff);
-    // The request's extensions and the network's, in a list of their own.
-    std::vector<const char*> networkExts;
-    if (network) {
-        networkExts.resize(modified.enabledExtensionCount + NETWORK_FEATURE_COUNT);
-        if (device_features_add_network_extensions(&modified, networkExts.data())) effective = &modified;
-    }
+    // The request's extensions and the network's, in the layer's list.
+    if (network && device_features_add_network_extensions(&modified, extensions)) effective = &modified;
 
     link->u.pLayerInfo = link->u.pLayerInfo->pNext;
     auto* const nextLayerInfo = link->u.pLayerInfo;
@@ -1009,6 +1035,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
     if (res != VK_SUCCESS) {
         delete dc;
         free(queues);
+        free(extensions);
         return res;
     }
 
@@ -1019,6 +1046,8 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
     dc->setDeviceLoaderData = setLoaderData;
     dc->table.next_dpa = next_dpa;
     device_table_load(&dc->table, *pDevice);
+    pthread_mutex_init(&dc->lock, nullptr);
+    pthread_mutex_init(&dc->networkSubmit, nullptr);
     list_init(&dc->swapchains);
     list_init(&dc->queueFamilies);
     dc->queueStore = queues;
@@ -1030,11 +1059,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
         dc->network = device_features_network_enabled(effective);
         log_printf("[layer] in-layer network features %s", dc->network ? "enabled" : "not enabled");
     }
-    if (!dc->table.vkQueuePresentKHR || !dc->table.vkCreateSwapchainKHR || !ic) dc->inert = true;
+    if (!dc->table.vkQueuePresentKHR || !dc->table.vkCreateSwapchainKHR || !ic) atomic_store(&dc->inert, true);
     if (LayerEnabled() && !device_features_has_formatless_storage_writes(effective)) {
-        dc->inert = true;
+        atomic_store(&dc->inert, true);
         log_printf("[layer] shaderStorageImageWriteWithoutFormat not enabled; presenting untouched");
     }
+    // The request's last reader is above.
+    free(extensions);
 
     // The native HIP worker runs on an AMD GPU, so on anything else there is nothing for this
     // layer to do but cost a round trip.
@@ -1052,16 +1083,16 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
         vendorSupported = vendorSupported || props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU;
 #endif
         if (!vendorSupported) {
-            dc->inert = true;
+            atomic_store(&dc->inert, true);
             log_printf("[layer] inert on non-AMD device (vendor %#x): %s", props.vendorID, deviceName);
         }
     }
 
-    g_stateMutex.lock();
+    pthread_mutex_lock(&g_stateMutex);
     list_append(&g_devices, &dc->node);
     log_printf("[layer] vkCreateDevice -> %p on %s (inert=%d enabled=%d)", (void*)*pDevice, deviceName,
-               (int) dc->inert.load(), (int) LayerEnabled());
-    g_stateMutex.unlock();
+               (int) atomic_load(&dc->inert), (int) LayerEnabled());
+    pthread_mutex_unlock(&g_stateMutex);
     return VK_SUCCESS;
 }
 
@@ -1071,10 +1102,14 @@ static void DestroySwapchainState(DeviceChain* dc, SwapchainState* sc) {
     composition_fini(&sc->comp);
     if (sc->fenceLeg1) dc->table.vkDestroyFence(dc->self, sc->fenceLeg1, nullptr);
     if (sc->fenceLeg2) dc->table.vkDestroyFence(dc->self, sc->fenceLeg2, nullptr);
-    for (VkSemaphore semaphore : sc->leg2Done) dc->table.vkDestroySemaphore(dc->self, semaphore, nullptr);
+    if (sc->leg2Done)
+        for (uint32_t i = 0; i < sc->imageCount; ++i) dc->table.vkDestroySemaphore(dc->self, sc->leg2Done[i], nullptr);
     if (sc->pool) dc->table.vkDestroyCommandPool(dc->self, sc->pool, nullptr);
     if (dc->inLayerLast == sc) dc->inLayerLast = nullptr;
     list_del(&sc->node);
+    free(sc->images);
+    free(sc->leg2Done);
+    free(sc->waitStages);
     delete sc;
 }
 
@@ -1083,29 +1118,31 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
     DeviceChain* dc = FindDevice(device);
     if (!dc) return;
     SwapchainState* sc;
-    dc->lock.lock();
+    pthread_mutex_lock(&dc->lock);
     list_foreach(sc, &dc->swapchains, SwapchainState, node) ReleasePrimary(device, sc->handle);
-    dc->lock.unlock();
+    pthread_mutex_unlock(&dc->lock);
     // Say the layer has gone. A reader that finds a pid here checks it is alive, so a crash is
     // caught too, but an orderly exit should not need anyone to go looking.
-    if (dc->shm.hdr && dc->shm.hdr->layerPid.load() == uint32_t(getpid())) {
-        dc->shm.hdr->layerPid.store(0);
-        dc->shm.hdr->layerCompositionUp.store(0);
+    if (dc->shm.hdr && atomic_load(&dc->shm.hdr->layerPid) == uint32_t(getpid())) {
+        atomic_store(&dc->shm.hdr->layerPid, 0);
+        atomic_store(&dc->shm.hdr->layerCompositionUp, 0);
         // The in-layer network's state goes with it.
-        if (!dc->networkReason.empty())
+        if (dc->networkReason[0])
             ShmStoreString(&dc->shm.hdr->layerReasonSeq, dc->shm.hdr->layerReason, kReasonBytes, "");
     }
     WaitDeviceIdle(dc);
     // While the device is still found by its queues: the network's build submits through them.
     if (dc->inLayer) g_network.close(dc->inLayer);
-    g_stateMutex.lock();
+    pthread_mutex_lock(&g_stateMutex);
     list_del(&dc->node);
-    g_stateMutex.unlock();
-    dc->lock.lock();
+    pthread_mutex_unlock(&g_stateMutex);
+    pthread_mutex_lock(&dc->lock);
     list_foreach(sc, &dc->swapchains, SwapchainState, node) DestroySwapchainState(dc, sc);
-    dc->lock.unlock();
+    pthread_mutex_unlock(&dc->lock);
     if (dc->table.vkDestroyDevice) dc->table.vkDestroyDevice(device, pAllocator);
     free(dc->queueStore);
+    pthread_mutex_destroy(&dc->networkSubmit);
+    pthread_mutex_destroy(&dc->lock);
     delete dc;
 }
 
@@ -1126,9 +1163,9 @@ static void RememberQueue_(DeviceChain* dc, VkQueue queue, uint32_t family) {
 
 static void RememberQueue(DeviceChain* dc, VkQueue queue, uint32_t family) {
     if (!queue) return;
-    dc->lock.lock();
+    pthread_mutex_lock(&dc->lock);
     RememberQueue_(dc, queue, family);
-    dc->lock.unlock();
+    pthread_mutex_unlock(&dc->lock);
 }
 
 static VKAPI_ATTR void VKAPI_CALL Hook_GetDeviceQueue(VkDevice device, uint32_t family,
@@ -1198,7 +1235,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
          pCreateInfo->imageColorSpace == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT) ||
         DetectHdrKind(pCreateInfo->imageFormat, pCreateInfo->imageColorSpace) == kHdrPq10);
     bool unsupportedTransfer = false;
-    if (!dc->inert && LayerEnabled()) {
+    if (!atomic_load(&dc->inert) && LayerEnabled()) {
         const VkImageUsageFlags required = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
         VkSurfaceCapabilitiesKHR capabilities{};
         auto query = dc->instance ? dc->instance->table.vkGetPhysicalDeviceSurfaceCapabilitiesKHR : nullptr;
@@ -1207,23 +1244,26 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
             (capabilities.supportedUsageFlags & required) != required;
     }
     VkSwapchainCreateInfoKHR m = *pCreateInfo;
-    if (!dc->inert && LayerEnabled() && !unsupportedHdr && !unsupportedTransfer &&
+    if (!atomic_load(&dc->inert) && LayerEnabled() && !unsupportedHdr && !unsupportedTransfer &&
         SupportedFormat(pCreateInfo->imageFormat))
         m.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
     VkResult res = dc->table.vkCreateSwapchainKHR(device, &m, pAllocator, pSwapchain);
-    if (res != VK_SUCCESS || dc->inert || !LayerEnabled()) return res;
+    if (res != VK_SUCCESS || atomic_load(&dc->inert) || !LayerEnabled()) return res;
+    uint32_t count = 0;
+    dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, nullptr);
     SwapchainState* const sc = new (std::nothrow) SwapchainState();
-    if (!sc) {
+    VkImage* const images = (VkImage*)calloc(count, sizeof *images);
+    if (!sc || !images) {
+        delete sc;
+        free(images);
         log_printf("[layer] swapchain %p: out of host memory for the layer's state; presenting it untouched",
                    (void*)*pSwapchain);
         return VK_SUCCESS;
     }
-
-    uint32_t count = 0;
-    dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, nullptr);
-    sc->images.resize(count);
-    dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, sc->images.data());
+    sc->images = images;
+    sc->imageCount = count;
+    dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, sc->images);
 
     sc->handle = *pSwapchain;
     sc->format = pCreateInfo->imageFormat;
@@ -1234,7 +1274,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
     sc->passThrough = unsupportedHdr || unsupportedTransfer || !SupportedFormat(sc->format) || sc->width > kMaxW ||
                       sc->height > kMaxH || tooSmall;
 
-    dc->lock.lock();
+    pthread_mutex_lock(&dc->lock);
     log_printf("[layer] swapchain %p %ux%u fmt=%d hdr=%u passThrough=%d%s", (void*)*pSwapchain,
                pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height,
                (int)pCreateInfo->imageFormat, sc->hdrKind, (int)sc->passThrough,
@@ -1243,7 +1283,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
                                   : !SupportedFormat(sc->format) ? " (unsupported format)"
                                   : tooSmall ? " (too small)" : " (too large)") : "");
     list_append(&dc->swapchains, &sc->node);
-    dc->lock.unlock();
+    pthread_mutex_unlock(&dc->lock);
     return VK_SUCCESS;
 }
 
@@ -1252,18 +1292,18 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
     DeviceChain* dc = FindDevice(device);
     if (!dc) return;
     ReleasePrimary(device, swapchain);
-    dc->lock.lock();
+    pthread_mutex_lock(&dc->lock);
     // SC stays valid while the lock is released for the wait: an entry never moves when others are
     // linked or unlinked, and only this hook and Hook_DestroyDevice free one, which the game may not
     // call for this swapchain or its device while this call runs.
     SwapchainState* const sc = FindSwapchain(dc, swapchain);
     if (sc) {
-        dc->lock.unlock();
+        pthread_mutex_unlock(&dc->lock);
         WaitDeviceIdle(dc);
-        dc->lock.lock();
+        pthread_mutex_lock(&dc->lock);
         DestroySwapchainState(dc, sc);
     }
-    dc->lock.unlock();
+    pthread_mutex_unlock(&dc->lock);
     if (dc->table.vkDestroySwapchainKHR) dc->table.vkDestroySwapchainKHR(device, swapchain, pAllocator);
 }
 
@@ -1321,9 +1361,10 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
     if (dc->table.vkCreateFence(d, &fci, nullptr, &sc.fenceLeg2) != VK_SUCCESS) return false;
     VkSemaphoreCreateInfo sci{};
     sci.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    sc.leg2Done.resize(sc.images.size());
-    for (VkSemaphore& semaphore : sc.leg2Done)
-        if (dc->table.vkCreateSemaphore(d, &sci, nullptr, &semaphore) != VK_SUCCESS) return false;
+    sc.leg2Done = (VkSemaphore*)calloc(sc.imageCount, sizeof *sc.leg2Done);
+    if (!sc.leg2Done) return false;
+    for (uint32_t i = 0; i < sc.imageCount; ++i)
+        if (dc->table.vkCreateSemaphore(d, &sci, nullptr, &sc.leg2Done[i]) != VK_SUCCESS) return false;
 
     if (!dc->instance) return false;
     if (composition_init(&sc.comp, &dc->table, &dc->instance->table, d, dc->physical) != VK_SUCCESS) {
@@ -1349,11 +1390,12 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
 static bool NoteVk(DeviceChain* dc, VkResult r, const char* what) {
     if (r == VK_SUCCESS) return true;
     if (r == VK_ERROR_DEVICE_LOST) {
-        if (!dc->inert.exchange(true)) log_printf("[layer] %s -> DEVICE_LOST; layer inert for this device", what);
+        if (!atomic_exchange(&dc->inert, true))
+            log_printf("[layer] %s -> DEVICE_LOST; layer inert for this device", what);
         return false;
     }
-    static std::atomic<uint32_t> reported{0};
-    if (reported.fetch_add(1) < 8) log_printf("[layer] %s -> %d", what, (int) r);
+    static _Atomic(uint32_t) reported;
+    if (atomic_fetch_add(&reported, 1) < 8) log_printf("[layer] %s -> %d", what, (int) r);
     return false;
 }
 
@@ -1400,29 +1442,39 @@ static void PublishFrame(DeviceChain* dc, const SwapchainState& sc, double ms) {
     ShmHeader* const hdr = dc->shm.hdr;
     if (!hdr) return;
     ShmStore64(&hdr->layerFramesLo, &hdr->layerFramesHi, ++dc->framesComposed);
-    hdr->layerWidth.store(sc.width);
-    hdr->layerHeight.store(sc.height);
-    hdr->layerFormat.store(uint32_t(sc.format));
-    hdr->layerCompositionUp.store(1);
-    hdr->layerPid.store(uint32_t(getpid()));
-    hdr->layerMsBits.store(FloatToBits(float(ms)));
-    hdr->layerMeasuredWhiteBits.store(FloatToBits(composition_measured_white_point(&sc.comp)));
-    hdr->layerHeartbeat.fetch_add(1);
+    atomic_store(&hdr->layerWidth, sc.width);
+    atomic_store(&hdr->layerHeight, sc.height);
+    atomic_store(&hdr->layerFormat, uint32_t(sc.format));
+    atomic_store(&hdr->layerCompositionUp, 1);
+    atomic_store(&hdr->layerPid, uint32_t(getpid()));
+    atomic_store(&hdr->layerMsBits, FloatToBits(float(ms)));
+    atomic_store(&hdr->layerMeasuredWhiteBits, FloatToBits(composition_measured_white_point(&sc.comp)));
+    atomic_fetch_add(&hdr->layerHeartbeat, 1);
 }
 
 static void NetworkLog(const char* line) { log_printf("[network] %s", line); }
 
+// Whether REASON, a buffer of SIZE bytes whose last byte is NUL (snprintf writes nothing else there),
+// holds WHAT, DETAIL and AFTER one after the other, cut to fit as snprintf cuts them. Each byte is
+// read once, up to the first difference; one at the last byte means REASON holds the cut text.
+static bool ReasonIs(const char* reason, size_t size, const char* what, const char* detail, const char* after) {
+    const char* const pieces[] = { what, detail, after };
+    const char* const end = reason + size - 1;
+    for (size_t i = 0; i < sizeof pieces / sizeof *pieces; ++i)
+        for (const char* p = pieces[i]; *p; ++p, ++reason)
+            if (*reason != *p) return reason == end;
+    return !*reason;
+}
+
 // The in-layer network's state in the channel's layer reason, for the controllers: WHAT, DETAIL and
-// AFTER, stored when it changes and logged when it is news. Unchanged, it allocates nothing.
+// AFTER, cut to dc->networkReason's size, stored when it changes and logged when it is news.
+// Unchanged, it copies nothing.
 static void NetworkReason(DeviceChain* dc, const char* what, const char* detail = "", const char* after = "") {
-    std::string& reason = dc->networkReason;
-    const size_t a = std::strlen(what), b = std::strlen(detail);
-    if (reason.size() == a + b + std::strlen(after) && !reason.compare(0, a, what) &&
-        !reason.compare(a, b, detail) && !reason.compare(a + b, std::string::npos, after))
-        return;
-    reason.assign(what).append(detail).append(after);
-    log_printf("[layer] %s", reason.c_str());
-    if (dc->shm.hdr) ShmStoreString(&dc->shm.hdr->layerReasonSeq, dc->shm.hdr->layerReason, kReasonBytes, reason.c_str());
+    char* const reason = dc->networkReason;
+    if (ReasonIs(reason, sizeof dc->networkReason, what, detail, after)) return;
+    snprintf(reason, sizeof dc->networkReason, "%s%s%s", what, detail, after);
+    log_printf("[layer] %s", reason);
+    if (dc->shm.hdr) ShmStoreString(&dc->shm.hdr->layerReasonSeq, dc->shm.hdr->layerReason, kReasonBytes, reason);
 }
 
 // The network failed: frames go to dlsslopd from now on.
@@ -1432,14 +1484,27 @@ static bool NetworkFailed(DeviceChain* dc) {
     return false;
 }
 
+// Loads g_network once, from beside the layer.
+static pthread_once_t g_networkOnce = PTHREAD_ONCE_INIT;
+
+static void LoadNetworkModule() {
+    const char* const self = LayerObjectPath();
+    const char* const slash = strrchr(self, '/');
+    const int directory = slash ? int(slash - self) + 1 : 0;
+    char path[PATH_MAX];
+    // A path cut to fit would name another file; the kernel refuses one this long anyway.
+    if (size_t(snprintf(path, sizeof path, "%.*slibdlsslop-network.so", directory, self)) >= sizeof path) {
+        snprintf(g_network.failure, sizeof g_network.failure, "%s: the module's path is too long", self);
+        return;
+    }
+    network_module_load(&g_network, path);
+}
+
 // The network on DC's device, building through QUEUE, SC's present queue; null, with the reason
 // published, when it does not open.
 static DlsslopNetwork* OpenNetwork(DeviceChain* dc, const SwapchainState& sc, VkQueue queue) {
-    static const bool loaded = [] {
-        const std::string self = LayerObjectPath();
-        return network_module_load(&g_network, (self.substr(0, self.rfind('/') + 1) + "libdlsslop-network.so").c_str());
-    }();
-    if (!loaded) {
+    pthread_once(&g_networkOnce, LoadNetworkModule);
+    if (!g_network.library) {
         NetworkReason(dc, "in-layer network off, module unavailable: ", g_network.failure,
                       "; frames go to dlsslopd");
         return nullptr;
@@ -1450,8 +1515,12 @@ static DlsslopNetwork* OpenNetwork(DeviceChain* dc, const SwapchainState& sc, Vk
     device.device = dc->self;
     device.queue = queue;
     device.family = sc.family;
-    device.lock_queue = [](void* context) { static_cast<DeviceChain*>(context)->networkSubmit.lock(); };
-    device.unlock_queue = [](void* context) { static_cast<DeviceChain*>(context)->networkSubmit.unlock(); };
+    device.lock_queue = [](void* context) {
+        pthread_mutex_lock(&static_cast<DeviceChain*>(context)->networkSubmit);
+    };
+    device.unlock_queue = [](void* context) {
+        pthread_mutex_unlock(&static_cast<DeviceChain*>(context)->networkSubmit);
+    };
     device.context = dc;
     device.physical_dispatch = dc->instance->next_gipa;
     dc->instance->table.vkGetPhysicalDeviceMemoryProperties(dc->physical, &device.memory);
@@ -1544,6 +1613,21 @@ static bool ProcessInLayer(DeviceChain* dc, SwapchainState& sc, VkQueue queue, u
     return true;
 }
 
+// Room for COUNT stage masks in sc.waitStages, one for each wait of the first submit. False, logged,
+// when out of host memory.
+static bool ReserveWaitStages(SwapchainState& sc, uint32_t count) {
+    if (sc.waitStageCount >= count) return true;
+    VkPipelineStageFlags* const grown = (VkPipelineStageFlags*)realloc(sc.waitStages, count * sizeof *grown);
+    if (!grown) {
+        log_printf("[layer] present: out of host memory for %u wait stages; presenting untouched", count);
+        return false;
+    }
+    for (uint32_t i = sc.waitStageCount; i < count; ++i) grown[i] = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    sc.waitStages = grown;
+    sc.waitStageCount = count;
+    return true;
+}
+
 // Returns true if the swapchain image will hold the composed frame: leg 2 was submitted and signals
 // sc.leg2Done[index], which the present must wait on.
 //
@@ -1575,16 +1659,17 @@ static bool ProcessPresent_(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
     const bool inLayer = UseInLayerNetwork(dc, sc, queue);
     if (inLayer) {
         // The raster the network runs at, which dlsslopd would publish.
-        if (const NativeTier* tier = ShmNativeTier(hdr->nativeTier.load())) {
-            hdr->nativeModelMaxWidth.store(tier->width);
-            hdr->nativeModelMaxHeight.store(tier->height);
+        if (const NativeTier* tier = ShmNativeTier(atomic_load(&hdr->nativeTier))) {
+            atomic_store(&hdr->nativeModelMaxWidth, tier->width);
+            atomic_store(&hdr->nativeModelMaxHeight, tier->height);
         }
-    } else if (hdr->helperState.load(std::memory_order_acquire) != kHelperRunning) {
+    } else if (atomic_load_explicit(&hdr->helperState, memory_order_acquire) != kHelperRunning) {
         // A daemon that serves again gets a fresh offer; its predecessor's imports are gone.
         composition_withdraw_offer(&sc.comp);
         StartWorker(dc->shm);
         return false;
-    } else if (hdr->seq_req.load(std::memory_order_acquire) != hdr->seq_resp.load(std::memory_order_acquire)) {
+    } else if (atomic_load_explicit(&hdr->seq_req, memory_order_acquire) !=
+               atomic_load_explicit(&hdr->seq_resp, memory_order_acquire)) {
         return false;
     }
     VkCommandBuffer cb = sc.cb;
@@ -1605,8 +1690,8 @@ static bool ProcessPresent_(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
     // float encode is only taken when both agree -- a model that refused the float input leaves the
     // frame on the 8-bit path it has always used. hdrActive doubles as the echo the helper reads, so
     // it builds the float images only for a layer that has said it will feed them.
-    const uint32_t hdrMode = dc->shm.hdr ? dc->shm.hdr->hdrMode.load() : kHdrAuto;
-    const uint32_t colorMode = dc->shm.hdr ? dc->shm.hdr->colourMode.load() : kColourAuto;
+    const uint32_t hdrMode = dc->shm.hdr ? atomic_load(&dc->shm.hdr->hdrMode) : kHdrAuto;
+    const uint32_t colorMode = dc->shm.hdr ? atomic_load(&dc->shm.hdr->colourMode) : kColourAuto;
     const bool hdrActive = hdrMode != kHdrOff && (hdrMode == kHdrForce || sc.hdrKind != kHdrNone);
     // HIP consumes an encoded picture in either precision; unlike NGX, format support does not
     // require rebuilding its model, so the float proxy follows the intent alone. The per-request
@@ -1622,19 +1707,19 @@ static bool ProcessPresent_(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
     }
 
     if (dc->shm.hdr) {
-        dc->shm.hdr->hdrDetected.store(sc.hdrKind);
+        atomic_store(&dc->shm.hdr->hdrDetected, sc.hdrKind);
         // The intent, not the format-gated decision: the helper builds the float images only for a
         // layer that has said it will feed them, and that handshake has to start while the proxy is
         // still 8-bit. Publishing composition_hdr_proxy_active() here would wait on proxyFormat,
         // which waits on this field, and neither would ever move.
-        dc->shm.hdr->hdrActive.store(hdrActive ? 1u : 0u);
+        atomic_store(&dc->shm.hdr->hdrActive, hdrActive ? 1u : 0u);
     }
 
     // A capture is asked for by writing a frame count into the header; taking it clears the request,
     // so one press produces one run rather than one per frame for as long as nobody clears it.
     // A request published after this frame's settings snapshot belongs to the next frame.
-    if (dc->shm.hdr && dc->shm.hdr->controlSeq.load() == fs.control_seq) {
-        if (const uint32_t frames = dc->shm.hdr->captureRequest.exchange(0); frames > 0)
+    if (dc->shm.hdr && atomic_load(&dc->shm.hdr->controlSeq) == fs.control_seq) {
+        if (const uint32_t frames = atomic_exchange(&dc->shm.hdr->captureRequest, 0); frames > 0)
             composition_request_capture(&sc.comp, frames, fs.control_seq);
     }
 
@@ -1645,11 +1730,10 @@ static bool ProcessPresent_(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
 
     // Only the first submit waits: the later one is ordered behind it on the same queue and fenced
     // besides, and a binary semaphore may be waited on once per signal.
-    if (sc.waitStages.size() < waitCount)
-        sc.waitStages.resize(waitCount, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    if (!ReserveWaitStages(sc, waitCount)) return false;
     si.waitSemaphoreCount = waitCount;
     si.pWaitSemaphores = waitCount ? waitSemaphores : nullptr;
-    si.pWaitDstStageMask = waitCount ? sc.waitStages.data() : nullptr;
+    si.pWaitDstStageMask = waitCount ? sc.waitStages : nullptr;
     const auto dropWaits = [&] {
         si.waitSemaphoreCount = 0;
         si.pWaitSemaphores = nullptr;
@@ -1700,13 +1784,13 @@ static bool ProcessPresent_(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
                          composition_model_bytes(&sc.comp), composition_proxy_pixels(&sc.comp),
                          composition_model_pixels(&sc.comp), composition_hdr_proxy_active(&sc.comp), transportGen)) {
         // A restarted worker holds no imports: offer the pair again on the next frame.
-        if (transportGen && dc->shm.hdr->transportMiss.load() == transportGen)
+        if (transportGen && atomic_load(&dc->shm.hdr->transportMiss) == transportGen)
             composition_set_transport_ready(&sc.comp, false);
         // Fail-open. Leg 1 already put the image back in PRESENT_SRC_KHR, so the original frame is
         // what gets presented and nothing else is owed.
         return false;
     }
-    composition_set_capture_inference(&sc.comp, dc->shm.hdr->seq_req.load());
+    composition_set_capture_inference(&sc.comp, atomic_load(&dc->shm.hdr->seq_req));
     const double tHelper = time ? log_now_ms() : 0.0;
 
     // ---- leg 2: the answer, composed back ----
@@ -1772,11 +1856,11 @@ static VkResult Hook_QueuePresentKHR_(DeviceChain* dc, VkQueue queue, const VkPr
         SwapchainState* const state = FindSwapchain(dc, pPresentInfo->pSwapchains[i]);
         if (!state) continue;
         SwapchainState& sc = *state;
-        if (sc.passThrough || pPresentInfo->pImageIndices[i] >= sc.images.size()) continue;
+        if (sc.passThrough || pPresentInfo->pImageIndices[i] >= sc.imageCount) continue;
         // One swapchain drives the channel; the rest present raw. See ClaimPrimary.
         if (!ClaimPrimary(dc->self, pPresentInfo->pSwapchains[i], sc.width, sc.height)) {
-            static std::atomic<uint32_t> n{0};
-            const uint32_t k = n.fetch_add(1);
+            static _Atomic(uint32_t) n;
+            const uint32_t k = atomic_fetch_add(&n, 1);
             if (k < 3) log_printf("[layer] present: swapchain %p is not primary", (void*)pPresentInfo->pSwapchains[i]);
             continue;
         }
@@ -1809,7 +1893,7 @@ static VkResult Hook_QueuePresentKHR_(DeviceChain* dc, VkQueue queue, const VkPr
         if (log_verbose()) {
             log_printf("[present] swapchain=%p image=%u seq=%u composed=%d",
                        (void*)pPresentInfo->pSwapchains[i], pPresentInfo->pImageIndices[i],
-                       dc->shm.hdr ? dc->shm.hdr->seq_req.load() : 0u, int(composed));
+                       dc->shm.hdr ? atomic_load(&dc->shm.hdr->seq_req) : 0u, int(composed));
         }
         // On failure before the capture submit, leave the application's waits attached to the
         // original present. Once our first submit accepted them they have been consumed.
@@ -1837,13 +1921,13 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
                                                             const VkPresentInfoKHR* pPresentInfo) {
     DeviceChain* dc = DeviceForQueue(queue);
     if (!dc || !dc->table.vkQueuePresentKHR) return VK_ERROR_INITIALIZATION_FAILED;
-    if (dc->inert || !LayerEnabled()) return dc->table.vkQueuePresentKHR(queue, pPresentInfo);
+    if (atomic_load(&dc->inert) || !LayerEnabled()) return dc->table.vkQueuePresentKHR(queue, pPresentInfo);
     // Held from here to the present at the end, alongside the queue hooks. Vulkan requires external
     // synchronization for every operation on a queue; the in-layer network's build submits to the
     // application's queue from a thread of its own, so the present must not overlap it.
-    dc->lock.lock();
+    pthread_mutex_lock(&dc->lock);
     const VkResult res = Hook_QueuePresentKHR_(dc, queue, pPresentInfo);
-    dc->lock.unlock();
+    pthread_mutex_unlock(&dc->lock);
     return res;
 }
 
@@ -1851,9 +1935,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueSubmit(VkQueue queue, uint32_t s
                                                         const VkSubmitInfo* pSubmits, VkFence fence) {
     DeviceChain* dc = DeviceForQueue(queue);
     if (!dc || !dc->table.vkQueueSubmit) return VK_ERROR_INITIALIZATION_FAILED;
-    dc->lock.lock();
+    pthread_mutex_lock(&dc->lock);
     const VkResult res = dc->table.vkQueueSubmit(queue, submitCount, pSubmits, fence);
-    dc->lock.unlock();
+    pthread_mutex_unlock(&dc->lock);
     return res;
 }
 
@@ -1861,18 +1945,18 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueSubmit2(VkQueue queue, uint32_t 
                                                          const VkSubmitInfo2* pSubmits, VkFence fence) {
     DeviceChain* dc = DeviceForQueue(queue);
     if (!dc || !dc->table.vkQueueSubmit2) return VK_ERROR_INITIALIZATION_FAILED;
-    dc->lock.lock();
+    pthread_mutex_lock(&dc->lock);
     const VkResult res = dc->table.vkQueueSubmit2(queue, submitCount, pSubmits, fence);
-    dc->lock.unlock();
+    pthread_mutex_unlock(&dc->lock);
     return res;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueWaitIdle(VkQueue queue) {
     DeviceChain* dc = DeviceForQueue(queue);
     if (!dc || !dc->table.vkQueueWaitIdle) return VK_ERROR_INITIALIZATION_FAILED;
-    dc->lock.lock();
+    pthread_mutex_lock(&dc->lock);
     const VkResult res = dc->table.vkQueueWaitIdle(queue);
-    dc->lock.unlock();
+    pthread_mutex_unlock(&dc->lock);
     return res;
 }
 
@@ -1880,9 +1964,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueSubmit2KHR(VkQueue queue, uint32
                                                             const VkSubmitInfo2* pSubmits, VkFence fence) {
     DeviceChain* dc = DeviceForQueue(queue);
     if (!dc || !dc->table.vkQueueSubmit2KHR) return VK_ERROR_INITIALIZATION_FAILED;
-    dc->lock.lock();
+    pthread_mutex_lock(&dc->lock);
     const VkResult res = dc->table.vkQueueSubmit2KHR(queue, submitCount, pSubmits, fence);
-    dc->lock.unlock();
+    pthread_mutex_unlock(&dc->lock);
     return res;
 }
 
@@ -1890,9 +1974,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueBindSparse(VkQueue queue, uint32
                                                             const VkBindSparseInfo* pBindInfo, VkFence fence) {
     DeviceChain* dc = DeviceForQueue(queue);
     if (!dc || !dc->table.vkQueueBindSparse) return VK_ERROR_INITIALIZATION_FAILED;
-    dc->lock.lock();
+    pthread_mutex_lock(&dc->lock);
     const VkResult res = dc->table.vkQueueBindSparse(queue, bindInfoCount, pBindInfo, fence);
-    dc->lock.unlock();
+    pthread_mutex_unlock(&dc->lock);
     return res;
 }
 
@@ -1901,9 +1985,9 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueBindSparse(VkQueue queue, uint32
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_DeviceWaitIdle(VkDevice device) {
     DeviceChain* dc = FindDevice(device);
     if (!dc || !dc->table.vkDeviceWaitIdle) return VK_ERROR_INITIALIZATION_FAILED;
-    dc->lock.lock();
+    pthread_mutex_lock(&dc->lock);
     const VkResult res = dc->table.vkDeviceWaitIdle(device);
-    dc->lock.unlock();
+    pthread_mutex_unlock(&dc->lock);
     return res;
 }
 
@@ -1931,13 +2015,13 @@ vkNegotiateLoaderLayerInterfaceVersion(VkNegotiateLayerInterface* v) {
     // manifest in the directory -- and loads this library on each pass. That is the loader's
     // business, but announcing it each time turned one line into 627 in the user's log. Every other
     // layer stays quiet because none of them log from here.
-    static std::once_flag announced;
-    if (LayerEnabled()) std::call_once(announced, [] {
+    static atomic_flag announced = ATOMIC_FLAG_INIT;
+    if (LayerEnabled() && !atomic_flag_test_and_set(&announced)) {
         const char* mixed = getenv("VKLayer_DLSS5");
         const char* upper = getenv("VKLAYER_DLSS5");
         const char* value = mixed ? mixed : upper;
         log_printf("=== %s loaded (VKLayer_DLSS5=%s) ===", VK_LAYER_NAME, value ? value : "(unset)");
-    });
+    }
     return VK_SUCCESS;
 }
 
@@ -2033,9 +2117,9 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instan
     if (!pName) return nullptr;
     if (const PFN_vkVoidFunction hook = LookupHook(pName, kHookInstance)) return hook;
     if (!instance) return nullptr;
-    g_stateMutex.lock();
+    pthread_mutex_lock(&g_stateMutex);
     const PFN_vkVoidFunction next = NextInstanceProcAddr(instance, pName);
-    g_stateMutex.unlock();
+    pthread_mutex_unlock(&g_stateMutex);
     return next;
 }
 
@@ -2043,9 +2127,9 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, co
     if (!pName) return nullptr;
     if (const PFN_vkVoidFunction hook = LookupHook(pName, kHookDevice)) return hook;
     if (!device) return nullptr;
-    g_stateMutex.lock();
+    pthread_mutex_lock(&g_stateMutex);
     const PFN_vkVoidFunction next = NextDeviceProcAddr(device, pName);
-    g_stateMutex.unlock();
+    pthread_mutex_unlock(&g_stateMutex);
     return next;
 }
 
