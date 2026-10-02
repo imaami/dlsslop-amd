@@ -90,9 +90,11 @@ log_open (void)
 	log_verbose_on = log_env_on("DLSSNR_VERBOSE");
 	log_time_on = log_env_on("DLSSNR_TIME");
 
+	// A prefix of digits counts, as atoi() read it; strtoll() saturates a number atoi() could not
+	// hold, which atoi() leaves undefined. Anything but a positive 32-bit count is the default.
 	char const *every = getenv("DLSSNR_TIME_EVERY");
-	int interval = every ? atoi(every) : 0;
-	log_interval = interval > 0 ? (uint32_t)interval : 30;
+	long long const interval = every ? strtoll(every, nullptr, 10) : 0;
+	log_interval = interval > 0 && interval <= UINT32_MAX ? (uint32_t)interval : 30;
 
 	if (!layer_requested())
 		return;

@@ -5,7 +5,6 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <dlfcn.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <linux/input.h>
 #include <stdint.h>
@@ -60,9 +59,9 @@ hotkey_key_code_from_name (char const *name)
 	// only names in the table that begin with a digit are the digits, which read as numbers.
 	if (isdigit((unsigned char)*name)) {
 		char *end;
-		errno = 0;
+		// Only a number below HOTKEYS_CODES is a key's, and strtoul() saturates one that overflows.
 		unsigned long const code = strtoul(name, &end, 10);
-		return *end || errno == ERANGE ? 0 : (uint32_t)code;
+		return *end || code >= HOTKEYS_CODES ? 0 : (uint32_t)code;
 	}
 
 	// The name in upper case, each byte put there with toupper() as upstream did. A name that

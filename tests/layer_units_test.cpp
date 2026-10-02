@@ -147,9 +147,11 @@ const Override kOverrides[] = {
     {"DLSSNR_GHOST_SLACK", "0", &Settings::ghost_slack, 0.0f},
     {"DLSSNR_GHOST_SLACK", "", &Settings::ghost_slack, 0.5f},
     {"DLSSNR_GHOST_SLACK", "-5", &Settings::ghost_slack, 0.5f},
-    // atoi: a prefix of digits counts, and no digits are 0.
+    // A prefix of digits counts, and no digits are 0; a number beyond 32 bits is the largest.
     {"DLSSNR_GHOST_SLACK", "12abc", &Settings::ghost_slack, 12 / 100.0f},
     {"DLSSNR_GHOST_SLACK", "abc", &Settings::ghost_slack, 0.0f},
+    {"DLSSNR_GHOST_SLACK", "99999999999", &Settings::ghost_slack, 2147483647 / 100.0f},
+    {"DLSSNR_GHOST_SLACK", "99999999999999999999999", &Settings::ghost_slack, 2147483647 / 100.0f},
     // Percent over the header's ratioSmoothPercent, up to 1.
     {"DLSSNR_RATIO_SMOOTH", "50", &Settings::ratio_smooth, 50 / 100.0f},
     {"DLSSNR_RATIO_SMOOTH", "150", &Settings::ratio_smooth, 1.0f},
@@ -510,10 +512,12 @@ void CheckKeyNames() {
         {"KEY_1", KEY_1},
         {"0", 0},
         {"KEY_0", KEY_0},
-        // The code wraps to 32 bits, up to the largest unsigned long; beyond it, nothing is bound.
-        {"4294967297", 1},
-        {"18446744073709551615", UINT32_MAX},
-        {"018446744073709551615", UINT32_MAX},
+        // A number is a key code below KEY_CNT; any other binds nothing, also beyond unsigned long.
+        {"767", KEY_MAX},
+        {"768", 0},
+        {"4294967297", 0},
+        {"18446744073709551615", 0},
+        {"018446744073709551615", 0},
         {"18446744073709551616", 0},
         {"99999999999999999999999999", 0},
         {"12a", 0},
@@ -606,8 +610,8 @@ const SwitchCase kSwitchCases[] = {
     {"yes", false}, {"true", false},
 };
 
-// atoi: a prefix of digits counts, leading blanks and a sign are skipped, and anything not positive
-// is the default.
+// A prefix of digits counts, leading blanks and a sign are skipped, and anything not positive or
+// beyond 32 bits is the default.
 struct IntervalCase {
     const char* value;
     uint32_t interval;
@@ -615,7 +619,8 @@ struct IntervalCase {
 
 const IntervalCase kIntervalCases[] = {
     {nullptr, 30}, {"", 30}, {"0", 30}, {"-5", 30}, {"abc", 30}, {"1", 1}, {"45", 45}, {"7x", 7},
-    {" 12", 12}, {"+9", 9}, {"2147483647", 2147483647},
+    {" 12", 12}, {"+9", 9}, {"2147483647", 2147483647}, {"4294967295", 4294967295u}, {"4294967296", 30},
+    {"99999999999999999999", 30},
 };
 
 void CheckLogSwitches() {

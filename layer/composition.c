@@ -189,16 +189,23 @@ static constexpr size_t FRAME_OVERRIDE_COUNT = sizeof FRAME_OVERRIDES / sizeof *
 /** @brief Runs read_overrides(). */
 static pthread_once_t frame_overrides_once = PTHREAD_ONCE_INIT;
 
-/** @brief atoi() of each override's variable, or -1 if it is unset or empty. */
-static int frame_overrides[FRAME_OVERRIDE_COUNT];
+/** @brief Each override's variable as a number, at most INT32_MAX, or -1 if it is unset, empty or
+ *         negative.
+ */
+static int32_t frame_overrides[FRAME_OVERRIDE_COUNT];
 
-/** @brief Reads the overrides' variables. */
+/** @brief Reads the overrides' variables.
+ *
+ * A prefix of digits counts, and none is 0, as atoi() read them; strtol() saturates a number atoi()
+ * could not hold, which atoi() leaves undefined.
+ */
 static void
 read_overrides (void)
 {
 	for (size_t i = 0; i < FRAME_OVERRIDE_COUNT; ++i) {
 		char const *const v = getenv(FRAME_OVERRIDES[i].variable);
-		frame_overrides[i] = v && *v ? atoi(v) : -1;
+		long const n = v && *v ? strtol(v, nullptr, 10) : -1;
+		frame_overrides[i] = n < 0 ? -1 : n > INT32_MAX ? INT32_MAX : (int32_t)n;
 	}
 }
 

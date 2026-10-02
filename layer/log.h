@@ -61,7 +61,7 @@ log_time_enabled (void);
 
 /** @brief The number of frames between two timing lines.
  *
- * @return DLSSNR_TIME_EVERY if it is a positive number, otherwise 30.
+ * @return DLSSNR_TIME_EVERY if it is a positive number of at most 32 bits, otherwise 30.
  */
 extern LOG_STD(uint32_t)
 log_time_interval (void);

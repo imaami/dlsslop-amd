@@ -72,11 +72,11 @@ struct hotkeys {
 /** @brief A Linux KEY_* code from a name.
  *
  * Names are the KEY_ names without the prefix, case-insensitive: "F10", "Home", "N". A bare number
- * is a key code, cut to 32 bits, so a key with no name here is still reachable.
+ * below HOTKEYS_CODES is a key code, so a key with no name here is still reachable.
  *
  * @param name The name, or nullptr.
- * @return     The code, or 0 (unbound) for anything unrecognised, and for a number beyond unsigned
- *             long.
+ * @return     The code, or 0 (unbound) for anything unrecognised, and for a number that is no key
+ *             code.
  */
 extern HOTKEY_STD(uint32_t)
 hotkey_key_code_from_name (char const *name);
