@@ -138,7 +138,7 @@ struct fake_device {
 	ino_t          ino;    //!< The file's inode.
 	uint32_t       probes; //!< How many times its event types were asked for.
 	enum fake_kind kind;   //!< What it claims to be.
-	bool           dead;   //!< Unplugged: every ioctl fails with ENODEV.
+	bool           dead;   //!< Unplugged: every ioctl fails, as on the plain file it is.
 };
 
 /** @brief The fake devices. */
@@ -209,7 +209,8 @@ set_bit (unsigned long bits[],
  *         else.
  *
  * Defined in this program, it takes the C library's place for hotkey.c. EVIOCGVERSION answers 0, as
- * the kernel's does, and EVIOCGBIT the number of bytes it wrote.
+ * the kernel's does, and EVIOCGBIT the number of bytes it wrote. A request that a fake device refuses
+ * goes to the kernel, which refuses it on the plain file and sets errno.
  */
 int
 ioctl (int           fd,
@@ -226,10 +227,8 @@ ioctl (int           fd,
 	if (!device)
 		return (int)syscall(SYS_ioctl, fd, request, arg);
 
-	if (device->dead) {
-		errno = ENODEV;
-		return -1;
-	}
+	if (device->dead)
+		return (int)syscall(SYS_ioctl, fd, request, arg);
 	if (request == EVIOCGVERSION) {
 		*(int *)arg = EV_VERSION;
 		return 0;
@@ -246,8 +245,7 @@ ioctl (int           fd,
 			if (answers->only ? key == answers->only : key != answers->without)
 				set_bit(bits, key);
 	} else {
-		errno = EINVAL;
-		return -1;
+		return (int)syscall(SYS_ioctl, fd, request, arg);
 	}
 
 	size_t const copied = size < sizeof bits ? size : sizeof bits;
