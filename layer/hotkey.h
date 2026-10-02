@@ -96,7 +96,7 @@ hotkey_key_name_from_code (HOTKEY_STD(uint32_t) code);
  * drains the events of a cached connection.
  *
  * Not thread-safe: the calls on one struct hotkeys must not overlap. The layer does not yet keep
- * them apart across devices (g_hotkeys in layer.cpp).
+ * them apart across devices (g_hotkeys in layer.c).
  *
  * @param h        The hotkeys, or nullptr.
  * @param key_code A Linux KEY_* code; 0 is unbound.

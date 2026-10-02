@@ -79,8 +79,7 @@ sudo apt-get install --no-install-recommends \
 ```
 
 The project is written in C23 and C++23, and GCC 16.2 and Clang 23.1 build it.
-The oldest compilers that build the layer are GCC 13 and, with GCC 16's
-libstdc++, Clang 19.
+The oldest compilers that build the layer, which is C, are GCC 13 and Clang 19.
 
 Then build from the fetched checkout:
 

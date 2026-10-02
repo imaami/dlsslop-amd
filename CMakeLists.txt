@@ -114,8 +114,8 @@ embed_shader(common/network_fallback.comp network/network_fallback kNetworkFallb
 add_custom_target(network-shaders DEPENDS ${SHADER_DIR}/network/network_verdict.h
     ${SHADER_DIR}/network/network_fallback.h)
 
-# Only layer.cpp differs between the layers; both and the layer tests link
-# the other translation units compiled once.
+# Only layer.c differs between the layers; both and the layer tests link the
+# other translation units compiled once.
 add_library(dlsslop-layer-objects OBJECT layer/shader_vk.c layer/dlssnr_pass.c layer/composition.c
     layer/capture.c layer/scaler_vk.c layer/hotkey.c layer/log.c)
 set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -124,10 +124,9 @@ target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC la
 target_link_libraries(dlsslop-layer-objects PUBLIC Threads::Threads ${CMAKE_DL_LIBS} m)
 
 function(add_neural_layer target)
-    add_library(${target} SHARED layer/layer.cpp)
+    add_library(${target} SHARED layer/layer.c)
     target_link_libraries(${target} PRIVATE dlsslop-layer-objects)
-    target_link_options(${target} PRIVATE
-        -static-libstdc++ -static-libgcc -Wl,-Bsymbolic
+    target_link_options(${target} PRIVATE -static-libgcc -Wl,-Bsymbolic
         "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/layer/dlssnr.map")
     target_compile_definitions(${target} PRIVATE DLSSLOP_LAYER_NAME="VK_LAYER_LOCAL_dlsslop_amd")
 endfunction()

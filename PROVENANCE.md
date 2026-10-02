@@ -40,7 +40,7 @@ the commit listed below and are maintained in this repository.
 
 The import took these files of the layer fork at `680ec8a`. It changed only
 the include paths that the move broke: one line each in `layer/capture.cpp`
-(now `capture.c`), `layer/composition.h` and `layer/layer.cpp`.
+(now `capture.c`), `layer/composition.h` and `layer/layer.cpp` (now `layer.c`).
 
 | Fork path | Path here |
 |---|---|
@@ -67,19 +67,19 @@ layer's license. `layer/log.h` and `layer/log.c` are the C port of
 `layer/shader_vk_priv.h` and `layer/shader_vk.c` that of `shader_vk.h` and
 `shader_vk.cpp`, `layer/dlssnr_pass.h` and `layer/dlssnr_pass.c` that of
 `dlssnr_pass.h` and `dlssnr_pass.cpp`, `layer/scaler_vk.h` and
-`layer/scaler_vk.c` that of `scaler_vk.h` and `scaler_vk.cpp`, and
+`layer/scaler_vk.c` that of `scaler_vk.h` and `scaler_vk.cpp`,
 `layer/composition.h` and `layer/composition.c` that of `composition.h` and
-`composition.cpp`. The port renames upstream names by one rule: the `dlssnr`
-namespace is dropped, CamelCase becomes snake_case, a class member takes its
-class as a prefix (`Composition::RecordCompose` becomes
-`composition_record_compose`), a free function with external linkage takes its
-module's name as a prefix unless its name begins with it (`Verbose` in log.h
-becomes `log_verbose`), and constants and enumerators become upper snake case
-with the class's prefix (`DlssNrPass::kSlots` becomes `DLSS_NR_PASS_SLOTS`). Log
-texts, environment variables, the loader's entry points, `layer/dlssnr.map` and
-the names in `common/shm_protocol.h`, which dlsslopd, the GUI, the network
-module and the tests share, keep their names. These upstream names do not follow
-the rule:
+`composition.cpp`, and `layer/layer.c` that of `layer.cpp`. The port renames
+upstream names by one rule: the `dlssnr` namespace is dropped, CamelCase becomes
+snake_case, a class member takes its class as a prefix
+(`Composition::RecordCompose` becomes `composition_record_compose`), a free
+function with external linkage takes its module's name as a prefix unless its
+name begins with it (`Verbose` in log.h becomes `log_verbose`), and constants
+and enumerators become upper snake case with the class's prefix
+(`DlssNrPass::kSlots` becomes `DLSS_NR_PASS_SLOTS`). Log texts, environment
+variables, the loader's entry points, `layer/dlssnr.map` and the names in
+`common/shm_protocol.h`, which dlsslopd, the GUI, the network module and the
+tests share, keep their names. These upstream names do not follow the rule:
 
 | Upstream name | Port | Why |
 |---|---|---|
@@ -87,12 +87,12 @@ the rule:
 | Data members, such as `DlssNrConstants::WhitePoint` and `CaptureWriter::_batchDir` | snake_case without a prefix or a leading underscore: `white_point`, `batch_dir` | a struct scopes its members in C as in C++ |
 | `IsEightBitRgba`, `NeedsChannelSwap` and `BytesPerPixel` in capture.cpp | `encoding` in capture.c | one table of how a format's frames are written |
 | `CaptureWriter::Remaining` | none; the test reads `remaining` | it had no other caller |
-| The constructors and destructors of `Shader_Vk`, `DlssNrPass`, `ScalerVk` and `Composition`, the member initializers of `FrameSettings`, and `Hotkeys::~Hotkeys` | `shader_vk`, `dlss_nr_pass` and `dlss_nr_pass_init`, `scaler_vk` and `scaler_vk_init`, `composition` and `composition_init`, `composition_frame_settings`; `shader_vk_fini`, `dlss_nr_pass_fini`, `scaler_vk_fini`, `composition_fini` and `hotkeys_fini` | C's life cycle: a function named like the struct returns a new one, an init function makes one in place, and a fini function frees what an object owns |
+| The constructors and destructors of `Shader_Vk`, `DlssNrPass`, `ScalerVk` and `Composition`, the member initializers of `FrameSettings`, `InstanceChain`, `SwapchainState` and `DeviceChain`, and `Hotkeys::~Hotkeys` and `ShmMap::~ShmMap` | `shader_vk`, `dlss_nr_pass` and `dlss_nr_pass_init`, `scaler_vk` and `scaler_vk_init`, `composition` and `composition_init`, `composition_frame_settings`, `instance_chain_create`, `swapchain_state_create` and `device_chain_create`; `shader_vk_fini`, `dlss_nr_pass_fini`, `scaler_vk_fini`, `composition_fini`, `hotkeys_fini`, `shm_map_fini`, `instance_chain_destroy`, `swapchain_state_destroy` and `device_chain_destroy` | C's life cycle: a function named like the struct returns a new one, an init function makes one in place, a create function allocates one, a fini function frees what an object owns and a destroy function frees the object too |
 | `Hotkeys::OpenEvdev` | part of `hotkeys_open` | it had no other caller |
 | `Hotkeys::_fds`, `_known`, `_knownOrder` and `_notKeyboard` | `struct hotkey_node` entries of `nodes` | one table of the event nodes |
 | `Hotkeys::_pending` | `pending` and `pending_total` | a count per key code |
-| `Hotkeys::_opened` and `_announced`, `DlssNrPass::_dummyReady`, `ScalerVk::_upsample`, and the `bool` members of `Composition` but `_usable`, `_meterGpu` and `_superSample` | `HOTKEYS_OPENED` and `HOTKEYS_ANNOUNCED`, `DLSS_NR_PASS_DUMMY_READY`, `SCALER_VK_UPSAMPLE`, and `COMPOSITION_BLIT_SWAPCHAIN` to `COMPOSITION_FRAME_CAPTURED` in `flags` | one flags member |
-| `Composition::_offer`, -1 without an offer | `offer`, and `COMPOSITION_OFFER` in `flags` | descriptor 0 is a valid descriptor, so the flag says whether the composition holds one |
+| `Hotkeys::_opened` and `_announced`, `DlssNrPass::_dummyReady`, `ScalerVk::_upsample`, the `bool` members of `Composition` but `_usable`, `_meterGpu` and `_superSample`, and those of `ShmMap`, `SwapchainState` and `DeviceChain` in layer.cpp | `HOTKEYS_OPENED` and `HOTKEYS_ANNOUNCED`, `DLSS_NR_PASS_DUMMY_READY`, `SCALER_VK_UPSAMPLE`, `COMPOSITION_BLIT_SWAPCHAIN` to `COMPOSITION_FRAME_CAPTURED`, `SHM_MAP_ANSWERED` and `SHM_MAP_DEAD`, the `SWAPCHAIN_STATE_*` and the `DEVICE_CHAIN_*` in `flags` | one flags member |
+| `Composition::_offer`, -1 without an offer, and `ShmMap::fd` and `producerFd`, -1 when closed | `offer`, and `COMPOSITION_OFFER` in `flags`; `fd` and `producer_fd`, and `SHM_MAP_FD` and `SHM_MAP_PRODUCER_FD` in `flags` | descriptor 0 is a valid descriptor, so the flag says whether the object holds one |
 | `Composition::_meterGpu` and `_superSample` | none; the composition tests `meter_state` and `model_native.image` | each was true exactly while its object existed |
 | `Composition::_usable` | `error`, which `composition_usable()` reads | the build's `VkResult`; where the class cleared `_usable` for a format it cannot write, `composition_prepare()` sets `VK_ERROR_FORMAT_NOT_SUPPORTED` |
 | `Composition::HdrTransfer` and `CaptureActive` | none; composition-rebuild-test calls `capture_writer_active()` on the composition's writer | `HdrTransfer` had no caller, and `CaptureActive` only the test |
@@ -106,7 +106,9 @@ the rule:
 | `DownsampleBlob` and `Blob` in scaler_vk.cpp | `SCALER_VK_AVERAGES` and `struct scaler_shader` in scaler_vk.c | one table of the averages' SPIR-V and names |
 | `ScalerFilterName`, `ScalerFilter` and its `kScaler*` enumerators | `scaler_vk_filter_name`, `enum scaler_vk_filter` and `SCALER_VK_*` | the module's prefix replaces the names' own `Scaler` |
 | `FrameSettings` and `FrameSettings::Read` in composition.h | `struct composition_frame_settings`, `composition_frame_settings` and `composition_frame_settings_read` | a function with external linkage carries its module's prefix, and the struct keeps the name of the function that returns one |
-| `g_phys` in layer.cpp | none; `InstanceChain` holds `physical` and `physicalCount` | an instance's physical devices are freed with the instance |
+| `g_phys` in layer.cpp | none; `struct instance_chain` holds `physical` and `physical_count` | an instance's physical devices are freed with the instance |
+| `ShmOpen`, `ShmProcessFrame` and the `ShmNeuralEnabled(ShmMap&)` overload in layer.cpp | `shm_map_open`, `shm_map_process_frame` and `shm_map_neural_enabled` | they work on a `struct shm_map`; `shm_open` is POSIX's, and `ShmNeuralEnabled` is the channel header's |
+| `ShmMap::seq` and `firstHeartbeat`, `InstanceChain::next_gipa` and `DeviceChain::next_dpa` | none; the chains call their tables' `next_gipa` and `next_dpa` | nothing read the first two, and the others repeated their tables' members |
 
 The headers that C and C++ share stay valid C++23. `common/shm_protocol.h`
 declares the channel for both languages, `layer/vk_table.h` the dispatch tables,
