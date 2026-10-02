@@ -71,17 +71,42 @@ make_dirs (char *path)
 	mkdir(path, 0700);
 }
 
+/** @brief Writes bytes as they are.
+ *
+ * The descriptor is close-on-exec (mode "e"), so the programs that the process executes do not
+ * inherit it.
+ *
+ * @param path   The file.
+ * @param pixels The bytes.
+ * @param bytes  How many.
+ * @return       true if the file was written and closed.
+ */
+static bool
+write_raw (char const *path,
+           void const *pixels,
+           size_t      bytes)
+{
+	FILE *const f = fopen(path, "wbe");
+	if (!f)
+		return false;
+
+	bool const wrote = fwrite(pixels, 1, bytes, f) == bytes;
+	bool const closed = !fclose(f);
+	return wrote && closed;
+}
+
 /** @brief Writes four 8-bit channels as a PNG.
  *
  * The pixels are copied first, so the encoder reads cached memory rather than the mapped readback
- * buffer, and so red and blue can swap places.
+ * buffer, and so red and blue can swap places. The PNG is encoded in memory and written by
+ * write_raw(), which checks the write and the close.
  *
  * @param path   The file.
  * @param pixels The pixels, tightly packed.
  * @param width  Their width.
  * @param height Their height.
  * @param swap   Whether red and blue swap places.
- * @return       true if the file was written.
+ * @return       true if the file was written and closed.
  */
 static bool
 write_png (char const *path,
@@ -108,31 +133,14 @@ write_png (char const *path,
 			rgba[i] = red;
 		}
 	}
-	bool const wrote = stbi_write_png(path, (int)width, (int)height, 4, rgba, stride);
+	int length;
+	unsigned char *png = stbi_write_png_to_mem(rgba, stride, (int)width, (int)height, 4, &length);
 	free(rgba);
 	rgba = nullptr;
+	bool const wrote = png && write_raw(path, png, (size_t)length);
+	STBIW_FREE(png);
+	png = nullptr;
 	return wrote;
-}
-
-/** @brief Writes bytes as they are.
- *
- * @param path   The file.
- * @param pixels The bytes.
- * @param bytes  How many.
- * @return       true if the file was written and closed.
- */
-static bool
-write_raw (char const *path,
-           void const *pixels,
-           size_t      bytes)
-{
-	FILE *const f = fopen(path, "wb");
-	if (!f)
-		return false;
-
-	bool const wrote = fwrite(pixels, 1, bytes, f) == bytes;
-	bool const closed = !fclose(f);
-	return wrote && closed;
 }
 
 /** @brief Writes one image of the pair, and logs a failure.
@@ -245,7 +253,7 @@ capture_writer_write_manifest (struct capture_writer const *w,
 {
 	char path[BATCH_PATH_MAX];
 	snprintf(path, sizeof path, "%s/manifest.txt", w->batch_dir);
-	FILE *const f = fopen(path, "w");
+	FILE *const f = fopen(path, "we");
 	if (!f)
 		return false;
 

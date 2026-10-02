@@ -991,7 +991,7 @@ check_no_backend (void)
 static char *
 read_file (char const *path)
 {
-	FILE *const f = fopen(path, "rb");
+	FILE *const f = fopen(path, "rbe");
 	require(f, "cannot read %s", path);
 	char *text = nullptr;
 	size_t size = 0;
