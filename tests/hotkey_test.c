@@ -779,7 +779,8 @@ static pid_t xvfb;
 static void
 stop_xvfb (void)
 {
-	if (!xvfb)
+	// kill() with -1 or 0 would signal every process the test may signal, or its whole group.
+	if (xvfb <= 0)
 		return;
 
 	// Also an atexit() handler, which may not exit(): a failure is only told.
@@ -829,10 +830,12 @@ start_xvfb (char const *log,
 	int fds[2] = { -1, -1 };
 	require(!pipe2(fds, O_CLOEXEC), "cannot make Xvfb's pipe");
 	pid_t const parent = getpid();
-	xvfb = fork();
-	require(xvfb >= 0, "fork failed");
-	if (!xvfb)
+	// Stored once it is a child's: stop_xvfb() runs at the exit that a failed fork() makes.
+	pid_t const child = fork();
+	require(child >= 0, "fork failed");
+	if (!child)
 		exec_xvfb(log, fds[1], parent);
+	xvfb = child;
 	require(!close(fds[1]), "cannot close Xvfb's end of its pipe");
 	fds[1] = -1;
 
