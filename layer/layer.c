@@ -13,6 +13,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <linux/futex.h>
 #include <poll.h>
 #include <pthread.h>
@@ -2187,19 +2188,19 @@ hook_create_swapchain_khr (VkDevice                        device,
 	uint32_t count = 0;
 	if (!dc->table.vkGetSwapchainImagesKHR
 	    || dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, nullptr) != VK_SUCCESS) {
-		log_printf("[layer] swapchain %p: its images cannot be listed; presenting it untouched",
-		           (void *)*pSwapchain);
+		log_printf("[layer] swapchain %#" PRIx64 ": its images cannot be listed; presenting it "
+		           "untouched", (uint64_t)*pSwapchain);
 		return VK_SUCCESS;
 	}
 	struct swapchain_state *sc = swapchain_state_create(&dc->table, device, *pSwapchain, count);
 	if (!sc) {
-		log_printf("[layer] swapchain %p: out of host memory for the layer's state; "
-		           "presenting it untouched", (void *)*pSwapchain);
+		log_printf("[layer] swapchain %#" PRIx64 ": out of host memory for the layer's state; "
+		           "presenting it untouched", (uint64_t)*pSwapchain);
 		return VK_SUCCESS;
 	}
 	if (dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, sc->images) != VK_SUCCESS) {
-		log_printf("[layer] swapchain %p: its images cannot be listed; presenting it untouched",
-		           (void *)*pSwapchain);
+		log_printf("[layer] swapchain %#" PRIx64 ": its images cannot be listed; presenting it "
+		           "untouched", (uint64_t)*pSwapchain);
 		swapchain_state_destroy(&sc);
 		return VK_SUCCESS;
 	}
@@ -2219,8 +2220,8 @@ hook_create_swapchain_khr (VkDevice                        device,
 		sc->flags |= SWAPCHAIN_STATE_PASS_THROUGH;
 
 	pthread_mutex_lock(&dc->lock);
-	log_printf("[layer] swapchain %p %ux%u fmt=%d hdr=%u passThrough=%d%s", (void *)*pSwapchain,
-	           pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height,
+	log_printf("[layer] swapchain %#" PRIx64 " %ux%u fmt=%d hdr=%u passThrough=%d%s",
+	           (uint64_t)*pSwapchain, pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height,
 	           (int)format, sc->hdr_kind, (int)(*pass_through != '\0'), pass_through);
 	list_append(&dc->swapchains, &sc->node);
 	pthread_mutex_unlock(&dc->lock);
@@ -3125,8 +3126,8 @@ ready_swapchain (struct device_chain    *dc,
 		sc->flags |= SWAPCHAIN_STATE_READY;
 		return true;
 	}
-	log_printf("[layer] staging resources failed for swapchain %p (%ux%u, family %u); "
-	           "passing this swapchain through", (void *)sc->handle, sc->width, sc->height, family);
+	log_printf("[layer] staging resources failed for swapchain %#" PRIx64 " (%ux%u, family %u); "
+	           "passing this swapchain through", (uint64_t)sc->handle, sc->width, sc->height, family);
 	sc->flags |= SWAPCHAIN_STATE_PASS_THROUGH;
 	// This swapchain claimed the primary role and just gave it up. Without the release the claim
 	// would sit on a swapchain that never drives the channel, and no peer of equal or smaller area
@@ -3163,7 +3164,8 @@ present_swapchain (struct device_chain    *dc,
 	if (!claim_primary(dc->self, sc->handle, sc->width, sc->height)) {
 		static _Atomic(uint32_t) n;
 		if (atomic_fetch_add(&n, 1) < 3)
-			log_printf("[layer] present: swapchain %p is not primary", (void *)sc->handle);
+			log_printf("[layer] present: swapchain %#" PRIx64 " is not primary",
+			           (uint64_t)sc->handle);
 		return;
 	}
 	// One composition, and one semaphore, per present. A larger swapchain that has just taken the
@@ -3181,8 +3183,8 @@ present_swapchain (struct device_chain    *dc,
 	bool const composed = process_present(dc, sc, queue, index, wait_count, info->pWaitSemaphores,
 	                                      waits_consumed);
 	if (log_verbose())
-		log_printf("[present] swapchain=%p image=%u seq=%u composed=%d", (void *)sc->handle, index,
-		           dc->shm.hdr ? atomic_load(&dc->shm.hdr->seq_req) : 0u, (int)composed);
+		log_printf("[present] swapchain=%#" PRIx64 " image=%u seq=%u composed=%d", (uint64_t)sc->handle,
+		           index, dc->shm.hdr ? atomic_load(&dc->shm.hdr->seq_req) : 0u, (int)composed);
 	// On failure before the capture submit, the application's waits stay attached to the original
 	// present. Once our first submit accepted them they have been consumed.
 	if (!composed) {
