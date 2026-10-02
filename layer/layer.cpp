@@ -545,7 +545,7 @@ static std::unordered_map<VkDevice, DeviceChain*> g_devices;
 static std::mutex g_stateMutex;
 // The in-layer network's module (layer/network_module.h), beside the layer,
 // loaded once for the first device that enabled the network.
-static dlssnr::NetworkModule g_network;
+static network_module g_network;
 
 // The one swapchain allowed to drive the neural round trip, chosen as the largest in the process.
 //
@@ -1281,23 +1281,23 @@ static bool NetworkFailed(DeviceChain* dc) {
 static DlsslopNetwork* OpenNetwork(DeviceChain* dc, const SwapchainState& sc, VkQueue queue) {
     static const bool loaded = [] {
         const std::string self = LayerObjectPath();
-        return g_network.Load((self.substr(0, self.rfind('/') + 1) + "libdlsslop-network.so").c_str());
+        return network_module_load(&g_network, (self.substr(0, self.rfind('/') + 1) + "libdlsslop-network.so").c_str());
     }();
     if (!loaded) {
-        NetworkReason(dc, "in-layer network off, module unavailable: ", g_network.failure.c_str(),
+        NetworkReason(dc, "in-layer network off, module unavailable: ", g_network.failure,
                       "; frames go to dlsslopd");
         return nullptr;
     }
-    DlsslopNetworkDevice device{};
+    dlsslop_network_device device{};
     device.instance = dc->instance->self;
     device.physical = dc->physical;
     device.device = dc->self;
     device.queue = queue;
     device.family = sc.family;
-    device.lockQueue = [](void* context) { static_cast<DeviceChain*>(context)->networkSubmit.lock(); };
-    device.unlockQueue = [](void* context) { static_cast<DeviceChain*>(context)->networkSubmit.unlock(); };
+    device.lock_queue = [](void* context) { static_cast<DeviceChain*>(context)->networkSubmit.lock(); };
+    device.unlock_queue = [](void* context) { static_cast<DeviceChain*>(context)->networkSubmit.unlock(); };
     device.context = dc;
-    device.physicalDispatch = dc->instance->next_gipa;
+    device.physical_dispatch = dc->instance->next_gipa;
     dc->instance->table.vkGetPhysicalDeviceMemoryProperties(dc->physical, &device.memory);
     device.log = NetworkLog;
     DlsslopNetwork* network = g_network.open(&device);
@@ -1343,13 +1343,13 @@ static bool ProcessInLayer(DeviceChain* dc, SwapchainState& sc, VkQueue queue, u
     dc->inLayerLast = &sc;
     switch (g_network.prepare(dc->inLayer, dc->shm.hdr, composition_model_width(&sc.comp),
                               composition_model_height(&sc.comp), composition_hdr_proxy_active(&sc.comp))) {
-    case kDlsslopNetworkReady:
+    case DLSSLOP_NETWORK_READY:
         NetworkReason(dc, "in-layer network running");
         break;
-    case kDlsslopNetworkBuilding:
+    case DLSSLOP_NETWORK_BUILDING:
         NetworkReason(dc, "in-layer network building; the game presents its own frames");
         return false;
-    case kDlsslopNetworkRejected:
+    case DLSSLOP_NETWORK_REJECTED:
         NetworkReason(dc, "in-layer network: ", g_network.error(dc->inLayer));
         return false;
     default:
@@ -1372,7 +1372,7 @@ static bool ProcessInLayer(DeviceChain* dc, SwapchainState& sc, VkQueue queue, u
         return false;
     };
     if (g_network.record(dc->inLayer, cb, composition_proxy_buffer(&sc.comp), composition_answer_buffer(&sc.comp),
-                         sc.family, composition_transport_exported(&sc.comp)) != kDlsslopNetworkReady) {
+                         sc.family, composition_transport_exported(&sc.comp)) != DLSSLOP_NETWORK_READY) {
         NetworkFailed(dc);
         return salvage(false);
     }

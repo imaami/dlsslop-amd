@@ -1,13 +1,16 @@
 // SPDX-License-Identifier: MIT
 // The in-layer network's module through its C functions, as the layer loads
-// it, without a GPU: a frame whose settings are out of range is rejected and
-// says which, a missing model fails the network for good, naming the model's
+// it, without a GPU: a missing module, or a library without the module's
+// functions, is refused, naming why, and the loader keeps no pointer into it;
+// a frame whose settings are out of range is rejected and says which, a
+// missing model fails the network for good, naming the model's
 // path and how to get it, and a frame of an extent the network does not take,
 // by its working extent or by the device's storage buffers, is rejected,
 // naming it, without a build, and so is another shape of that extent, which
 // no network was built for to reshape. The model is the one dlsslopd's config
 // file names, and a config file dlsslopd refuses fails the network. Takes the
-// module's path.
+// module's path and that of a library with all its functions but
+// dlsslop_network_close().
 #include "network_module.h"
 #include "shm_protocol.h"
 
@@ -55,16 +58,16 @@ void require(bool value, const char* message)
 
 // The first frame's failure, of a network opened while dlsslopd's config file
 // CONFIG holds TEXT.
-std::string failure_with(const dlssnr::NetworkModule& module, const ShmHeader* header, const std::string& config,
+std::string failure_with(const network_module& module, const ShmHeader* header, const std::string& config,
                          const std::string& text)
 {
     std::FILE* file = std::fopen(config.c_str(), "w");
     require(file && std::fputs(text.c_str(), file) >= 0 && !std::fclose(file), "cannot write the config file");
-    DlsslopNetworkDevice device{};
-    device.physicalDispatch = no_functions;
+    dlsslop_network_device device{};
+    device.physical_dispatch = no_functions;
     DlsslopNetwork* network = module.open(&device);
     require(network, "the module did not open");
-    const bool failed = module.prepare(network, header, 1280, 720, 0) == kDlsslopNetworkFailed;
+    const bool failed = module.prepare(network, header, 1280, 720, 0) == DLSSLOP_NETWORK_FAILED;
     std::string error = failed ? module.error(network) : "";
     module.close(network);
     return error;
@@ -73,18 +76,35 @@ std::string failure_with(const dlssnr::NetworkModule& module, const ShmHeader* h
 
 int main(int argc, char** argv)
 {
-    require(argc == 2, "usage: network-module-test MODULE");
-    dlssnr::NetworkModule module;
-    const bool loaded = module.Load(argv[1]);
-    require(loaded, module.failure.c_str());
+    require(argc == 3, "usage: network-module-test MODULE INCOMPLETE");
+    // A module that is not there, and a library without the module's functions, load nothing and say
+    // why; the latter is unloaded again.
+    network_module absent{};
+    require(!network_module_load(&absent, "/nonexistent/libdlsslop-network.so") && !absent.library &&
+                std::strstr(absent.failure, "/nonexistent/libdlsslop-network.so"),
+            "a missing module was loaded, or its failure does not name it");
+    network_module foreign{};
+    require(!network_module_load(&foreign, "libm.so.6") && !foreign.library &&
+                std::strstr(foreign.failure, "dlsslop_network_"),
+            "a library without the module's functions was kept, or its failure does not name a function");
+    // A library with all but one of the functions is unloaded too, and the loader keeps none of them.
+    network_module incomplete{};
+    require(!network_module_load(&incomplete, argv[2]) && !incomplete.library &&
+                std::strstr(incomplete.failure, "dlsslop_network_close") && !incomplete.open && !incomplete.prepare &&
+                !incomplete.record && !incomplete.submitted && !incomplete.error && !incomplete.close,
+            "a library without one of the module's functions was kept, or pointers into it were");
+    require(!network_module_load(nullptr, argv[1]), "a module was loaded into no loader");
+    network_module module{};
+    const bool loaded = network_module_load(&module, argv[1]);
+    require(loaded, module.failure);
     require(mkdtemp(directory), "cannot make a temporary directory");
     std::atexit(remove_directory);
     setenv("XDG_DATA_HOME", directory, 1);
     setenv("XDG_CACHE_HOME", directory, 1);
     setenv("XDG_CONFIG_HOME", directory, 1);
     // No device: nothing here reaches Vulkan.
-    DlsslopNetworkDevice device{};
-    device.physicalDispatch = no_functions;
+    dlsslop_network_device device{};
+    device.physical_dispatch = no_functions;
     DlsslopNetwork* network = module.open(&device);
     require(network, "the module did not open");
     void* memory = mmap(nullptr, kHeaderBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -93,13 +113,13 @@ int main(int argc, char** argv)
     ShmInitNativeDefaults(header, false);
 
     header->style.store(3);
-    require(module.prepare(network, header, 1280, 720, 0) == kDlsslopNetworkRejected &&
+    require(module.prepare(network, header, 1280, 720, 0) == DLSSLOP_NETWORK_REJECTED &&
                 std::strstr(module.error(network), "style 0..2"),
             "a setting out of range was not rejected, naming it");
     header->style.store(0);
     const std::string model = std::string(directory) + "/dlsslop-amd/dlssnr.bin";
     for (int frame = 0; frame < 2; ++frame)
-        require(module.prepare(network, header, 1280, 720, 0) == kDlsslopNetworkFailed &&
+        require(module.prepare(network, header, 1280, 720, 0) == DLSSLOP_NETWORK_FAILED &&
                     std::strstr(module.error(network), model.c_str()) &&
                     std::strstr(module.error(network), "dlsslop-setup --dll"),
                 "a missing model did not fail the network for good, naming it");
@@ -115,17 +135,17 @@ int main(int argc, char** argv)
     require(network, "the module did not open");
     for (uint32_t passes = 1; passes <= 2; ++passes) {
         header->passes.store(passes);
-        require(module.prepare(network, header, 16, 16, 0) == kDlsslopNetworkRejected &&
+        require(module.prepare(network, header, 16, 16, 0) == DLSSLOP_NETWORK_REJECTED &&
                     std::strstr(module.error(network), "does not take 16x16 frames"),
                 "a frame of an extent the network does not take, or another shape of it, was not rejected, naming it");
     }
     header->passes.store(1);
     module.close(network);
-    device.physicalDispatch = small_storage;
+    device.physical_dispatch = small_storage;
     network = module.open(&device);
     require(network, "the module did not open");
     for (int frame = 0; frame < 2; ++frame)
-        require(module.prepare(network, header, 1280, 720, 0) == kDlsslopNetworkRejected &&
+        require(module.prepare(network, header, 1280, 720, 0) == DLSSLOP_NETWORK_REJECTED &&
                     std::strstr(module.error(network), "does not take 1280x720 frames") &&
                     std::strstr(module.error(network), "exceed the device's storage buffers of 1048576 bytes"),
                 "a frame whose arena exceeds the device's storage buffers was not rejected, naming it");
@@ -137,7 +157,7 @@ int main(int argc, char** argv)
     require(failure_with(module, header, config, "vulkan-model = relative.bin\n").find(config) != std::string::npos,
             "a config file dlsslopd refuses did not fail the network, naming it");
     munmap(memory, kHeaderBytes);
-    std::puts("network module: out-of-range settings rejected, a missing model fails for good, extents the "
-              "network or the device's storage buffers do not take rejected in any shape, and the model is the one "
-              "dlsslopd's config file names");
+    std::puts("network module: a missing module or one without the functions is refused, naming why; out-of-range "
+              "settings rejected, a missing model fails for good, extents the network or the device's storage "
+              "buffers do not take rejected in any shape, and the model is the one dlsslopd's config file names");
 }

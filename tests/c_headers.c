@@ -5,6 +5,7 @@
 #include "device_features.h"
 #include "dlssnr/DlssNr_Layout.h"
 #include "log.h"
+#include "network_module.h"
 #include "network_requirements.h"
 #include "shm_protocol.h"
 #include "vk_chain.h"

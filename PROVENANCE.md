@@ -8,8 +8,8 @@ and `dlsslop-run`. Locally introduced integration identifiers use `DLSSLOP_`, in
 codec namespace is `dlsslop`.
 
 Inherited interfaces retain their upstream names, including `DLSSNR_SHM`,
-`DLSSNR_LOG`, the other `DLSSNR_*` layer controls, the `dlssnr` C++ namespace
-and the AMD network's `DLSS5_VIT_ADAPTIVE`. The inherited control build target
+`DLSSNR_LOG`, the other `DLSSNR_*` layer controls and the AMD network's
+`DLSS5_VIT_ADAPTIVE`. The inherited control build target
 remains `dlssnr-shmctl`; installation copies its ELF executable directly to
 `bin/dlsslopctl` for the public command. The inherited shared
 runtime directory is `/tmp/dlssnr-UID` and honors `DLSSNR_UID`; the native
