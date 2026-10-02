@@ -124,7 +124,7 @@ struct composition_host_buffer {
 };
 
 /** @brief The state that struct composition records in its flags. */
-enum composition_flags {
+enum composition_flags : COMPOSITION_STD(uint64_t) {
 	COMPOSITION_BLIT_SWAPCHAIN      = 1 << 0, //!< work_format is not the swapchain's twin: blit.
 	COMPOSITION_LINEAR_HDR          = 1 << 1, //!< The frame holds linear light.
 	COMPOSITION_HDR_PROXY           = 1 << 2, //!< The surfaces that cross are float16.

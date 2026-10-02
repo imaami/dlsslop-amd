@@ -65,7 +65,7 @@ static_assert(SCALER_VK_LANCZOS3 == 4, "the protocol's Downscaler numbering must
 static constexpr SCALER_VK_STD(uint32_t) SCALER_VK_SLOTS = 6;
 
 /** @brief What struct scaler_vk records in its flags. */
-enum scaler_vk_flags {
+enum scaler_vk_flags : SCALER_VK_STD(uint64_t) {
 	SCALER_VK_UPSAMPLE = 1 //!< The pass enlarges, with bcus; otherwise it averages.
 };
 

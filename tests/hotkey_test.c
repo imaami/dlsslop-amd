@@ -87,12 +87,14 @@ expect_log (char const *fmt,
 	va_start(args, fmt);
 	int const length = vsnprintf(line, sizeof line, fmt, args);
 	va_end(args);
-	require(length >= 0 && (size_t)length < sizeof line, "an expected log line is too long");
+	require(length >= 0 && length < (int)sizeof line, "an expected log line is too long");
 
 	size_t const room = sizeof expected_log - expected_length;
 	int const added = snprintf(expected_log + expected_length, room, "[dlssnr-layer] %s\n", line);
-	require(added >= 0 && (size_t)added < room, "the expected log is full");
-	expected_length += (size_t)added;
+	require(added >= 0, "an expected log line cannot be formatted");
+	size_t const bytes = (size_t)added;
+	require(bytes < room, "the expected log is full");
+	expected_length += bytes;
 }
 
 /** @brief The line that the hotkeys log when no backend opens. */

@@ -683,7 +683,7 @@ ensure_transport (struct composition *c)
 		return;
 
 	size_t const bytes = composition_model_bytes(c);
-	c->flags &= ~(uint64_t)COMPOSITION_TRANSPORT_READY;
+	c->flags &= ~COMPOSITION_TRANSPORT_READY;
 	composition_withdraw_offer(c); // New buffers: any offer was of the old ones.
 	if ((c->flags & COMPOSITION_EXPORT) && make_export_buffer(c, &c->download, bytes)
 	    && make_export_buffer(c, &c->upload, bytes))
@@ -949,7 +949,7 @@ make_meter_state (struct composition *c)
 		drop_meter_state(c);
 		return false;
 	}
-	c->flags &= ~(uint64_t)COMPOSITION_METER_STATE_CLEARED;
+	c->flags &= ~COMPOSITION_METER_STATE_CLEARED;
 	return true;
 }
 
@@ -981,7 +981,7 @@ drop_all (struct composition *c)
 	composition_withdraw_offer(c);
 	scaler_vk_fini(&c->super_up);
 	scaler_vk_fini(&c->super_down);
-	c->flags &= ~(uint64_t)(COMPOSITION_FRAME_CAPTURED | COMPOSITION_CAPTURE_RECORDED);
+	c->flags &= ~(COMPOSITION_FRAME_CAPTURED | COMPOSITION_CAPTURE_RECORDED);
 	c->width = c->height = c->model_w = c->model_h = 0;
 	c->measured_white_point = 0.0f;
 }
@@ -1072,7 +1072,7 @@ composition_set_transport_ready (struct composition *c,
 	if (!c)
 		return;
 	c->flags = ready ? c->flags | COMPOSITION_TRANSPORT_READY
-	                 : c->flags & ~(uint64_t)COMPOSITION_TRANSPORT_READY;
+	                 : c->flags & ~COMPOSITION_TRANSPORT_READY;
 	composition_withdraw_offer(c);
 }
 
@@ -1153,7 +1153,7 @@ composition_disable_export (struct composition *c)
 {
 	if (!c)
 		return;
-	c->flags &= ~(uint64_t)COMPOSITION_EXPORT;
+	c->flags &= ~COMPOSITION_EXPORT;
 	drop_host_buffer(c, &c->download);
 	drop_host_buffer(c, &c->upload);
 	ensure_transport(c);
@@ -1383,8 +1383,8 @@ composition_prepare (struct composition                      *c,
 
 	c->swapchain_format = swapchain_format;
 	c->work_format = work;
-	c->flags = (c->flags & ~(uint64_t)(COMPOSITION_BLIT_SWAPCHAIN | COMPOSITION_LINEAR_HDR
-	                                   | COMPOSITION_HDR_PROXY))
+	c->flags = (c->flags & ~(COMPOSITION_BLIT_SWAPCHAIN | COMPOSITION_LINEAR_HDR
+	                         | COMPOSITION_HDR_PROXY))
 	           | blit | shape;
 	c->hdr_transfer = hdr_transfer;
 
@@ -1743,7 +1743,7 @@ note_hold (struct composition                      *c,
 		return;
 
 	if (holding) {
-		c->flags &= ~(uint64_t)COMPOSITION_HOLDING;
+		c->flags &= ~COMPOSITION_HOLDING;
 		log_printf("[comp] frame released");
 		return;
 	}
@@ -2073,7 +2073,7 @@ composition_record_compose (struct composition                      *c,
 	if (!composition_usable(c) || !c->composed.image)
 		return false;
 
-	c->flags &= ~(uint64_t)COMPOSITION_CAPTURE_RECORDED;
+	c->flags &= ~COMPOSITION_CAPTURE_RECORDED;
 	transition(c, cb, &c->model, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 	VkBufferImageCopy const region = {
 		.imageSubresource = COMPOSITION_COLOR_LAYERS,
@@ -2113,7 +2113,7 @@ composition_write_captured_frame (struct composition *c)
 	if (!c || !(c->flags & COMPOSITION_CAPTURE_RECORDED) || !c->capture_buf.mapped)
 		return;
 
-	c->flags &= ~(uint64_t)COMPOSITION_CAPTURE_RECORDED;
+	c->flags &= ~COMPOSITION_CAPTURE_RECORDED;
 	unsigned char const *const base = c->capture_buf.mapped;
 	capture_writer_write_frame(&c->capture, base, base + pair_bytes(c), c->width, c->height,
 	                           (uint32_t)c->work_format, &c->capture_metadata);

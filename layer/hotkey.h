@@ -47,7 +47,7 @@ struct hotkey_node;
 struct hotkey_x11;
 
 /** @brief The state that struct hotkeys records in its flags. */
-enum hotkeys_flags {
+enum hotkeys_flags : HOTKEY_STD(uint32_t) {
 	HOTKEYS_OPENED    = 1, //!< The first hotkeys_pressed() chose a backend.
 	HOTKEYS_ANNOUNCED = 2  //!< /dev/input was read once: a keyboard found later is logged.
 };

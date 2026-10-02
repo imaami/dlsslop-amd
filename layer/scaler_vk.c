@@ -21,13 +21,16 @@
 /** @brief What the scaling shaders read.
  *
  * Upstream's Constants, spelled here so the layer does not have to carry the 33 KB of HLSL source
- * strings that sit beside it in OS_Common.h for the D3D11 path.
+ * strings that sit beside it in OS_Common.h for the D3D11 path. The shaders read the sizes as int,
+ * which holds the same bits for every Vulkan extent. The rest of the 256-byte block is a member, not
+ * padding, so that an initializer zeroes it.
  */
 struct scaler_constants {
-	alignas(256) int32_t src_width;
-	int32_t              src_height;
-	int32_t              dest_width;
-	int32_t              dest_height;
+	uint32_t src_width;   //!< The source's width.
+	uint32_t src_height;  //!< The source's height.
+	uint32_t dest_width;  //!< The destination's width.
+	uint32_t dest_height; //!< The destination's height.
+	uint32_t unused[60];  //!< The rest of the block, which the shaders do not read.
 };
 
 static_assert(sizeof (struct scaler_constants) == 256, "a constant slot holds one 256-byte block");
@@ -224,12 +227,13 @@ scaler_vk_dispatch (struct scaler_vk *p,
 	VkDeviceSize const offset = p->slot_stride * slot;
 
 	// From the images this call was handed, not from a global that happens to agree most of the
-	// time. The empty initializer zeroes the block's padding too, all of which is copied.
-	struct scaler_constants c = {};
-	c.src_width = (int32_t)src_width;
-	c.src_height = (int32_t)src_height;
-	c.dest_width = (int32_t)dest_width;
-	c.dest_height = (int32_t)dest_height;
+	// time. The initializer zeroes the rest of the block, all of which is copied.
+	struct scaler_constants const c = {
+		.src_width   = src_width,
+		.src_height  = src_height,
+		.dest_width  = dest_width,
+		.dest_height = dest_height
+	};
 	memcpy((unsigned char *)s->mapped_constant_buffer + offset, &c, sizeof c);
 
 	VkDescriptorSet const set = p->descriptor_sets[slot];

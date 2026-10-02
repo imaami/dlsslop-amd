@@ -69,7 +69,7 @@ min_d (double a,
 // ---------------------------------------------------------------------------
 
 /** @brief The state that struct shm_map records in its flags. */
-enum shm_map_flags {
+enum shm_map_flags : uint32_t {
 	SHM_MAP_ANSWERED = 1 << 0, //!< The helper has answered a frame.
 	SHM_MAP_DEAD     = 1 << 1  //!< Frames pass through until the helper is back.
 };
@@ -328,9 +328,9 @@ shm_map_open (struct shm_map *s)
 	}
 	// The file still spans the whole protocol -- the offsets are fixed and both sides agree on them --
 	// but it is sparse, so the size on disk is what has actually been written.
-	size_t const total = ShmTotalBytes();
+	off_t const total = (off_t)ShmTotalBytes();
 	struct stat st = {0};
-	if ((fstat(fd, &st) != 0 || (size_t)st.st_size < total) && ftruncate(fd, (off_t)total) != 0) {
+	if ((fstat(fd, &st) != 0 || st.st_size < total) && ftruncate(fd, total) != 0) {
 		close(fd);
 		fd = -1;
 		goto fail;
@@ -394,7 +394,7 @@ shm_map_neural_enabled (struct shm_map *s)
 	if (ctrl != s->last_control_seq) {
 		s->last_control_seq = ctrl;
 		if ((s->flags & SHM_MAP_DEAD) && ShmNeuralEnabled(s->hdr)) {
-			s->flags &= ~(uint32_t)SHM_MAP_DEAD;
+			s->flags &= ~SHM_MAP_DEAD;
 			s->timeouts = 0;
 			log_printf("[shm] control changed, re-enabling");
 		}
@@ -407,7 +407,7 @@ shm_map_neural_enabled (struct shm_map *s)
 		// it had given up -- which cost the game another round of full-length waits, over and over.
 		// That is the stutter: recover, stall, give up, recover.
 		if ((s->flags & SHM_MAP_DEAD) && log_now_ms() >= s->retry_after_ms && ShmNeuralEnabled(s->hdr)) {
-			s->flags &= ~(uint32_t)SHM_MAP_DEAD;
+			s->flags &= ~SHM_MAP_DEAD;
 			s->timeouts = 0;
 			log_printf("[shm] helper heartbeat, trying again");
 		}
@@ -789,18 +789,15 @@ instance_chain_destroy (struct instance_chain **p_dest)
 	ptr = nullptr;
 }
 
-/** @brief A queue that the game took from its device: the present path needs its family.
- *
- * The family is 64 bits wide, which fills the padding that a 32-bit member would leave.
- */
+/** @brief A queue that the game took from its device: the present path needs its family. */
 struct device_queue {
 	struct list node;   //!< The queue's hook in its device chain's queue_families.
 	VkQueue     queue;  //!< The queue.
-	uint64_t    family; //!< Its family.
+	uint32_t    family; //!< Its family.
 };
 
 /** @brief The state that struct swapchain_state records in its flags. */
-enum swapchain_state_flags {
+enum swapchain_state_flags : uint32_t {
 	SWAPCHAIN_STATE_GRAPHICS     = 1 << 0, //!< The present queue's family runs graphics.
 	SWAPCHAIN_STATE_LEG2_PENDING = 1 << 1, //!< Leg 2 is submitted and its fence not yet waited on.
 	SWAPCHAIN_STATE_READY        = 1 << 2, //!< create_resources() succeeded.
@@ -939,7 +936,7 @@ swapchain_state_destroy (struct swapchain_state **p_dest)
 }
 
 /** @brief The state that struct device_chain records in its flags. */
-enum device_chain_flags {
+enum device_chain_flags : uint32_t {
 	DEVICE_CHAIN_EXPORT_MEMORY = 1 << 0, //!< VK_KHR_external_memory_fd and vkGetMemoryFdKHR are there.
 	DEVICE_CHAIN_NETWORK       = 1 << 1, //!< The ledger enabled the in-layer network's requirements.
 	DEVICE_CHAIN_IN_LAYER_OFF  = 1 << 2  //!< The in-layer network failed or did not open.
@@ -980,6 +977,7 @@ struct device_chain {
 	uint32_t                   queue_store_used;       //!< The entries of queue_store in use.
 	uint32_t                   in_layer_family;        //!< The queue family the network opened on.
 	uint32_t                   flags;                  //!< enum device_chain_flags.
+	uint32_t                   pid;                    //!< The process, as the channel's layerPid holds it.
 	_Atomic(bool)              inert;                  //!< The layer leaves the device alone.
 	char                       network_reason[2048];   //!< The network's last layer reason, as logged.
 };
@@ -1007,6 +1005,7 @@ device_chain_create (uint32_t queue_count)
 	}
 
 	ret->shm = shm_map();
+	ret->pid = (uint32_t)getpid();
 	ret->queue_store = queues;
 	ret->queue_store_count = queue_count;
 	list_init(&ret->swapchains);
@@ -1936,7 +1935,7 @@ hook_destroy_device (VkDevice                     device,
 	pthread_mutex_unlock(&dc->lock);
 	// Say the layer has gone. A reader that finds a pid here checks it is alive, so a crash is caught
 	// too, but an orderly exit should not need anyone to go looking.
-	if (dc->shm.hdr && atomic_load(&dc->shm.hdr->layerPid) == (uint32_t)getpid()) {
+	if (dc->shm.hdr && atomic_load(&dc->shm.hdr->layerPid) == dc->pid) {
 		atomic_store(&dc->shm.hdr->layerPid, 0);
 		atomic_store(&dc->shm.hdr->layerCompositionUp, 0);
 		// The in-layer network's state goes with it.
@@ -2425,7 +2424,7 @@ collect_leg2 (struct device_chain    *dc,
 {
 	if (!wait_leg(dc, sc->fence_leg2))
 		return false;
-	sc->flags &= ~(uint32_t)SWAPCHAIN_STATE_LEG2_PENDING;
+	sc->flags &= ~SWAPCHAIN_STATE_LEG2_PENDING;
 	composition_write_captured_frame(&sc->comp);
 	return true;
 }
@@ -2450,7 +2449,7 @@ publish_frame (struct device_chain          *dc,
 	atomic_store(&hdr->layerHeight, sc->height);
 	atomic_store(&hdr->layerFormat, (uint32_t)sc->format);
 	atomic_store(&hdr->layerCompositionUp, 1);
-	atomic_store(&hdr->layerPid, (uint32_t)getpid());
+	atomic_store(&hdr->layerPid, dc->pid);
 	atomic_store(&hdr->layerMsBits, FloatToBits((float)ms));
 	atomic_store(&hdr->layerMeasuredWhiteBits, FloatToBits(composition_measured_white_point(&sc->comp)));
 	atomic_fetch_add(&hdr->layerHeartbeat, 1);

@@ -90,6 +90,11 @@ write_png (char const *path,
            uint32_t    height,
            bool        swap)
 {
+	// The encoder takes the sizes as int.
+	if (width > INT_MAX / 4 || height > INT_MAX)
+		return false;
+	int const stride = (int)width * 4;
+
 	size_t const bytes = (size_t)width * height * 4;
 	uint8_t *rgba = malloc(bytes);
 	if (!rgba)
@@ -103,7 +108,7 @@ write_png (char const *path,
 			rgba[i] = red;
 		}
 	}
-	bool const wrote = stbi_write_png(path, (int)width, (int)height, 4, rgba, (int)width * 4);
+	bool const wrote = stbi_write_png(path, (int)width, (int)height, 4, rgba, stride);
 	free(rgba);
 	rgba = nullptr;
 	return wrote;
@@ -297,28 +302,29 @@ capture_writer_directory (char   *buf,
 
 /** @brief Creates the batch's directory, named capture-PID-XXXXXX, in the capture directory.
  *
- * @param w The writer, whose batch_dir receives the batch's directory.
- * @return  The capture directory's length, or 0 if the batch's directory was not created; then
- *          batch_dir holds the capture directory, cut to fit.
+ * @param w The writer, whose batch_dir receives the batch's directory and batch_name where its own
+ *          name starts.
+ * @return  true if the batch's directory was created; otherwise batch_dir holds the capture
+ *          directory, cut to fit.
  */
-static size_t
+static bool
 make_batch_dir (struct capture_writer *w)
 {
-	size_t const size = sizeof w->batch_dir;
 	char *const dir = w->batch_dir;
-	int const dir_length = capture_writer_directory(dir, size);
-	if ((size_t)dir_length >= size)
-		return 0;
+	int const dir_length = capture_writer_directory(dir, sizeof w->batch_dir);
+	if (dir_length < 0 || dir_length >= (int)sizeof w->batch_dir)
+		return false;
 
 	make_dirs(dir);
-	size_t const length = (size_t)dir_length;
-	int const name_length = snprintf(dir + length, size - length, "/capture-%d-XXXXXX",
-	                                 (int)getpid());
-	if ((size_t)name_length >= size - length || !mkdtemp(dir)) {
-		dir[length] = '\0';
-		return 0;
+	int const room = (int)sizeof w->batch_dir - dir_length;
+	int const name_length = snprintf(dir + dir_length, (size_t)room, "/capture-%d-XXXXXX", (int)getpid());
+	if (name_length < 0 || name_length >= room || !mkdtemp(dir)) {
+		dir[dir_length] = '\0';
+		return false;
 	}
-	return length;
+	// The name starts after the slash, inside batch_dir.
+	w->batch_name = (uint32_t)dir_length + 1;
+	return true;
 }
 
 void
@@ -329,13 +335,11 @@ capture_writer_begin (struct capture_writer *w,
 	if (!w || !frames)
 		return;
 
-	size_t const dir_length = make_batch_dir(w);
-	if (!dir_length) {
+	if (!make_batch_dir(w)) {
 		log_printf("[capture] cannot create batch directory in %s", w->batch_dir);
 		w->remaining = 0;
 		return;
 	}
-	w->batch_name = (uint32_t)dir_length + 1;
 	w->control_seq = control_seq;
 	w->remaining = frames < CAPTURE_WRITER_FRAMES ? frames : CAPTURE_WRITER_FRAMES;
 	w->index = 0;

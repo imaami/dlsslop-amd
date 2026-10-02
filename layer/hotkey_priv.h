@@ -13,7 +13,7 @@
 #include "hotkey.h"
 
 /** @brief What the hotkeys know about an event node. */
-enum hotkey_node_flags {
+enum hotkey_node_flags : uint16_t {
 	HOTKEY_NODE_REJECTED = 1, //!< Not a keyboard, as long as the node's inode is ino.
 	HOTKEY_NODE_SEEN     = 2  //!< In the directory, during a look at it.
 };

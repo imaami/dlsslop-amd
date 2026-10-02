@@ -520,11 +520,11 @@ hotkeys_read (struct hotkeys *h,
 	if (n <= 0)
 		return false;
 
-	size_t const count = (size_t)n / sizeof *events;
-	for (size_t i = 0; i < count; ++i)
+	ssize_t const count = n / (ssize_t)sizeof *events;
+	for (ssize_t i = 0; i < count; ++i)
 		if (events[i].type == EV_KEY && events[i].value == 1)
 			hotkeys_count(h, events[i].code);
-	return (size_t)n == sizeof events;
+	return n == (ssize_t)sizeof events;
 }
 
 /** @brief Drains everything the keyboards have to say, and answers whether the key went down.
