@@ -92,6 +92,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     assert 'DLSSNR_SHM' in helptext and 'DLSSLOP_MODULES' in helptext
     assert default(helptext, 'trace-dir').startswith('disabled')
     assert default(helptext, 'idle-exit').startswith('0 (never)')
+    assert default(helptext, 'self-test-drops').startswith('0; requires --self-test')
     for flag in ('diagnose', 'self-test', 'cpu-compose', 'cpu-codec', 'performance', 'once', 'test-identity'):
         entry = re.search(r'\n  -\S, --' + flag + r' .*?(?=\n  -)', helptext, re.S)
         assert entry and re.search(r'Default: off\b', entry.group(0)), (flag, helptext)
@@ -256,6 +257,12 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     for options in (('--self-test', '-x', '5'), ('--idle-exit', '5', '-D')):
         result = run(binary, *options, env=env, cwd=cwd, expected=1)
         assert '--idle-exit requires serving shared-memory requests' in result.stderr, result.stderr
+    # --self-test-drops takes 0..999 and only applies to the self-test.
+    for options, message in ((('-X', '1'), '--self-test-drops requires --self-test'),
+                             (('--self-test', '--self-test-drops', '1000'), '--self-test-drops must be 0..999'),
+                             (('-S', '-X', 'x'), 'invalid self-test drops')):
+        result = run(binary, *options, env=env, cwd=cwd, expected=1)
+        assert message in result.stderr, (options, result.stderr)
 
     # The backend is one of three, and the Vulkan network needs its model: without
     # it, --backend vulkan fails before HIP, the GPU or the channel is touched.

@@ -337,6 +337,7 @@ Result<void> VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint
         inference_ms = ms(1, 2);
         readback_ms = ms(2, 3);
     }
+    if (s.recorder->timed_out()) return reject(kDropped);
     if (!exported) std::memcpy(output, s.download.mapped, bytes);
     return {};
 }

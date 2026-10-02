@@ -37,25 +37,37 @@ std::vector<uint8_t> gradient(unsigned w, unsigned h, uint8_t on, uint8_t off)
 } // namespace
 
 // The Vulkan network on a deterministic gradient: finite, repeatable and changed.
+// A run whose wait ran out under other GPU work is dropped, as serving answers
+// such a frame as failed, up to o.self_test_drops of them; the runs it keeps
+// must all be equal.
 Result<void> run_self_test(const Options& o, VulkanEngine& engine)
 {
     const unsigned passes = std::min(o.passes.value_or(kNativeDefaultPasses), VulkanEngine::max_passes);
     const unsigned w = ShmNativeTier(engine.tier())->width, h = engine.tier();
     const std::vector<uint8_t> input = gradient(w, h, 200, 60);
     std::vector<uint8_t> output(input.size()), first;
+    unsigned dropped = 0;
     for (unsigned run = 0; run < o.self_test_runs; ++run) {
-        DLSSLOP_TRY(engine.infer({input.data(), output.data()}, w, h, passes));
-        if (!run) first = output;
-        else if (output != first) return fail("self-test run " + std::to_string(run + 1) + " differs from the first");
+        if (auto inferred = engine.infer({input.data(), output.data()}, w, h, passes); !inferred) {
+            if (inferred.error().what != VulkanNetwork::kDropped) return forward(std::move(inferred).error());
+            if (++dropped > o.self_test_drops)
+                return fail("self-test run " + std::to_string(run + 1) + " dropped, one more than --self-test-drops " +
+                            std::to_string(o.self_test_drops) + " allows: " + VulkanNetwork::kDropped);
+        } else if (first.empty()) {
+            first = output;
+        } else if (output != first) {
+            return fail("self-test run " + std::to_string(run + 1) + " differs from the first that was not dropped");
+        }
     }
+    if (first.empty()) return fail(std::string("self-test: every run was dropped: ") + VulkanNetwork::kDropped);
     size_t changed = 0;
     for (size_t i = 0; i < input.size(); ++i) changed += (i % 4 != 3) && input[i] != output[i];
     if (!changed) return fail("self-test: the network left the input unchanged");
     if (!o.output.empty() && !write_file(o.output, ppm(output, w, h))) return fail("write " + o.output);
-    std::fprintf(stderr, "Vulkan self-test PASS: %u identical runs at %ux%u; changed_components=%zu\n"
+    std::fprintf(stderr, "Vulkan self-test PASS: %u identical runs at %ux%u; dropped=%u; changed_components=%zu\n"
                  "tier=%u; passes=%u; upload_ms=%.3f; network_ms=%.3f; readback_ms=%.3f\n",
-                 o.self_test_runs, w, h, changed, engine.tier(), passes, engine.upload_ms, engine.inference_ms,
-                 engine.readback_ms);
+                 o.self_test_runs - dropped, w, h, dropped, changed, engine.tier(), passes, engine.upload_ms,
+                 engine.inference_ms, engine.readback_ms);
     return {};
 }
 

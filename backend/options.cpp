@@ -88,6 +88,10 @@ const Spec kSpecs[] = {
         o.self_test_runs = DLSSLOP_TRY(number(v, "self-test runs"));
         return {};
     }},
+    {"self-test-drops", 'X', Spec::kValue, false, [](Options& o, const char* v) -> Result<void> {
+        o.self_test_drops = DLSSLOP_TRY(number(v, "self-test drops"));
+        return {};
+    }},
     {"input", 'i', Spec::kValue, false, [](Options& o, const char* v) -> Result<void> { o.input = v; return {}; }},
     {"output", 'o', Spec::kValue, false, [](Options& o, const char* v) -> Result<void> { o.output = v; return {}; }},
     {"width", 'W', Spec::kValue, false, [](Options& o, const char* v) -> Result<void> {
@@ -198,6 +202,10 @@ void usage(FILE* out)
         "                          Default: %s\n"
         "  -r, --self-test-runs N  Identical-input runs, including baseline (2..1000)\n"
         "                          Default: %u; requires --self-test\n"
+        "  -X, --self-test-drops N Most Vulkan runs to drop (0..999)\n"
+        "                          Default: %u; requires --self-test. A run is\n"
+        "                          dropped when a wait of the network ran out\n"
+        "                          while other GPU work held the device\n"
         "  -i, --input FILE        Offline tightly packed RGBA8 input\n"
         "                          Default: unset; serve shared-memory requests\n"
         "  -o, --output FILE       Offline RGBA8 output; self-test PPM output\n"
@@ -238,7 +246,8 @@ void usage(FILE* out)
         defaults.modules.empty() ? "unset; required for inference" : defaults.modules.c_str(),
         defaults.shm.c_str(), ShmNativeDefaultPath().c_str(), kNativeDefaultTier,
         kMaxPasses, kNativeDefaultPasses, dlsslop::VulkanNetwork::kMaxPasses, on_off(defaults.diagnose),
-        on_off(defaults.self_test), defaults.self_test_runs, kMaxW, defaults.width, kMaxH, defaults.height,
+        on_off(defaults.self_test), defaults.self_test_runs, defaults.self_test_drops, kMaxW, defaults.width,
+        kMaxH, defaults.height,
         on_off(defaults.cpu_compose), on_off(defaults.cpu_codec), on_off(defaults.performance), on_off(defaults.once),
         defaults.idle_exit, on_off(defaults.test_identity));
 }
@@ -344,6 +353,10 @@ Result<Options> parse(int argc, char** argv)
         return fail("--self-test-runs must be 2..1000");
     if (on_command_line('r') && !o.self_test)
         return fail("--self-test-runs requires --self-test");
+    if (o.self_test_drops > 999)
+        return fail("--self-test-drops must be 0..999");
+    if (on_command_line('X') && !o.self_test)
+        return fail("--self-test-drops requires --self-test");
     if (!o.diagnose && !o.test_identity && (o.assets.empty() || o.modules.empty()))
         return fail("--assets and --modules are required for inference");
     if (o.self_test && (o.test_identity || !o.input.empty()))

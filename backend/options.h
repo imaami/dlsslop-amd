@@ -13,7 +13,7 @@ struct Options {
     std::string assets, modules, shm = ShmNativeChannelPath();
     std::string input, output, trace_dir;
     std::string backend = "auto", vulkan_model;
-    unsigned width = 0, height = 0, self_test_runs = 10;
+    unsigned width = 0, height = 0, self_test_runs = 10, self_test_drops = 0;
     unsigned idle_exit = 0;
     // Unset, a serving worker keeps the channel's live values across restarts.
     std::optional<unsigned> tier, passes;

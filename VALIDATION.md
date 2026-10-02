@@ -184,11 +184,15 @@ dlsslopd --tier 1080 --self-test --self-test-runs 20 --output neural-test.ppm
 ```
 
 With the Vulkan model installed, the self-test runs the Vulkan network: every run
-must reproduce the first byte for byte and change the image. Add `--backend hip`
-for the HIP network, whose first run checks the GPU codec bit for bit against the
-CPU reference. Every later run must reproduce its raw FP32 answer and decoded
-output exactly, and the summary reports the last run's timings, which exclude the
-reference checks.
+it keeps must reproduce the first one byte for byte and change the image. It
+drops a run whose network wait ran out while other GPU work held the device, as
+dlsslopd answers such a frame as failed, and counts it in `dropped=N`. It fails
+when it drops more runs than `--self-test-drops` allows, none by default, or
+every run: on a quiet desktop it drops none. Add `--backend hip` for the HIP
+network, whose first run checks the GPU codec bit for bit against the CPU
+reference. Every later run must reproduce its raw FP32 answer and decoded
+output exactly, and the summary reports the last run's timings, which exclude
+the reference checks.
 Repeat with `--passes 2` to exercise feedback. Successful execution and
 deterministic output are basic sanity checks; the self-test does not measure
 visual quality or game performance.

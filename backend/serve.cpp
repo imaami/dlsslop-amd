@@ -303,7 +303,9 @@ Result<void> serve(const Options& o, Mapping& mapping, const TransportListener& 
                 pending_trace->finish("{\"frame_seq\":" + std::to_string(number) + "}", error.what.c_str());
                 pending_trace.reset();
             }
-            if (failure != error.what) { // Report a persistent rejection once, not every frame.
+            // Report a persistent rejection once, not every frame. A frame that the Vulkan network
+            // dropped is not serving's failure: the network logs drops, at most every 10 s.
+            if (failure != error.what && error.what != VulkanNetwork::kDropped) {
                 mapping.reason(failure = error.what);
                 std::fprintf(stderr, "frame %u failed: %s\n", number, error.what.c_str());
             }

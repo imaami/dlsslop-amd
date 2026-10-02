@@ -16,6 +16,11 @@ class VulkanNetwork {
 public:
     static constexpr unsigned kMaxPasses = NetworkRecorder::kMaxPasses;
     static constexpr unsigned kImportSlots = 4;
+    // Why infer() rejects a frame that it drops, as a wait of the network ran out
+    // while other GPU work held the device: the network answered the frame with
+    // its input and logs that itself, at most every 10 s. Serving answers it as
+    // failed, so that the layer shows the game's own frame.
+    static constexpr const char* kDropped = "a wait of the network ran out while other GPU work held the device";
     // device < 0: the first physical device the network can run on.
     static Result<VulkanNetwork> create(const VulkanPaths& paths, int device);
     VulkanNetwork(VulkanNetwork&&) noexcept;
@@ -39,6 +44,7 @@ public:
     bool import(unsigned slot, const ShmTransportOffer& offer, int fds[2]);
     // Slot -1: the frame and answer are host memory at input and output. Otherwise
     // they are the pair imported into that slot, which the caller knows holds them.
+    // A frame whose network wait ran out is rejected with kDropped.
     Result<void> infer(const VulkanFrame& frame, int slot, const uint8_t* input, uint8_t* output);
 
     float upload_ms = 0, inference_ms = 0, readback_ms = 0;
