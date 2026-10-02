@@ -101,6 +101,7 @@ struct shm_map {
 	size_t            path_length;        //!< The bytes of path.
 	double            retry_after_ms;     //!< When a heartbeat may end SHM_MAP_DEAD (log_now_ms()).
 	double            start_after_ms;     //!< start_worker()'s rate limit (log_now_ms()).
+	double            open_after_ms;      //!< shm_map_open()'s rate limit (log_now_ms()).
 	uint32_t          timeouts;           //!< The requests in a row that the helper did not answer.
 	uint32_t          last_control_seq;   //!< The header's controlSeq, as last seen.
 	uint32_t          last_heartbeat;     //!< The header's heartbeat, as last seen.
@@ -321,7 +322,8 @@ channel_path (size_t *length)
 
 /** @brief Maps the channel's header, creating the file if it is not there.
  *
- * The channel is channel_path()'s, which the map keeps once the header is mapped.
+ * The channel is channel_path()'s, which the map keeps once the header is mapped. Every present asks
+ * for it, so a failed attempt is not repeated, nor logged again, for two seconds.
  *
  * @param s The map.
  * @return  true if the header is mapped.
@@ -331,6 +333,10 @@ shm_map_open (struct shm_map *s)
 {
 	if (s->hdr)
 		return true;
+	double const now = log_now_ms();
+	if (now < s->open_after_ms)
+		return false;
+	s->open_after_ms = now + 2000.0;
 
 	size_t length;
 	char *p = channel_path(&length);
