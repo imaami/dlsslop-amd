@@ -1339,8 +1339,14 @@ composition_prepare (struct composition                      *c,
 	// for. Compose in half float in that case and blit at both ends instead: the blit converts, and
 	// sixteen bits a channel hold more than the ten the swapchain can show, so nothing is lost that
 	// the display could have displayed.
+	//
+	// The device's answer does not change, and this runs every frame: the swapchain format of the
+	// last build keeps what was decided for it.
 	uint64_t blit = 0;
-	if (!format_supports(c, work, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)) {
+	if (swapchain_format == c->swapchain_format) {
+		work = c->work_format;
+		blit = c->flags & COMPOSITION_BLIT_SWAPCHAIN;
+	} else if (!format_supports(c, work, VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)) {
 		VkFormat const wide = VK_FORMAT_R16G16B16A16_SFLOAT;
 		VkFormatFeatureFlags const blit_both = VK_FORMAT_FEATURE_BLIT_SRC_BIT
 		                                       | VK_FORMAT_FEATURE_BLIT_DST_BIT;
@@ -1352,11 +1358,8 @@ composition_prepare (struct composition                      *c,
 			log_printf("[comp] %s (format %d)", c->reason, (int)work);
 			return false;
 		}
-		// composition_prepare() runs every frame; this is only news when the swapchain changed
-		// under it.
-		if (swapchain_format != c->swapchain_format)
-			log_printf("[comp] format %d cannot be written as a storage image here; "
-			           "composing in half float", (int)work);
+		log_printf("[comp] format %d cannot be written as a storage image here; composing in half "
+		           "float", (int)work);
 		work = wide;
 		blit = COMPOSITION_BLIT_SWAPCHAIN;
 	}
@@ -1369,14 +1372,15 @@ composition_prepare (struct composition                      *c,
 
 	// The float16 proxy needs a surface the shader can write and sample as float. Where the device
 	// says it cannot, the request quietly becomes the 8-bit arrangement that shipped before -- the
-	// same shape as every other capability step in this file.
+	// same shape as every other capability step in this file. A build with the float16 proxy already
+	// found it supported.
 	VkFormatFeatureFlags const fp16_need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT
 	                                       | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT
 	                                       | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT
 	                                       | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
-	if (hdr_proxy && !format_supports(c, VK_FORMAT_R16G16B16A16_SFLOAT, fp16_need)) {
-		if (!(c->flags & COMPOSITION_HDR_PROXY))
-			log_printf("[comp] float16 proxy requested but not supported here; staying 8-bit");
+	if (hdr_proxy && !(c->flags & COMPOSITION_HDR_PROXY)
+	    && !format_supports(c, VK_FORMAT_R16G16B16A16_SFLOAT, fp16_need)) {
+		log_printf("[comp] float16 proxy requested but not supported here; staying 8-bit");
 		hdr_proxy = false;
 	}
 
@@ -1799,15 +1803,15 @@ note_hold (struct composition                      *c,
  *
  * @param c      The composition, whose work image exists.
  * @param cb     The command buffer to record into.
- * @param s      The frame's settings.
+ * @param base   The frame's constants (base_constants()).
  * @param source The frame or the proxy.
  * @return       true if the dispatch was recorded.
  */
 static bool
-record_work (struct composition                      *c,
-             VkCommandBuffer                          cb,
-             struct composition_frame_settings const *s,
-             struct composition_image                *source)
+record_work (struct composition             *c,
+             VkCommandBuffer                 cb,
+             struct dlss_nr_constants const *base,
+             struct composition_image       *source)
 {
 	transition(c, cb, source, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	transition(c, cb, &c->work, VK_IMAGE_LAYOUT_GENERAL);
@@ -1819,7 +1823,7 @@ record_work (struct composition                      *c,
 
 	// Reduce, with the module's own area filter -- the model then works on fewer pixels and less
 	// crosses the shared memory.
-	struct dlss_nr_constants down = base_constants(c, s);
+	struct dlss_nr_constants down = *base;
 	down.mode = DLSS_NR_MODE_DOWNSAMPLE;
 	down.width = c->model_w;
 	down.height = c->model_h;
@@ -1865,10 +1869,12 @@ composition_record_capture (struct composition                      *c,
 
 	transition(c, cb, &c->frame, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
+	// The constants every dispatch of this leg shares; each sets its mode and size.
+	struct dlss_nr_constants const base = base_constants(c, s);
 	struct composition_image *source = &c->frame;
 	if (c->proxy.image) {
 		transition(c, cb, &c->proxy, VK_IMAGE_LAYOUT_GENERAL);
-		struct dlss_nr_constants enc = base_constants(c, s);
+		struct dlss_nr_constants enc = base;
 		enc.mode = DLSS_NR_MODE_ENCODE;
 		enc.width = c->width;
 		enc.height = c->height;
@@ -1892,7 +1898,7 @@ composition_record_capture (struct composition                      *c,
 	if (c->meter_state) {
 		transition(c, cb, &c->meter, VK_IMAGE_LAYOUT_GENERAL);
 
-		struct dlss_nr_constants meter = base_constants(c, s);
+		struct dlss_nr_constants meter = base;
 		meter.mode = DLSS_NR_MODE_CALIBRATE;
 		meter.width = DLSS_NR_METER_GRID;
 		meter.height = DLSS_NR_METER_GRID;
@@ -1905,7 +1911,7 @@ composition_record_capture (struct composition                      *c,
 
 	// What the model is actually handed: the full-resolution proxy, or a reduction of it.
 	if (c->work.image) {
-		if (!record_work(c, cb, s, source))
+		if (!record_work(c, cb, &base, source))
 			return false;
 		source = &c->work;
 	}

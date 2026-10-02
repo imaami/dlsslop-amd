@@ -380,12 +380,14 @@ shm_map_open (struct shm_map *s)
 	// composing with its old field set and every setting the newer side writes is invisible. That is
 	// indistinguishable from "the new feature does nothing", which is how a stale layer reads until
 	// someone checks the log.
-	if (atomic_load(&s->hdr->magic) != kShmMagic || atomic_load(&s->hdr->version) != kShmVersion
-	    || atomic_load(&s->hdr->passes) == 0) {
-		if (atomic_load(&s->hdr->magic) == kShmMagic && atomic_load(&s->hdr->version) != kShmVersion)
+	// Each word read once: another process may be rewriting them.
+	uint32_t const magic = atomic_load(&s->hdr->magic);
+	uint32_t const version = atomic_load(&s->hdr->version);
+	if (magic != kShmMagic || version != kShmVersion || atomic_load(&s->hdr->passes) == 0) {
+		if (magic == kShmMagic && version != kShmVersion)
 			log_printf("[shm] header is version %u but this layer is v%u -- another process is out of "
 			           "date, re-initialising it; update the layer, the helper and the GUI together",
-			           atomic_load(&s->hdr->version), kShmVersion);
+			           version, kShmVersion);
 		ShmInitDefaults(s->hdr);
 	}
 	s->last_heartbeat = atomic_load(&s->hdr->heartbeat);
@@ -1551,6 +1553,28 @@ layer_enabled (void)
 	return g_layer_enabled;
 }
 
+static pthread_once_t g_network_requested_once = PTHREAD_ONCE_INIT; //!< Runs read_network_requested().
+static bool           g_network_requested;                          //!< Whether the network is asked for.
+
+/** @brief Reads whether the in-layer network is asked for into g_network_requested. */
+static void
+read_network_requested (void)
+{
+	g_network_requested = device_features_network_requested();
+}
+
+/** @brief Whether the in-layer network is asked for, read once, so that a device that enabled it
+ *         and the lookups of the queue hooks that serialize its build agree.
+ *
+ * @return device_features_network_requested() as it was at the first call.
+ */
+static bool
+network_requested (void)
+{
+	pthread_once(&g_network_requested_once, read_network_requested);
+	return g_network_requested;
+}
+
 // ---------------------------------------------------------------------------
 // Instance hooks
 // ---------------------------------------------------------------------------
@@ -1786,7 +1810,7 @@ static bool
 network_available (struct instance_chain const *ic,
                    VkPhysicalDevice             physical)
 {
-	if (!device_features_network_requested())
+	if (!network_requested())
 		return false;
 
 	char const *const off = network_unavailable(ic, physical);
@@ -2197,14 +2221,16 @@ hook_create_swapchain_khr (VkDevice                        device,
 	// transfer/primary combinations need their own color conversion and remain pass-through.
 	VkFormat const format = pCreateInfo->imageFormat;
 	VkColorSpaceKHR const space = pCreateInfo->imageColorSpace;
+	uint32_t const hdr_kind = detect_hdr_kind(format, space);
+	bool const format_supported = supported_format(format);
 	bool const unsupported_hdr = !(space == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
 	                               || (format == VK_FORMAT_R16G16B16A16_SFLOAT
 	                                   && space == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT)
-	                               || detect_hdr_kind(format, space) == kHdrPq10);
+	                               || hdr_kind == kHdrPq10);
 	bool const active = !atomic_load(&dc->inert) && layer_enabled();
 	bool const unsupported_transfer = active && !surface_transfers(dc, pCreateInfo->surface);
 	VkSwapchainCreateInfoKHR m = *pCreateInfo;
-	if (active && !unsupported_hdr && !unsupported_transfer && supported_format(format))
+	if (active && !unsupported_hdr && !unsupported_transfer && format_supported)
 		m.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
 	VkResult const res = dc->table.vkCreateSwapchainKHR(device, &m, pAllocator, pSwapchain);
@@ -2232,13 +2258,13 @@ hook_create_swapchain_khr (VkDevice                        device,
 	}
 
 	sc->format = format;
-	sc->hdr_kind = detect_hdr_kind(format, space);
+	sc->hdr_kind = hdr_kind;
 	sc->width = pCreateInfo->imageExtent.width;
 	sc->height = pCreateInfo->imageExtent.height;
 	// Why its frames present untouched, the first reason that holds; empty if they do not.
 	char const *const pass_through = unsupported_hdr ? " (unsupported color space for native HIP)"
 	                                 : unsupported_transfer ? " (surface cannot transfer frames)"
-	                                 : !supported_format(format) ? " (unsupported format)"
+	                                 : !format_supported ? " (unsupported format)"
 	                                 : sc->width < kMinW || sc->height < kMinH ? " (too small)"
 	                                 : sc->width > kMaxW || sc->height > kMaxH ? " (too large)"
 	                                 : "";
@@ -3559,7 +3585,7 @@ lookup_hook (char const      *name,
 	for (size_t i = 0; i < HOOK_COUNT; ++i) {
 		if (HOOKS[i].scope < first || strcmp(HOOKS[i].name, name))
 			continue;
-		if (HOOKS[i].scope == HOOK_QUEUE && !device_features_network_requested())
+		if (HOOKS[i].scope == HOOK_QUEUE && !network_requested())
 			return nullptr;
 		return HOOKS[i].fn;
 	}

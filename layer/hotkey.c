@@ -392,11 +392,13 @@ hotkey_x11_destroy (struct hotkey_x11 **p_dest)
  * Raw events are delivered whatever has focus, which is the whole point: the layer has no window and
  * the game may not even be an X client.
  *
- * @param x A zeroed backend, which receives what was loaded even when this fails.
- * @return  true if raw key presses are selected.
+ * @param x    A zeroed backend, which receives what was loaded even when this fails.
+ * @param name The display's name.
+ * @return     true if raw key presses are selected.
  */
 static bool
-hotkey_x11_open (struct hotkey_x11 *x)
+hotkey_x11_open (struct hotkey_x11 *x,
+                 char const        *name)
 {
 	x->x11 = dlopen("libX11.so.6", RTLD_LAZY | RTLD_LOCAL);
 	x->xi = dlopen("libXi.so.6", RTLD_LAZY | RTLD_LOCAL);
@@ -419,7 +421,7 @@ hotkey_x11_open (struct hotkey_x11 *x)
 	    || !x->pending || !x->next_event || !x->get_event_data || !x->free_event_data)
 		return false;
 
-	Display *display = open_display(nullptr);
+	Display *display = open_display(name);
 	if (!display)
 		return false;
 
@@ -456,34 +458,37 @@ hotkey_x11_open (struct hotkey_x11 *x)
 	return true;
 }
 
-/** @brief Opens an XInput2 backend on the display that DISPLAY names.
+/** @brief Opens an XInput2 backend on a display.
  *
  * A display that has no XInput 2.2 gives no backend, and what was loaded is unloaded at once.
  * Upstream went on polling such a display, on which it had selected no events.
  *
- * @return The backend, or nullptr if raw key presses could not be selected.
+ * @param name The display's name.
+ * @return     The backend, or nullptr if raw key presses could not be selected.
  */
 static struct hotkey_x11 *
-hotkey_x11_create (void)
+hotkey_x11_create (char const *name)
 {
 	struct hotkey_x11 *x = calloc(1, sizeof *x);
-	if (x && !hotkey_x11_open(x))
+	if (x && !hotkey_x11_open(x, name))
 		hotkey_x11_destroy(&x);
 	return x;
 }
 
 /** @brief Opens the XInput2 backend if DISPLAY names a display.
  *
- * @param h The hotkeys.
- * @return  true if the backend works.
+ * @param h    The hotkeys.
+ * @param name DISPLAY's value, or nullptr if it is unset.
+ * @return     true if the backend works.
  */
 static bool
-hotkeys_open_x11 (struct hotkeys *h)
+hotkeys_open_x11 (struct hotkeys *h,
+                  char const     *name)
 {
-	if (!getenv("DISPLAY"))
+	if (!name)
 		return false;
 
-	h->x11 = hotkey_x11_create();
+	h->x11 = hotkey_x11_create(name);
 	return h->x11;
 }
 
@@ -507,14 +512,18 @@ hotkeys_open (struct hotkeys *h)
 
 	if (want_evdev) {
 		hotkeys_rescan_evdev(h, "/dev/input");
+		// The first press's look at /dev/input is this one.
+		h->last_scan = log_now_ms();
 		if (h->keyboards) {
 			h->flags |= HOTKEYS_EVDEV;
 			log_printf("[hotkey] watching %u keyboard(s) through evdev", h->keyboards);
 			return;
 		}
 	}
-	if (want_x11 && hotkeys_open_x11(h)) {
-		log_printf("[hotkey] watching XInput2 raw keys on %s", getenv("DISPLAY"));
+	// DISPLAY read once, for the check, the connection and the log.
+	char const *const display = want_x11 ? getenv("DISPLAY") : nullptr;
+	if (hotkeys_open_x11(h, display)) {
+		log_printf("[hotkey] watching XInput2 raw keys on %s", display);
 		return;
 	}
 

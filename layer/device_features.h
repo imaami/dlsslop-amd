@@ -247,8 +247,11 @@ device_features_add_network_extensions (VkDeviceCreateInfo  *info,
 	if (!info || !list)
 		return false;
 	DEVICE_FEATURES_STD(uint32_t) const count = info->enabledExtensionCount;
-	for (DEVICE_FEATURES_STD(uint32_t) i = 0; i < count; ++i)
-		list[i] = info->ppEnabledExtensionNames[i];
+	// The request's own list is in place already.
+	if (list != info->ppEnabledExtensionNames) {
+		for (DEVICE_FEATURES_STD(uint32_t) i = 0; i < count; ++i)
+			list[i] = info->ppEnabledExtensionNames[i];
+	}
 	DEVICE_FEATURES_STD(uint32_t) const total = network_requirements_append_extensions(list, count);
 	if (total == count)
 		return false;

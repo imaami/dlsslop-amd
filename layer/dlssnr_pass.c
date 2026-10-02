@@ -76,8 +76,9 @@ build (struct dlss_nr_pass *p)
 	VkDeviceSize const align = props.limits.minUniformBufferOffsetAlignment;
 	VkDeviceSize const alignment = align ? align : 1;
 	p->slot_stride = (sizeof (struct dlss_nr_constants) + alignment - 1) / alignment * alignment;
+	VkDeviceSize const ring_size = p->slot_stride * DLSS_NR_PASS_SLOTS;
 
-	r = shader_vk_create_buffer_resource(s, p->slot_stride * DLSS_NR_PASS_SLOTS,
+	r = shader_vk_create_buffer_resource(s, ring_size,
 	                                     VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
 	                                     | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
 	                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT
@@ -88,8 +89,7 @@ build (struct dlss_nr_pass *p)
 	}
 
 	void *mapped;
-	r = s->vk->vkMapMemory(s->device, s->constant_buffer_memory, 0,
-	                       p->slot_stride * DLSS_NR_PASS_SLOTS, 0, &mapped);
+	r = s->vk->vkMapMemory(s->device, s->constant_buffer_memory, 0, ring_size, 0, &mapped);
 	if (r != VK_SUCCESS) {
 		log_printf("[pass] could not map the constant ring");
 		return r;

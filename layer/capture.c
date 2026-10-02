@@ -125,6 +125,7 @@ write_raw (char const *path,
  * @param pixels The pixels, tightly packed.
  * @param width  Their width.
  * @param height Their height.
+ * @param bytes  Their size: four bytes a pixel.
  * @param swap   Whether red and blue swap places.
  * @return       true if the file was written and closed.
  */
@@ -134,6 +135,7 @@ write_png (char const *path,
            void const *pixels,
            uint32_t    width,
            uint32_t    height,
+           size_t      bytes,
            bool        swap)
 {
 	// The encoder takes the sizes as int.
@@ -141,7 +143,6 @@ write_png (char const *path,
 		return false;
 	int const stride = (int)width * 4;
 
-	size_t const bytes = (size_t)width * height * 4;
 	uint8_t *rgba = malloc(bytes);
 	if (!rgba)
 		return false;
@@ -194,7 +195,7 @@ write_image (struct capture_writer const *w,
 	char path[BATCH_PATH_MAX];
 	memcpy(path, w->batch_dir, w->batch_length);
 	memcpy(path + w->batch_length, name, (size_t)length + 1);
-	bool const wrote = e.png ? write_png(path, pixels, width, height, e.swap)
+	bool const wrote = e.png ? write_png(path, pixels, width, height, bytes, e.swap)
 	                         : write_raw(path, pixels, bytes);
 	if (!wrote)
 		log_printf("[capture] could not write %s", path);
