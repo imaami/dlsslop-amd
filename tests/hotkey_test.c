@@ -448,8 +448,8 @@ check_reads (void)
 	*h.nodes = (struct hotkey_node){ .fd = keyboard[0] };
 	h.node_count = 1;
 	h.keyboards = 1;
-	// Opened, and /dev/input looked at forever from now: no sweep while this runs.
-	h.flags = HOTKEYS_OPENED | HOTKEYS_ANNOUNCED;
+	// Opened on evdev, and /dev/input looked at forever from now: no sweep while this runs.
+	h.flags = HOTKEYS_OPENED | HOTKEYS_ANNOUNCED | HOTKEYS_EVDEV;
 	h.last_scan = INFINITY;
 	require(!hotkeys_pressed(&h, KEY_F10), "a key read as pressed with no event");
 
@@ -712,7 +712,7 @@ check_keyboards (char const *parent)
 	require(rejected(&h, dir, 7) && h.node_count == 7, "a plain file was not rejected");
 
 	// The keyboard's press reads back, once.
-	h.flags |= HOTKEYS_OPENED;
+	h.flags |= HOTKEYS_OPENED | HOTKEYS_EVDEV;
 	h.last_scan = INFINITY;
 	require(hotkeys_pressed(&h, KEY_F10) && !hotkeys_pressed(&h, KEY_F10),
 	        "the press on the keyboard did not read back once");

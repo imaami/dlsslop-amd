@@ -509,6 +509,7 @@ hotkeys_open (struct hotkeys *h)
 	if (want_evdev) {
 		hotkeys_rescan_evdev(h, "/dev/input");
 		if (h->keyboards) {
+			h->flags |= HOTKEYS_EVDEV;
 			log_printf("[hotkey] watching %u keyboard(s) through evdev", h->keyboards);
 			return;
 		}
@@ -617,7 +618,8 @@ hotkeys_pressed (struct hotkeys *h,
 		return false;
 
 	hotkeys_open(h);
-	if (h->keyboards)
+	// By the backend, not by the keyboards open now: evdev looks for new ones while it has none.
+	if (h->flags & HOTKEYS_EVDEV)
 		return hotkeys_pressed_evdev(h, key_code);
 	if (h->x11)
 		return hotkeys_pressed_x11(h, key_code);

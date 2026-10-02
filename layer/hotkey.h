@@ -49,7 +49,8 @@ struct hotkey_x11;
 /** @brief The state that struct hotkeys records in its flags. */
 enum hotkeys_flags : HOTKEY_STD(uint32_t) {
 	HOTKEYS_OPENED    = 1, //!< The first hotkeys_pressed() chose a backend.
-	HOTKEYS_ANNOUNCED = 2  //!< /dev/input was read once: a keyboard found later is logged.
+	HOTKEYS_ANNOUNCED = 2, //!< /dev/input was read once: a keyboard found later is logged.
+	HOTKEYS_EVDEV     = 4  //!< The backend is evdev, also while no keyboard is open.
 };
 
 /** @brief The keyboards that the layer reads its key from, and the presses it has not answered.
