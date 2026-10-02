@@ -1038,6 +1038,8 @@ check_scaler_dispatch (void)
 	}
 }
 
+#undef HANDLE
+
 /** @brief What a scaling pass must be. */
 struct expected_scaler {
 	unsigned char const *spv;   //!< Its SPIR-V.

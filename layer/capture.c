@@ -18,6 +18,7 @@
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "../third_party/stb/stb_image_write.h"
+#undef STB_IMAGE_WRITE_IMPLEMENTATION
 
 /** @brief The size of a path in the batch's directory: the directory, which fits in
  *         CAPTURE_WRITER_DIR_SIZE bytes, then a slash and a file name of at most 13 bytes. A path

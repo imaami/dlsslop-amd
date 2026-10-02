@@ -3504,6 +3504,8 @@ vkEnumerateInstanceLayerProperties (uint32_t          *pCount,
 	return VK_SUCCESS;
 }
 
+#undef VK_LAYER_NAME
+
 /** @brief The layer's instance extensions: none.
  *
  * @param pLayerName  Ignored.

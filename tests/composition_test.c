@@ -799,6 +799,8 @@ static VkCommandBuffer const CMD = HANDLE(VkCommandBuffer, 0x30);
 /** @brief The swapchain image that the composition reads and writes, which the device did not make. */
 static VkImage const SWAPCHAIN = HANDLE(VkImage, 0x40);
 
+#undef HANDLE
+
 static void
 live_image (VkImage image)
 {
@@ -953,6 +955,8 @@ require_held (struct composition const *c,
 	require(n == live_objects(), "%s: the composition holds %u objects of %u live ones", when, n,
 	        live_objects());
 }
+
+#undef VALUE
 
 /** @brief An arrangement of the composition's surfaces. objects is a size_t, which fills the padding. */
 struct arrangement {

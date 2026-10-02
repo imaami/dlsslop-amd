@@ -17,14 +17,6 @@
 #ifndef DLSSLOP_AMD_LAYER_SHADER_VK_H_
 #define DLSSLOP_AMD_LAYER_SHADER_VK_H_
 
-#ifdef __cplusplus
-# include <cstdint>
-# define SHADER_VK_STD(x) std::x
-#else
-# include <stdint.h>
-# define SHADER_VK_STD(x) x
-#endif
-
 #include "vk_table.h"
 
 #ifdef __cplusplus
@@ -82,7 +74,5 @@ shader_vk_set_image_layout (struct shader_vk const  *s,
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
-
-#undef SHADER_VK_STD
 
 #endif /* DLSSLOP_AMD_LAYER_SHADER_VK_H_ */
