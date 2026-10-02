@@ -807,13 +807,18 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
     }
     // The in-layer network, on request, where the game's instance and device allow it.
     const char* networkOff = nullptr;
-    const bool network = LayerEnabled() && ic && dlssnr::NetworkRequested() &&
-                         !(networkOff = dlssnr::NetworkUnavailable(
+    const bool network = LayerEnabled() && ic && device_features_network_requested() &&
+                         !(networkOff = device_features_network_unavailable(
                                physicalDevice, ic->apiVersion, ic->table.vkGetPhysicalDeviceProperties2,
                                ic->table.vkGetPhysicalDeviceFeatures2, ic->table.vkEnumerateDeviceExtensionProperties,
                                ic->table.vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR));
     if (networkOff) log_printf("[layer] in-layer network unavailable: needs %s", networkOff);
-    if (network && dlssnr::AddNetworkExtensions(modified, enabledExts)) effective = &modified;
+    // The request's extensions and the network's, in a list of their own.
+    std::vector<const char*> networkExts;
+    if (network) {
+        networkExts.resize(modified.enabledExtensionCount + NETWORK_FEATURE_COUNT);
+        if (device_features_add_network_extensions(&modified, networkExts.data())) effective = &modified;
+    }
 
     link->u.pLayerInfo = link->u.pLayerInfo->pNext;
     auto* const nextLayerInfo = link->u.pLayerInfo;
@@ -821,15 +826,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
     // views, an optional capability requested explicitly, and the in-layer network, on request,
     // needs its own. The request owns private copies of the game's structures it changes; behind
     // a structure it cannot copy it declines, which disables composition safely.
-    dlssnr::DeviceFeatureRequest features;
+    device_features features{};
     if (LayerEnabled()) {
         VkPhysicalDeviceFeatures supported{};
         auto query = ic ? ic->table.vkGetPhysicalDeviceFeatures : nullptr;
         if (query) query(physicalDevice, &supported);
         if (supported.shaderStorageImageWriteWithoutFormat) {
-            if (features.Enable(modified, network)) {
+            if (device_features_enable(&features, &modified, network)) {
                 effective = &modified;
-            } else if (network && features.Enable(modified, false)) {
+            } else if (network && device_features_enable(&features, &modified, false)) {
                 effective = &modified;
                 log_printf("[layer] in-layer network unavailable: cannot safely copy the game's feature chain");
             } else {
@@ -862,11 +867,11 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
         if (!std::strcmp(effective->ppEnabledExtensionNames[i], VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME))
             dc->exportMemory = dc->table.vkGetMemoryFdKHR != nullptr;
     if (network) {
-        dc->network = dlssnr::NetworkEnabled(*effective);
+        dc->network = device_features_network_enabled(effective);
         log_printf("[layer] in-layer network features %s", dc->network ? "enabled" : "not enabled");
     }
     if (!dc->table.vkQueuePresentKHR || !dc->table.vkCreateSwapchainKHR || !ic) dc->inert = true;
-    if (LayerEnabled() && !dlssnr::HasFormatlessStorageWrites(*effective)) {
+    if (LayerEnabled() && !device_features_has_formatless_storage_writes(effective)) {
         dc->inert = true;
         log_printf("[layer] shaderStorageImageWriteWithoutFormat not enabled; presenting untouched");
     }
@@ -1755,7 +1760,7 @@ static PFN_vkVoidFunction LookupHook(const char* n) {
     if (!std::strcmp(n, "vkQueuePresentKHR")) return (PFN_vkVoidFunction)Hook_QueuePresentKHR;
     // The in-layer network's build submits to the game's queue from a thread of its own: the queue
     // hooks serialize it with the game's queue operations and device waits.
-    if (!dlssnr::NetworkRequested()) return nullptr;
+    if (!device_features_network_requested()) return nullptr;
     if (!std::strcmp(n, "vkQueueSubmit")) return (PFN_vkVoidFunction)Hook_QueueSubmit;
     if (!std::strcmp(n, "vkQueueSubmit2")) return (PFN_vkVoidFunction)Hook_QueueSubmit2;
     if (!std::strcmp(n, "vkQueueWaitIdle")) return (PFN_vkVoidFunction)Hook_QueueWaitIdle;
@@ -1774,7 +1779,7 @@ static PFN_vkVoidFunction LookupDeviceHook(const char* n) {
     if (!std::strcmp(n, "vkQueuePresentKHR")) return (PFN_vkVoidFunction)Hook_QueuePresentKHR;
     // The in-layer network's build submits to the game's queue from a thread of its own: the queue
     // hooks serialize it with the game's queue operations and device waits.
-    if (!dlssnr::NetworkRequested()) return nullptr;
+    if (!device_features_network_requested()) return nullptr;
     if (!std::strcmp(n, "vkQueueSubmit")) return (PFN_vkVoidFunction)Hook_QueueSubmit;
     if (!std::strcmp(n, "vkQueueSubmit2")) return (PFN_vkVoidFunction)Hook_QueueSubmit2;
     if (!std::strcmp(n, "vkQueueWaitIdle")) return (PFN_vkVoidFunction)Hook_QueueWaitIdle;

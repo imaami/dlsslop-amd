@@ -69,10 +69,10 @@ static void Features() {
     VkPhysicalDeviceFeatures original{};
     original.robustBufferAccess = VK_TRUE;
     info.pEnabledFeatures = &original;
-    dlssnr::DeviceFeatureRequest legacy;
-    Check(legacy.Enable(info, false), "cannot enable legacy features");
+    device_features legacy{};
+    Check(device_features_enable(&legacy, &info, false), "cannot enable legacy features");
     Check(info.pEnabledFeatures != &original && info.pEnabledFeatures->robustBufferAccess &&
-          dlssnr::HasFormatlessStorageWrites(info) && !original.shaderStorageImageWriteWithoutFormat,
+          device_features_has_formatless_storage_writes(&info) && !original.shaderStorageImageWriteWithoutFormat,
           "legacy features were not preserved/copied");
 
     VkBaseOutStructure unknown{};
@@ -91,15 +91,15 @@ static void Features() {
     loader.pNext = &vulkan12;
     info.pNext = &loader;
     info.pEnabledFeatures = nullptr;
-    dlssnr::DeviceFeatureRequest chained;
-    Check(chained.Enable(info, false), "cannot enable known Features2 chain");
+    device_features chained{};
+    Check(device_features_enable(&chained, &info, false), "cannot enable known Features2 chain");
     auto* first = static_cast<const VkLayerDeviceCreateInfo*>(info.pNext);
     auto* second = static_cast<const VkPhysicalDeviceVulkan12Features*>(first->pNext);
     auto* third = static_cast<const VkPhysicalDeviceFeatures2*>(second->pNext);
     Check(first != &loader && second != &vulkan12 && third != &core && third->pNext == &unknown,
           "incorrect Features2 prefix/suffix ownership");
     Check(first->function == loader.function && second->timelineSemaphore &&
-          third->features.robustBufferAccess && dlssnr::HasFormatlessStorageWrites(info),
+          third->features.robustBufferAccess && device_features_has_formatless_storage_writes(&info),
           "caller settings lost in prefix copy");
     Check(loader.pNext == &vulkan12 && vulkan12.pNext == &core && core.pNext == &unknown &&
           !core.features.shaderStorageImageWriteWithoutFormat, "caller chain was mutated");
@@ -107,11 +107,26 @@ static void Features() {
     unknown.pNext = reinterpret_cast<VkBaseOutStructure*>(&core);
     core.pNext = nullptr;
     info.pNext = &unknown;
-    dlssnr::DeviceFeatureRequest unsupported;
-    Check(!unsupported.Enable(info, false) && info.pNext == &unknown &&
+    device_features unsupported{};
+    Check(!device_features_enable(&unsupported, &info, false) && info.pNext == &unknown &&
           !core.features.shaderStorageImageWriteWithoutFormat, "unknown prefix was not rejected intact");
     core.features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
-    Check(unsupported.Enable(info, false) && info.pNext == &unknown, "already enabled unknown prefix was rejected");
+    Check(device_features_enable(&unsupported, &info, false) && info.pNext == &unknown,
+          "already enabled unknown prefix was rejected");
+    // Without a VkPhysicalDeviceFeatures2: pEnabledFeatures that enable formatless storage writes are
+    // kept, and a request without pEnabledFeatures is given a copy of its own.
+    VkPhysicalDeviceFeatures enough{};
+    enough.shaderStorageImageWriteWithoutFormat = VK_TRUE;
+    VkDeviceCreateInfo kept{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+    kept.pEnabledFeatures = &enough;
+    device_features unchanged{};
+    Check(device_features_enable(&unchanged, &kept, false) && kept.pEnabledFeatures == &enough && !kept.pNext,
+          "pEnabledFeatures that enable formatless storage writes were replaced");
+    VkDeviceCreateInfo bare{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+    device_features added{};
+    Check(device_features_enable(&added, &bare, false) && bare.pEnabledFeatures == &added.legacy && !bare.pNext &&
+              device_features_has_formatless_storage_writes(&bare),
+          "a request without pEnabledFeatures was not given formatless storage writes");
     std::puts("device features: private legacy/Features2 copies and unknown-prefix fallback verified");
 }
 
@@ -134,8 +149,8 @@ static bool Valid(const VkDeviceCreateInfo& info) {
 // Every network feature set where the chain enables it.
 static bool AllNetworkBits(const VkDeviceCreateInfo& info) {
     for (const auto& f : NETWORK_FEATURES) {
-        const auto place = dlssnr::NetworkFeatureIn(info.pNext, f);
-        if (!place.first || !*vk_chain_bit(place.first, place.second))
+        const auto place = device_features_network_feature_in(info.pNext, &f);
+        if (!place.node || !*vk_chain_bit(place.node, place.offset))
             return false;
     }
     return true;
@@ -171,9 +186,9 @@ static void NetworkFeatures() {
     const auto before = std::make_tuple(core.features.shaderStorageImageWriteWithoutFormat, v11.storageBuffer16BitAccess,
                                         v12.shaderInt8, v13.subgroupSizeControl);
     const auto loaderBytes = chain();
-    dlssnr::DeviceFeatureRequest request;
-    Check(request.Enable(info, true), "cannot add the network to a core-structure chain");
-    Check(Valid(info) && AllNetworkBits(info) && dlssnr::HasFormatlessStorageWrites(info),
+    device_features request{};
+    Check(device_features_enable(&request, &info, true), "cannot add the network to a core-structure chain");
+    Check(Valid(info) && AllNetworkBits(info) && device_features_has_formatless_storage_writes(&info),
           "network features missing from a core-structure chain");
     Check(vk_chain_find(info.pNext, VK_STRUCTURE_TYPE_APPLICATION_INFO) == &unknown,
           "the unknown suffix was not left shared");
@@ -184,7 +199,7 @@ static void NetworkFeatures() {
           "extension structures were not added");
     const auto* copied13 = static_cast<const VkPhysicalDeviceVulkan13Features*>(
         vk_chain_find(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES));
-    const auto* copied2 = dlssnr::CoreFeatures2(info);
+    const auto* copied2 = device_features_core_features2(&info);
     Check(copied13 != &v13 && copied13->dynamicRendering && copied2 != &core && copied2->features.robustBufferAccess,
           "the game's own settings were lost in the copies");
     Check(before == std::make_tuple(core.features.shaderStorageImageWriteWithoutFormat, v11.storageBuffer16BitAccess,
@@ -193,14 +208,14 @@ static void NetworkFeatures() {
           "the game's chain was written");
 
     // The ledger reads what vkCreateDevice accepted: the extensions too.
-    Check(!dlssnr::NetworkEnabled(info), "ledger ignored the missing extensions");
+    Check(!device_features_network_enabled(&info), "ledger ignored the missing extensions");
     const auto extensions = NetworkExtensions();
     info.enabledExtensionCount = uint32_t(extensions.size());
     info.ppEnabledExtensionNames = extensions.data();
-    Check(dlssnr::NetworkEnabled(info), "ledger missed an enabled network");
+    Check(device_features_network_enabled(&info), "ledger missed an enabled network");
     // The network requires explicit workgroup layout too (network_requirements.h).
     --info.enabledExtensionCount;
-    Check(!dlssnr::NetworkEnabled(info), "ledger ignored the missing explicit workgroup layout");
+    Check(!device_features_network_enabled(&info), "ledger ignored the missing explicit workgroup layout");
 
     // Structures of their own: one bit set in the game's, the rest added, none twice.
     VkPhysicalDeviceShaderFloat16Int8Features float16{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES};
@@ -208,9 +223,9 @@ static void NetworkFeatures() {
     VkPhysicalDeviceFeatures legacy{};
     VkDeviceCreateInfo own{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &float16};
     own.pEnabledFeatures = &legacy;
-    dlssnr::DeviceFeatureRequest separate;
-    Check(separate.Enable(own, true) && Valid(own) && AllNetworkBits(own) &&
-          dlssnr::HasFormatlessStorageWrites(own) && own.pEnabledFeatures != &legacy,
+    device_features separate{};
+    Check(device_features_enable(&separate, &own, true) && Valid(own) && AllNetworkBits(own) &&
+          device_features_has_formatless_storage_writes(&own) && own.pEnabledFeatures != &legacy,
           "cannot add the network beside the game's own structures");
     Check(!float16.shaderInt8 && !legacy.shaderStorageImageWriteWithoutFormat &&
           vk_chain_find(own.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES) !=
@@ -221,14 +236,14 @@ static void NetworkFeatures() {
     VkPhysicalDeviceVulkan12Features late{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     VkBaseOutStructure opaque{VK_STRUCTURE_TYPE_APPLICATION_INFO, reinterpret_cast<VkBaseOutStructure*>(&late)};
     VkDeviceCreateInfo hidden{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &opaque};
-    dlssnr::DeviceFeatureRequest declined;
-    Check(!declined.Enable(hidden, true) && hidden.pNext == &opaque && !late.shaderInt8 &&
+    device_features declined{};
+    Check(!device_features_enable(&declined, &hidden, true) && hidden.pNext == &opaque && !late.shaderInt8 &&
           !hidden.pEnabledFeatures, "an uncopyable prefix was not declined intact");
     // With nothing to change behind it, the network's own structures go in front.
     for (const auto& f : NETWORK_FEATURES)
         if (f.core == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES) *vk_chain_bit(&late, f.core_offset) = VK_TRUE;
-    dlssnr::DeviceFeatureRequest ahead;
-    Check(ahead.Enable(hidden, true) && Valid(hidden) && AllNetworkBits(hidden) &&
+    device_features ahead{};
+    Check(device_features_enable(&ahead, &hidden, true) && Valid(hidden) && AllNetworkBits(hidden) &&
           vk_chain_find(hidden.pNext, VK_STRUCTURE_TYPE_APPLICATION_INFO) == &opaque,
           "the network's structures were not put ahead of an uncopyable chain");
     std::puts("device features: network features set in the game's structures or added, never twice, "
@@ -289,7 +304,7 @@ VkResult VKAPI_CALL Matrices(VkPhysicalDevice, uint32_t* count, VkCooperativeMat
 }
 
 const char* Unavailable(uint32_t instance) {
-    return dlssnr::NetworkUnavailable(VK_NULL_HANDLE, instance, Properties2, Features2, Extensions, Matrices);
+    return device_features_network_unavailable(VK_NULL_HANDLE, instance, Properties2, Features2, Extensions, Matrices);
 }
 }  // namespace stub
 
@@ -336,8 +351,8 @@ static void NetworkMatrices() {
     Check(Same(stub::Unavailable(VK_API_VERSION_1_3), "e4m3 16x16x16 cooperative matrices"),
           "a device whose cooperative matrices cannot be counted was given the network");
     stub::counted = VK_SUCCESS;
-    Check(Same(dlssnr::NetworkUnavailable(VK_NULL_HANDLE, VK_API_VERSION_1_3, stub::Properties2, stub::Features2,
-                                          stub::Extensions, nullptr),
+    Check(Same(device_features_network_unavailable(VK_NULL_HANDLE, VK_API_VERSION_1_3, stub::Properties2,
+                                                   stub::Features2, stub::Extensions, nullptr),
                "vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR"),
           "a device was given the network without a cooperative-matrix query");
 }
@@ -348,8 +363,8 @@ static void NetworkAvailability() {
     stub::matrices = {stub::kNetworkMatrix};
     Check(!stub::Unavailable(VK_API_VERSION_1_3), "a capable device was refused the network");
     Check(Same(stub::Unavailable(VK_API_VERSION_1_2), "a Vulkan 1.3 instance") &&
-          Same(dlssnr::NetworkUnavailable(VK_NULL_HANDLE, VK_API_VERSION_1_3, nullptr, stub::Features2,
-                                          stub::Extensions, stub::Matrices), "a Vulkan 1.3 instance"),
+          Same(device_features_network_unavailable(VK_NULL_HANDLE, VK_API_VERSION_1_3, nullptr, stub::Features2,
+                                                   stub::Extensions, stub::Matrices), "a Vulkan 1.3 instance"),
           "a Vulkan 1.2 instance, or one without the 1.1 queries, was given the network");
     stub::api = VK_API_VERSION_1_2;
     Check(Same(stub::Unavailable(VK_API_VERSION_1_3), "Vulkan 1.3"), "a Vulkan 1.2 device was given the network");
@@ -399,12 +414,23 @@ static void NetworkAvailability() {
     VkDeviceCreateInfo info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
     info.enabledExtensionCount = 2;
     info.ppEnabledExtensionNames = game;
-    std::vector<const char*> list;
-    Check(dlssnr::AddNetworkExtensions(info, list) && info.ppEnabledExtensionNames == list.data() &&
-          info.enabledExtensionCount == list.size() && list.size() == 1 + all.size() && list[0] == game[0] &&
-          list[1] == game[1], "the network's extensions were not added once each behind the game's");
-    Check(!dlssnr::AddNetworkExtensions(info, list) && list.size() == 1 + all.size(),
+    const char* list[2 + NETWORK_FEATURE_COUNT] = {};
+    Check(device_features_add_network_extensions(&info, list) && info.ppEnabledExtensionNames == list &&
+          info.enabledExtensionCount == 1 + all.size() && list[0] == game[0] && list[1] == game[1] &&
+          Same(list[2], all[1]) && Same(list[3], all[2]),
+          "the network's extensions were not added once each behind the game's");
+    // The request's own list, which already names them all.
+    Check(!device_features_add_network_extensions(&info, list) && info.ppEnabledExtensionNames == list &&
+          info.enabledExtensionCount == 1 + all.size() && list[0] == game[0],
           "extensions already listed were added again");
+    // A request without extensions.
+    VkDeviceCreateInfo bare{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+    const char* only[NETWORK_FEATURE_COUNT] = {};
+    Check(device_features_add_network_extensions(&bare, only) && bare.ppEnabledExtensionNames == only &&
+          bare.enabledExtensionCount == all.size() && Same(only[0], all[0]),
+          "the network's extensions were not added to a request without extensions");
+    Check(!device_features_add_network_extensions(nullptr, only) && !device_features_add_network_extensions(&bare, nullptr),
+          "extensions were added to no request or no list");
 
     // A request that declined the network still enables formatless storage writes.
     VkPhysicalDeviceVulkan12Features late{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
@@ -412,9 +438,9 @@ static void NetworkAvailability() {
     VkPhysicalDeviceFeatures legacy{};
     VkDeviceCreateInfo hidden{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &opaque};
     hidden.pEnabledFeatures = &legacy;
-    dlssnr::DeviceFeatureRequest request;
-    Check(!request.Enable(hidden, true) && request.Enable(hidden, false) &&
-          dlssnr::HasFormatlessStorageWrites(hidden) && hidden.pNext == &opaque && !late.shaderInt8,
+    device_features request{};
+    Check(!device_features_enable(&request, &hidden, true) && device_features_enable(&request, &hidden, false) &&
+          device_features_has_formatless_storage_writes(&hidden) && hidden.pNext == &opaque && !late.shaderInt8,
           "a request that declined the network did not fall back to formatless storage alone");
     std::puts("device features: the network is refused for each missing requirement, its FP8 matrices included, "
               "its extensions are added once, and a declined request falls back");
@@ -462,8 +488,70 @@ static void FeatureChain() {
     std::puts("network requirements: the feature chain is zeroed and linked in order");
 }
 
+// The copies' bound: a structure to change behind DEVICE_FEATURES_COPIES - 1 that need copies is
+// changed in the last of DEVICE_FEATURES_COPIES copies; behind one more, the request declines,
+// untouched. A valid chain repeats no structure but the loader's; this one is copyable all the same.
+static void CopyBound() {
+    for (const auto& c : DEVICE_FEATURES_COPYABLE)
+        Check(c.size <= sizeof(device_features_copy) &&
+                  std::count_if(std::begin(DEVICE_FEATURES_COPYABLE), std::end(DEVICE_FEATURES_COPYABLE),
+                                [&c](const device_features_copyable& o) { return o.type == c.type; }) == 1,
+              "a copyable structure does not fit a copy or is listed twice");
+    VkBaseOutStructure tail{VK_STRUCTURE_TYPE_APPLICATION_INFO};
+    VkPhysicalDeviceFeatures2 core{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, &tail};
+    std::vector<VkPhysicalDeviceVulkan11Features> ahead(DEVICE_FEATURES_COPIES,
+                                                         {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES});
+    for (size_t i = 0; i < ahead.size(); ++i) ahead[i].pNext = i + 1 < ahead.size() ? &ahead[i + 1] : (void*)&core;
+    VkDeviceCreateInfo fits{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &ahead[1]};
+    device_features request{};
+    Check(device_features_enable(&request, &fits, false) && device_features_has_formatless_storage_writes(&fits),
+          "a chain that needs DEVICE_FEATURES_COPIES copies was declined");
+    uint32_t copies = 0;
+    const void* node = fits.pNext;
+    for (; node && node != &tail; node = vk_chain_next(node)) {
+        const auto* bytes = static_cast<const unsigned char*>(node);
+        const auto* first = reinterpret_cast<const unsigned char*>(&request);
+        copies += bytes >= first && bytes < first + sizeof request;
+    }
+    Check(node == &tail && copies == DEVICE_FEATURES_COPIES && !core.features.shaderStorageImageWriteWithoutFormat,
+          "a chain of DEVICE_FEATURES_COPIES copies was not copied up to its rest");
+    VkDeviceCreateInfo over{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, &ahead[0]};
+    device_features declined{};
+    Check(!device_features_enable(&declined, &over, false) && over.pNext == &ahead[0] && !over.pEnabledFeatures &&
+              !core.features.shaderStorageImageWriteWithoutFormat,
+          "a chain that needs more than DEVICE_FEATURES_COPIES copies was not declined intact");
+    // Nothing to change: no copy, and the chain stays the game's.
+    core.features.shaderStorageImageWriteWithoutFormat = VK_TRUE;
+    Check(device_features_enable(&declined, &over, false) && over.pNext == &ahead[0],
+          "a chain with nothing to change was copied");
+    std::puts("device features: at most DEVICE_FEATURES_COPIES copies, and a longer prefix declined intact");
+}
+
+// The request asks for the in-layer network only on DLSSLOP_LAYER_NETWORK=1, and its functions
+// answer nothing for no request.
+static void Requests() {
+    unsetenv("DLSSLOP_LAYER_NETWORK");
+    const bool unset = device_features_network_requested();
+    setenv("DLSSLOP_LAYER_NETWORK", "1", 1);
+    const bool one = device_features_network_requested();
+    setenv("DLSSLOP_LAYER_NETWORK", "0", 1);
+    const bool zero = device_features_network_requested();
+    setenv("DLSSLOP_LAYER_NETWORK", "11", 1);
+    const bool eleven = device_features_network_requested();
+    unsetenv("DLSSLOP_LAYER_NETWORK");
+    Check(!unset && one && !zero && !eleven, "the in-layer network was asked for by another value than 1");
+    VkDeviceCreateInfo info{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+    device_features request{};
+    Check(!device_features_enable(nullptr, &info, false) && !device_features_enable(&request, nullptr, false) &&
+              !device_features_network_enabled(nullptr) && !device_features_has_formatless_storage_writes(nullptr),
+          "a request's functions answered for no request");
+    std::puts("device features: DLSSLOP_LAYER_NETWORK=1 asks for the network, and no request has no features");
+}
+
 int main() {
     FeatureChain();
+    CopyBound();
+    Requests();
     Features();
     NetworkFeatures();
     NetworkAvailability();
