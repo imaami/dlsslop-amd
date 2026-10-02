@@ -1610,7 +1610,8 @@ hook_enumerate_physical_devices (VkInstance        instance,
 	if (!chain || !chain->table.vkEnumeratePhysicalDevices)
 		return VK_ERROR_INITIALIZATION_FAILED;
 	VkResult const res = chain->table.vkEnumeratePhysicalDevices(instance, pCount, pPhysicalDevices);
-	if (res != VK_SUCCESS || !pPhysicalDevices)
+	// VK_INCOMPLETE still wrote *pCount devices, which a game that asks for fewer than there are uses.
+	if ((res != VK_SUCCESS && res != VK_INCOMPLETE) || !pPhysicalDevices)
 		return res;
 	pthread_mutex_lock(&g_state_mutex);
 	bool const remembered = remember_physical(chain, pPhysicalDevices, *pCount);
@@ -1697,8 +1698,10 @@ add_wanted_extensions (struct instance_chain const *ic,
 	// Indexed by wanted_extension(), whose WANT_COUNT is every other extension.
 	bool available[WANT_COUNT + 1] = {0};
 	bool enabled[WANT_COUNT + 1] = {0};
+	// A failed call leaves the count undefined: nothing is added then.
 	uint32_t n = 0;
-	t->vkEnumerateDeviceExtensionProperties(physical, nullptr, &n, nullptr);
+	if (t->vkEnumerateDeviceExtensionProperties(physical, nullptr, &n, nullptr) != VK_SUCCESS)
+		return false;
 	// One more than counted, so that a device that offers none does not read as running out.
 	VkExtensionProperties *avail = calloc((size_t)n + 1, sizeof *avail);
 	if (!avail) {
@@ -2180,15 +2183,26 @@ hook_create_swapchain_khr (VkDevice                        device,
 	VkResult const res = dc->table.vkCreateSwapchainKHR(device, &m, pAllocator, pSwapchain);
 	if (res != VK_SUCCESS || !active || atomic_load(&dc->inert))
 		return res;
+	// A failed call leaves the count undefined, and a failed listing the images.
 	uint32_t count = 0;
-	dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, nullptr);
-	struct swapchain_state *const sc = swapchain_state_create(&dc->table, device, *pSwapchain, count);
+	if (!dc->table.vkGetSwapchainImagesKHR
+	    || dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, nullptr) != VK_SUCCESS) {
+		log_printf("[layer] swapchain %p: its images cannot be listed; presenting it untouched",
+		           (void *)*pSwapchain);
+		return VK_SUCCESS;
+	}
+	struct swapchain_state *sc = swapchain_state_create(&dc->table, device, *pSwapchain, count);
 	if (!sc) {
 		log_printf("[layer] swapchain %p: out of host memory for the layer's state; "
 		           "presenting it untouched", (void *)*pSwapchain);
 		return VK_SUCCESS;
 	}
-	dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, sc->images);
+	if (dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, sc->images) != VK_SUCCESS) {
+		log_printf("[layer] swapchain %p: its images cannot be listed; presenting it untouched",
+		           (void *)*pSwapchain);
+		swapchain_state_destroy(&sc);
+		return VK_SUCCESS;
+	}
 
 	sc->format = format;
 	sc->hdr_kind = detect_hdr_kind(format, space);
@@ -2443,7 +2457,7 @@ submit_leg (struct device_chain *dc,
  *
  * @param dc    The device's chain.
  * @param fence The fence.
- * @return      true if the wait succeeded.
+ * @return      true if the wait and the reset succeeded.
  */
 static bool
 wait_leg (struct device_chain *dc,
@@ -2452,8 +2466,8 @@ wait_leg (struct device_chain *dc,
 	VkResult const waited = dc->table.vkWaitForFences(dc->self, 1, &fence, VK_TRUE, UINT64_MAX);
 	if (!note_vk(dc, waited, "vkWaitForFences"))
 		return false;
-	dc->table.vkResetFences(dc->self, 1, &fence);
-	return true;
+	// A fence that is not reset stays signalled, which the leg's next submit may not take.
+	return note_vk(dc, dc->table.vkResetFences(dc->self, 1, &fence), "vkResetFences");
 }
 
 /** @brief Waits for leg 2: the command buffer and the composed surfaces are free again, and the
@@ -3391,7 +3405,8 @@ vkNegotiateLoaderLayerInterfaceVersion (VkNegotiateLayerInterface *v)
 /** @brief The layer's one layer: its name, "DLSS Linux Open Proxy for AMD", spec version 1.3.0 and
  *         implementation version 1.
  *
- * @param pCount      Receives 1; on input, the room in @a pProperties.
+ * @param pCount      Receives the layers written: 1, or 0 without room in @a pProperties; 1 if
+ *                    @a pProperties is nullptr. On input, the room in @a pProperties.
  * @param pProperties Receives the layer, or nullptr.
  * @return            VK_SUCCESS, or VK_INCOMPLETE without room.
  */
@@ -3405,10 +3420,9 @@ vkEnumerateInstanceLayerProperties (uint32_t          *pCount,
 		*pCount = 1;
 		return VK_SUCCESS;
 	}
-	if (*pCount < 1) {
-		*pCount = 1;
+	// No room: none was written, which *pCount already says.
+	if (*pCount < 1)
 		return VK_INCOMPLETE;
-	}
 	memset(pProperties, 0, sizeof *pProperties);
 	strncpy(pProperties->layerName, VK_LAYER_NAME, VK_MAX_EXTENSION_NAME_SIZE - 1);
 	strncpy(pProperties->description, "DLSS Linux Open Proxy for AMD", VK_MAX_DESCRIPTION_SIZE - 1);

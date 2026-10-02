@@ -388,8 +388,8 @@ static void NetworkAvailability() {
           "a device that offers no extensions was not refused, naming the first one needed");
     stub::extensions.assign(all.begin(), all.end());
     stub::filled = VK_ERROR_OUT_OF_HOST_MEMORY;
-    Check(Same(stub::Unavailable(VK_API_VERSION_1_3), all[0]),
-          "a device whose extensions could not be listed was not refused, naming the first one needed");
+    Check(Same(stub::Unavailable(VK_API_VERSION_1_3), NETWORK_REQUIREMENTS_NO_MEMORY),
+          "a device whose extensions could not be listed was not refused for host memory");
     stub::filled = VK_SUCCESS;
     Check(Same(network_requirements_unsupported(VK_NULL_HANDLE, stub::Properties2, stub::Features2, stub::Extensions,
                                                 stub::Matrices, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME),

@@ -308,6 +308,8 @@ network_requirements_unoffered (VkExtensionProperties const *offered,
 
 /** @brief The first extension that a device lacks: @a also, then the network's.
  *
+ * Without a layer name, listing the extensions fails only when memory runs out.
+ *
  * @param physical   The device.
  * @param extensions The caller's vkEnumerateDeviceExtensionProperties.
  * @param also       An extension the caller needs besides, or nullptr.
@@ -319,16 +321,20 @@ network_requirements_missing_extension (VkPhysicalDevice                        
                                         PFN_vkEnumerateDeviceExtensionProperties extensions,
                                         char const                              *also)
 {
+	// A failed call leaves the count undefined.
 	NETWORK_STD(uint32_t) count = 0;
-	extensions(physical, nullptr, &count, nullptr);
-	// One more than counted, so that a device that offers none is no special case. Zeroed, so that a
-	// list the second call fails to fill holds empty names.
+	if (extensions(physical, nullptr, &count, nullptr) != VK_SUCCESS)
+		return NETWORK_REQUIREMENTS_NO_MEMORY;
+	// One more than counted, so that a device that offers none is no special case.
 	VkExtensionProperties *offered =
-		(VkExtensionProperties *)NETWORK_STD(calloc)(1, sizeof *offered * count + sizeof *offered);
+		(VkExtensionProperties *)NETWORK_STD(calloc)((NETWORK_STD(size_t))count + 1, sizeof *offered);
 	if (!offered)
 		return NETWORK_REQUIREMENTS_NO_MEMORY;
-	extensions(physical, nullptr, &count, offered);
-	char const *const missing = network_requirements_unoffered(offered, count, also);
+	// VK_INCOMPLETE leaves out extensions beyond those counted, and says how many it wrote.
+	VkResult const listed = extensions(physical, nullptr, &count, offered);
+	char const *const missing = listed == VK_SUCCESS || listed == VK_INCOMPLETE
+	                            ? network_requirements_unoffered(offered, count, also)
+	                            : NETWORK_REQUIREMENTS_NO_MEMORY;
 	NETWORK_STD(free)(offered);
 	offered = nullptr;
 	return missing;
