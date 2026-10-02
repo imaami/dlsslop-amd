@@ -1418,14 +1418,12 @@ composition_prepare (struct composition                      *c,
 	VkImageUsageFlags const src = VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	VkImageUsageFlags const dst = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 
-	bool made_frame;
 	if (kept.image) {
 		c->frame = kept;
 		c->flags |= COMPOSITION_FRAME_CAPTURED;
-		made_frame = true;
-	} else {
-		made_frame = make_image(c, &c->frame, width, height, work, sampled | src | dst);
 	}
+	bool const made_frame = kept.image
+	                        || make_image(c, &c->frame, width, height, work, sampled | src | dst);
 
 	c->swapchain_format = swapchain_format;
 	c->work_format = work;

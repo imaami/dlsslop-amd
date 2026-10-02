@@ -431,13 +431,14 @@ device_features_enable (struct device_features *r,
 	DEVICE_FEATURES_STD(uint32_t) missing_count = 0;
 	VkPhysicalDeviceFeatures2 const *const features2 = device_features_core_features2(info);
 	VkPhysicalDeviceFeatures const *enabled = info->pEnabledFeatures;
-	DEVICE_FEATURES_STD(size_t) const formatless =
-		offsetof(VkPhysicalDeviceFeatures2, features.shaderStorageImageWriteWithoutFormat);
 	// Without a VkPhysicalDeviceFeatures2, formatless storage writes go in a copy of pEnabledFeatures.
 	if (!features2) {
 		enabled = device_features_enable_legacy(r, enabled);
 	} else if (!features2->features.shaderStorageImageWriteWithoutFormat) {
-		struct device_features_place const place = {features2, formatless};
+		struct device_features_place const place = {
+			features2,
+			offsetof(VkPhysicalDeviceFeatures2, features.shaderStorageImageWriteWithoutFormat)
+		};
 		changes[change_count++] = place;
 	}
 	DEVICE_FEATURES_STD(uint32_t) const asked = network ? NETWORK_FEATURE_COUNT : 0;
