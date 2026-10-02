@@ -120,12 +120,16 @@ shader_vk_create_descriptor_pool (struct shader_vk           *s,
                                   uint32_t                    count,
                                   uint32_t                    max_sets);
 
+/** @brief The most descriptor sets that shader_vk_create_descriptor_sets() allocates at once. */
+static constexpr uint32_t SHADER_VK_SETS_MAX = 18;
+
 /** @brief Allocates descriptor sets of the pass's layout from its pool.
  *
  * @param s     A base whose descriptor set layout and pool exist.
- * @param count The number of sets, small enough for an array of their layouts on the stack.
+ * @param count The number of sets, from 1 to SHADER_VK_SETS_MAX.
  * @param sets  Receives the sets.
- * @return      VK_SUCCESS, or what vkAllocateDescriptorSets() returned.
+ * @return      VK_SUCCESS, VK_ERROR_INITIALIZATION_FAILED for a count out of range, or what
+ *              vkAllocateDescriptorSets() returned.
  */
 extern VkResult
 shader_vk_create_descriptor_sets (struct shader_vk const *s,

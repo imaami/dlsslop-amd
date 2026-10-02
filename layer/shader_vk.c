@@ -229,7 +229,12 @@ shader_vk_create_descriptor_sets (struct shader_vk const *s,
                                   uint32_t                count,
                                   VkDescriptorSet        *sets)
 {
-	VkDescriptorSetLayout layouts[count];
+	// A fixed array: a variable one is undefined for no sets and unbounded on the stack.
+	if (!count || count > SHADER_VK_SETS_MAX) {
+		log_printf("[%s] %u descriptor sets asked for, not 1 to %u", s->name, count, SHADER_VK_SETS_MAX);
+		return VK_ERROR_INITIALIZATION_FAILED;
+	}
+	VkDescriptorSetLayout layouts[SHADER_VK_SETS_MAX];
 	for (uint32_t i = 0; i < count; ++i)
 		layouts[i] = s->descriptor_set_layout;
 

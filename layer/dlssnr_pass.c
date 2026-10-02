@@ -26,6 +26,8 @@ static VkDescriptorSetLayoutBinding const DLSS_NR_PASS_BINDINGS[] = {
 	SHADER_VK_BINDING(7, VK_DESCRIPTOR_TYPE_SAMPLER)                 // gLinear
 };
 
+static_assert(DLSS_NR_PASS_SLOTS <= SHADER_VK_SETS_MAX, "the pass allocates a set per slot at once");
+
 /** @brief The number of bindings. */
 static constexpr uint32_t DLSS_NR_PASS_BINDING_COUNT =
 	sizeof DLSS_NR_PASS_BINDINGS / sizeof *DLSS_NR_PASS_BINDINGS;

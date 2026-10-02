@@ -74,6 +74,8 @@ static VkDescriptorSetLayoutBinding const SCALER_VK_BINDINGS[] = {
 	SHADER_VK_BINDING(3, VK_DESCRIPTOR_TYPE_SAMPLER)
 };
 
+static_assert(SCALER_VK_SLOTS <= SHADER_VK_SETS_MAX, "the pass allocates a set per slot at once");
+
 /** @brief The number of bindings. */
 static constexpr uint32_t SCALER_VK_BINDING_COUNT =
 	sizeof SCALER_VK_BINDINGS / sizeof *SCALER_VK_BINDINGS;
