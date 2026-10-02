@@ -963,8 +963,8 @@ check_pass_dispatch (void)
 			bool const refused = !dlss_nr_pass_dispatch(&pass, CMD, &k, 8, 8, source, model, original, motion,
 			                                            target, keep, read_only, read_only);
 			require(refused && !fake.dispatches && !pass.slot && !fake.image_barriers
-			        && live_objects() == built && !(pass.flags & DLSS_NR_PASS_DUMMY_READY),
-			        "a dispatch whose placeholder failed at step %u", step);
+			        && live_objects() == built && !pass.dummy_image && !pass.dummy_memory
+			        && !pass.dummy_view, "a dispatch whose placeholder failed at step %u", step);
 			fake.device_local = true;
 			require(!retry
 			        || (dlss_nr_pass_dispatch(&pass, CMD, &k, 8, 8, VK_NULL_HANDLE, model, original, motion,

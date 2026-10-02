@@ -11,15 +11,9 @@
 
 #include "log.h"
 
-/** @brief What a log file owns. */
-enum log_file_flags {
-	LOG_FILE_STREAM_OPEN = 1 //!< log_file() opened the stream; log_file_fini() closes it.
-};
-
-/** @brief A stream that the log's lines go to. */
+/** @brief A stream that the log's lines go to, which the log file owns unless it is stderr. */
 struct log_file {
-	FILE      *stream; //!< Where lines go; nullptr: nowhere.
-	uintptr_t  flags;  //!< enum log_file_flags, as wide as a pointer.
+	FILE *stream; //!< Where lines go; nullptr: nowhere.
 };
 
 static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER; //!< Guards log_sink.
@@ -43,13 +37,7 @@ static struct log_file
 log_file (char const *path)
 {
 	FILE *stream = path && *path ? fopen(path, "ae") : nullptr;
-	if (!stream)
-		return (struct log_file){ .stream = stderr };
-
-	return (struct log_file){
-		.stream = stream,
-		.flags  = LOG_FILE_STREAM_OPEN
-	};
+	return (struct log_file){ .stream = stream ? stream : stderr };
 }
 
 /** @brief Closes the stream that a log file opened, if any, and leaves
@@ -61,7 +49,7 @@ static void
 log_file_fini (struct log_file *dest)
 {
 	if (dest) {
-		if (dest->flags & LOG_FILE_STREAM_OPEN)
+		if (dest->stream && dest->stream != stderr)
 			fclose(dest->stream);
 
 		*dest = (struct log_file){0};

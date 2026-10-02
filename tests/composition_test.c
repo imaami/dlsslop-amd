@@ -929,9 +929,8 @@ require_held (struct composition const *c,
 {
 	uint32_t n = held_shader(&c->pass.shader) + held_shader(&c->super_up.shader)
 	             + held_shader(&c->super_down.shader);
-	if (c->pass.flags & DLSS_NR_PASS_DUMMY_READY)
-		n += held(VALUE(c->pass.dummy_image), KIND_IMAGE) + held(VALUE(c->pass.dummy_memory), KIND_MEMORY)
-		     + held(VALUE(c->pass.dummy_view), KIND_VIEW);
+	n += held(VALUE(c->pass.dummy_image), KIND_IMAGE) + held(VALUE(c->pass.dummy_memory), KIND_MEMORY)
+	     + held(VALUE(c->pass.dummy_view), KIND_VIEW);
 	struct composition_image const *const images[] = {
 		&c->frame, &c->proxy, &c->work, &c->model, &c->composed, &c->model_native, &c->meter
 	};

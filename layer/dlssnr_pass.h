@@ -55,18 +55,13 @@ static constexpr DLSS_NR_PASS_STD(uint32_t) DLSS_NR_PASS_FRAMES_IN_FLIGHT = 3;
 static constexpr DLSS_NR_PASS_STD(uint32_t) DLSS_NR_PASS_SLOTS =
 	DLSS_NR_PASS_SLOTS_PER_FRAME * DLSS_NR_PASS_FRAMES_IN_FLIGHT;
 
-/** @brief The state that struct dlss_nr_pass records in its flags. */
-enum dlss_nr_pass_flags {
-	DLSS_NR_PASS_DUMMY_READY = 1 //!< The placeholder exists and its move to GENERAL is recorded.
-};
-
 /** @brief The composition shader's pass.
  *
  * A zeroed object is an empty one. dlss_nr_pass() builds one, and dlss_nr_pass_fini() destroys what
- * it owns, which the flags of the pass and of its base name. A constant slot is struct
- * dlss_nr_constants rounded up to the device's uniform buffer offset alignment, because a uniform
- * buffer binding can be offset only to a multiple of it. The flags are 64 bits wide, which fills the
- * padding that a narrower member would leave.
+ * it owns: the objects whose handles the pass and its base hold. The placeholder's handles are
+ * stored only once all three exist, and its move to GENERAL is recorded with them. A constant slot
+ * is struct dlss_nr_constants rounded up to the device's uniform buffer offset alignment, because a
+ * uniform buffer binding can be offset only to a multiple of it.
  */
 struct dlss_nr_pass {
 	struct shader_vk           shader;                              //!< The pipeline, ring and sampler.
@@ -75,7 +70,6 @@ struct dlss_nr_pass {
 	VkImage                    dummy_image;                         //!< The placeholder's image.
 	VkDeviceMemory             dummy_memory;                        //!< The placeholder's memory.
 	VkImageView                dummy_view;                          //!< The placeholder's view.
-	DLSS_NR_PASS_STD(uint64_t) flags;                               //!< enum dlss_nr_pass_flags.
 	VkResult                   error;                               //!< What the build returned.
 	DLSS_NR_PASS_STD(uint32_t) slot;                                //!< The next dispatch's slot.
 };

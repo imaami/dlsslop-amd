@@ -152,13 +152,14 @@ dlss_nr_pass_fini (struct dlss_nr_pass *dest)
 	if (!dest)
 		return;
 
-	if (dest->flags & DLSS_NR_PASS_DUMMY_READY) {
-		struct device_table const *const vk = dest->shader.vk;
-		VkDevice const device = dest->shader.device;
+	struct device_table const *const vk = dest->shader.vk;
+	VkDevice const device = dest->shader.device;
+	if (dest->dummy_view)
 		vk->vkDestroyImageView(device, dest->dummy_view, nullptr);
+	if (dest->dummy_image)
 		vk->vkDestroyImage(device, dest->dummy_image, nullptr);
+	if (dest->dummy_memory)
 		vk->vkFreeMemory(device, dest->dummy_memory, nullptr);
-	}
 
 	shader_vk_fini(&dest->shader);
 	*dest = (struct dlss_nr_pass){0};
@@ -167,7 +168,8 @@ dlss_nr_pass_fini (struct dlss_nr_pass *dest)
 /** @brief Creates the placeholder: one pixel, R16G16B16A16_SFLOAT so it is legal for both a sampled
  *         read and a storage write.
  *
- * If a step fails, the function destroys what it created.
+ * The handles are made in locals and stored in the pass only once all three exist. If a step fails,
+ * the function destroys what it created, and the pass still has no placeholder.
  *
  * @param p The pass, which has no placeholder.
  * @return  true if the image, its memory and its view exist.
@@ -190,13 +192,14 @@ make_dummy (struct dlss_nr_pass *p)
 		.sharingMode   = VK_SHARING_MODE_EXCLUSIVE,
 		.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
 	};
-	if (vk->vkCreateImage(s->device, &image_info, nullptr, &p->dummy_image) != VK_SUCCESS) {
+	VkImage image;
+	if (vk->vkCreateImage(s->device, &image_info, nullptr, &image) != VK_SUCCESS) {
 		log_printf("[pass] could not create the placeholder image");
 		return false;
 	}
 
 	VkMemoryRequirements requirements;
-	vk->vkGetImageMemoryRequirements(s->device, p->dummy_image, &requirements);
+	vk->vkGetImageMemoryRequirements(s->device, image, &requirements);
 
 	uint32_t const type = shader_vk_find_memory_type(s, requirements.memoryTypeBits,
 	                                                 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -208,34 +211,43 @@ make_dummy (struct dlss_nr_pass *p)
 		.allocationSize  = requirements.size,
 		.memoryTypeIndex = type
 	};
-	if (vk->vkAllocateMemory(s->device, &allocate_info, nullptr, &p->dummy_memory) != VK_SUCCESS) {
+	VkDeviceMemory memory;
+	if (vk->vkAllocateMemory(s->device, &allocate_info, nullptr, &memory) != VK_SUCCESS) {
 		log_printf("[pass] could not back the placeholder image");
 		goto destroy_image;
 	}
-	if (vk->vkBindImageMemory(s->device, p->dummy_image, p->dummy_memory, 0) != VK_SUCCESS) {
+	if (vk->vkBindImageMemory(s->device, image, memory, 0) != VK_SUCCESS) {
 		log_printf("[pass] could not back the placeholder image");
 		goto free_memory;
 	}
 
 	VkImageViewCreateInfo const view_info = {
 		.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-		.image            = p->dummy_image,
+		.image            = image,
 		.viewType         = VK_IMAGE_VIEW_TYPE_2D,
 		.format           = VK_FORMAT_R16G16B16A16_SFLOAT,
 		.subresourceRange = DLSS_NR_PASS_COLOR_RANGE
 	};
-	if (vk->vkCreateImageView(s->device, &view_info, nullptr, &p->dummy_view) == VK_SUCCESS)
+	VkImageView view;
+	if (vk->vkCreateImageView(s->device, &view_info, nullptr, &view) == VK_SUCCESS) {
+		p->dummy_image = image;
+		p->dummy_memory = memory;
+		p->dummy_view = view;
 		return true;
+	}
 
 	log_printf("[pass] could not view the placeholder image");
 free_memory:
-	vk->vkFreeMemory(s->device, p->dummy_memory, nullptr);
+	vk->vkFreeMemory(s->device, memory, nullptr);
 destroy_image:
-	vk->vkDestroyImage(s->device, p->dummy_image, nullptr);
+	vk->vkDestroyImage(s->device, image, nullptr);
 	return false;
 }
 
 /** @brief Makes the placeholder ready, once: creates it, and records its move into GENERAL.
+ *
+ * The placeholder is ready exactly while its view exists: the move is recorded in the call that
+ * makes it.
  *
  * Its content is never read: it exists because Vulkan rejects a descriptor set with an unwritten
  * binding, and the shader declares all seven resources at file scope whichever mode is running.
@@ -250,14 +262,13 @@ static bool
 create_dummy (struct dlss_nr_pass *p,
               VkCommandBuffer      cmd_list)
 {
-	if (p->flags & DLSS_NR_PASS_DUMMY_READY)
+	if (p->dummy_view)
 		return true;
 	if (!make_dummy(p))
 		return false;
 
 	shader_vk_set_image_layout(&p->shader, cmd_list, p->dummy_image, VK_IMAGE_LAYOUT_UNDEFINED,
 	                           VK_IMAGE_LAYOUT_GENERAL, DLSS_NR_PASS_COLOR_RANGE);
-	p->flags |= DLSS_NR_PASS_DUMMY_READY;
 	return true;
 }
 

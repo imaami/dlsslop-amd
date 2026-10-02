@@ -78,7 +78,8 @@ shader_vk_create_compute_pipeline (struct shader_vk    *s,
 
 /** @brief Creates the pass's constant ring: a buffer with memory of its own, bound to it.
  *
- * If a step fails, the function destroys what it created.
+ * Each handle is stored in the base once the call that made it succeeded. If a later step fails,
+ * what was made stays in the base, and shader_vk_fini() destroys it.
  *
  * @param s          A base that has no constant buffer.
  * @param size       The buffer's size.
