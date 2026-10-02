@@ -75,7 +75,11 @@ Mesa's lavapipe under the Khronos validation layer, and its tools and run
 script; without lavapipe or the validation layer it skips the probe. The
 tracers' fake layer, `shmclient`, must send dlsslopd's identity mode the
 inputs the tracers' baselines were taken with, after storing the settings that
-the daemon then finds in the channel. With the GUI enabled it also
+the daemon then finds in the channel. Without a GPU, it checks the options of
+`vulkan-contention`, the load of the hardware check of the network's waits
+(see [The Vulkan network's waits under load](#the-vulkan-networks-waits-under-load)):
+their ranges and the defaults that `--help` states, and that the options it
+rejects never reach Vulkan. With the GUI enabled it also
 checks the controller's option parsing without a display, its shared-memory
 backend and slider, that an edit is written at once and later ones coalesced,
 and that the wheel scrolls a page without editing the unfocused controls it
@@ -225,6 +229,76 @@ network running`, and no `in-layer network off`. At the same tier, captures
 beside the layer, the log must say the module is unavailable and frames must go
 to the daemon. A Vulkan 1.1 application logs `in-layer network unavailable:
 needs a Vulkan 1.3 instance`.
+
+### The Vulkan network's waits under load
+
+Tile counters order many of the Vulkan network's dispatches instead of
+barriers: a consumer's workgroups wait, for a bounded number of polls, until
+the tiles they read are written. Another GPU client whose workgroups hold the
+compute units for milliseconds, such as a game's asynchronous compute or
+another process's compute queue, can make such a wait run out, and the frame is
+then wrong. Every frame judges its waits after the network: dlsslopd answers a
+frame whose wait ran out as failed, so that the layer shows the game's own
+frame, and the in-layer network answers it with its input, which the
+composition composes as an unchanged frame. The next frame starts the network
+over. `vulkan-contention`, which the build makes with the tests and does not
+install, is such a client, and a bounded one: by default 40 s of dispatches on
+the asynchronous compute queue, each of 64 workgroups that hold 64 KiB of
+shared memory for 9 to 19 ms on an otherwise idle RX 9070 XT, and up to 65 ms
+beside the network's frames. Its options cannot ask for more work a dispatch,
+workgroups times iterations, and it stops once a submission takes longer than
+100 ms; `--help` lists its options and their defaults.
+
+Run each check below while the load runs in a second shell, started a moment
+before the check:
+
+```bash
+./build/vulkan-contention --seconds 45
+```
+
+dlsslopd's self-tests at 720p, 1080p and with two passes must each pass:
+
+```bash
+dlsslopd --tier 720 --self-test --self-test-runs 1000 --self-test-drops 999
+dlsslopd --tier 1080 --self-test --self-test-runs 1000 --self-test-drops 999
+dlsslopd --tier 720 --passes 2 --self-test --self-test-runs 500 --self-test-drops 499
+```
+
+Every run that a self-test accepts must equal the first it accepted; its
+summary counts the dropped runs, from a few to about a hundred in a thousand on
+an RX 9070 XT. A self-test that drops none says nothing about the waits: the
+load did not reach the network, so repeat it. For motion, FP16 and a big frame,
+whose persistent runs have more than 4096 windows a layer, serve frames of one
+input through `shmclient`, on a channel in a private directory:
+
+```bash
+mkdir -m 700 /tmp/w && A=$(printf 'A%.0s' {1..1000})
+./build/shmclient --shm /tmp/w/ch.bin --width 1280 --height 720 --frames "$A" --mvec 1 -- \
+    ./build/dlsslopd --tier 720 --shm /tmp/w/ch.bin
+./build/shmclient --shm /tmp/w/ch.bin --width 1920 --height 1080 --frames "$A" --fp16 -- \
+    ./build/dlsslopd --tier 1080 --shm /tmp/w/ch.bin
+./build/shmclient --shm /tmp/w/ch.bin --width 3840 --height 2160 --frames "${A:0:400}" -- \
+    ./build/dlsslopd --tier 1080 --shm /tmp/w/ch.bin
+```
+
+A frame whose wait ran out is answered with `ok=0`, with no `frame N failed`
+line and the channel's reason left as it was; dlsslopd logs `a wait of the
+network ran out` at most every 10 s, and shmclient then exits with 1. Without
+motion, every frame answered with `ok=1` must have the same `answer_fnv`. With
+motion, the frame after one with `ok=0` starts the motion history over: a frame
+answered N frames after the first frame or after the last one with `ok=0` must
+have the `answer_fnv` of frame N of the same run without the load.
+
+In the layer, run a Vulkan 1.3 application that presents the same picture in
+every frame through `dlsslop-run --layer-network`, at tiers 720 and 1080, with
+the default transfer mode and again with FP16 and two passes, and take captures
+(`dlsslopctl --capture 64`) while the load runs. A frame whose wait ran out
+answers with its input, which transfer modes 1 and 2 compose into the game's
+own frame byte for byte, and mode 0 within a few levels. With the default mode,
+every composed frame (`after_NN`) must equal the one captured without the load
+or its own `before_NN`. The layer log says `a wait of the network ran out` at
+most every 10 s while waits run out. The in-layer network records the same
+commands as dlsslopd, whose check above covers motion.
 
 ### Tracing the HIP network
 
@@ -406,7 +480,19 @@ build or a reshape moves the images into their layouts with a barrier before
 it copies the proxy into the network's input. Those frames have one barrier
 more, so the comparison prints `DIFFERENT`; with `--span network` it must
 print `MATCH`. With `--hash all`, the state after its setup also holds the
-network's images, which since then stay undefined until the first frame.
+network's images, which since then stay undefined until the first frame. Any
+dlsslopd built before "vulkan: answer with the input when a wait of the frame
+ran out" uploads weights whose tile-counter records each name an error word of
+their own, where later builds' records all name one, and its frames use two
+pipelines fewer. Its frames lack, after the network's last dispatch, the
+verdict's dispatch, a barrier and the fallback's indirect dispatch; the first
+frame after a build or a reshape and each frame that starts the motion history
+over also lack the fill of the activation arena past its values, with a barrier
+on each side, before the proxy is copied in. The comparison prints
+`DIFFERENT`. The verdict and the fallback run SPIR-V that the runtime embeds,
+which no file in `VKTRACE_SPIRV` names, so the network's span leaves them out:
+with `--span network --skip-setup` the comparison must print `MATCH`, answers
+included.
 
 The revision before "vulkan: run the network with the project's own host code"
 runs the host code of the fork in its `external/vulkan`. Its lock pins an older

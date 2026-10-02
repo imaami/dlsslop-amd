@@ -1,0 +1,23 @@
+#version 450
+// SPDX-License-Identifier: MIT
+// vulkan-contention's work: every invocation runs ITERATIONS dependent
+// multiply-adds, then passes its result through the workgroup's shared
+// memory, of kSharedWords words, which the workgroup holds while it runs.
+layout(local_size_x = 256) in;
+layout(constant_id = 0) const uint kSharedWords = 16384u;
+layout(set = 0, binding = 0, std430) writeonly buffer Results { float results[]; };
+layout(push_constant) uniform Push { uint iterations; } pc;
+shared float shared_words[kSharedWords];
+
+void main()
+{
+    float a = float(gl_LocalInvocationIndex), b = 1.0001;
+    for (uint i = 0u; i < pc.iterations; ++i) {
+        a = fma(a, b, 0.5);
+        b = fma(b, 0.9999, 0.0001);
+    }
+    shared_words[gl_LocalInvocationIndex % kSharedWords] = a;
+    barrier();
+    results[gl_WorkGroupID.x * 256u + gl_LocalInvocationIndex] =
+        shared_words[(gl_LocalInvocationIndex + 1u) % kSharedWords];
+}

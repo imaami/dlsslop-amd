@@ -365,6 +365,15 @@ if(BUILD_TESTING)
     add_test(NAME composition-rebuild COMMAND composition-rebuild-test)
     add_test(NAME vulkan-smoke COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/run-smoke.py
         --build-dir ${CMAKE_CURRENT_BINARY_DIR} --headless)
+    # A bounded compute load from a process of its own, for the hardware check
+    # of the Vulkan network's waits (VALIDATION.md); its options are checked
+    # without a GPU.
+    embed_shader(tests/vulkan_contention.comp tests/vulkan_contention kContentionSpv vulkan1.3)
+    add_executable(vulkan-contention tests/vulkan_contention.cpp ${SHADER_DIR}/tests/vulkan_contention.h)
+    target_include_directories(vulkan-contention PRIVATE ${SHADER_DIR})
+    target_link_libraries(vulkan-contention PRIVATE ${VULKAN_LOADER})
+    add_test(NAME contention-cli COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/contention-cli.py
+        $<TARGET_FILE:vulkan-contention>)
     # A tracing Vulkan layer, VK_LAYER_LOCAL_vktrace, for comparing the
     # network's command streams between builds (VALIDATION.md); tested with a
     # probe on lavapipe. Its name tables come from the registry of the Vulkan
