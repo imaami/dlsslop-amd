@@ -59,7 +59,8 @@ join (char        path[static PATH_SIZE],
       char const *dir,
       char const *name)
 {
-	require(snprintf(path, PATH_SIZE, "%s/%s", dir, name) < (int)PATH_SIZE, "%s/%s is too long", dir, name);
+	int const length = snprintf(path, PATH_SIZE, "%s/%s", dir, name);
+	require(length >= 0 && length < (int)PATH_SIZE, "%s/%s is too long", dir, name);
 }
 
 /** @brief Writes eventN. */
@@ -67,7 +68,8 @@ static void
 event_name (char     name[static 16],
             uint16_t event)
 {
-	require(snprintf(name, 16, "event%u", event) < 16, "event%u is too long", event);
+	int const length = snprintf(name, 16, "event%u", event);
+	require(length >= 0 && length < 16, "event%u is too long", event);
 }
 
 /** @brief What the layer's log must hold when the test ends. */
@@ -397,7 +399,7 @@ check_fini (void)
 	        "finishing hotkeys twice closed descriptors");
 	int *const opened[] = { &reused[0], &reused[1], &first[1], &second[1], &other };
 	for (size_t i = 0; i < sizeof opened / sizeof *opened; ++i) {
-		close(*opened[i]);
+		require(!close(*opened[i]), "cannot close descriptor %d", *opened[i]);
 		*opened[i] = -1;
 	}
 }
@@ -488,7 +490,7 @@ check_reads (void)
 	require(presses(&h, KEY_MAX) == 1 && !presses(&h, KEY_CNT) && !presses(&h, UINT16_MAX)
 	        && !presses(&h, UINT32_MAX) && !h.pending_total, "a code beyond the key codes counted");
 
-	close(keyboard[1]);
+	require(!close(keyboard[1]), "cannot close the keyboard's pipe");
 	keyboard[1] = -1;
 	hotkeys_fini(&h);
 	require(!is_open(keyboard[0]), "the keyboard stayed open");
@@ -601,7 +603,7 @@ check_sweeps (char const *dir)
 	require(h.flags == HOTKEYS_ANNOUNCED, "a sweep did not mark the hotkeys announced");
 	require(h.node_count == 3 && rejected(&h, dir, 3) && rejected(&h, dir, 10) && rejected(&h, dir, 65535),
 	        "a sweep found %u nodes, not events 3, 10 and 65535 rejected", h.node_count);
-	close(gone[1]);
+	require(!close(gone[1]), "cannot close the gone keyboard's pipe");
 	gone[1] = -1;
 
 	// Again: the same nodes, the same verdicts.
@@ -780,8 +782,13 @@ stop_xvfb (void)
 	if (!xvfb)
 		return;
 
-	kill(xvfb, SIGTERM);
-	waitpid(xvfb, nullptr, 0);
+	// Also an atexit() handler, which may not exit(): a failure is only told.
+	if (kill(xvfb, SIGTERM))
+		fprintf(stderr, "hotkey-test: cannot stop Xvfb (%d): %s\n", (int)xvfb, strerror(errno));
+	if (waitpid(xvfb, nullptr, 0) != xvfb) {
+		fprintf(stderr, "hotkey-test: cannot wait for Xvfb (%d): %s\n", (int)xvfb, strerror(errno));
+		return;
+	}
 	xvfb = 0;
 }
 
@@ -826,7 +833,7 @@ start_xvfb (char const *log,
 	require(xvfb >= 0, "fork failed");
 	if (!xvfb)
 		exec_xvfb(log, fds[1], parent);
-	close(fds[1]);
+	require(!close(fds[1]), "cannot close Xvfb's end of its pipe");
 	fds[1] = -1;
 
 	// Xvfb writes the display's number and a newline once it takes connections, and the child
@@ -837,11 +844,12 @@ start_xvfb (char const *log,
 		struct pollfd ready = { .fd = fds[0], .events = POLLIN };
 		require(poll(&ready, 1, 10000) == 1, "Xvfb did not tell its display in 10 s; see %s", log);
 		ssize_t const n = read(fds[0], number + length, sizeof number - 1 - length);
-		if (n <= 0)
+		require(n >= 0, "cannot read Xvfb's pipe");
+		if (!n)
 			break;
 		length += (size_t)n;
 	}
-	close(fds[0]);
+	require(!close(fds[0]), "cannot close Xvfb's pipe");
 	fds[0] = -1;
 	if (!length) {
 		int status = 0;
@@ -853,7 +861,8 @@ start_xvfb (char const *log,
 	}
 	require(number[length - 1] == '\n', "Xvfb told \"%s\", not a display's number", number);
 	number[length - 1] = '\0';
-	require(snprintf(display, 16, ":%s", number) < 16, "the display's name is too long");
+	int const named = snprintf(display, 16, ":%s", number);
+	require(named >= 0 && named < 16, "the display's name is too long");
 	return true;
 }
 
@@ -1001,6 +1010,7 @@ read_file (char const *path)
 		text = grown;
 		n = fread(text + size, 1, 4096, f);
 	}
+	require(!ferror(f), "cannot read %s", path);
 	fclose(f);
 	text[size] = '\0';
 	return text;
@@ -1013,15 +1023,16 @@ main (void)
 	int null = open("/dev/null", O_RDONLY | O_CLOEXEC);
 	require(null >= 0 && dup2(null, 0) == 0 && !fstat(0, &descriptor_0), "cannot replace descriptor 0");
 	if (null) {
-		close(null);
+		require(!close(null), "cannot close /dev/null");
 		null = -1;
 	}
 	require(!atexit(stop_xvfb), "atexit failed");
 
 	char const *const tmp = getenv("TMPDIR");
 	char dir[PATH_SIZE];
-	require(snprintf(dir, sizeof dir, "%s/dlsslop-amd-hotkey-XXXXXX", tmp && *tmp ? tmp : "/tmp")
-	        < (int)sizeof dir, "TMPDIR is too long");
+	int const length = snprintf(dir, sizeof dir, "%s/dlsslop-amd-hotkey-XXXXXX",
+	                            tmp && *tmp ? tmp : "/tmp");
+	require(length >= 0 && length < (int)sizeof dir, "TMPDIR is too long");
 	require(mkdtemp(dir), "mkdtemp failed");
 	char log[PATH_SIZE];
 	join(log, dir, "layer.log");

@@ -158,7 +158,7 @@ reset (void)
 	}
 	for (size_t i = 0; i < sizeof fake.fds / sizeof *fake.fds; ++i) {
 		if (fake.fds[i] >= 0) {
-			close(fake.fds[i]);
+			require(!close(fake.fds[i]), "cannot close descriptor %d", fake.fds[i]);
 			fake.fds[i] = -1;
 		}
 	}
@@ -1152,7 +1152,8 @@ prepare_failing (struct arrangement const *a,
 	uint32_t const steps = fake.creates;
 	fake.fail_at = 0;
 	char when[96];
-	snprintf(when, sizeof when, "%s with call %u failing", a->name, k);
+	int const length = snprintf(when, sizeof when, "%s with call %u failing", a->name, k);
+	require(length >= 0 && length < (int)sizeof when, "the case %s is too long to name", a->name);
 	require_held(&c, when);
 	*failed += !ok;
 	require(ok || (!c.frame.image && !c.download.buffer && !c.width && !c.model_w && composition_usable(&c)
@@ -1310,6 +1311,7 @@ check_offer (void)
 	struct arrangement const *const a = &ARRANGEMENTS[0];
 	require(prepare(&c, a), "the build failed");
 	int fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+	require(fd >= 0, "cannot open /dev/null");
 	composition_await_answer(&c, fd);
 	require(composition_offer_connection(&c) == fd, "the offer's connection is %d, not %d",
 	        composition_offer_connection(&c), fd);
@@ -1322,6 +1324,7 @@ check_offer (void)
 	// fini.
 	for (uint32_t end = 0; end < 4; ++end) {
 		fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+		require(fd >= 0, "cannot open /dev/null");
 		composition_await_answer(&c, fd);
 		switch (end) {
 		case 0:
@@ -1364,10 +1367,9 @@ check_export (void)
 	        && !memcmp(offer.deviceUuid, DEVICE_UUID, VK_UUID_SIZE)
 	        && !memcmp(offer.driverUuid, DRIVER_UUID, VK_UUID_SIZE) && (offer.generation & 1),
 	        "the offer's sizes, UUIDs or generation");
-	close(fds[0]);
+	require(!close(fds[0]) && !close(fds[1]), "cannot close the export's descriptors");
 	fds[0] = -1;
 	fake.fds[0] = -1;
-	close(fds[1]);
 	fds[1] = -1;
 	fake.fds[1] = -1;
 

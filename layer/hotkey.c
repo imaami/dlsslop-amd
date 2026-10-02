@@ -222,7 +222,7 @@ hotkeys_node (struct hotkeys *h,
  *
  * @param h    The hotkeys.
  * @param node The node, which is not open.
- * @param dir  The directory.
+ * @param dir  The directory's descriptor.
  * @param path The directory's path, for the log.
  * @param name The node's name in it.
  * @return     true if the node opened and is not a keyboard.
@@ -230,11 +230,11 @@ hotkeys_node (struct hotkeys *h,
 static bool
 hotkeys_probe (struct hotkeys     *h,
                struct hotkey_node *node,
-               DIR                *dir,
+               int                 dir,
                char const         *path,
                char const         *name)
 {
-	int fd = openat(dirfd(dir), name, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	int fd = openat(dir, name, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
 	if (fd < 0)
 		return false;
 
@@ -253,13 +253,13 @@ hotkeys_probe (struct hotkeys     *h,
 /** @brief Looks at one directory entry: opens it if it is a keyboard that is not open yet.
  *
  * @param h    The hotkeys.
- * @param dir  The directory.
+ * @param dir  The directory's descriptor.
  * @param path The directory's path, for the log.
  * @param name The entry's name.
  */
 static void
 hotkeys_look_at (struct hotkeys *h,
-                 DIR            *dir,
+                 int             dir,
                  char const     *path,
                  char const     *name)
 {
@@ -279,7 +279,7 @@ hotkeys_look_at (struct hotkeys *h,
 	// stat is two orders of magnitude cheaper than the open/ioctl/close it replaces. A node that
 	// cannot be stat'ed is probed, and not remembered.
 	struct stat st;
-	if (fstatat(dirfd(dir), name, &st, 0)) {
+	if (fstatat(dir, name, &st, 0)) {
 		hotkeys_probe(h, node, dir, path, name);
 		return;
 	}
@@ -351,10 +351,17 @@ hotkeys_rescan_evdev (struct hotkeys *h,
 	DIR *const dir = opendir(path);
 	if (!dir)
 		return;
+	// The stream's own descriptor, which closedir() closes.
+	int fd = dirfd(dir);
+	if (fd < 0) {
+		closedir(dir);
+		return;
+	}
 
 	for (struct dirent *e; (e = readdir(dir));)
-		hotkeys_look_at(h, dir, path, e->d_name);
+		hotkeys_look_at(h, fd, path, e->d_name);
 	closedir(dir);
+	fd = -1;
 
 	hotkeys_forget(h);
 	h->flags |= HOTKEYS_ANNOUNCED;

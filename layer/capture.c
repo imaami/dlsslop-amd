@@ -2,6 +2,7 @@
  *
  * The capture writer: matched frames as PNG or raw, and the manifest that says how to read them.
  */
+#include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdint.h>
@@ -56,19 +57,37 @@ encoding (uint32_t vk_format)
 	}
 }
 
-/** @brief Creates a directory and each directory above it, as mkdir -p does, but ignores errors.
+/** @brief Creates a directory unless it exists.
+ *
+ * @param dir The directory.
+ * @return    true if it exists now; otherwise why it could not be created is logged.
+ */
+static bool
+make_dir (char const *dir)
+{
+	if (!mkdir(dir, 0700) || errno == EEXIST)
+		return true;
+	log_printf("[capture] cannot create %s: %s", dir, strerror(errno));
+	return false;
+}
+
+/** @brief Creates a directory and each directory above it, as mkdir -p does, up to the first that
+ *         cannot be created.
  *
  * @param path A nonempty path, which is restored before the function returns.
+ * @return     true if the directory exists now.
  */
-static void
+static bool
 make_dirs (char *path)
 {
 	for (char *slash = path; (slash = strchr(slash + 1, '/'));) {
 		*slash = '\0';
-		mkdir(path, 0700);
+		bool const made = make_dir(path);
 		*slash = '/';
+		if (!made)
+			return false;
 	}
-	mkdir(path, 0700);
+	return make_dir(path);
 }
 
 /** @brief Writes bytes as they are.
@@ -283,7 +302,8 @@ capture_writer_write_manifest (struct capture_writer const *w,
 	// The first frame's metadata without a prefix, then every frame's with one.
 	write_metadata(f, "", &w->metadata[0]);
 	for (uint32_t i = 0; i < w->index; ++i) {
-		char prefix[24];
+		// Sized for the format's longest output, so nothing is cut.
+		char prefix[sizeof "frame_4294967295_"];
 		snprintf(prefix, sizeof prefix, "frame_%u_", i);
 		write_metadata(f, prefix, &w->metadata[i]);
 	}
@@ -303,7 +323,8 @@ capture_writer_write_manifest (struct capture_writer const *w,
 	// manifest.txt beside the batch: in the capture directory, which path starts with.
 	memcpy(path + w->batch_name, manifest, sizeof manifest);
 	if (rename(pending, path)) {
-		unlink(pending);
+		if (unlink(pending))
+			log_printf("[capture] cannot remove %s: %s", pending, strerror(errno));
 		return false;
 	}
 	return true;
@@ -339,7 +360,8 @@ make_batch_dir (struct capture_writer *w)
 	if (dir_length < 0 || dir_length >= (int)sizeof w->batch_dir)
 		return false;
 
-	make_dirs(dir);
+	if (!make_dirs(dir))
+		return false;
 	int const room = (int)sizeof w->batch_dir - dir_length;
 	int const name_length = snprintf(dir + dir_length, (size_t)room, "/capture-%d-XXXXXX", (int)getpid());
 	if (name_length < 0 || name_length >= room || !mkdtemp(dir)) {

@@ -11,6 +11,7 @@
 # define VK_NO_PROTOTYPES
 #endif
 #include <dlfcn.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <linux/futex.h>
 #include <poll.h>
@@ -181,6 +182,20 @@ shm_map_lock_producer (struct shm_map *s)
 	return !flock(s->producer_fd, LOCK_EX | LOCK_NB);
 }
 
+/** @brief Creates a directory unless it exists.
+ *
+ * @param dir The directory.
+ * @return    true if it exists now; otherwise why it could not be created is logged.
+ */
+static bool
+make_dir (char const *dir)
+{
+	if (!mkdir(dir, 0700) || errno == EEXIST)
+		return true;
+	log_printf("[shm] cannot create %s: %s", dir, strerror(errno));
+	return false;
+}
+
 /** @brief Creates the directory of a file, and checks that it is this user's alone.
  *
  * The directory now lives under /tmp, which is world-writable, so it is worth checking that what we
@@ -201,21 +216,22 @@ ensure_parent_dir (char   *path,
 
 	// The directory: the path up to the file's name.
 	*slash = '\0';
-	// Each ancestor, then the directory itself.
-	for (char *end = strchr(path + 1, '/'); end; end = strchr(end + 1, '/')) {
+	// Each ancestor, then the directory itself, up to the first that cannot be created.
+	bool made = true;
+	for (char *end = strchr(path + 1, '/'); made && end; end = strchr(end + 1, '/')) {
 		*end = '\0';
-		mkdir(path, 0700);
+		made = make_dir(path);
 		*end = '/';
 	}
-	mkdir(path, 0700);
+	made = made && make_dir(path);
 
 	struct stat st = {0};
-	bool const exists = lstat(path, &st) == 0;
+	bool const exists = made && lstat(path, &st) == 0;
 	bool const ours = exists && S_ISDIR(st.st_mode) && st.st_uid == getuid()
 	                  && (st.st_mode & (S_IRWXG | S_IRWXO)) == 0;
-	if (!exists)
+	if (made && !exists)
 		log_printf("[shm] %s is missing", path);
-	else if (!ours)
+	else if (exists && !ours)
 		log_printf("[shm] refusing %s: it is not a private directory owned by this user", path);
 	*slash = '/';
 	return ours;
@@ -643,6 +659,8 @@ start_worker (struct shm_map *s)
 	if (!transport_address(s, &address))
 		return;
 	int sock = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	if (sock < 0)
+		return;
 	connect(sock, (struct sockaddr const *)&address, sizeof address);
 	close(sock);
 	sock = -1;
@@ -1010,19 +1028,19 @@ struct device_chain {
  * channel's map is shm_map()'s, whose descriptors are -1.
  *
  * @param queue_count The number of queues the device is created with.
- * @return            The chain, unlinked and without a device, or nullptr without memory.
+ * @return            The chain, unlinked and without a device, or nullptr without memory or a
+ *                    mutex.
  */
 static struct device_chain *
 device_chain_create (uint32_t queue_count)
 {
 	struct device_chain *ret = calloc(1, sizeof *ret);
 	struct device_queue *queues = calloc(queue_count, sizeof *queues);
-	if (!ret || !queues) {
-		free(ret);
-		ret = nullptr;
-		free(queues);
-		queues = nullptr;
-		return nullptr;
+	if (!ret || !queues || pthread_mutex_init(&ret->lock, nullptr))
+		goto fail;
+	if (pthread_mutex_init(&ret->network_submit, nullptr)) {
+		pthread_mutex_destroy(&ret->lock);
+		goto fail;
 	}
 
 	ret->shm = shm_map();
@@ -1031,10 +1049,15 @@ device_chain_create (uint32_t queue_count)
 	ret->queue_store_count = queue_count;
 	list_init(&ret->swapchains);
 	list_init(&ret->queue_families);
-	pthread_mutex_init(&ret->lock, nullptr);
-	pthread_mutex_init(&ret->network_submit, nullptr);
 	atomic_init(&ret->inert, false);
 	return ret;
+
+fail:
+	free(ret);
+	ret = nullptr;
+	free(queues);
+	queues = nullptr;
+	return nullptr;
 }
 
 /** @brief Frees what a device chain owns and destroys its mutexes, then leaves it empty.
@@ -1397,8 +1420,9 @@ duplicate_layer_copy (void)
 		           "Remove one of the implicit-layer manifests.", claimed, self);
 		return true;
 	}
-	if (*self)
-		setenv("DLSSNR_LAYER_OBJECT", self, 0);
+	if (*self && setenv("DLSSNR_LAYER_OBJECT", self, 0))
+		log_printf("[layer] cannot claim DLSSNR_LAYER_OBJECT (%s): a second copy of the layer would not "
+		           "stand aside", strerror(errno));
 	return false;
 }
 
@@ -3061,7 +3085,12 @@ process_present (struct device_chain    *dc,
 
 	bool const composed = process_present_(dc, sc, queue, index, wait_count, wait_semaphores,
 	                                       waits_consumed);
-	flock(dc->shm.producer_fd, LOCK_UN);
+	if (flock(dc->shm.producer_fd, LOCK_UN)) {
+		// Closing the descriptor drops the lock; the next frame opens it again.
+		log_printf("[shm] cannot release the producer lock (%s); closing it", strerror(errno));
+		close(dc->shm.producer_fd);
+		dc->shm.producer_fd = -1;
+	}
 	return composed;
 }
 

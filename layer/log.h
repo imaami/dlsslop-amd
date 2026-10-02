@@ -68,7 +68,7 @@ log_time_interval (void);
 
 /** @brief The time of CLOCK_MONOTONIC.
  *
- * @return The time in milliseconds.
+ * @return The time in milliseconds, or 0 if the clock cannot be read.
  */
 extern double
 log_now_ms (void);

@@ -178,6 +178,7 @@ double
 log_now_ms (void)
 {
 	struct timespec now;
-	clock_gettime(CLOCK_MONOTONIC, &now);
+	if (clock_gettime(CLOCK_MONOTONIC, &now))
+		return 0.0;
 	return (double)(now.tv_sec * INT64_C(1000000000) + now.tv_nsec) / 1e6;
 }
