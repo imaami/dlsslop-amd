@@ -611,8 +611,9 @@ shm_map_process_frame (struct shm_map *s,
 		log_printf("[shm] helper could not use frame %u (ok=%u)", req, atomic_load(&s->hdr->seq_ok));
 	if (ok && !transport_gen)
 		memcpy(model_out, s->out_pixels, bytes);
-	static uint32_t frame_no;
-	if (time && ++frame_no % log_time_interval() == 0) {
+	// Every device's frames, which presents on other threads count too.
+	static _Atomic(uint32_t) frame_no;
+	if (time && (atomic_fetch_add(&frame_no, 1) + 1) % log_time_interval() == 0) {
 		double const t_done = log_now_ms();
 		log_printf("[time] shm copy=%.2f signal=%.2f wait=%.2f total=%.2f ms",
 		           t_copy - t0, t_signal - t_copy, t_done - t_signal, t_done - t0);
@@ -1323,8 +1324,9 @@ struct primary_swap {
 
 static struct primary_swap g_primary; //!< Under g_primary_mutex.
 
-/** @brief Guards g_primary. Its own mutex, never nested with dc->lock or g_state_mutex, so the lock
- *         order in the present hook cannot invert against the device hooks.
+/** @brief Guards g_primary. A leaf: taken under dc->lock (the present hook's swapchains and
+ *         hook_destroy_device()) and never the other way round, and never with g_state_mutex, so the
+ *         lock order in the present hook cannot invert against the device hooks.
  */
 static pthread_mutex_t g_primary_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -1429,22 +1431,32 @@ duplicate_layer_copy (void)
 
 /** @brief One set of keyboards for the process, however many devices the game creates.
  *
- * Zeroed, it has opened nothing. Each device polls it under its own lock, so two devices that
- * present at the same time race on it, as they did on upstream's Hotkeys: one present's rescan can
- * move the node table while the other present reads it.
+ * Zeroed, it has opened nothing. Each device polls it under its own lock, and two devices can present
+ * at the same time: one present's rescan could move the node table while the other present reads it,
+ * as on upstream's Hotkeys. g_hotkeys_mutex keeps them apart.
  */
 static struct hotkeys g_hotkeys;
+
+/** @brief Guards g_hotkeys. A leaf: taken under dc->lock, and nothing but the log's lock under it. */
+static pthread_mutex_t g_hotkeys_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /** @brief Closes the keyboards that the hotkeys opened and unloads libX11 and libXi, so that a layer
  *         loaded again starts with nothing open.
  *
- * Runs at unload, which the loader does when the last instance is destroyed, and at exit.
+ * Runs at unload, which the loader does when the last instance is destroyed, and at exit. Leaves the
+ * hotkeys alone if their mutex is held: at exit another thread can be polling them, and in a child
+ * that fork() made while a thread polled, the mutex stays held. The process closes what they opened
+ * when it ends.
  */
 [[gnu::destructor]]
 static void
 unload_layer (void)
 {
+	if (pthread_mutex_trylock(&g_hotkeys_mutex))
+		return;
+
 	hotkeys_fini(&g_hotkeys);
+	pthread_mutex_unlock(&g_hotkeys_mutex);
 }
 
 static pthread_once_t g_toggle_key_once = PTHREAD_ONCE_INIT; //!< Runs read_toggle_key().
@@ -1488,11 +1500,19 @@ poll_hotkeys (struct device_chain *dc)
 	if (!shm_map_open(&dc->shm))
 		return;
 	uint32_t const key = toggle_key(dc->shm.hdr);
-	if (!hotkeys_pressed(&g_hotkeys, key))
+	// A present that finds another device polling skips its poll rather than wait: that one answers
+	// the press.
+	if (pthread_mutex_trylock(&g_hotkeys_mutex))
+		return;
+	bool const pressed = hotkeys_pressed(&g_hotkeys, key);
+	pthread_mutex_unlock(&g_hotkeys_mutex);
+	if (!pressed)
 		return;
 
-	bool const was_on = atomic_load(&dc->shm.hdr->enabled) != 0;
-	atomic_store(&dc->shm.hdr->enabled, was_on ? 0u : 1u);
+	// One read-modify-write: the GUI and dlsslopctl write the same word from other processes.
+	uint32_t was_on = atomic_load(&dc->shm.hdr->enabled);
+	while (!atomic_compare_exchange_weak(&dc->shm.hdr->enabled, &was_on, was_on ? 0u : 1u))
+		continue;
 	atomic_fetch_add(&dc->shm.hdr->controlSeq, 1);
 	log_printf("[hotkey] %s -> neural rendering %s", hotkey_key_name_from_code(key),
 	           was_on ? "off" : "on");
@@ -3072,8 +3092,9 @@ process_present_ (struct device_chain    *dc,
 	double const t_return = log_now_ms();
 	publish_frame(dc, sc, t_return - t0);
 
-	static uint32_t frame_no;
-	if (time && ++frame_no % log_time_interval() == 0)
+	// Every device's frames, which presents on other threads count too.
+	static _Atomic(uint32_t) frame_no;
+	if (time && (atomic_fetch_add(&frame_no, 1) + 1) % log_time_interval() == 0)
 		log_printf("[time] encode=%.2f helper=%.2f resolve=%.2f total=%.2f ms (model %ux%u)",
 		           t_capture - t0, t_helper - t_capture, t_return - t_helper, t_return - t0,
 		           composition_model_width(&sc->comp), composition_model_height(&sc->comp));
@@ -3217,8 +3238,9 @@ hook_queue_present_khr_ (struct device_chain    *dc,
 	uint32_t const family = present_queue ? present_queue->family : 0;
 	for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i)
 		present_swapchain(dc, queue, pPresentInfo, i, family, &composed_sem, &waits_consumed);
-	static uint32_t frame_no;
-	if (log_time_enabled() && ++frame_no % log_time_interval() == 0)
+	// Every device's presents, which other threads make too.
+	static _Atomic(uint32_t) frame_no;
+	if (log_time_enabled() && (atomic_fetch_add(&frame_no, 1) + 1) % log_time_interval() == 0)
 		log_printf("[layer] composed=%llu passed through=%llu", (unsigned long long)dc->frames_composed,
 		           (unsigned long long)dc->frames_passed_through);
 

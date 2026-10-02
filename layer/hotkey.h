@@ -95,8 +95,8 @@ hotkey_key_name_from_code (HOTKEY_STD(uint32_t) code);
  * backend drains a non-blocking read and looks at /dev/input again once a second, and the X11 one
  * drains the events of a cached connection.
  *
- * Not thread-safe: the calls on one struct hotkeys must not overlap. The layer does not yet keep
- * them apart across devices (g_hotkeys in layer.c).
+ * Not thread-safe: the calls on one struct hotkeys must not overlap. The layer keeps its devices'
+ * calls apart with a mutex (g_hotkeys in layer.c).
  *
  * @param h        The hotkeys, or nullptr.
  * @param key_code A Linux KEY_* code; 0 is unbound.
