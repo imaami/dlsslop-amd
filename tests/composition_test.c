@@ -200,6 +200,7 @@ static constexpr VkResult FAILURE = VK_ERROR_OUT_OF_DEVICE_MEMORY;
 		end(VALUE(handle), (kind)); \
 	} while (0)
 
+/** @brief The fake vkCreateSampler(). */
 static VKAPI_ATTR VkResult VKAPI_CALL
 create_sampler (VkDevice                     d,
                 VkSamplerCreateInfo const   *i,
@@ -209,6 +210,7 @@ create_sampler (VkDevice                     d,
 	CREATE(VkSampler, KIND_SAMPLER, 0, out);
 }
 
+/** @brief The fake vkDestroySampler(). */
 static VKAPI_ATTR void VKAPI_CALL
 destroy_sampler (VkDevice                     d,
                  VkSampler                    s,
@@ -217,6 +219,7 @@ destroy_sampler (VkDevice                     d,
 	DESTROY(s, KIND_SAMPLER);
 }
 
+/** @brief The fake vkCreateBuffer(): a buffer of some bytes. */
 static VKAPI_ATTR VkResult VKAPI_CALL
 create_buffer (VkDevice                     d,
                VkBufferCreateInfo const    *i,
@@ -227,6 +230,7 @@ create_buffer (VkDevice                     d,
 	CREATE(VkBuffer, KIND_BUFFER, i->size, out);
 }
 
+/** @brief The fake vkDestroyBuffer(). */
 static VKAPI_ATTR void VKAPI_CALL
 destroy_buffer (VkDevice                     d,
                 VkBuffer                     b,
@@ -257,6 +261,7 @@ image_requirements (VkDevice              d,
 	*r = (VkMemoryRequirements){ .size = 256, .alignment = 256, .memoryTypeBits = 3 };
 }
 
+/** @brief The fake vkAllocateMemory(): some bytes of one of the two memory types. */
 static VKAPI_ATTR VkResult VKAPI_CALL
 allocate_memory (VkDevice                     d,
                  VkMemoryAllocateInfo const  *i,
@@ -282,6 +287,7 @@ free_memory (VkDevice                     d,
 	DESTROY(m, KIND_MEMORY);
 }
 
+/** @brief The fake vkBindBufferMemory(): a live buffer to live memory. */
 static VKAPI_ATTR VkResult VKAPI_CALL
 bind_buffer_memory (VkDevice       d,
                     VkBuffer       b,
@@ -294,6 +300,7 @@ bind_buffer_memory (VkDevice       d,
 	return fails() ? FAILURE : VK_SUCCESS;
 }
 
+/** @brief The fake vkBindImageMemory(): a live image to live memory. */
 static VKAPI_ATTR VkResult VKAPI_CALL
 bind_image_memory (VkDevice       d,
                    VkImage        i,
@@ -343,6 +350,7 @@ unmap_memory (VkDevice       d,
 	--fake.mapped;
 }
 
+/** @brief The fake vkCreateDescriptorSetLayout(). */
 static VKAPI_ATTR VkResult VKAPI_CALL
 create_set_layout (VkDevice                               d,
                    VkDescriptorSetLayoutCreateInfo const *i,
@@ -352,6 +360,7 @@ create_set_layout (VkDevice                               d,
 	CREATE(VkDescriptorSetLayout, KIND_SET_LAYOUT, 0, out);
 }
 
+/** @brief The fake vkDestroyDescriptorSetLayout(). */
 static VKAPI_ATTR void VKAPI_CALL
 destroy_set_layout (VkDevice                     d,
                     VkDescriptorSetLayout        l,
@@ -372,6 +381,7 @@ create_pipeline_layout (VkDevice                          d,
 	CREATE(VkPipelineLayout, KIND_PIPELINE_LAYOUT, 0, out);
 }
 
+/** @brief The fake vkDestroyPipelineLayout(). */
 static VKAPI_ATTR void VKAPI_CALL
 destroy_pipeline_layout (VkDevice                     d,
                          VkPipelineLayout             l,
@@ -380,6 +390,7 @@ destroy_pipeline_layout (VkDevice                     d,
 	DESTROY(l, KIND_PIPELINE_LAYOUT);
 }
 
+/** @brief The fake vkCreateDescriptorPool(). */
 static VKAPI_ATTR VkResult VKAPI_CALL
 create_pool (VkDevice                          d,
              VkDescriptorPoolCreateInfo const *i,
@@ -438,6 +449,7 @@ create_module (VkDevice                        d,
 	CREATE(VkShaderModule, KIND_MODULE, 0, out);
 }
 
+/** @brief The fake vkDestroyShaderModule(). */
 static VKAPI_ATTR void VKAPI_CALL
 destroy_module (VkDevice                     d,
                 VkShaderModule               m,
@@ -461,6 +473,7 @@ create_pipelines (VkDevice                           d,
 	CREATE(VkPipeline, KIND_PIPELINE, 0, out);
 }
 
+/** @brief The fake vkDestroyPipeline(). */
 static VKAPI_ATTR void VKAPI_CALL
 destroy_pipeline (VkDevice                     d,
                   VkPipeline                   p,
@@ -469,6 +482,7 @@ destroy_pipeline (VkDevice                     d,
 	DESTROY(p, KIND_PIPELINE);
 }
 
+/** @brief The fake vkCreateImage(): a 2D image of some pixels. */
 static VKAPI_ATTR VkResult VKAPI_CALL
 create_image (VkDevice                     d,
               VkImageCreateInfo const     *i,
@@ -480,6 +494,7 @@ create_image (VkDevice                     d,
 	CREATE(VkImage, KIND_IMAGE, 0, out);
 }
 
+/** @brief The fake vkDestroyImage(). */
 static VKAPI_ATTR void VKAPI_CALL
 destroy_image (VkDevice                     d,
                VkImage                      i,
@@ -499,6 +514,7 @@ create_view (VkDevice                     d,
 	CREATE(VkImageView, KIND_VIEW, 0, out);
 }
 
+/** @brief The fake vkDestroyImageView(). */
 static VKAPI_ATTR void VKAPI_CALL
 destroy_view (VkDevice                     d,
               VkImageView                  v,
@@ -535,6 +551,7 @@ update_sets (VkDevice                    d,
 static void
 live_image (VkImage image);
 
+/** @brief The fake vkCmdBindPipeline(): a live pipeline. */
 static VKAPI_ATTR void VKAPI_CALL
 bind_pipeline (VkCommandBuffer     cb,
                VkPipelineBindPoint p,
@@ -544,6 +561,7 @@ bind_pipeline (VkCommandBuffer     cb,
 	live(VALUE(pipeline), KIND_PIPELINE);
 }
 
+/** @brief The fake vkCmdBindDescriptorSets(): live sets in a live layout. */
 static VKAPI_ATTR void VKAPI_CALL
 bind_sets (VkCommandBuffer        cb,
            VkPipelineBindPoint    p,
@@ -560,6 +578,7 @@ bind_sets (VkCommandBuffer        cb,
 		live(VALUE(sets[i]), KIND_SET);
 }
 
+/** @brief The fake vkCmdDispatch(): counts a dispatch of some groups. */
 static VKAPI_ATTR void VKAPI_CALL
 dispatch (VkCommandBuffer cb,
           uint32_t        x,
@@ -571,6 +590,7 @@ dispatch (VkCommandBuffer cb,
 	require(x && y && z == 1, "a dispatch of %u x %u x %u groups", x, y, z);
 }
 
+/** @brief The fake vkCmdPushConstants(): the meter's 24 bytes, in a live layout. */
 static VKAPI_ATTR void VKAPI_CALL
 push_constants (VkCommandBuffer    cb,
                 VkPipelineLayout   l,
@@ -584,6 +604,7 @@ push_constants (VkCommandBuffer    cb,
 	require(!offset && size == 24, "%u bytes of push constants at %u", size, offset);
 }
 
+/** @brief The fake vkCmdFillBuffer(): counts a fill of a live buffer. */
 static VKAPI_ATTR void VKAPI_CALL
 fill_buffer (VkCommandBuffer cb,
              VkBuffer        b,
@@ -596,6 +617,7 @@ fill_buffer (VkCommandBuffer cb,
 	live(VALUE(b), KIND_BUFFER);
 }
 
+/** @brief The fake vkCmdCopyBuffer(): between live buffers, within their sizes. */
 static VKAPI_ATTR void VKAPI_CALL
 copy_buffer (VkCommandBuffer     cb,
              VkBuffer            src,
@@ -611,6 +633,7 @@ copy_buffer (VkCommandBuffer     cb,
 		        && regions[i].dstOffset + regions[i].size <= t->size, "a copy beyond a buffer");
 }
 
+/** @brief The fake vkCmdCopyImage(): counts a copy between live images in transfer layouts. */
 static VKAPI_ATTR void VKAPI_CALL
 copy_image (VkCommandBuffer    cb,
             VkImage            src,
@@ -628,6 +651,7 @@ copy_image (VkCommandBuffer    cb,
 	        "a copy between layouts %d and %d", sl, dl);
 }
 
+/** @brief The fake vkCmdBlitImage(): counts a blit, and a copy, between live images. */
 static VKAPI_ATTR void VKAPI_CALL
 blit_image (VkCommandBuffer    cb,
             VkImage            src,
@@ -646,6 +670,7 @@ blit_image (VkCommandBuffer    cb,
 	require(filter == VK_FILTER_NEAREST, "a blit that filters");
 }
 
+/** @brief The fake vkCmdCopyImageToBuffer(): counts a readback from a live image. */
 static VKAPI_ATTR void VKAPI_CALL
 copy_image_to_buffer (VkCommandBuffer          cb,
                       VkImage                  src,
@@ -661,6 +686,7 @@ copy_image_to_buffer (VkCommandBuffer          cb,
 	require(sl == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, "a readback from layout %d", sl);
 }
 
+/** @brief The fake vkCmdCopyBufferToImage(): counts an upload into a live image. */
 static VKAPI_ATTR void VKAPI_CALL
 copy_buffer_to_image (VkCommandBuffer          cb,
                       VkBuffer                 src,
