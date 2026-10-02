@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../common/network_requirements.h"
+#include "../common/vk_chain.h"
 
 #include <vulkan/vulkan.h>
 #include <vulkan/vk_layer.h>
@@ -16,7 +17,7 @@ namespace dlssnr {
 
 inline const VkPhysicalDeviceFeatures2* CoreFeatures2(const VkDeviceCreateInfo& info) {
     return static_cast<const VkPhysicalDeviceFeatures2*>(
-        dlsslop::FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2));
+        vk_chain_find(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2));
 }
 
 inline bool HasFormatlessStorageWrites(const VkDeviceCreateInfo& info) {
@@ -27,24 +28,24 @@ inline bool HasFormatlessStorageWrites(const VkDeviceCreateInfo& info) {
 
 // Where a network feature is enabled in a chain: the structure carrying it
 // alone, else the core structure carrying it, and the offset in it.
-inline std::pair<const void*, uint32_t> NetworkFeatureIn(const void* chain, const dlsslop::NetworkFeature& f) {
-    if (const void* node = dlsslop::FindStructure(chain, f.type)) return {node, f.offset};
-    if (f.core == dlsslop::kNoCore) return {nullptr, 0};
-    return {dlsslop::FindStructure(chain, f.core), f.core_offset};
+inline std::pair<const void*, uint32_t> NetworkFeatureIn(const void* chain, const network_feature& f) {
+    if (const void* node = vk_chain_find(chain, f.type)) return {node, f.offset};
+    if (f.core == NETWORK_FEATURE_NO_CORE) return {nullptr, 0};
+    return {vk_chain_find(chain, f.core), f.core_offset};
 }
 
 // The ledger: whether a device created from INFO, the request vkCreateDevice
 // accepted, has every feature and extension the in-layer network needs. A
 // device's supported features are no proof: only what was enabled may be used.
 inline bool NetworkEnabled(const VkDeviceCreateInfo& info) {
-    const auto enabled = [&info](const dlsslop::NetworkFeature& f) {
+    const auto enabled = [&info](const network_feature& f) {
         bool extension = !f.extension;
         for (uint32_t i = 0; !extension && i < info.enabledExtensionCount; ++i)
             extension = !std::strcmp(info.ppEnabledExtensionNames[i], f.extension);
         const auto [node, offset] = NetworkFeatureIn(info.pNext, f);
-        return extension && node && dlsslop::FeatureBit(node, offset);
+        return extension && node && *vk_chain_bit(node, offset);
     };
-    return std::all_of(std::begin(dlsslop::kNetworkFeatures), std::end(dlsslop::kNetworkFeatures), enabled);
+    return std::all_of(std::begin(NETWORK_FEATURES), std::end(NETWORK_FEATURES), enabled);
 }
 
 // Whether the in-layer network is asked for: DLSSLOP_LAYER_NETWORK=1, while it
@@ -63,7 +64,7 @@ inline const char* NetworkUnavailable(VkPhysicalDevice physical, uint32_t instan
                                       PFN_vkEnumerateDeviceExtensionProperties extensions,
                                       PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR matrices) {
     if (instanceVersion < VK_API_VERSION_1_3 || !properties2 || !features2) return "a Vulkan 1.3 instance";
-    return dlsslop::NetworkUnsupported(physical, properties2, features2, extensions, matrices, nullptr);
+    return network_requirements_unsupported(physical, properties2, features2, extensions, matrices, nullptr);
 }
 
 // Adds the network's extensions the request lacks: EXTENSIONS holds the
@@ -71,10 +72,13 @@ inline const char* NetworkUnavailable(VkPhysicalDevice physical, uint32_t instan
 inline bool AddNetworkExtensions(VkDeviceCreateInfo& info, std::vector<const char*>& extensions) {
     if (extensions.empty())
         extensions.assign(info.ppEnabledExtensionNames, info.ppEnabledExtensionNames + info.enabledExtensionCount);
-    if (!dlsslop::AppendNetworkExtensions(extensions)) return false;
+    // The vector may move: INFO points into it afterwards, also when nothing was added.
+    const size_t count = extensions.size();
+    extensions.resize(count + NETWORK_FEATURE_COUNT);
+    extensions.resize(network_requirements_append_extensions(extensions.data(), uint32_t(count)));
     info.enabledExtensionCount = uint32_t(extensions.size());
     info.ppEnabledExtensionNames = extensions.data();
-    return true;
+    return extensions.size() != count;
 }
 
 // What the layer adds to a game's vkCreateDevice: formatless storage writes
@@ -88,7 +92,7 @@ inline bool AddNetworkExtensions(VkDeviceCreateInfo& info, std::vector<const cha
 class DeviceFeatureRequest {
     VkPhysicalDeviceFeatures legacy_{};
     std::vector<std::shared_ptr<void>> copies_;
-    dlsslop::NetworkFeatureChain added_;
+    network_feature_chain added_;
 
     template<class T> void* Copy(const void* node) {
         auto copy = std::make_shared<T>(*static_cast<const T*>(node));
@@ -98,7 +102,7 @@ class DeviceFeatureRequest {
     }
 
     void* CopyNode(const void* node) {
-        switch (dlsslop::StructureType(node)) {
+        switch (vk_chain_type(node)) {
 #define COPY(type, tag) case tag: return Copy<type>(node)
             COPY(VkLayerDeviceCreateInfo, VK_STRUCTURE_TYPE_LOADER_DEVICE_CREATE_INFO);
             COPY(VkPhysicalDeviceFeatures2, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
@@ -130,21 +134,23 @@ class DeviceFeatureRequest {
     }
 
 public:
+    DeviceFeatureRequest() { network_feature_chain_init(&added_); }
+
     // Adds the features to INFO, with NETWORK the in-layer network's. False,
     // leaving INFO as it was, when a structure to change follows one this
     // cannot copy.
     bool Enable(VkDeviceCreateInfo& info, bool network) {
         // The bits to set in the game's structures, and the network's that none carries.
         std::vector<std::pair<const void*, uint32_t>> changes;
-        std::vector<const dlsslop::NetworkFeature*> missing;
-        const void* features2 = dlsslop::FindStructure(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
+        std::vector<const network_feature*> missing;
+        const void* features2 = vk_chain_find(info.pNext, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2);
         constexpr uint32_t kFormatless = offsetof(VkPhysicalDeviceFeatures2, features.shaderStorageImageWriteWithoutFormat);
         if (features2 && !HasFormatlessStorageWrites(info)) changes.emplace_back(features2, kFormatless);
         if (network)
-            for (const auto& f : dlsslop::kNetworkFeatures) {
+            for (const auto& f : NETWORK_FEATURES) {
                 const auto place = NetworkFeatureIn(info.pNext, f);
                 if (!place.first) missing.push_back(&f);
-                else if (!dlsslop::FeatureBit(place.first, place.second))
+                else if (!*vk_chain_bit(place.first, place.second))
                     changes.push_back(place);
             }
         // Private copies of the chain up to the last structure changed. The
@@ -152,32 +158,32 @@ public:
         const void* head = info.pNext;
         const void* node = info.pNext;
         void* previous = nullptr;
-        for (size_t left = changes.size(); left; node = dlsslop::NextStructure(node)) {
+        for (size_t left = changes.size(); left; node = vk_chain_next(node)) {
             void* copy = CopyNode(node);
             if (!copy) {
                 copies_.clear();
                 return false;
             }
             if (previous)
-                dlsslop::LinkStructure(previous, copy);
+                vk_chain_link(previous, copy);
             else
                 head = copy;
             previous = copy;
             for (const auto& change : changes)
                 if (change.first == node) {
-                    dlsslop::FeatureBit(copy, change.second) = VK_TRUE;
+                    *vk_chain_bit(copy, change.second) = VK_TRUE;
                     --left;
                 }
         }
         // Structures of its own, at the head, for the network features no game structure carries.
         std::vector<void*> own;
         for (const auto* f : missing) {
-            void* structure = added_.structure(f->type);
-            dlsslop::FeatureBit(structure, f->offset) = VK_TRUE;
+            void* structure = network_feature_chain_structure(&added_, f->type);
+            *vk_chain_bit(structure, f->offset) = VK_TRUE;
             if (std::find(own.begin(), own.end(), structure) == own.end()) own.push_back(structure);
         }
         for (auto it = own.rbegin(); it != own.rend(); ++it) {
-            dlsslop::LinkStructure(*it, head);
+            vk_chain_link(*it, head);
             head = *it;
         }
         info.pNext = head;

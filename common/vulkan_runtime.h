@@ -44,8 +44,8 @@ struct PhysicalFunctions {
 };
 
 // The device the network runs on, which it does not own: dlsslopd's, or a
-// game's in the layer, which NetworkUnsupported() accepted, with every feature
-// of network_requirements.h enabled.
+// game's in the layer, which network_requirements_unsupported() accepted,
+// with every feature of network_requirements.h enabled.
 // Its device-level functions are the loader's.
 struct Device {
     VkInstance instance;

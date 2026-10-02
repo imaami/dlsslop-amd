@@ -24,9 +24,9 @@ std::string unsuitable(VkPhysicalDevice physical, PFN_vkGetPhysicalDeviceCoopera
                        uint32_t& family)
 {
     // External memory: the layer's device-local frames are imported.
-    if (const char* missing = NetworkUnsupported(physical, vkGetPhysicalDeviceProperties2, vkGetPhysicalDeviceFeatures2,
-                                                 vkEnumerateDeviceExtensionProperties, matrices,
-                                                 VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME))
+    if (const char* missing = network_requirements_unsupported(
+            physical, vkGetPhysicalDeviceProperties2, vkGetPhysicalDeviceFeatures2,
+            vkEnumerateDeviceExtensionProperties, matrices, VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME))
         return std::string(missing) + " unavailable";
     uint32_t count = 0;
     // Graphics too: the runtime converts colour formats with blits.
@@ -159,21 +159,22 @@ Result<VulkanNetwork> VulkanNetwork::create(const VulkanPaths& paths, int device
     if (!s.physical)
         return fail(device >= 0 && unsigned(device) >= count ? "no Vulkan device " + std::to_string(device)
                                                              : "no Vulkan device can run the network:" + reasons);
-    NetworkFeatureChain enable;
-    for (const auto& f : kNetworkFeatures) enable.bit(f) = VK_TRUE;
-    std::vector<const char*> extensions = {VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME};
-    AppendNetworkExtensions(extensions);
+    network_feature_chain enable;
+    network_feature_chain_init(&enable);
+    for (const auto& f : NETWORK_FEATURES) *network_feature_chain_bit(&enable, &f) = VK_TRUE;
+    const char* extensions[1 + NETWORK_FEATURE_COUNT] = {VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME};
+    const uint32_t extensionCount = network_requirements_append_extensions(extensions, 1);
     const float priority = 1.0f;
     VkDeviceQueueCreateInfo queue{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
     queue.queueFamilyIndex = s.family;
     queue.queueCount = 1;
     queue.pQueuePriorities = &priority;
     VkDeviceCreateInfo create{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
-    create.pNext = &enable.features2();
+    create.pNext = &enable.head;
     create.queueCreateInfoCount = 1;
     create.pQueueCreateInfos = &queue;
-    create.enabledExtensionCount = uint32_t(extensions.size());
-    create.ppEnabledExtensionNames = extensions.data();
+    create.enabledExtensionCount = extensionCount;
+    create.ppEnabledExtensionNames = extensions;
     DLSSLOP_TRY(vk_check(vkCreateDevice(s.physical, &create, nullptr, &s.device), "create Vulkan device"));
     vkGetDeviceQueue(s.device, s.family, 0, &s.queue);
     vkGetPhysicalDeviceMemoryProperties(s.physical, &s.memory);
