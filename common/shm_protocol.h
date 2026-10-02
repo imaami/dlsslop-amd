@@ -557,8 +557,9 @@ struct ShmHeader {
 	_Atomic(SHM_STD(uint32_t)) layerMeasuredWhiteBits;
 	_Atomic(SHM_STD(uint32_t)) layerHeartbeat;
 
-	// Free text, each guarded by its own sequence number: bumped after the bytes are written, so a
-	// reader that sees an unchanged number is looking at a whole string.
+	// Free text, each guarded by its own sequence number, which ShmStoreString() bumps after it
+	// writes the bytes. Nothing marks a field while it is written, so a reader that copies then can
+	// take a torn or empty string; closing that race would change the protocol.
 	_Atomic(SHM_STD(uint32_t)) helperReasonSeq;
 	char                       helperReason[kReasonBytes];
 	_Atomic(SHM_STD(uint32_t)) layerReasonSeq;
@@ -798,7 +799,9 @@ BitsToFloat (SHM_STD(uint32_t) u)
 
 /** @brief Publishes a string in one of the header's text fields.
  *
- * Writes the string, cut to @a cap - 1 bytes and padded with zeros, then bumps @a seq.
+ * Writes the string, cut to @a cap - 1 bytes and padded with zeros, then bumps @a seq. Nothing
+ * marks the field while the bytes are written, so a reader can take a torn or empty string (see
+ * ShmLoadString()).
  *
  * @param seq The field's sequence number.
  * @param dst The field.
@@ -819,13 +822,15 @@ ShmStoreString (_Atomic(SHM_STD(uint32_t)) *seq,
 
 /** @brief Reads a string that ShmStoreString() published.
  *
- * Copies the field and keeps the copy if @a seq did not change meanwhile, trying four times.
+ * Copies the field and keeps the copy if @a seq did not change meanwhile, trying four times. A copy
+ * made while a writer writes the bytes passes, torn or empty, when the writer bumps @a seq only
+ * after the second load.
  *
  * @param seq The field's sequence number.
  * @param src The field.
  * @param cap The field's size, and @a out's; at least 1.
- * @param out Receives the string, or an empty one if every copy was torn.
- * @return    true if @a out holds a whole string.
+ * @param out Receives the string, or an empty one if @a seq changed during every copy.
+ * @return    true if @a seq did not change during the copy that @a out holds.
  */
 SHM_INLINE bool
 ShmLoadString (_Atomic(SHM_STD(uint32_t)) const *seq,
@@ -995,6 +1000,9 @@ ShmNeuralEnabled (struct ShmHeader const *h)
 
 /** @brief Reads a 64-bit count that two words hold.
  *
+ * Read while ShmStore64() carries the low word into the high one, the count can be 2^32 off: the
+ * counts are only shown, and that happens once in 2^32 counts.
+ *
  * @param lo The low word.
  * @param hi The high word.
  * @return   The count.
@@ -1105,7 +1113,7 @@ ShmTransportPath (std::string const &channel)
  * @param src The field.
  * @param cap The field's size; at least 1. At most the larger of kReasonBytes and kNameBytes is
  *            read.
- * @return    The string, or an empty one if every copy was torn.
+ * @return    The string, or an empty one if @a seq changed during every copy.
  */
 inline std::string
 ShmLoadString (std::atomic<std::uint32_t> const &seq,

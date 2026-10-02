@@ -118,6 +118,27 @@ void check_channel_paths() {
                         : unsetenv("DLSSNR_SHM")) == 0, "restoring DLSSNR_SHM failed");
 }
 
+// A text field's sequence number is bumped after each write, and a load takes the string: one cut
+// to the field's size, and an empty one for a null string.
+void check_text_fields() {
+    static ShmHeader header;
+    ShmStoreString(&header.layerReasonSeq, header.layerReason, kReasonBytes, "first");
+    require(header.layerReasonSeq.load() == 1 &&
+                ShmLoadString(header.layerReasonSeq, header.layerReason, kReasonBytes) == "first",
+            "a text field was not published");
+    const std::string tooLong(kReasonBytes, 'x');
+    ShmStoreString(&header.layerReasonSeq, header.layerReason, kReasonBytes, tooLong.c_str());
+    require(header.layerReasonSeq.load() == 2 &&
+                ShmLoadString(header.layerReasonSeq, header.layerReason, kReasonBytes) ==
+                    tooLong.substr(0, kReasonBytes - 1),
+            "a text field did not cut a string to its size");
+    ShmStoreString(&header.layerReasonSeq, header.layerReason, kReasonBytes, nullptr);
+    require(header.layerReasonSeq.load() == 3 &&
+                ShmLoadString(header.layerReasonSeq, header.layerReason, kReasonBytes).empty() &&
+                !header.layerReason[0],
+            "a null string did not empty a text field");
+}
+
 // capture_writer_directory() as a string. The C form writes what fits and returns the length of
 // the whole path, as snprintf does.
 std::string capture_directory() {
@@ -161,6 +182,7 @@ bool logged(const std::string& log, const std::string& line) {
 
 int main() {
     check_channel_paths();
+    check_text_fields();
     // Static, so a failed check that exits removes it too.
     static const TemporaryDirectory temporary;
     // The log reads its variables at its first line, which comes below.
@@ -339,6 +361,6 @@ int main() {
     require(logged(log, (failed + exact).substr(0, 2047)),
             "the capture directory of CAPTURE_WRITER_DIR_SIZE bytes was not logged");
     require(logged(log, failed + underFile + "/dlssnr/captures"), "the capture directory under a file was not logged");
-    std::printf("PASS: runtime and capture paths, capture publication, provenance, manifest text, preserved batches, BGRA PNG, FP16 raw, write failure, full batch, failed directories, moved environment, log lines\n");
+    std::printf("PASS: runtime and capture paths, text fields, capture publication, provenance, manifest text, preserved batches, BGRA PNG, FP16 raw, write failure, full batch, failed directories, moved environment, log lines\n");
     return 0;
 }
