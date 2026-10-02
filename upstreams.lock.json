@@ -19,7 +19,7 @@
     "vulkan": {
       "path": "external/vulkan",
       "url": "https://github.com/imaami/DLSSNR-AMD.git",
-      "commit": "a75ac49b0c2165e77fe116d85917cb293b03b49b",
+      "commit": "c77366542351732c44ce9438baba1cc1691d9476",
       "sources": [
         "LICENSE",
         "linux/build/build_network.py",

@@ -439,10 +439,14 @@ Result<uint32_t> chain(std::vector<Dispatch>& d, Blob& blob, uint64_t& arena, ui
 {
     arena = align(arena, 256);
     const uint64_t base = arena / 4;
-    // Every consumer's wait sets one error word, the first pair's, so that one
-    // word says whether a wait of the frame ran out; upstream's records name
-    // each pair's own. Each pair keeps its word before its counters, which
-    // stay where upstream puts them.
+    // Every record names one error word, the first pair's, so that one word
+    // says whether a wait of the frame ran out: a consumer's tile waits and a
+    // persistent run's claims set it when they give up, and read it to give up
+    // early. A tile wait that ran out stops the frame's tile waits, and a run
+    // that gave up a claim stops every wait. Upstream's records name each
+    // consumer pair's own, and none for a dispatch that only signals. Each
+    // pair keeps its word before its counters, which stay where upstream puts
+    // them.
     error = uint32_t(base + 1);
     // The frame counter, which the first fswin32 ticks.
     const size_t tick =
@@ -452,7 +456,8 @@ Result<uint32_t> chain(std::vector<Dispatch>& d, Blob& blob, uint64_t& arena, ui
     // Each dispatch's record: the counters it waits on, the units it needs of
     // each, its table, the counters it signals, the frame counter, its error
     // word and the magic word.
-    std::vector<std::array<uint32_t, 7>> rec(d.size(), {~0u, 0u, ~0u, ~0u, uint32_t(base), 0u, 0x54434852u});
+    const std::array<uint32_t, 7> idle{~0u, 0u, ~0u, ~0u, uint32_t(base), error, 0x54434852u};
+    std::vector<std::array<uint32_t, 7>> rec(d.size(), idle);
     if (tick < d.size()) rec[tick][1] = 1;
     // On a big frame, with a persistent run of more than 4096 windows a layer,
     // the runs and the fused C=32 downsample and upsample keep their barriers
@@ -575,14 +580,23 @@ Result<uint32_t> chain(std::vector<Dispatch>& d, Blob& blob, uint64_t& arena, ui
         rec[i][3] = counter;
         rec[i + 1][0] = counter;
         rec[i + 1][2] = uint32_t(blob.put_words(table.data(), table.size()) / 4);
-        rec[i + 1][5] = error;
         p.after = After::kNothing;
     }
     for (size_t i = 0; i < d.size(); ++i) {
         if (!counted(d[i].kernel)) continue;
-        const bool none = rec[i][1] == 0 && rec[i][2] == ~0u && rec[i][3] == ~0u;
-        d[i].push[d[i].words++] = none ? ~0u : uint32_t(blob.put_words(rec[i].data(), rec[i].size()) / 4);
+        d[i].push[d[i].words++] = rec[i] == idle ? ~0u : uint32_t(blob.put_words(rec[i].data(), rec[i].size()) / 4);
     }
+    // A persistent run that neither waits nor signals, which upstream leaves
+    // without a record (on a big frame, fswinpds64 and fswinpup256), names
+    // one that orders nothing, put after upstream's: its claims too must give
+    // up once a run of the frame has given up a claim, and stop the frame's
+    // waits when they give up.
+    uint32_t nothing = ~0u;
+    for (Dispatch& r : d)
+        if (persistent(r.kernel) && r.push[r.words - 1] == ~0u) {
+            if (nothing == ~0u) nothing = uint32_t(blob.put_words(idle.data(), idle.size()) / 4);
+            r.push[r.words - 1] = nothing;
+        }
     arena += align(words * 4, 256);
     if (words > UINT32_MAX) return reject("its tile counters overflow 32-bit indices");
     return uint32_t(words);

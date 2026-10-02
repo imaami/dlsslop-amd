@@ -25,11 +25,15 @@ every dispatch with its push constants, as planned and with the kernels built
 without that clamp that the real model's weights allow, the tables of the
 weight blob with the heads that model frees, and the activation arena's values
 and sizes, and at 8 of them the weight blob packed from a synthetic model pack,
-whose weights free no layer of the clamp. Upstream's tile-counter records each
-name an error word of their own, which a wait sets when it runs out; the plan's
-records all name one, between the frame counter and the first counter, and the
-tables and blobs are checked with upstream's words put back. The plan must list
-that word and each persistent run's as the words its waits set. Frames that
+whose weights free no layer of the clamp. Upstream's tile-counter records that
+wait each name an error word of their own, which a wait sets when it runs out,
+and those that only signal name none, and the persistent runs that neither wait
+nor signal have none; the plan's records all name one, between the frame
+counter and the first counter, and those runs share one more record after the
+others, which orders nothing. The steps, tables and blobs are checked with
+upstream's words put back and that record taken out. Every persistent run must
+name a record, and the plan must list that word and each persistent run's as
+the words its waits set. Frames that
 upstream fails on, and frames whose arena overflows 32-bit offsets, must be
 rejected. The Vulkan network's weight digests were recorded from the DLSSNR-AMD
 fork's host code at `3dfdddc`, and its plan goldens from the fork's host code
@@ -246,14 +250,19 @@ needs a Vulkan 1.3 instance`.
 Tile counters order many of the Vulkan network's dispatches instead of
 barriers: a consumer's workgroups wait, for a bounded number of polls, until
 the tiles they read are written. Another GPU client whose workgroups hold the
-compute units for milliseconds, such as a game's asynchronous compute or
-another process's compute queue, can make such a wait run out, and the frame is
-then wrong. Every frame judges its waits after the network: dlsslopd answers a
-frame whose wait ran out as failed, so that the layer shows the game's own
-frame, and the in-layer network answers it with its input, which the
-composition composes as an unchanged frame. The next frame starts the network
-over. `vulkan-contention`, which the build makes with the tests and does not
-install, is such a client, and a bounded one: by default 40 s of dispatches on
+compute units for tens of milliseconds, such as a game's asynchronous compute
+or another process's compute queue, can make such a wait run out, and the
+frame is then wrong. Once a tile wait of a frame has run out, the frame's
+other tile waits give up at their next read of its error word, and once a
+persistent run has given up a claim, all of the frame's waits do. Such a frame
+takes about one tile wait's bound longer, and one claim budget more when a run
+gives up a claim, not one bound per wait. Every frame judges its
+waits after the network: dlsslopd answers a frame whose wait ran out as failed,
+so that the layer shows the game's own frame, and the in-layer network answers
+it with its input, which the composition composes as an unchanged frame. The
+next frame starts the network over. `vulkan-contention`, which the build makes
+with the tests and does not install, is such a client, and a bounded one: by
+default 40 s of dispatches on
 the asynchronous compute queue, each of 64 workgroups that hold 64 KiB of
 shared memory for 9 to 19 ms on an otherwise idle RX 9070 XT, and up to 65 ms
 beside the network's frames. Its options cannot ask for more work a dispatch,
@@ -276,11 +285,11 @@ dlsslopd --tier 720 --passes 2 --self-test --self-test-runs 500 --self-test-drop
 ```
 
 Every run that a self-test accepts must equal the first it accepted; its
-summary counts the dropped runs, from a few to about a hundred in a thousand on
-an RX 9070 XT. A self-test that drops none says nothing about the waits: the
-load did not reach the network, so repeat it. For motion, FP16 and a big frame,
-whose persistent runs have more than 4096 windows a layer, serve frames of one
-input through `shmclient`, on a channel in a private directory:
+summary counts the dropped runs, none to a few in a thousand on an RX 9070 XT.
+A self-test that drops none says nothing about the waits, so repeat it until
+one does. For motion, FP16 and a big frame, whose persistent runs have more
+than 4096 windows a layer, serve frames of one input through `shmclient`, on a
+channel in a private directory; the big frame drops a few in a hundred:
 
 ```bash
 mkdir -m 700 /tmp/w && A=$(printf 'A%.0s' {1..1000})
@@ -503,7 +512,15 @@ on each side, before the proxy is copied in. The comparison prints
 `DIFFERENT`. The verdict and the fallback run SPIR-V that the runtime embeds,
 which no file in `VKTRACE_SPIRV` names, so the network's span leaves them out:
 with `--span network --skip-setup` the comparison must print `MATCH`, answers
-included.
+included. Any dlsslopd built before "external: pin the Vulkan fork that ends a
+frame's waits once one runs out" runs other SPIR-V in the kernels that wait on
+tile counters and in the persistent runs, and uploads weights whose
+tile-counter records that only signal name no error word. Its traces name
+those shader modules by other hashes, so the comparison prints `DIFFERENT`,
+also with `--span network --skip-setup`. With the `bytes` and `fnv` of every
+`CreateShaderModule` line set equal in both traces, as `sed -E
+'/CreateShaderModule/s/ bytes=[0-9]+ fnv=[0-9a-f]+/ bytes=0 fnv=0/'` does,
+`--skip-setup` must print `MATCH`, answers included.
 
 The revision before "vulkan: run the network with the project's own host code"
 runs the host code of the fork in its `external/vulkan`. Its lock pins an older

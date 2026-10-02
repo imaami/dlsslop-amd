@@ -86,7 +86,7 @@ void trim(std::vector<Dispatch>& dispatches, uint32_t height);
 // replace: their tables and records put in BLOB, their counters after the
 // ARENA's end, which grows, and AFTER kNothing for each dispatch they order
 // (upstream: nr_graph.cpp:3844-4247); the counters' words. ERROR is the arena's
-// u32 word that every consumer's wait sets when it runs out.
+// u32 word that every record names, and that the waits set when they give up.
 Result<uint32_t> chain(std::vector<Dispatch>& dispatches, Blob& blob, uint64_t& arena, uint32_t& error);
 // The word of a persistent run's sync region, from its sync_off on, that the
 // run's waits set when they run out (fswin_t.comp).

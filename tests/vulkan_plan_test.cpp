@@ -8,9 +8,11 @@
 // NrSession::build (DLSSNR-AMD's nr_graph.cpp at 82560c4, built with its
 // rdna4.sh defines and stopped before the device), and the weight blob packed
 // from a synthetic model pack against upstream's. Where upstream's
-// tile-counter records each name an error word of their own, the plan's name
-// one they share: the goldens are checked with upstream's words put back. The
-// frames the network cannot take are rejected.
+// tile-counter records that wait each name an error word of their own and
+// those that only signal none, the plan's all name one they share, and the
+// persistent runs that upstream gives no record share one more, after the
+// others: the goldens are checked with upstream's words put back and that
+// record taken out. The frames the network cannot take are rejected.
 #include "vulkan_pack.h"
 #include "vulkan_plan.h"
 #include "vulkan_weights.h"
@@ -197,30 +199,47 @@ Plan unclamped(Plan p, const ClampFree& free)
 bool operator==(const ClampFree& a, const ClampFree& b) { return std::ranges::equal(a.heads, b.heads); }
 
 // A tile-counter record (vulkan_schedule.cpp's chain()): 7 words, the counters
-// its step waits on, -, its table, the counters it signals, the frame counter,
-// the error word its waits set when they run out, and the magic word.
-enum Record : size_t { kWaits, kTable = 2, kSignals, kFrame, kError, kMagic, kRecordWords };
-// Where in P.tables the records of P's steps start: the table of a record's
-// words at the last push word of a step.
+// its step waits on, the units it needs of each (the frame counter's tick), its
+// table, the counters it signals, the frame counter, the error word its waits
+// set when they give up, and the magic word.
+enum Record : size_t { kWaits, kUnits, kTable, kSignals, kFrame, kError, kMagic, kRecordWords };
+// Where in P.tables the record of step S starts, or SIZE_MAX: the table of a
+// record's words at the last push word of a step.
+size_t record(const Plan& p, const Step& s)
+{
+    const uint32_t word = p.push[s.push + s.words - 1];
+    const auto table = std::ranges::find_if(p.segments, [&](const Segment& g) {
+        return g.recipe == Recipe::kTable && g.offset == 4ull * word && g.bytes == 4 * kRecordWords;
+    });
+    if (word == ~0u || table == p.segments.end() || p.tables[table->index + kMagic] != 0x54434852u) return SIZE_MAX;
+    return table->index;
+}
+// Where in P.tables the records of P's steps start.
 std::vector<size_t> records(const Plan& p)
 {
     std::vector<size_t> at;
-    for (const Step& s : p.steps) {
-        const uint32_t word = p.push[s.push + s.words - 1];
-        const auto table = std::ranges::find_if(p.segments, [&](const Segment& g) {
-            return g.recipe == Recipe::kTable && g.offset == 4ull * word && g.bytes == 4 * kRecordWords;
-        });
-        if (word != ~0u && table != p.segments.end() && p.tables[table->index + kMagic] == 0x54434852u)
-            at.push_back(table->index);
-    }
+    for (const Step& s : p.steps)
+        if (const size_t r = record(p, s); r != SIZE_MAX) at.push_back(r);
     return at;
 }
 // P as upstream plans it: each record that waits names the word before its
-// counters as its error word.
+// counters as its error word, and one that only signals none; a persistent run
+// that neither waits nor signals names no record, where the plan's name one
+// that orders nothing, the blob's last segment.
 Plan upstream(Plan p)
 {
     for (const size_t r : records(p))
-        if (p.tables[r + kTable] != ~0u) p.tables[r + kError] = p.tables[r + kWaits] - 1;
+        p.tables[r + kError] = p.tables[r + kTable] != ~0u ? p.tables[r + kWaits] - 1 : 0;
+    const Segment last = p.segments.back();
+    if (last.recipe != Recipe::kTable || last.bytes != 4 * kRecordWords) return p;
+    const uint32_t* r = &p.tables[last.index];
+    if (r[kMagic] != 0x54434852u || r[kWaits] != ~0u || r[kUnits] || r[kTable] != ~0u || r[kSignals] != ~0u) return p;
+    for (const Step& s : p.steps)
+        if (uint32_t& word = p.push[s.push + s.words - 1]; persistent(s.kernel) && 4ull * word == last.offset)
+            word = ~0u;
+    p.tables.resize(last.index);
+    p.segments.pop_back();
+    p.blob_bytes = p.segments.back().offset + p.segments.back().bytes;
     return p;
 }
 
@@ -331,22 +350,25 @@ void check_invariants(const Plan& p)
     expect(p.values_end % 256 == 0 && p.values_end + 4ull * p.counter_words <= p.arena_bytes &&
                p.arena_bytes <= UINT32_MAX,
            "%s: the arena's regions do not fit it", at);
-    // The words that waits set when they run out: one that every record that
-    // waits names, after the frame counter and before every counter, then
-    // each persistent run's, sync_off + 3, in its sync region below the frame
-    // counter. Nothing else writes them.
+    // The words that waits set when they give up: one that every record
+    // names, after the frame counter and before every counter, then each
+    // persistent run's, sync_off + 3, in its sync region below the frame
+    // counter. Nothing else writes them. Every persistent run names a record.
     const std::vector<uint32_t>& t = p.timeouts;
     uint32_t frame = ~0u, counters = ~0u, waits = 0;
     for (const size_t r : records(p)) {
         frame = p.tables[r + kFrame];
         for (const Record c : {kWaits, kSignals}) counters = std::min(counters, p.tables[r + c]);
-        if (p.tables[r + kTable] == ~0u) continue;
-        ++waits;
-        expect(!t.empty() && p.tables[r + kError] == t[0], "%s: a record's waits set another word than the plan's", at);
+        expect(!t.empty() && p.tables[r + kError] == t[0], "%s: a record names another error word than the plan's",
+               at);
+        waits += p.tables[r + kTable] != ~0u;
     }
     std::vector<uint32_t> runs;
     for (const Step& s : steps)
-        if (persistent(s.kernel)) runs.push_back(p.push[s.push + offsetof(vulkan::PushPersist, sync_off) / 4] + 3);
+        if (persistent(s.kernel)) {
+            runs.push_back(p.push[s.push + offsetof(vulkan::PushPersist, sync_off) / 4] + 3);
+            expect(record(p, s) != SIZE_MAX, "%s: persistent run %s names no record", at, stem(s.kernel));
+        }
     expect(waits == p.chained && !t.empty() && t[0] == frame + 1 && t[0] < counters &&
                std::ranges::equal(t.begin() + 1, t.end(), runs.begin(), runs.end()),
            "%s: the words that waits set are not the shared one, then each persistent run's", at);
@@ -373,15 +395,14 @@ void check_goldens()
                ", %" PRIu64 " and %u",
                g.width, g.height, p->arena_bytes, p->values_end, p->counter_words, g.arena, g.values_end,
                g.counters);
-        expect(p->blob_bytes == g.blob, "%ux%u: a weight blob of %u bytes, upstream's %u", g.width, g.height,
-               p->blob_bytes, g.blob);
-        expect(dispatch_hash(*p) == g.dispatches, "%ux%u: the steps differ from upstream's dispatches", g.width,
-               g.height);
-        const Plan free = unclamped(*p, kModelClampFree);
-        expect(dispatch_hash(free) == g.clamped,
+        const Plan free = unclamped(*p, kModelClampFree), theirs = upstream(free);
+        expect(theirs.blob_bytes == g.blob, "%ux%u: a weight blob of %u bytes, upstream's %u", g.width, g.height,
+               theirs.blob_bytes, g.blob);
+        expect(dispatch_hash(upstream(*p)) == g.dispatches, "%ux%u: the steps differ from upstream's dispatches",
+               g.width, g.height);
+        expect(dispatch_hash(theirs) == g.clamped,
                "%ux%u: the steps with the real model's kernels differ from upstream's dispatches (--print)", g.width,
                g.height);
-        const Plan theirs = upstream(free);
         expect(fnv1a(theirs.tables.data(), 4 * theirs.tables.size()) == g.real_tables,
                "%ux%u: the tables with the real model's free heads differ from upstream's", g.width, g.height);
         expect(value_hash(*p) == g.values, "%ux%u: the values differ from upstream's (--print)", g.width, g.height);
@@ -478,9 +499,9 @@ int check_model(const std::string& path)
     return failures ? 1 : 0;
 }
 
-// --print: the plan at WxH with the real model's kernels as the dumps of
-// upstream's build of the real model have it, its dispatches' "D" lines and
-// its values' "V" lines.
+// --print: the plan at WxH with the real model's kernels and upstream's
+// records, as the dumps of upstream's build of the real model have it, its
+// dispatches' "D" lines and its values' "V" lines.
 int print(const std::string& extent)
 {
     unsigned width, height;
@@ -492,6 +513,7 @@ int print(const std::string& extent)
         return 1;
     }
     vulkan::unclamp(*p, kModelClampFree);
+    *p = upstream(std::move(*p));
     std::printf("source %ux%u plan %ux%u\nact_total %" PRIu64 " values_end %" PRIu64 "\nwblob %u\ndisp %zu\n", width,
                 height, p->work_width, p->work_height, p->arena_bytes, p->values_end, p->blob_bytes, p->steps.size());
     for (size_t i = 0; i < p->steps.size(); ++i) {

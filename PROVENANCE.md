@@ -35,7 +35,7 @@ the commit listed below and are maintained in this repository.
 | Component | Upstream and base commit | Fork and pinned commit | License |
 |---|---|---|---|
 | Vulkan presentation layer and shared protocol | [bmitch87/DLSS5VKLayer](https://github.com/bmitch87/DLSS5VKLayer) `ab722b091071d6d59df56f10d86d4f3005bcad86` | [imaami/DLSS5VKLayer](https://github.com/imaami/DLSS5VKLayer/tree/dlsslop-amd) `680ec8afb96cff206cf6a7608d3a559ca1e9c2f3`, imported | AGPL-3.0; embedded dependencies keep their notices |
-| Vulkan network's SPIR-V sources, shader build and model extractor, and the runtime that dlsslop-amd ports | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) `82560c4fbfaac347fc5e22c22025191402ae916b` | [imaami/DLSSNR-AMD](https://github.com/imaami/DLSSNR-AMD/tree/dlsslop-amd-82560c4) `a75ac49b0c2165e77fe116d85917cb293b03b49b` | MIT |
+| Vulkan network's SPIR-V sources, shader build and model extractor, and the runtime that dlsslop-amd ports | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) `82560c4fbfaac347fc5e22c22025191402ae916b` | [imaami/DLSSNR-AMD](https://github.com/imaami/DLSSNR-AMD/tree/dlsslop-amd-82560c4) `c77366542351732c44ce9438baba1cc1691d9476` | MIT |
 | AMD HIP kernels, and the scheduler that dlsslopd ports | [lmxxf/dlss5-on-amd-9070xt-porting](https://github.com/lmxxf/dlss5-on-amd-9070xt-porting) `ad499a8199c9ce3678d83c9be58fe3bc1bef3498` | [imaami/dlss5-on-amd-9070xt-porting](https://github.com/imaami/dlss5-on-amd-9070xt-porting/tree/dlsslop-amd) `c1908317fb7e7ee9fe4884feba4a67220d93461f` | MIT |
 
 The import took these files of the layer fork at `680ec8a`. It changed only
@@ -141,11 +141,16 @@ dlsslop-amd's per-pass sharpening and color preservation
 The fork's host-side changes let the runtime load its model, SPIR-V and
 pipeline cache from explicit paths and record the new stages after every pass.
 A frame with those stages does not take upstream's path that samples the
-caller's color in place. The build fetches only the fork's SPIR-V sources,
-shader build, model tools and license; it neither fetches nor compiles the
-fork's host code (`linux/src/core`), which those changes modify. Of the 74
-files that the shader build writes, `install.py` installs the 44 that the
-project's own host code names in its tables and reads.
+caller's color in place. The fork's two shader commits after `a75ac49`, which
+leave its host code as it was there, make a tile-counter wait give up once the
+error word that its record names says that a wait of the frame has given up,
+and a persistent run's claims once it says that a run has given up a claim,
+and wait up to 2^17 polls for a tile instead of 2^16; a frame whose waits all
+finish computes the same answer. The build fetches only the fork's SPIR-V
+sources, shader build, model tools and license; it neither fetches nor compiles
+the fork's host code (`linux/src/core`), which its host-side changes modify. Of
+the 74 files that the shader build writes, `install.py` installs the 44 that
+the project's own host code names in its tables and reads.
 
 dlsslopd runs the AMD fork's kernels with its own host code.
 `backend/hip_weights.*`, `backend/hip_plan.*` and `backend/hip_network.*` port
@@ -217,12 +222,15 @@ transfers, where upstream creates it for storage and transfers only and still
 binds it to the temporal blocks' samplers. It advances the motion history's
 latch, parity and noise seed when its caller says that a recorded frame was
 submitted, where upstream advances them when it records the frame. Its
-tile-counter records all name one error word, which a wait sets when it runs
-out, where upstream's name one each. After the network's last dispatch, each
-frame reads and zeroes the words that its waits set and, when one ran out,
-answers with its input; the next frame then zeroes the persistent runs' sync
-regions and the tile counters and drops the motion history. Upstream's
-production path never reads those words. It leaves out
+tile-counter records all name one error word, which a wait sets when it gives
+up and which the frame's other waits read to give up early, where upstream's
+records that wait name one each and those that only signal none, and it gives
+the persistent runs that upstream gives no record one that orders nothing and
+names that word. After the
+network's last dispatch, each frame reads and zeroes the words that its waits
+set and, when one ran out, answers with its input; the next frame then zeroes
+the persistent runs' sync regions and the tile counters and drops the motion
+history. Upstream's production path never reads those words. It leaves out
 what dlsslop-amd never calls, such as control masks, `record_engine`,
 per-feature histories, preprocessing, model scales below 1, input formats other
 than RGBA8 and RGBA16F, the GPU timing that `last_gpu_ms()` and

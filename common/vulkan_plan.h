@@ -342,11 +342,11 @@ struct Plan {
     std::vector<Value> values;
     uint64_t values_end, arena_bytes;
     uint32_t counter_words;
-    // The arena's u32 words that a frame's waits set when they run out, and
-    // that nothing else writes: the one every tile-counter wait sets, then
-    // each persistent run's. A wait that runs out leaves its frame wrong; one
-    // of a persistent run also leaves its sync region and the counters it
-    // signals short of their counts.
+    // The arena's u32 words that a frame's waits set when they give up, and
+    // that nothing else writes: the one that every record names, which every
+    // wait sets and reads, then each persistent run's. A wait that runs out
+    // leaves its frame wrong; one of a persistent run also leaves its sync
+    // region and the counters it signals short of their counts.
     std::vector<uint32_t> timeouts;
     // The noise field, which the build writes into the weight blob on the GPU.
     NoiseJob noise;
