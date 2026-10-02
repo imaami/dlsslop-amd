@@ -99,7 +99,8 @@ write_raw (char const *path,
  *
  * The pixels are copied first, so the encoder reads cached memory rather than the mapped readback
  * buffer, and so red and blue can swap places. The PNG is encoded in memory and written by
- * write_raw(), which checks the write and the close.
+ * write_raw(), which checks the write and the close. Not inlined: inlined into write_image(), GCC's
+ * -Wstringop-overflow misreads the encoder's hash table pushes.
  *
  * @param path   The file.
  * @param pixels The pixels, tightly packed.
@@ -108,6 +109,7 @@ write_raw (char const *path,
  * @param swap   Whether red and blue swap places.
  * @return       true if the file was written and closed.
  */
+[[gnu::noinline]]
 static bool
 write_png (char const *path,
            void const *pixels,
@@ -163,9 +165,16 @@ write_image (struct capture_writer const *w,
              struct encoding              e,
              size_t                       bytes)
 {
+	// /SIDE_NN.EXT after the batch's directory, whose length is known.
+	char name[16];
+	int const length = snprintf(name, sizeof name, "/%s_%02u.%s", side, w->index, e.png ? "png" : "raw");
+	if (length < 0 || length >= (int)sizeof name) {
+		log_printf("[capture] could not name %s_%02u", side, w->index);
+		return false;
+	}
 	char path[BATCH_PATH_MAX];
-	snprintf(path, sizeof path, "%s/%s_%02u.%s", w->batch_dir, side, w->index,
-	         e.png ? "png" : "raw");
+	memcpy(path, w->batch_dir, w->batch_length);
+	memcpy(path + w->batch_length, name, (size_t)length + 1);
 	bool const wrote = e.png ? write_png(path, pixels, width, height, e.swap)
 	                         : write_raw(path, pixels, bytes);
 	if (!wrote)
@@ -251,8 +260,13 @@ capture_writer_write_manifest (struct capture_writer const *w,
                                uint32_t                     vk_format,
                                struct encoding              e)
 {
+	static constexpr char manifest[] = "manifest.txt";
+	static constexpr char published[] = "published.tmp";
+	// Built after the batch's directory, whose length is known.
 	char path[BATCH_PATH_MAX];
-	snprintf(path, sizeof path, "%s/manifest.txt", w->batch_dir);
+	memcpy(path, w->batch_dir, w->batch_length);
+	path[w->batch_length] = '/';
+	memcpy(path + w->batch_length + 1, manifest, sizeof manifest);
 	FILE *const f = fopen(path, "we");
 	if (!f)
 		return false;
@@ -281,11 +295,13 @@ capture_writer_write_manifest (struct capture_writer const *w,
 		return false;
 
 	char pending[BATCH_PATH_MAX];
-	snprintf(pending, sizeof pending, "%s/published.tmp", w->batch_dir);
+	memcpy(pending, path, w->batch_length + 1);
+	memcpy(pending + w->batch_length + 1, published, sizeof published);
 	if (link(path, pending))
 		return false;
 
-	snprintf(path, sizeof path, "%.*smanifest.txt", (int)w->batch_name, w->batch_dir);
+	// manifest.txt beside the batch: in the capture directory, which path starts with.
+	memcpy(path + w->batch_name, manifest, sizeof manifest);
 	if (rename(pending, path)) {
 		unlink(pending);
 		return false;
@@ -310,8 +326,8 @@ capture_writer_directory (char   *buf,
 
 /** @brief Creates the batch's directory, named capture-PID-XXXXXX, in the capture directory.
  *
- * @param w The writer, whose batch_dir receives the batch's directory and batch_name where its own
- *          name starts.
+ * @param w The writer, whose batch_dir receives the batch's directory, batch_name where its own
+ *          name starts, and batch_length its length.
  * @return  true if the batch's directory was created; otherwise batch_dir holds the capture
  *          directory, cut to fit.
  */
@@ -330,8 +346,9 @@ make_batch_dir (struct capture_writer *w)
 		dir[dir_length] = '\0';
 		return false;
 	}
-	// The name starts after the slash, inside batch_dir.
+	// Both fit in batch_dir; the name starts after the slash.
 	w->batch_name = (uint32_t)dir_length + 1;
+	w->batch_length = (uint32_t)(dir_length + name_length);
 	return true;
 }
 

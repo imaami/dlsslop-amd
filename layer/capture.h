@@ -76,6 +76,7 @@ struct capture_writer {
 	CAPTURE_STD(uint32_t)   index;                              //!< Frames written, and the next one's number.
 	CAPTURE_STD(uint32_t)   control_seq;                        //!< The control sequence of the request.
 	CAPTURE_STD(uint32_t)   batch_name;                         //!< Where the batch's own name starts in batch_dir.
+	CAPTURE_STD(uint32_t)   batch_length;                       //!< The length of batch_dir.
 };
 
 /** @brief Returns a metadata record with the renderer's defaults.

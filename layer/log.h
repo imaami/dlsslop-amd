@@ -28,14 +28,14 @@ extern "C" {
  * starts with 1. The line goes to the file that DLSSNR_LOG names, opened
  * for appending, or to stderr if DLSSNR_LOG is unset or empty or the file
  * cannot be opened. The formatted text is cut to 2047 bytes, then written
- * after "[dlssnr-layer] " and before a newline, and flushed. Lines that
- * threads write at the same time do not mix. When the layer is unloaded
- * or the process exits, the log closes the file it opened and drops the
- * lines that follow. If a thread holds the log's lock at that moment, the
- * file stays open until the process ends. That happens at exit while
- * another thread writes a line, and in a child that fork() made while a
- * thread wrote one. The programs that the process executes do not
- * inherit the file.
+ * after "[dlssnr-layer] " and before a newline, and flushed; a line whose
+ * format fails is not written. Lines that threads write at the same time
+ * do not mix. When the layer is unloaded or the process exits, the log
+ * closes the file it opened and drops the lines that follow. If a thread
+ * holds the log's lock at that moment, the file stays open until the
+ * process ends. That happens at exit while another thread writes a line,
+ * and in a child that fork() made while a thread wrote one. The programs
+ * that the process executes do not inherit the file.
  *
  * @param fmt A printf format.
  * @param ... The format's arguments.

@@ -187,13 +187,15 @@ shm_map_lock_producer (struct shm_map *s)
  * are about to open really is ours: a directory, owned by this uid, with nothing granted to anyone
  * else. Anything else and we refuse rather than create the file inside it.
  *
- * @param path The file's path, which the function cuts at each slash in turn and restores.
- * @return     true if the file may be created there.
+ * @param path   The file's path, which the function cuts at each slash in turn and restores.
+ * @param length The path's length.
+ * @return       true if the file may be created there.
  */
 static bool
-ensure_parent_dir (char *path)
+ensure_parent_dir (char   *path,
+                   size_t  length)
 {
-	char *const slash = strrchr(path, '/');
+	char *const slash = memrchr(path, '/', length);
 	if (!slash || slash == path)
 		return true;
 
@@ -319,7 +321,7 @@ shm_map_open (struct shm_map *s)
 		log_printf("[shm] cannot make the channel's path");
 		return false;
 	}
-	if (!ensure_parent_dir(p))
+	if (!ensure_parent_dir(p, length))
 		goto fail;
 	int fd = open(p, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
 	if (fd < 0) {
@@ -601,12 +603,33 @@ shm_map_process_frame (struct shm_map *s,
 	return ok;
 }
 
+/** @brief The address of the daemon's transport socket beside the channel, as ShmTransportPath()
+ *         names it.
+ *
+ * @param s       The map, whose header is mapped.
+ * @param address Receives the address.
+ * @return        false if the socket's path does not fit in an address: a path cut to fit would name
+ *                another socket.
+ */
+static bool
+transport_address (struct shm_map const *s,
+                   struct sockaddr_un   *address)
+{
+	if (s->path_length + sizeof kShmTransportSuffix > sizeof address->sun_path)
+		return false;
+
+	*address = (struct sockaddr_un){ .sun_family = AF_UNIX };
+	memcpy(address->sun_path, s->path, s->path_length);
+	memcpy(address->sun_path + s->path_length, kShmTransportSuffix, sizeof kShmTransportSuffix);
+	return true;
+}
+
 /** @brief Starts a worker that stopped (idle, crashed) through its systemd socket unit, for which a
  *         connection is enough.
  *
  * At most every two seconds, and never waiting: this is the present path.
  *
- * @param s The map.
+ * @param s The map, whose header is mapped.
  */
 static void
 start_worker (struct shm_map *s)
@@ -616,9 +639,8 @@ start_worker (struct shm_map *s)
 		return;
 
 	s->start_after_ms = now + 2000.0;
-	struct sockaddr_un address = { .sun_family = AF_UNIX };
-	if ((size_t)ShmTransportPath(address.sun_path, sizeof address.sun_path, s->path)
-	    >= sizeof address.sun_path)
+	struct sockaddr_un address;
+	if (!transport_address(s, &address))
 		return;
 	int sock = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 	connect(sock, (struct sockaddr const *)&address, sizeof address);
@@ -637,7 +659,7 @@ enum offer {
 /** @brief Hands the composition's exported frames to the daemon under a fresh generation and wakes
  *         it.
  *
- * @param s    The map.
+ * @param s    The map, whose header is mapped.
  * @param comp The composition.
  * @return     The connection the answer comes on, or -1.
  */
@@ -645,9 +667,8 @@ static int
 send_offer (struct shm_map     *s,
             struct composition *comp)
 {
-	struct sockaddr_un address = { .sun_family = AF_UNIX };
-	if ((size_t)ShmTransportPath(address.sun_path, sizeof address.sun_path, s->path)
-	    >= sizeof address.sun_path || !shm_map_open(s))
+	struct sockaddr_un address;
+	if (!transport_address(s, &address))
 		return -1;
 	struct ShmTransportOffer offer = { .magic = kShmMagic };
 	int fds[2] = { -1, -1 };
@@ -690,7 +711,7 @@ send_offer (struct shm_map     *s,
  * The first look sends the offer and waits a moment, later ones only look. No answer by the time
  * @a expires holds counts as a refusal.
  *
- * @param s       The map.
+ * @param s       The map, whose header is mapped.
  * @param comp    The composition.
  * @param expires When an outstanding offer counts as refused (log_now_ms()); set when it is sent.
  * @return        What became of the offer.

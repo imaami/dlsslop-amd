@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #include "log.h"
@@ -131,13 +132,23 @@ log_printf (char const *fmt,
 	pthread_once(&log_once, log_open);
 	pthread_mutex_lock(&log_mutex);
 	if (log_sink.stream) {
-		char line[2048];
+		static constexpr char prefix[] = "[dlssnr-layer] ";
+		static constexpr size_t start = sizeof prefix - 1;
+		// The text and its null, which the newline replaces.
+		static constexpr size_t room = 2048;
+		char line[start + room];
+		memcpy(line, prefix, start);
 		va_list args;
 		va_start(args, fmt);
-		vsnprintf(line, sizeof line, fmt, args);
+		int const length = vsnprintf(line + start, room, fmt, args);
 		va_end(args);
-		fprintf(log_sink.stream, "[dlssnr-layer] %s\n", line);
-		fflush(log_sink.stream);
+		// The text cut to room - 1 bytes; a line whose format fails is not written.
+		if (length >= 0) {
+			size_t const end = start + (length < (int)room ? (size_t)length : room - 1);
+			line[end] = '\n';
+			fwrite(line, 1, end + 1, log_sink.stream);
+			fflush(log_sink.stream);
+		}
 	}
 	pthread_mutex_unlock(&log_mutex);
 }

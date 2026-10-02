@@ -751,6 +751,9 @@ struct ShmTransportOffer {
 
 static_assert(sizeof (struct ShmTransportOffer) == 72, "the transport offer's layout changed");
 
+/** @brief What the transport's socket adds to the channel's path (ShmTransportPath()). */
+static constexpr char kShmTransportSuffix[] = ".sock";
+
 /** @brief The socket on which the layer offers its transport.
  *
  * @param buf     Receives the path; may be nullptr if @a size is 0.
@@ -764,7 +767,7 @@ ShmTransportPath (char            *buf,
                   SHM_STD(size_t)  size,
                   char const      *channel)
 {
-	return SHM_STD(snprintf)(buf, size, "%s.sock", channel);
+	return SHM_STD(snprintf)(buf, size, "%s%s", channel, kShmTransportSuffix);
 }
 
 /** @brief A float's bits.
