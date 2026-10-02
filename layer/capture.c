@@ -18,11 +18,12 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "../third_party/stb/stb_image_write.h"
 
-/** @brief The size of a path in the batch's directory: the directory, which fits in PATH_MAX
- *         bytes, then a slash and a file name of at most 13 bytes. A path that the kernel refuses
- *         as too long therefore fails where the file is opened, as upstream's did.
+/** @brief The size of a path in the batch's directory: the directory, which fits in
+ *         CAPTURE_WRITER_DIR_SIZE bytes, then a slash and a file name of at most 13 bytes. A path
+ *         that the kernel refuses as too long therefore fails where the file is opened, as
+ *         upstream's did.
  */
-static constexpr size_t BATCH_PATH_MAX = PATH_MAX + 16;
+static constexpr size_t BATCH_PATH_MAX = CAPTURE_WRITER_DIR_SIZE + 16;
 
 /** @brief How the frames of one format are written. */
 struct encoding {

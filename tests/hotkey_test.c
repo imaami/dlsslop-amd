@@ -11,7 +11,6 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <limits.h>
 #include <linux/input.h>
 #include <math.h>
 #include <poll.h>
@@ -51,13 +50,16 @@ require (bool        condition,
 	exit(1);
 }
 
+/** @brief The size of the test's paths: TMPDIR, the test's directory in it, and the names in that. */
+static constexpr size_t PATH_SIZE = 1024;
+
 /** @brief Writes a directory's path and a name in it, which must fit. */
 static void
-join (char        path[static PATH_MAX],
+join (char        path[static PATH_SIZE],
       char const *dir,
       char const *name)
 {
-	require(snprintf(path, PATH_MAX, "%s/%s", dir, name) < PATH_MAX, "%s/%s is too long", dir, name);
+	require(snprintf(path, PATH_SIZE, "%s/%s", dir, name) < (int)PATH_SIZE, "%s/%s is too long", dir, name);
 }
 
 /** @brief Writes eventN. */
@@ -80,7 +82,7 @@ static void
 expect_log (char const *fmt,
             ...)
 {
-	char line[PATH_MAX + 256];
+	char line[PATH_SIZE + 256];
 	va_list args;
 	va_start(args, fmt);
 	int const length = vsnprintf(line, sizeof line, fmt, args);
@@ -170,7 +172,7 @@ fake_device (char const     *dir,
              void const     *events,
              size_t          size)
 {
-	char path[PATH_MAX];
+	char path[PATH_SIZE];
 	join(path, dir, name);
 	int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
 	require(fd >= 0, "cannot create %s", path);
@@ -496,7 +498,7 @@ static void
 make_file (char const *dir,
            char const *name)
 {
-	char path[PATH_MAX];
+	char path[PATH_SIZE];
 	join(path, dir, name);
 	int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
 	require(fd >= 0 && !close(fd), "cannot create %s", path);
@@ -508,7 +510,7 @@ static void
 remove_file (char const *dir,
              char const *name)
 {
-	char path[PATH_MAX];
+	char path[PATH_SIZE];
 	join(path, dir, name);
 	require(!remove(path), "cannot remove %s", path);
 }
@@ -518,7 +520,7 @@ static void
 lock_file (char const *dir,
            char const *name)
 {
-	char path[PATH_MAX];
+	char path[PATH_SIZE];
 	join(path, dir, name);
 	require(!chmod(path, 0), "cannot chmod %s", path);
 }
@@ -528,7 +530,7 @@ static ino_t
 inode (char const *dir,
        char const *name)
 {
-	char path[PATH_MAX];
+	char path[PATH_SIZE];
 	join(path, dir, name);
 	struct stat st;
 	require(!stat(path, &st), "cannot stat %s", path);
@@ -609,7 +611,7 @@ check_sweeps (char const *dir)
 	// is made, so the inode differs.
 	ino_t const old = inode(dir, "event3");
 	make_file(dir, "event3.new");
-	char from[PATH_MAX], to[PATH_MAX];
+	char from[PATH_SIZE], to[PATH_SIZE];
 	join(from, dir, "event3.new");
 	join(to, dir, "event3");
 	require(!rename(from, to), "cannot replace event3");
@@ -630,7 +632,7 @@ check_sweeps (char const *dir)
 	// A node that does not open is known, but not rejected; one that is a directory opens.
 	make_file(dir, "event7");
 	lock_file(dir, "event7");
-	char sub[PATH_MAX];
+	char sub[PATH_SIZE];
 	join(sub, dir, "event8");
 	require(!mkdir(sub, 0700), "cannot create event8");
 	hotkeys_rescan_evdev(&h, dir);
@@ -670,7 +672,7 @@ check_sweeps (char const *dir)
 static void
 check_keyboards (char const *parent)
 {
-	char dir[PATH_MAX];
+	char dir[PATH_SIZE];
 	join(dir, parent, "input");
 	require(!mkdir(dir, 0700), "cannot create %s", dir);
 	uint32_t const descriptors = open_descriptors();
@@ -741,7 +743,7 @@ check_keyboards (char const *parent)
 
 	// One keyboard unplugged, and another plugged in at its path: the new one is opened and logged.
 	struct fake_device *const replug = fake_device(dir, "event21.new", FAKE_KEYBOARD, nullptr, 0);
-	char from[PATH_MAX], to[PATH_MAX];
+	char from[PATH_SIZE], to[PATH_SIZE];
 	join(from, dir, "event21.new");
 	join(to, dir, "event21");
 	require(!rename(from, to), "cannot replace event21");
@@ -898,7 +900,7 @@ check_x11 (char const *dir)
 	require(open_display && sync_display && close_display && fake_key_event,
 	        "libX11 or libXtst lacks a function");
 
-	char log[PATH_MAX];
+	char log[PATH_SIZE];
 	join(log, dir, "xvfb.log");
 	char display[16];
 	if (!start_xvfb(log, display)) {
@@ -1015,11 +1017,11 @@ main (void)
 	require(!atexit(stop_xvfb), "atexit failed");
 
 	char const *const tmp = getenv("TMPDIR");
-	char dir[PATH_MAX];
+	char dir[PATH_SIZE];
 	require(snprintf(dir, sizeof dir, "%s/dlsslop-amd-hotkey-XXXXXX", tmp && *tmp ? tmp : "/tmp")
 	        < (int)sizeof dir, "TMPDIR is too long");
 	require(mkdtemp(dir), "mkdtemp failed");
-	char log[PATH_MAX];
+	char log[PATH_SIZE];
 	join(log, dir, "layer.log");
 	// The log reads its variables at its first line, which opens its file before any check counts
 	// descriptors.

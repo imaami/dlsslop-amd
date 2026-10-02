@@ -12,7 +12,6 @@
 #endif
 #include <dlfcn.h>
 #include <fcntl.h>
-#include <limits.h>
 #include <linux/futex.h>
 #include <poll.h>
 #include <pthread.h>
@@ -95,7 +94,9 @@ struct shm_map {
 	struct ShmHeader *hdr;                //!< The header, mapped; nullptr until shm_map_open().
 	uint8_t          *in_pixels;          //!< The input region, mapped.
 	uint8_t          *out_pixels;         //!< The output region, mapped.
+	char             *path;               //!< The file's path: the socket and the lock are beside it.
 	size_t            mapped_frame_bytes; //!< The size of each region's mapping.
+	size_t            path_length;        //!< The bytes of path.
 	double            retry_after_ms;     //!< When a heartbeat may end SHM_MAP_DEAD (log_now_ms()).
 	double            start_after_ms;     //!< start_worker()'s rate limit (log_now_ms()).
 	uint32_t          timeouts;           //!< The requests in a row that the helper did not answer.
@@ -104,7 +105,6 @@ struct shm_map {
 	uint32_t          flags;              //!< enum shm_map_flags.
 	int               fd;                 //!< The channel's descriptor, or -1.
 	int               producer_fd;        //!< The producer lock's descriptor, or -1.
-	char              path[PATH_MAX];     //!< The file's path: the socket and the lock are beside it.
 };
 
 /** @brief An empty map: nothing mapped, and no descriptor.
@@ -141,6 +141,8 @@ shm_map_fini (struct shm_map *dest)
 		close(dest->producer_fd);
 		dest->producer_fd = -1;
 	}
+	free(dest->path);
+	dest->path = nullptr;
 	*dest = shm_map();
 }
 
@@ -163,11 +165,15 @@ shm_map_lock_producer (struct shm_map *s)
 		return false;
 
 	if (s->producer_fd < 0) {
-		// A name cut to fit would be another file; the kernel refuses a path this long anyway.
-		char lock[PATH_MAX];
-		if ((size_t)snprintf(lock, sizeof lock, "%s.producer.lock", s->path) >= sizeof lock)
+		static constexpr char suffix[] = ".producer.lock";
+		char *lock = malloc(s->path_length + sizeof suffix);
+		if (!lock)
 			return false;
+		memcpy(lock, s->path, s->path_length);
+		memcpy(lock + s->path_length, suffix, sizeof suffix);
 		int const fd = open(lock, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+		free(lock);
+		lock = nullptr;
 		if (fd < 0)
 			return false;
 		s->producer_fd = fd;
@@ -181,38 +187,36 @@ shm_map_lock_producer (struct shm_map *s)
  * are about to open really is ours: a directory, owned by this uid, with nothing granted to anyone
  * else. Anything else and we refuse rather than create the file inside it.
  *
- * @param path The file's path, which fits in PATH_MAX bytes.
+ * @param path The file's path, which the function cuts at each slash in turn and restores.
  * @return     true if the file may be created there.
  */
 static bool
-ensure_parent_dir (char const *path)
+ensure_parent_dir (char *path)
 {
-	char const *const slash = strrchr(path, '/');
+	char *const slash = strrchr(path, '/');
 	if (!slash || slash == path)
 		return true;
 
-	char dir[PATH_MAX];
-	size_t const length = (size_t)(slash - path);
-	memcpy(dir, path, length);
-	dir[length] = '\0';
+	// The directory: the path up to the file's name.
+	*slash = '\0';
 	// Each ancestor, then the directory itself.
-	for (char *end = strchr(dir + 1, '/'); end; end = strchr(end + 1, '/')) {
+	for (char *end = strchr(path + 1, '/'); end; end = strchr(end + 1, '/')) {
 		*end = '\0';
-		mkdir(dir, 0700);
+		mkdir(path, 0700);
 		*end = '/';
 	}
-	mkdir(dir, 0700);
+	mkdir(path, 0700);
 
 	struct stat st = {0};
-	if (lstat(dir, &st) != 0) {
-		log_printf("[shm] %s is missing", dir);
-		return false;
-	}
-	if (!S_ISDIR(st.st_mode) || st.st_uid != getuid() || (st.st_mode & (S_IRWXG | S_IRWXO)) != 0) {
-		log_printf("[shm] refusing %s: it is not a private directory owned by this user", dir);
-		return false;
-	}
-	return true;
+	bool const exists = lstat(path, &st) == 0;
+	bool const ours = exists && S_ISDIR(st.st_mode) && st.st_uid == getuid()
+	                  && (st.st_mode & (S_IRWXG | S_IRWXO)) == 0;
+	if (!exists)
+		log_printf("[shm] %s is missing", path);
+	else if (!ours)
+		log_printf("[shm] refusing %s: it is not a private directory owned by this user", path);
+	*slash = '/';
+	return ours;
 }
 
 /** @brief Maps the two pixel regions at the size this frame needs, remapping when the size changes.
@@ -261,9 +265,44 @@ shm_map_frames (struct shm_map *s,
 	return true;
 }
 
+/** @brief The channel's path: DLSSNR_SHM if it is set and not empty, otherwise ShmDefaultPath().
+ *
+ * @param length Receives the path's length.
+ * @return       The path, which the caller frees, or nullptr without memory or when the default
+ *               path cannot be formatted.
+ */
+static char *
+channel_path (size_t *length)
+{
+	char const *const env = getenv("DLSSNR_SHM");
+	if (env && *env) {
+		size_t const n = strlen(env);
+		char *const path = malloc(n + 1);
+		if (!path)
+			return nullptr;
+		memcpy(path, env, n + 1);
+		*length = n;
+		return path;
+	}
+
+	int const n = ShmDefaultPath(nullptr, 0);
+	if (n < 0)
+		return nullptr;
+	size_t const size = (size_t)n + 1;
+	char *path = malloc(size);
+	// DLSSNR_UID can change between the two calls, and a path cut to fit would name another file.
+	if (path && ShmDefaultPath(path, size) != n) {
+		free(path);
+		path = nullptr;
+	}
+	if (path)
+		*length = size - 1;
+	return path;
+}
+
 /** @brief Maps the channel's header, creating the file if it is not there.
  *
- * The channel is DLSSNR_SHM if it is set and not empty, otherwise ShmDefaultPath().
+ * The channel is channel_path()'s, which the map keeps once the header is mapped.
  *
  * @param s The map.
  * @return  true if the header is mapped.
@@ -274,20 +313,18 @@ shm_map_open (struct shm_map *s)
 	if (s->hdr)
 		return true;
 
-	char const *const path = getenv("DLSSNR_SHM");
-	char p[sizeof s->path];
-	int const length = path && *path ? snprintf(p, sizeof p, "%s", path) : ShmDefaultPath(p, sizeof p);
-	// A path cut to fit would name another file; the kernel refuses one this long anyway.
-	if ((size_t)length >= sizeof p) {
-		log_printf("[shm] open %s failed", p);
+	size_t length;
+	char *p = channel_path(&length);
+	if (!p) {
+		log_printf("[shm] cannot make the channel's path");
 		return false;
 	}
 	if (!ensure_parent_dir(p))
-		return false;
+		goto fail;
 	int fd = open(p, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
 	if (fd < 0) {
 		log_printf("[shm] open %s failed", p);
-		return false;
+		goto fail;
 	}
 	// The file still spans the whole protocol -- the offsets are fixed and both sides agree on them --
 	// but it is sparse, so the size on disk is what has actually been written.
@@ -296,7 +333,7 @@ shm_map_open (struct shm_map *s)
 	if ((fstat(fd, &st) != 0 || (size_t)st.st_size < total) && ftruncate(fd, (off_t)total) != 0) {
 		close(fd);
 		fd = -1;
-		return false;
+		goto fail;
 	}
 
 	void *const m = mmap(nullptr, kHeaderBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -304,10 +341,12 @@ shm_map_open (struct shm_map *s)
 		log_printf("[shm] mmap of the header failed");
 		close(fd);
 		fd = -1;
-		return false;
+		goto fail;
 	}
 	s->fd = fd;
 	s->hdr = m;
+	s->path = p;
+	s->path_length = length;
 	// A mapping left by an older build has a different magic, a different version, or a header laid
 	// out differently; re-initialising is the only safe reading of any of those.
 	//
@@ -325,10 +364,14 @@ shm_map_open (struct shm_map *s)
 		ShmInitDefaults(s->hdr);
 	}
 	s->last_heartbeat = atomic_load(&s->hdr->heartbeat);
-	memcpy(s->path, p, (size_t)length + 1);
-	log_printf("[shm] attached %s seq_req=%u seq_resp=%u", p, atomic_load(&s->hdr->seq_req),
+	log_printf("[shm] attached %s seq_req=%u seq_resp=%u", s->path, atomic_load(&s->hdr->seq_req),
 	           atomic_load(&s->hdr->seq_resp));
 	return true;
+
+fail:
+	free(p);
+	p = nullptr;
+	return false;
 }
 
 /** @brief Whether frames go to the helper: the channel asks for neural rendering, and the helper is
@@ -2512,16 +2555,20 @@ static pthread_once_t g_network_once = PTHREAD_ONCE_INIT; //!< Runs load_network
 static void
 load_network_module (void)
 {
+	static constexpr char name[] = "libdlsslop-network.so";
 	char const *const self = layer_object_path();
 	char const *const slash = strrchr(self, '/');
-	int const directory = slash ? (int)(slash - self) + 1 : 0;
-	char path[PATH_MAX];
-	// A path cut to fit would name another file; the kernel refuses one this long anyway.
-	if ((size_t)snprintf(path, sizeof path, "%.*slibdlsslop-network.so", directory, self) >= sizeof path) {
-		snprintf(g_network.failure, sizeof g_network.failure, "%s: the module's path is too long", self);
+	size_t const directory = slash ? (size_t)(slash - self) + 1 : 0;
+	char *path = malloc(directory + sizeof name);
+	if (!path) {
+		snprintf(g_network.failure, sizeof g_network.failure, "%s: no memory for the module's path", self);
 		return;
 	}
+	memcpy(path, self, directory);
+	memcpy(path + directory, name, sizeof name);
 	network_module_load(&g_network, path);
+	free(path);
+	path = nullptr;
 }
 
 /** @brief Takes the device's network_submit before a submit of the network's build. */

@@ -121,7 +121,7 @@ void check_channel_paths() {
 // capture_writer_directory() as a string. The C form writes what fits and returns the length of
 // the whole path, as snprintf does.
 std::string capture_directory() {
-    char dir[PATH_MAX];
+    char dir[CAPTURE_WRITER_DIR_SIZE];
     const int length = capture_writer_directory(dir, sizeof dir);
     require(length >= 0 && size_t(length) < sizeof dir && size_t(length) == std::strlen(dir),
             "the capture directory did not fit");
@@ -277,20 +277,21 @@ int main() {
     metadata.detail = 0.5f;
 
     // A batch directory that cannot be created: the writer stays idle and abandons the batch it was
-    // writing. With a capture directory that does not fit in PATH_MAX bytes itself, nothing is
-    // created, even when only its terminating null does not fit; with one that fits when its batch
-    // does not, the directories are created and only the batch's is not.
+    // writing. With a capture directory that does not fit in CAPTURE_WRITER_DIR_SIZE bytes itself,
+    // nothing is created, even when only its terminating null does not fit; with one that fits when
+    // its batch does not, the directories are created and only the batch's is not.
     capture_writer_begin(&writer, 2, 129);
     require(capture_writer_active(&writer), "the batch before the failing directories did not start");
     // Components shorter than NAME_MAX, so that only the whole path is too long.
     std::string tooLong = temporary.path.string(), almost = tooLong, exact = tooLong;
-    while (tooLong.size() < PATH_MAX) tooLong += "/" + std::string(200, 'x');
-    while (almost.size() + 201 < PATH_MAX - 30) almost += "/" + std::string(200, 'y');
-    almost += "/" + std::string(PATH_MAX - 31 - almost.size(), 'y');
-    // A capture directory of exactly PATH_MAX bytes, "/dlssnr/captures" included.
-    while (exact.size() + 201 < PATH_MAX - 16) exact += "/" + std::string(200, 'z');
-    require(exact.size() + 18 <= PATH_MAX, "the temporary directory leaves no room for the exact path");
-    exact += "/" + std::string(PATH_MAX - 17 - exact.size(), 'z');
+    constexpr size_t size = CAPTURE_WRITER_DIR_SIZE;
+    while (tooLong.size() < size) tooLong += "/" + std::string(200, 'x');
+    while (almost.size() + 201 < size - 30) almost += "/" + std::string(200, 'y');
+    almost += "/" + std::string(size - 31 - almost.size(), 'y');
+    // A capture directory of exactly CAPTURE_WRITER_DIR_SIZE bytes, "/dlssnr/captures" included.
+    while (exact.size() + 201 < size - 16) exact += "/" + std::string(200, 'z');
+    require(exact.size() + 18 <= size, "the temporary directory leaves no room for the exact path");
+    exact += "/" + std::string(size - 17 - exact.size(), 'z');
     // A capture directory under a file, which mkdir() cannot create.
     const std::string underFile = (temporary.path / "notes").string();
     std::ofstream(underFile) << "a file";
@@ -302,9 +303,9 @@ int main() {
         require(!capture_writer_active(&writer), "an idle writer wrote a frame");
     }
     require(!std::filesystem::exists(temporary.path / std::string(200, 'x'), error),
-            "a directory longer than PATH_MAX was created in part");
+            "a directory longer than CAPTURE_WRITER_DIR_SIZE was created in part");
     require(!std::filesystem::exists(temporary.path / std::string(200, 'z'), error),
-            "a directory of exactly PATH_MAX bytes was created in part");
+            "a directory of exactly CAPTURE_WRITER_DIR_SIZE bytes was created in part");
     const std::string almostCaptures = almost + "/dlssnr/captures";
     require(std::filesystem::is_directory(almostCaptures, error) && std::filesystem::is_empty(almostCaptures, error),
             "the capture directory that fits was not created, or holds a batch");
@@ -333,8 +334,10 @@ int main() {
     // The log cuts a line's text to 2047 bytes.
     const std::string failed = "[capture] cannot create batch directory in ";
     require(logged(log, (failed + almostCaptures).substr(0, 2047)), "the batch directory that did not fit was not logged");
-    require(logged(log, (failed + tooLong).substr(0, 2047)), "the capture directory longer than PATH_MAX was not logged");
-    require(logged(log, (failed + exact).substr(0, 2047)), "the capture directory of PATH_MAX bytes was not logged");
+    require(logged(log, (failed + tooLong).substr(0, 2047)),
+            "the capture directory longer than CAPTURE_WRITER_DIR_SIZE was not logged");
+    require(logged(log, (failed + exact).substr(0, 2047)),
+            "the capture directory of CAPTURE_WRITER_DIR_SIZE bytes was not logged");
     require(logged(log, failed + underFile + "/dlssnr/captures"), "the capture directory under a file was not logged");
     std::printf("PASS: runtime and capture paths, capture publication, provenance, manifest text, preserved batches, BGRA PNG, FP16 raw, write failure, full batch, failed directories, moved environment, log lines\n");
     return 0;
