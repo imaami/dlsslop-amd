@@ -140,8 +140,19 @@ stride. It checks that a dispatch writes its constants into its slot and every
 binding of the slot's set, dispatches the shader's groups and makes the
 placeholder only once, that the dispatch after a failed placeholder makes it
 again, and that the passes refuse dispatches that miss a command buffer or an
-image. With the tests, the build compiles `tests/c_headers.c`, which includes
-as C the headers that C and C++ share.
+image. The composition test builds the composition on a fake device in seven
+arrangements of its surfaces: 8-bit frames at, below and above the model's
+raster, linear frames with and without a float16 proxy, an exported transport
+pair and the raw bypass. In each, it fails every fallible call in turn and
+checks that the composition then holds every object it made and no other,
+that the next frame builds again, that both legs record the dispatches and
+copies of the arrangement and name no destroyed object, and that finishing the
+composition frees everything once. It also checks that a rebuild keeps a held
+frame of the same shape, that whatever ends a transport offer closes its
+connection once, the exported pair's offer, and the swapchain formats that the
+composition blits through half float or cannot write. With the tests, the build
+compiles `tests/c_headers.c`, which includes as C the headers that C and C++
+share.
 
 Two checks disassemble the built HIP modules and need `llvm-objdump`. The
 LDS-barrier check fails when a shared-memory access can still be outstanding at

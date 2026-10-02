@@ -32,7 +32,8 @@
 
 namespace {
 
-using dlssnr::FrameSettings;
+// The settings, under a name that does not hide behind the function composition_frame_settings().
+using Settings = struct composition_frame_settings;
 
 [[noreturn]] void Fail(const std::string& message) {
     std::fprintf(stderr, "layer-units-test: %s\n", message.c_str());
@@ -43,67 +44,66 @@ void Require(bool condition, const std::string& message) {
     if (!condition) Fail(message);
 }
 
-// Every field of FrameSettings, with its initial value.
+// Every field of the settings, with its initial value.
 struct RealField {
     const char* name;
-    float FrameSettings::*field;
+    float Settings::*field;
     float initial;
 };
 
 struct WordField {
     const char* name;
-    uint32_t FrameSettings::*field;
+    uint32_t Settings::*field;
     uint32_t initial;
 };
 
 constexpr RealField kReals[] = {
-    {"transferStrength", &FrameSettings::transferStrength, 1.0f},
-    {"colourStrength", &FrameSettings::colourStrength, 1.0f},
-    {"maxRatio", &FrameSettings::maxRatio, 2.0f},
-    {"debugScale", &FrameSettings::debugScale, 1.0f},
-    {"whitePointManual", &FrameSettings::whitePointManual, 1.0f},
-    {"whitePointScale", &FrameSettings::whitePointScale, 1.0f},
-    {"whitePointTrim", &FrameSettings::whitePointTrim, 1.0f},
-    {"compareSplit", &FrameSettings::compareSplit, 0.5f},
-    {"compareZoom", &FrameSettings::compareZoom, 1.0f},
-    {"workingScale", &FrameSettings::workingScale, 1.0f},
-    {"ghostSlack", &FrameSettings::ghostSlack, 0.5f},
-    {"editBlur", &FrameSettings::editBlur, 0.04f},
-    {"motionSmooth", &FrameSettings::motionSmooth, 1.0f},
-    {"colourTrust", &FrameSettings::colourTrust, 1.0f},
-    {"ratioSmooth", &FrameSettings::ratioSmooth, 0.0f},
+    {"transfer_strength", &Settings::transfer_strength, 1.0f},
+    {"colour_strength", &Settings::colour_strength, 1.0f},
+    {"max_ratio", &Settings::max_ratio, 2.0f},
+    {"debug_scale", &Settings::debug_scale, 1.0f},
+    {"white_point_manual", &Settings::white_point_manual, 1.0f},
+    {"white_point_scale", &Settings::white_point_scale, 1.0f},
+    {"white_point_trim", &Settings::white_point_trim, 1.0f},
+    {"compare_split", &Settings::compare_split, 0.5f},
+    {"compare_zoom", &Settings::compare_zoom, 1.0f},
+    {"working_scale", &Settings::working_scale, 1.0f},
+    {"ghost_slack", &Settings::ghost_slack, 0.5f},
+    {"edit_blur", &Settings::edit_blur, 0.04f},
+    {"motion_smooth", &Settings::motion_smooth, 1.0f},
+    {"colour_trust", &Settings::colour_trust, 1.0f},
+    {"ratio_smooth", &Settings::ratio_smooth, 0.0f},
 };
 
 constexpr WordField kWords[] = {
-    {"controlSeq", &FrameSettings::controlSeq, 0},
-    {"tuningSeq", &FrameSettings::tuningSeq, 0},
-    {"passes", &FrameSettings::passes, 0},
-    {"whitePointSource", &FrameSettings::whitePointSource, kWhitePointManual},
-    {"nativeModelMaxWidth", &FrameSettings::nativeModelMaxWidth, 0},
-    {"nativeModelMaxHeight", &FrameSettings::nativeModelMaxHeight, 0},
-    {"transfer", &FrameSettings::transfer, 1},
-    {"debugView", &FrameSettings::debugView, 0},
-    {"compareMode", &FrameSettings::compareMode, 0},
-    {"compareSwap", &FrameSettings::compareSwap, 0},
-    {"reversibleMode", &FrameSettings::reversibleMode, kReversibleKnee},
-    {"applyModel", &FrameSettings::applyModel, 1},
-    {"holdFrame", &FrameSettings::holdFrame, 0},
-    {"downscaler", &FrameSettings::downscaler, SCALER_VK_LANCZOS3},
-    {"compositionBypass", &FrameSettings::compositionBypass, 0},
+    {"control_seq", &Settings::control_seq, 0},
+    {"tuning_seq", &Settings::tuning_seq, 0},
+    {"passes", &Settings::passes, 0},
+    {"white_point_source", &Settings::white_point_source, kWhitePointManual},
+    {"native_model_max_width", &Settings::native_model_max_width, 0},
+    {"native_model_max_height", &Settings::native_model_max_height, 0},
+    {"transfer", &Settings::transfer, 1},
+    {"debug_view", &Settings::debug_view, 0},
+    {"compare_mode", &Settings::compare_mode, 0},
+    {"compare_swap", &Settings::compare_swap, 0},
+    {"reversible_mode", &Settings::reversible_mode, kReversibleKnee},
+    {"apply_model", &Settings::apply_model, 1},
+    {"hold_frame", &Settings::hold_frame, 0},
+    {"downscaler", &Settings::downscaler, SCALER_VK_LANCZOS3},
+    {"composition_bypass", &Settings::composition_bypass, 0},
 };
 
-static_assert(std::size(kReals) + std::size(kWords) == sizeof(FrameSettings) / 4,
-              "every FrameSettings field needs a row");
+static_assert(std::size(kReals) + std::size(kWords) == sizeof(Settings) / 4, "every settings field needs a row");
 
-FrameSettings Initial() {
-    FrameSettings s;
+Settings Initial() {
+    Settings s{};
     for (const RealField& f : kReals) s.*f.field = f.initial;
     for (const WordField& f : kWords) s.*f.field = f.initial;
     return s;
 }
 
 // Field by field, and bit for bit for the reals: -0.0 is not 0.0 here.
-void Expect(const FrameSettings& got, const FrameSettings& want, const std::string& label) {
+void Expect(const Settings& got, const Settings& want, const std::string& label) {
     for (const RealField& f : kReals) {
         if (FloatToBits(got.*f.field) == FloatToBits(want.*f.field)) continue;
         char text[160];
@@ -122,57 +122,57 @@ struct Header {
     Header() { ShmInitNativeDefaults(&h, false); }
 };
 
-FrameSettings NativeDefaults() {
-    FrameSettings s = Initial();
+Settings NativeDefaults() {
+    Settings s = Initial();
     s.passes = kNativeDefaultPasses;
     s.transfer = 2;
-    s.ratioSmooth = 1.0f;
-    s.colourTrust = 2.0f;
+    s.ratio_smooth = 1.0f;
+    s.colour_trust = 2.0f;
     return s;
 }
 
-// The five overrides FrameSettings::Read takes from the environment, read once per process: each
-// row runs in a child of its own, forked before this process reads any settings.
+// The five overrides composition_frame_settings_read() takes from the environment, read once per
+// process: each row runs in a child of its own, forked before this process reads any settings.
 struct Override {
     const char* variable;
     const char* value;
-    float FrameSettings::*field;
+    float Settings::*field;
     float want;
 };
 
 const Override kOverrides[] = {
     // Percent; no bound above, a negative number or none keeps the default.
-    {"DLSSNR_GHOST_SLACK", "25", &FrameSettings::ghostSlack, 25 / 100.0f},
-    {"DLSSNR_GHOST_SLACK", "150", &FrameSettings::ghostSlack, 150 / 100.0f},
-    {"DLSSNR_GHOST_SLACK", "0", &FrameSettings::ghostSlack, 0.0f},
-    {"DLSSNR_GHOST_SLACK", "", &FrameSettings::ghostSlack, 0.5f},
-    {"DLSSNR_GHOST_SLACK", "-5", &FrameSettings::ghostSlack, 0.5f},
+    {"DLSSNR_GHOST_SLACK", "25", &Settings::ghost_slack, 25 / 100.0f},
+    {"DLSSNR_GHOST_SLACK", "150", &Settings::ghost_slack, 150 / 100.0f},
+    {"DLSSNR_GHOST_SLACK", "0", &Settings::ghost_slack, 0.0f},
+    {"DLSSNR_GHOST_SLACK", "", &Settings::ghost_slack, 0.5f},
+    {"DLSSNR_GHOST_SLACK", "-5", &Settings::ghost_slack, 0.5f},
     // atoi: a prefix of digits counts, and no digits are 0.
-    {"DLSSNR_GHOST_SLACK", "12abc", &FrameSettings::ghostSlack, 12 / 100.0f},
-    {"DLSSNR_GHOST_SLACK", "abc", &FrameSettings::ghostSlack, 0.0f},
+    {"DLSSNR_GHOST_SLACK", "12abc", &Settings::ghost_slack, 12 / 100.0f},
+    {"DLSSNR_GHOST_SLACK", "abc", &Settings::ghost_slack, 0.0f},
     // Percent over the header's ratioSmoothPercent, up to 1.
-    {"DLSSNR_RATIO_SMOOTH", "50", &FrameSettings::ratioSmooth, 50 / 100.0f},
-    {"DLSSNR_RATIO_SMOOTH", "150", &FrameSettings::ratioSmooth, 1.0f},
-    {"DLSSNR_RATIO_SMOOTH", "0", &FrameSettings::ratioSmooth, 0.0f},
-    {"DLSSNR_RATIO_SMOOTH", "", &FrameSettings::ratioSmooth, 1.0f},
-    {"DLSSNR_RATIO_SMOOTH", "-5", &FrameSettings::ratioSmooth, 1.0f},
+    {"DLSSNR_RATIO_SMOOTH", "50", &Settings::ratio_smooth, 50 / 100.0f},
+    {"DLSSNR_RATIO_SMOOTH", "150", &Settings::ratio_smooth, 1.0f},
+    {"DLSSNR_RATIO_SMOOTH", "0", &Settings::ratio_smooth, 0.0f},
+    {"DLSSNR_RATIO_SMOOTH", "", &Settings::ratio_smooth, 1.0f},
+    {"DLSSNR_RATIO_SMOOTH", "-5", &Settings::ratio_smooth, 1.0f},
     // Percent over the header's colourTrustPercent, up to 8.
-    {"DLSSNR_COLOUR_TRUST", "50", &FrameSettings::colourTrust, 50 / 100.0f},
-    {"DLSSNR_COLOUR_TRUST", "900", &FrameSettings::colourTrust, 8.0f},
-    {"DLSSNR_COLOUR_TRUST", "", &FrameSettings::colourTrust, 2.0f},
-    {"DLSSNR_COLOUR_TRUST", "-1", &FrameSettings::colourTrust, 2.0f},
+    {"DLSSNR_COLOUR_TRUST", "50", &Settings::colour_trust, 50 / 100.0f},
+    {"DLSSNR_COLOUR_TRUST", "900", &Settings::colour_trust, 8.0f},
+    {"DLSSNR_COLOUR_TRUST", "", &Settings::colour_trust, 2.0f},
+    {"DLSSNR_COLOUR_TRUST", "-1", &Settings::colour_trust, 2.0f},
     // Percent, up to 1; the header has no field for it.
-    {"DLSSNR_MOTION_SMOOTH", "40", &FrameSettings::motionSmooth, 40 / 100.0f},
-    {"DLSSNR_MOTION_SMOOTH", "150", &FrameSettings::motionSmooth, 1.0f},
-    {"DLSSNR_MOTION_SMOOTH", "0", &FrameSettings::motionSmooth, 0.0f},
-    {"DLSSNR_MOTION_SMOOTH", "", &FrameSettings::motionSmooth, 1.0f},
-    {"DLSSNR_MOTION_SMOOTH", "-1", &FrameSettings::motionSmooth, 1.0f},
+    {"DLSSNR_MOTION_SMOOTH", "40", &Settings::motion_smooth, 40 / 100.0f},
+    {"DLSSNR_MOTION_SMOOTH", "150", &Settings::motion_smooth, 1.0f},
+    {"DLSSNR_MOTION_SMOOTH", "0", &Settings::motion_smooth, 0.0f},
+    {"DLSSNR_MOTION_SMOOTH", "", &Settings::motion_smooth, 1.0f},
+    {"DLSSNR_MOTION_SMOOTH", "-1", &Settings::motion_smooth, 1.0f},
     // Per mille, up to 0.25.
-    {"DLSSNR_EDIT_BLUR", "100", &FrameSettings::editBlur, 100 / 1000.0f},
-    {"DLSSNR_EDIT_BLUR", "300", &FrameSettings::editBlur, 0.25f},
-    {"DLSSNR_EDIT_BLUR", "0", &FrameSettings::editBlur, 0.0f},
-    {"DLSSNR_EDIT_BLUR", "", &FrameSettings::editBlur, 0.04f},
-    {"DLSSNR_EDIT_BLUR", "-1", &FrameSettings::editBlur, 0.04f},
+    {"DLSSNR_EDIT_BLUR", "100", &Settings::edit_blur, 100 / 1000.0f},
+    {"DLSSNR_EDIT_BLUR", "300", &Settings::edit_blur, 0.25f},
+    {"DLSSNR_EDIT_BLUR", "0", &Settings::edit_blur, 0.0f},
+    {"DLSSNR_EDIT_BLUR", "", &Settings::edit_blur, 0.04f},
+    {"DLSSNR_EDIT_BLUR", "-1", &Settings::edit_blur, 0.04f},
 };
 
 void CheckOverrides() {
@@ -184,9 +184,9 @@ void CheckOverrides() {
         if (!child) {
             if (setenv(o.variable, o.value, 1)) _exit(2);
             const Header header;
-            FrameSettings want = NativeDefaults();
+            Settings want = NativeDefaults();
             want.*o.field = o.want;
-            Expect(FrameSettings::Read(&header.h), want, label);
+            Expect(composition_frame_settings_read(&header.h), want, label);
             std::fflush(nullptr);
             _exit(0);
         }
@@ -197,93 +197,95 @@ void CheckOverrides() {
     }
 }
 
-// The header's floats, and what Read makes of one that is not a number or infinite: the default,
-// not a bound.
+// The header's floats, and what composition_frame_settings_read() makes of one that is not a number
+// or infinite: the default, not a bound.
 struct HeaderReal {
     std::atomic<uint32_t> ShmHeader::*bits;
-    float FrameSettings::*field;
+    float Settings::*field;
     float fallback;
 };
 
 const HeaderReal kHeaderReals[] = {
-    {&ShmHeader::transferStrengthBits, &FrameSettings::transferStrength, 1.0f},
-    {&ShmHeader::colourStrengthBits, &FrameSettings::colourStrength, 1.0f},
-    {&ShmHeader::maxRatioBits, &FrameSettings::maxRatio, 2.0f},
-    {&ShmHeader::debugScaleBits, &FrameSettings::debugScale, 1.0f},
-    {&ShmHeader::whitePointBits, &FrameSettings::whitePointManual, 1.0f},
-    {&ShmHeader::whitePointScaleBits, &FrameSettings::whitePointScale, 1.0f},
-    {&ShmHeader::whitePointTrimBits, &FrameSettings::whitePointTrim, 1.0f},
-    {&ShmHeader::compareSplitBits, &FrameSettings::compareSplit, 0.5f},
-    {&ShmHeader::compareZoomBits, &FrameSettings::compareZoom, 1.0f},
-    {&ShmHeader::workingScaleBits, &FrameSettings::workingScale, 1.0f},
+    {&ShmHeader::transferStrengthBits, &Settings::transfer_strength, 1.0f},
+    {&ShmHeader::colourStrengthBits, &Settings::colour_strength, 1.0f},
+    {&ShmHeader::maxRatioBits, &Settings::max_ratio, 2.0f},
+    {&ShmHeader::debugScaleBits, &Settings::debug_scale, 1.0f},
+    {&ShmHeader::whitePointBits, &Settings::white_point_manual, 1.0f},
+    {&ShmHeader::whitePointScaleBits, &Settings::white_point_scale, 1.0f},
+    {&ShmHeader::whitePointTrimBits, &Settings::white_point_trim, 1.0f},
+    {&ShmHeader::compareSplitBits, &Settings::compare_split, 0.5f},
+    {&ShmHeader::compareZoomBits, &Settings::compare_zoom, 1.0f},
+    {&ShmHeader::workingScaleBits, &Settings::working_scale, 1.0f},
 };
 
-// A finite header float and what Read makes of it: clamped to the nearer bound, or unchanged
-// within them. -0.0 stays -0.0, as std::max keeps its first argument when both compare equal.
+// A finite header float and what composition_frame_settings_read() makes of it: clamped to the
+// nearer bound, or unchanged within them. -0.0 stays -0.0, as std::max keeps its first argument when
+// both compare equal.
 struct RealCase {
     std::atomic<uint32_t> ShmHeader::*bits;
-    float FrameSettings::*field;
+    float Settings::*field;
     float value, want;
 };
 
 const RealCase kRealCases[] = {
-    {&ShmHeader::transferStrengthBits, &FrameSettings::transferStrength, -1.0f, 0.0f},
-    {&ShmHeader::transferStrengthBits, &FrameSettings::transferStrength, -0.0f, -0.0f},
-    {&ShmHeader::transferStrengthBits, &FrameSettings::transferStrength, 0.0f, 0.0f},
-    {&ShmHeader::transferStrengthBits, &FrameSettings::transferStrength, 5.0f, 4.0f},
-    {&ShmHeader::colourStrengthBits, &FrameSettings::colourStrength, -2.0f, 0.0f},
-    {&ShmHeader::colourStrengthBits, &FrameSettings::colourStrength, 3.5f, 3.5f},
-    {&ShmHeader::colourStrengthBits, &FrameSettings::colourStrength, 4.5f, 4.0f},
-    {&ShmHeader::maxRatioBits, &FrameSettings::maxRatio, 0.5f, 1.0f},
-    {&ShmHeader::maxRatioBits, &FrameSettings::maxRatio, 7.25f, 7.25f},
-    {&ShmHeader::maxRatioBits, &FrameSettings::maxRatio, 100.0f, float(kMaxPasses)},
-    {&ShmHeader::debugScaleBits, &FrameSettings::debugScale, 0.0f, 0.01f},
-    {&ShmHeader::debugScaleBits, &FrameSettings::debugScale, 0.01f, 0.01f},
-    {&ShmHeader::debugScaleBits, &FrameSettings::debugScale, 1000.0f, 100.0f},
-    {&ShmHeader::whitePointBits, &FrameSettings::whitePointManual, 0.0f, 1e-4f},
-    {&ShmHeader::whitePointBits, &FrameSettings::whitePointManual, 2000.0f, 2000.0f},
-    {&ShmHeader::whitePointBits, &FrameSettings::whitePointManual, 1e6f, 2000.0f},
-    {&ShmHeader::whitePointScaleBits, &FrameSettings::whitePointScale, -3.0f, 0.01f},
-    {&ShmHeader::whitePointScaleBits, &FrameSettings::whitePointScale, 0.3f, 0.3f},
-    {&ShmHeader::whitePointScaleBits, &FrameSettings::whitePointScale, 101.0f, 100.0f},
-    {&ShmHeader::whitePointTrimBits, &FrameSettings::whitePointTrim, 0.001f, 0.01f},
-    {&ShmHeader::whitePointTrimBits, &FrameSettings::whitePointTrim, 100.0f, 100.0f},
-    {&ShmHeader::whitePointTrimBits, &FrameSettings::whitePointTrim, 1e30f, 100.0f},
-    {&ShmHeader::compareSplitBits, &FrameSettings::compareSplit, -0.5f, 0.0f},
-    {&ShmHeader::compareSplitBits, &FrameSettings::compareSplit, 1.0f, 1.0f},
-    {&ShmHeader::compareSplitBits, &FrameSettings::compareSplit, 2.0f, 1.0f},
-    {&ShmHeader::compareZoomBits, &FrameSettings::compareZoom, 0.5f, 1.0f},
-    {&ShmHeader::compareZoomBits, &FrameSettings::compareZoom, 1.5f, 1.5f},
-    {&ShmHeader::compareZoomBits, &FrameSettings::compareZoom, 3.0f, 2.0f},
-    {&ShmHeader::workingScaleBits, &FrameSettings::workingScale, 0.1f, 0.25f},
-    {&ShmHeader::workingScaleBits, &FrameSettings::workingScale, 0.25f, 0.25f},
-    {&ShmHeader::workingScaleBits, &FrameSettings::workingScale, 4.0f, 2.0f},
+    {&ShmHeader::transferStrengthBits, &Settings::transfer_strength, -1.0f, 0.0f},
+    {&ShmHeader::transferStrengthBits, &Settings::transfer_strength, -0.0f, -0.0f},
+    {&ShmHeader::transferStrengthBits, &Settings::transfer_strength, 0.0f, 0.0f},
+    {&ShmHeader::transferStrengthBits, &Settings::transfer_strength, 5.0f, 4.0f},
+    {&ShmHeader::colourStrengthBits, &Settings::colour_strength, -2.0f, 0.0f},
+    {&ShmHeader::colourStrengthBits, &Settings::colour_strength, 3.5f, 3.5f},
+    {&ShmHeader::colourStrengthBits, &Settings::colour_strength, 4.5f, 4.0f},
+    {&ShmHeader::maxRatioBits, &Settings::max_ratio, 0.5f, 1.0f},
+    {&ShmHeader::maxRatioBits, &Settings::max_ratio, 7.25f, 7.25f},
+    {&ShmHeader::maxRatioBits, &Settings::max_ratio, 100.0f, float(kMaxPasses)},
+    {&ShmHeader::debugScaleBits, &Settings::debug_scale, 0.0f, 0.01f},
+    {&ShmHeader::debugScaleBits, &Settings::debug_scale, 0.01f, 0.01f},
+    {&ShmHeader::debugScaleBits, &Settings::debug_scale, 1000.0f, 100.0f},
+    {&ShmHeader::whitePointBits, &Settings::white_point_manual, 0.0f, 1e-4f},
+    {&ShmHeader::whitePointBits, &Settings::white_point_manual, 2000.0f, 2000.0f},
+    {&ShmHeader::whitePointBits, &Settings::white_point_manual, 1e6f, 2000.0f},
+    {&ShmHeader::whitePointScaleBits, &Settings::white_point_scale, -3.0f, 0.01f},
+    {&ShmHeader::whitePointScaleBits, &Settings::white_point_scale, 0.3f, 0.3f},
+    {&ShmHeader::whitePointScaleBits, &Settings::white_point_scale, 101.0f, 100.0f},
+    {&ShmHeader::whitePointTrimBits, &Settings::white_point_trim, 0.001f, 0.01f},
+    {&ShmHeader::whitePointTrimBits, &Settings::white_point_trim, 100.0f, 100.0f},
+    {&ShmHeader::whitePointTrimBits, &Settings::white_point_trim, 1e30f, 100.0f},
+    {&ShmHeader::compareSplitBits, &Settings::compare_split, -0.5f, 0.0f},
+    {&ShmHeader::compareSplitBits, &Settings::compare_split, 1.0f, 1.0f},
+    {&ShmHeader::compareSplitBits, &Settings::compare_split, 2.0f, 1.0f},
+    {&ShmHeader::compareZoomBits, &Settings::compare_zoom, 0.5f, 1.0f},
+    {&ShmHeader::compareZoomBits, &Settings::compare_zoom, 1.5f, 1.5f},
+    {&ShmHeader::compareZoomBits, &Settings::compare_zoom, 3.0f, 2.0f},
+    {&ShmHeader::workingScaleBits, &Settings::working_scale, 0.1f, 0.25f},
+    {&ShmHeader::workingScaleBits, &Settings::working_scale, 0.25f, 0.25f},
+    {&ShmHeader::workingScaleBits, &Settings::working_scale, 4.0f, 2.0f},
 };
 
 // Reads a header that differs from the daemon's defaults in one float.
-void CheckReal(std::atomic<uint32_t> ShmHeader::*bits, float FrameSettings::*field, float value, float want) {
+void CheckReal(std::atomic<uint32_t> ShmHeader::*bits, float Settings::*field, float value, float want) {
     Header header;
     (header.h.*bits).store(FloatToBits(value));
-    FrameSettings expected = NativeDefaults();
+    Settings expected = NativeDefaults();
     expected.*field = want;
-    Expect(FrameSettings::Read(&header.h), expected, "a header value of " + std::to_string(value));
+    Expect(composition_frame_settings_read(&header.h), expected,
+           "a header value of " + std::to_string(value));
 }
 
 void CheckRead() {
-    Expect(FrameSettings{}, Initial(), "the initializers");
-    Expect(FrameSettings::Read(nullptr), Initial(), "no header");
+    Expect(composition_frame_settings(), Initial(), "the defaults");
+    Expect(composition_frame_settings_read(nullptr), Initial(), "no header");
     {
         const Header header;
-        Expect(FrameSettings::Read(&header.h), NativeDefaults(), "the daemon's defaults");
+        Expect(composition_frame_settings_read(&header.h), NativeDefaults(), "the daemon's defaults");
     }
     {
         // What the layer writes when it creates the channel.
         ShmHeader h{};
         ShmInitDefaults(&h);
-        FrameSettings want = NativeDefaults();
+        Settings want = NativeDefaults();
         want.transfer = 1;
-        want.compositionBypass = 1;
-        Expect(FrameSettings::Read(&h), want, "the layer's defaults");
+        want.composition_bypass = 1;
+        Expect(composition_frame_settings_read(&h), want, "the layer's defaults");
     }
     for (const float value : {std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity(),
                               -std::numeric_limits<float>::infinity()})
@@ -294,63 +296,63 @@ void CheckRead() {
     struct Word {
         std::atomic<uint32_t> ShmHeader::*source;
         uint32_t value;
-        uint32_t FrameSettings::*field;
+        uint32_t Settings::*field;
         uint32_t want;
     };
     static const Word kWordCases[] = {
-        {&ShmHeader::whitePointSource, kWhitePointMeasured, &FrameSettings::whitePointSource, kWhitePointMeasured},
-        {&ShmHeader::whitePointSource, kWhitePointMeasured + 1, &FrameSettings::whitePointSource, kWhitePointManual},
-        {&ShmHeader::transfer, 0, &FrameSettings::transfer, 0},
-        {&ShmHeader::transfer, 3, &FrameSettings::transfer, 2},
-        {&ShmHeader::transfer, UINT32_MAX, &FrameSettings::transfer, 2},
-        {&ShmHeader::debugView, 5, &FrameSettings::debugView, 5},
-        {&ShmHeader::debugView, 6, &FrameSettings::debugView, 0},
-        {&ShmHeader::compareMode, 2, &FrameSettings::compareMode, 2},
-        {&ShmHeader::compareMode, 3, &FrameSettings::compareMode, 0},
-        {&ShmHeader::reversibleMode, kReversibleModeCount - 1, &FrameSettings::reversibleMode,
+        {&ShmHeader::whitePointSource, kWhitePointMeasured, &Settings::white_point_source, kWhitePointMeasured},
+        {&ShmHeader::whitePointSource, kWhitePointMeasured + 1, &Settings::white_point_source, kWhitePointManual},
+        {&ShmHeader::transfer, 0, &Settings::transfer, 0},
+        {&ShmHeader::transfer, 3, &Settings::transfer, 2},
+        {&ShmHeader::transfer, UINT32_MAX, &Settings::transfer, 2},
+        {&ShmHeader::debugView, 5, &Settings::debug_view, 5},
+        {&ShmHeader::debugView, 6, &Settings::debug_view, 0},
+        {&ShmHeader::compareMode, 2, &Settings::compare_mode, 2},
+        {&ShmHeader::compareMode, 3, &Settings::compare_mode, 0},
+        {&ShmHeader::reversibleMode, kReversibleModeCount - 1, &Settings::reversible_mode,
          kReversibleModeCount - 1},
-        {&ShmHeader::reversibleMode, kReversibleModeCount, &FrameSettings::reversibleMode, kReversibleKnee},
-        {&ShmHeader::scalingDownscaler, SCALER_VK_BICUBIC, &FrameSettings::downscaler, SCALER_VK_BICUBIC},
-        {&ShmHeader::scalingDownscaler, SCALER_VK_MAGIC, &FrameSettings::downscaler, SCALER_VK_MAGIC},
-        {&ShmHeader::scalingDownscaler, SCALER_VK_FSR1, &FrameSettings::downscaler, SCALER_VK_LANCZOS3},
-        {&ShmHeader::scalingDownscaler, SCALER_VK_COUNT, &FrameSettings::downscaler, SCALER_VK_LANCZOS3},
-        {&ShmHeader::controlSeq, 77, &FrameSettings::controlSeq, 77},
-        {&ShmHeader::tuningSeq, 78, &FrameSettings::tuningSeq, 78},
-        {&ShmHeader::passes, 99, &FrameSettings::passes, 99},
-        {&ShmHeader::compareSwap, 7, &FrameSettings::compareSwap, 7},
-        {&ShmHeader::applyModel, 0, &FrameSettings::applyModel, 0},
-        {&ShmHeader::holdFrame, 3, &FrameSettings::holdFrame, 3},
-        {&ShmHeader::compositionBypass, 2, &FrameSettings::compositionBypass, 2},
+        {&ShmHeader::reversibleMode, kReversibleModeCount, &Settings::reversible_mode, kReversibleKnee},
+        {&ShmHeader::scalingDownscaler, SCALER_VK_BICUBIC, &Settings::downscaler, SCALER_VK_BICUBIC},
+        {&ShmHeader::scalingDownscaler, SCALER_VK_MAGIC, &Settings::downscaler, SCALER_VK_MAGIC},
+        {&ShmHeader::scalingDownscaler, SCALER_VK_FSR1, &Settings::downscaler, SCALER_VK_LANCZOS3},
+        {&ShmHeader::scalingDownscaler, SCALER_VK_COUNT, &Settings::downscaler, SCALER_VK_LANCZOS3},
+        {&ShmHeader::controlSeq, 77, &Settings::control_seq, 77},
+        {&ShmHeader::tuningSeq, 78, &Settings::tuning_seq, 78},
+        {&ShmHeader::passes, 99, &Settings::passes, 99},
+        {&ShmHeader::compareSwap, 7, &Settings::compare_swap, 7},
+        {&ShmHeader::applyModel, 0, &Settings::apply_model, 0},
+        {&ShmHeader::holdFrame, 3, &Settings::hold_frame, 3},
+        {&ShmHeader::compositionBypass, 2, &Settings::composition_bypass, 2},
     };
     for (const Word& w : kWordCases) {
         Header header;
         (header.h.*w.source).store(w.value);
-        FrameSettings want = NativeDefaults();
+        Settings want = NativeDefaults();
         want.*w.field = w.want;
-        Expect(FrameSettings::Read(&header.h), want, "word " + std::to_string(w.value));
+        Expect(composition_frame_settings_read(&header.h), want, "word " + std::to_string(w.value));
     }
 
     // Percentages from the header: ratio smoothing up to 1, colour trust up to 8.
     struct Percent {
         std::atomic<uint32_t> ShmHeader::*source;
         uint32_t value;
-        float FrameSettings::*field;
+        float Settings::*field;
         float want;
     };
     static const Percent kPercents[] = {
-        {&ShmHeader::ratioSmoothPercent, 0, &FrameSettings::ratioSmooth, 0.0f},
-        {&ShmHeader::ratioSmoothPercent, 50, &FrameSettings::ratioSmooth, 50 / 100.0f},
-        {&ShmHeader::ratioSmoothPercent, 150, &FrameSettings::ratioSmooth, 1.0f},
-        {&ShmHeader::colourTrustPercent, 0, &FrameSettings::colourTrust, 0.0f},
-        {&ShmHeader::colourTrustPercent, 350, &FrameSettings::colourTrust, 350 / 100.0f},
-        {&ShmHeader::colourTrustPercent, 1000, &FrameSettings::colourTrust, 8.0f},
+        {&ShmHeader::ratioSmoothPercent, 0, &Settings::ratio_smooth, 0.0f},
+        {&ShmHeader::ratioSmoothPercent, 50, &Settings::ratio_smooth, 50 / 100.0f},
+        {&ShmHeader::ratioSmoothPercent, 150, &Settings::ratio_smooth, 1.0f},
+        {&ShmHeader::colourTrustPercent, 0, &Settings::colour_trust, 0.0f},
+        {&ShmHeader::colourTrustPercent, 350, &Settings::colour_trust, 350 / 100.0f},
+        {&ShmHeader::colourTrustPercent, 1000, &Settings::colour_trust, 8.0f},
     };
     for (const Percent& p : kPercents) {
         Header header;
         (header.h.*p.source).store(p.value);
-        FrameSettings want = NativeDefaults();
+        Settings want = NativeDefaults();
         want.*p.field = p.want;
-        Expect(FrameSettings::Read(&header.h), want, "percent " + std::to_string(p.value));
+        Expect(composition_frame_settings_read(&header.h), want, "percent " + std::to_string(p.value));
     }
 
     // The native model's maximum raster: a pair within kMinW..kMaxW x kMinH..kMaxH, or none.
@@ -372,10 +374,10 @@ void CheckRead() {
         Header header;
         header.h.nativeModelMaxWidth.store(m.width);
         header.h.nativeModelMaxHeight.store(m.height);
-        FrameSettings want = NativeDefaults();
-        want.nativeModelMaxWidth = m.wantWidth;
-        want.nativeModelMaxHeight = m.wantHeight;
-        Expect(FrameSettings::Read(&header.h), want,
+        Settings want = NativeDefaults();
+        want.native_model_max_width = m.wantWidth;
+        want.native_model_max_height = m.wantHeight;
+        Expect(composition_frame_settings_read(&header.h), want,
                "maxima " + std::to_string(m.width) + "x" + std::to_string(m.height));
     }
 }
@@ -420,17 +422,17 @@ void CheckModelExtent() {
         {105, 105, 0.7f, 3840, 2160, 73, 73},
     };
     for (const Case& c : kCases) {
-        FrameSettings s = Initial();
-        s.workingScale = c.workingScale;
-        s.nativeModelMaxWidth = c.maxWidth;
-        s.nativeModelMaxHeight = c.maxHeight;
-        uint32_t width = 0, height = 0;
-        dlssnr::Composition::ModelExtent(c.width, c.height, s, width, height);
-        char label[160];
-        std::snprintf(label, sizeof label, "ModelExtent(%ux%u, scale %g, maximum %ux%u) is %ux%u, not %ux%u",
-                      c.width, c.height, double(c.workingScale), c.maxWidth, c.maxHeight, width, height,
+        Settings s = Initial();
+        s.working_scale = c.workingScale;
+        s.native_model_max_width = c.maxWidth;
+        s.native_model_max_height = c.maxHeight;
+        const VkExtent2D model = composition_model_extent(c.width, c.height, &s);
+        char label[176];
+        std::snprintf(label, sizeof label,
+                      "composition_model_extent(%ux%u, scale %g, maximum %ux%u) is %ux%u, not %ux%u", c.width,
+                      c.height, double(c.workingScale), c.maxWidth, c.maxHeight, model.width, model.height,
                       c.modelWidth, c.modelHeight);
-        Require(width == c.modelWidth && height == c.modelHeight, label);
+        Require(model.width == c.modelWidth && model.height == c.modelHeight, label);
     }
 }
 
@@ -459,9 +461,9 @@ void CheckFormats() {
         {VkFormat(1000452000), VK_FORMAT_UNDEFINED},
     };
     for (const Format& f : kFormats)
-        Require(dlssnr::CompositionFormat(f.swapchain) == f.composition,
-                "CompositionFormat(" + std::to_string(f.swapchain) + ") is " +
-                std::to_string(dlssnr::CompositionFormat(f.swapchain)));
+        Require(composition_format(f.swapchain) == f.composition,
+                "composition_format(" + std::to_string(f.swapchain) + ") is " +
+                std::to_string(composition_format(f.swapchain)));
 
     // Display-referred and linear HDR are forced; auto, and any other mode, takes a float
     // swapchain for light and everything else for a picture.
@@ -471,8 +473,9 @@ void CheckFormats() {
                                            std::pair{uint32_t(kColourDisplay), false},
                                            std::pair{uint32_t(kColourLinearHdr), true},
                                            std::pair{3u, fp16}, std::pair{UINT32_MAX, fp16}})
-            Require(dlssnr::ColourIsLinearHdr(f.swapchain, mode) == linear,
-                    "ColourIsLinearHdr(" + std::to_string(f.swapchain) + ", " + std::to_string(mode) + ")");
+            Require(composition_colour_is_linear_hdr(f.swapchain, mode) == linear,
+                    "composition_colour_is_linear_hdr(" + std::to_string(f.swapchain) + ", " + std::to_string(mode) +
+                    ")");
     }
 }
 

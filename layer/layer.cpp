@@ -16,7 +16,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
-#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -394,7 +393,7 @@ enum class Offer { kReady, kDeclined, kWaiting, kLater };
 
 // Hands the composition's exported frames to the daemon under a fresh generation and wakes it.
 // The connection the answer comes on, or -1.
-static int SendOffer(ShmMap& s, dlssnr::Composition& comp) {
+static int SendOffer(ShmMap& s, struct composition& comp) {
     sockaddr_un address{};
     address.sun_family = AF_UNIX;
     const std::string path = ShmTransportPath(s.path);
@@ -403,7 +402,7 @@ static int SendOffer(ShmMap& s, dlssnr::Composition& comp) {
     ShmTransportOffer offer{};
     offer.magic = kShmMagic;
     int fds[2];
-    if (!comp.ExportTransport(fds, offer)) return -1;
+    if (!composition_export_transport(&comp, fds, &offer)) return -1;
     alignas(cmsghdr) char control[CMSG_SPACE(sizeof fds)]{};
     iovec data{&offer, sizeof offer};
     msghdr message{};
@@ -432,18 +431,18 @@ static int SendOffer(ShmMap& s, dlssnr::Composition& comp) {
 
 // The daemon's answer to the composition's offer: the first look sends it and waits a moment,
 // later ones only look. No answer within expires counts as a refusal.
-static Offer OfferTransport(ShmMap& s, dlssnr::Composition& comp, double& expires) {
+static Offer OfferTransport(ShmMap& s, struct composition& comp, double& expires) {
     int wait = 0;
-    if (comp.OfferConnection() < 0) {
+    if (composition_offer_connection(&comp) < 0) {
         const int connection = SendOffer(s, comp);
         if (connection < 0)
             return s.hdr->helperState.load(std::memory_order_acquire) == kHelperRunning ? Offer::kDeclined
                                                                                     : Offer::kLater;
-        comp.AwaitAnswer(connection);
+        composition_await_answer(&comp, connection);
         expires = log_now_ms() + 5000.0;
         wait = 250;
     }
-    pollfd answer{comp.OfferConnection(), POLLIN, 0};
+    pollfd answer{composition_offer_connection(&comp), POLLIN, 0};
     if (poll(&answer, 1, wait) != 1) return log_now_ms() >= expires ? Offer::kDeclined : Offer::kWaiting;
     uint8_t imported = 0;
     if (recv(answer.fd, &imported, 1, 0) != 1) return Offer::kLater; // Closed unanswered.
@@ -497,8 +496,9 @@ struct SwapchainState {
     bool passThrough = false;
 
     // The pass. Owns every surface it needs, including the transport pair -- exported device-local
-    // memory when the daemon imports it, host-visible staging when it does not.
-    std::unique_ptr<dlssnr::Composition> comp;
+    // memory when the daemon imports it, host-visible staging when it does not. Empty until
+    // CreateResources builds it.
+    struct composition comp = {};
 };
 
 struct DeviceChain {
@@ -935,7 +935,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
         std::lock_guard<std::mutex> lk(dc->lock);
         for (auto& kv : dc->swapchains) {
             SwapchainState& sc = kv.second;
-            sc.comp.reset();
+            composition_fini(&sc.comp);
             if (sc.fenceLeg1) dc->table.vkDestroyFence(device, sc.fenceLeg1, nullptr);
             if (sc.fenceLeg2) dc->table.vkDestroyFence(device, sc.fenceLeg2, nullptr);
             for (VkSemaphore semaphore : sc.leg2Done) dc->table.vkDestroySemaphore(device, semaphore, nullptr);
@@ -988,7 +988,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_GetDeviceQueue2(VkDevice device,
 // the model at all -- the encode is exactly the step that turns open-ended light into the kind of
 // picture the model was trained on.
 static bool SupportedFormat(VkFormat f) {
-    return dlssnr::CompositionFormat(f) != VK_FORMAT_UNDEFINED;
+    return composition_format(f) != VK_FORMAT_UNDEFINED;
 }
 
 // What a swapchain's format and colour space together say about the light in the frame.
@@ -1094,7 +1094,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
         }
         lk.lock();
         SwapchainState& sc = it->second;
-        sc.comp.reset();
+        composition_fini(&sc.comp);
         if (sc.fenceLeg1) dc->table.vkDestroyFence(device, sc.fenceLeg1, nullptr);
         if (sc.fenceLeg2) dc->table.vkDestroyFence(device, sc.fenceLeg2, nullptr);
         for (VkSemaphore semaphore : sc.leg2Done) dc->table.vkDestroySemaphore(device, semaphore, nullptr);
@@ -1165,13 +1165,12 @@ static bool CreateResources(DeviceChain* dc, SwapchainState& sc, uint32_t family
         if (dc->table.vkCreateSemaphore(d, &sci, nullptr, &semaphore) != VK_SUCCESS) return false;
 
     if (!dc->instance) return false;
-    sc.comp = std::make_unique<dlssnr::Composition>(&dc->table, &dc->instance->table, d, dc->physical);
-    if (!sc.comp->Usable()) {
-        log_printf("[layer] composition unavailable: %s", sc.comp->Reason());
-        sc.comp.reset();
+    if (composition_init(&sc.comp, &dc->table, &dc->instance->table, d, dc->physical) != VK_SUCCESS) {
+        log_printf("[layer] composition unavailable: %s", composition_reason(&sc.comp));
+        composition_fini(&sc.comp);
         return false;
     }
-    if (dc->exportMemory) sc.comp->EnableExport(family);
+    if (dc->exportMemory) composition_enable_export(&sc.comp, family);
     sc.family = family;
     sc.graphics = families[family].queueFlags & VK_QUEUE_GRAPHICS_BIT;
     return true;
@@ -1231,7 +1230,7 @@ static bool WaitLeg(DeviceChain* dc, VkFence fence) {
 static bool CollectLeg2(DeviceChain* dc, SwapchainState& sc) {
     if (!WaitLeg(dc, sc.fenceLeg2)) return false;
     sc.leg2Pending = false;
-    sc.comp->WriteCapturedFrame();
+    composition_write_captured_frame(&sc.comp);
     return true;
 }
 
@@ -1246,7 +1245,7 @@ static void PublishFrame(DeviceChain* dc, const SwapchainState& sc, double ms) {
     hdr->layerCompositionUp.store(1);
     hdr->layerPid.store(uint32_t(getpid()));
     hdr->layerMsBits.store(FloatToBits(float(ms)));
-    hdr->layerMeasuredWhiteBits.store(FloatToBits(sc.comp->MeasuredWhitePoint()));
+    hdr->layerMeasuredWhiteBits.store(FloatToBits(composition_measured_white_point(&sc.comp)));
     hdr->layerHeartbeat.fetch_add(1);
 }
 
@@ -1328,16 +1327,17 @@ static bool UseInLayerNetwork(DeviceChain* dc, const SwapchainState& sc, VkQueue
 // with the game's waits, and no CPU wait between them. False presents the game's own frame: while
 // the network builds, for a rejected setting, or once it fails, after which frames go to dlsslopd.
 static bool ProcessInLayer(DeviceChain* dc, SwapchainState& sc, VkQueue queue, uint32_t index,
-                           const dlssnr::FrameSettings& fs, VkSubmitInfo& si, bool& waitsConsumed, double t0) {
+                           const struct composition_frame_settings& fs, VkSubmitInfo& si, bool& waitsConsumed,
+                           double t0) {
     // The previous frame's meter, whose fence the frame waited for.
-    sc.comp->ConsumeMeter();
+    composition_consume_meter(&sc.comp);
     // A swapchain that takes over, a resized one, has not waited for its predecessor's last frame,
     // which may still run the network that a build or a reshape at the new shape frees.
     SwapchainState* const last = dc->inLayerLast;
     if (last && last != &sc && last->leg2Pending && !CollectLeg2(dc, *last)) return false;
     dc->inLayerLast = &sc;
-    switch (g_network.prepare(dc->inLayer, dc->shm.hdr, sc.comp->ModelWidth(), sc.comp->ModelHeight(),
-                              sc.comp->HdrProxyActive())) {
+    switch (g_network.prepare(dc->inLayer, dc->shm.hdr, composition_model_width(&sc.comp),
+                              composition_model_height(&sc.comp), composition_hdr_proxy_active(&sc.comp))) {
     case kDlsslopNetworkReady:
         NetworkReason(dc, "in-layer network running");
         break;
@@ -1352,7 +1352,7 @@ static bool ProcessInLayer(DeviceChain* dc, SwapchainState& sc, VkQueue queue, u
     }
     VkCommandBuffer cb = sc.cb;
     if (!BeginLeg(dc, cb)) return false;
-    if (!sc.comp->RecordCapture(cb, sc.images[index], fs)) {
+    if (!composition_record_capture(&sc.comp, cb, sc.images[index], &fs)) {
         dc->table.vkEndCommandBuffer(cb);
         return false;
     }
@@ -1366,19 +1366,19 @@ static bool ProcessInLayer(DeviceChain* dc, SwapchainState& sc, VkQueue queue, u
         }
         return false;
     };
-    if (g_network.record(dc->inLayer, cb, sc.comp->ProxyBuffer(), sc.comp->AnswerBuffer(), sc.family,
-                         sc.comp->TransportExported()) != kDlsslopNetworkReady) {
+    if (g_network.record(dc->inLayer, cb, composition_proxy_buffer(&sc.comp), composition_answer_buffer(&sc.comp),
+                         sc.family, composition_transport_exported(&sc.comp)) != kDlsslopNetworkReady) {
         NetworkFailed(dc);
         return salvage(false);
     }
-    if (!sc.comp->RecordCompose(cb, sc.images[index], fs)) return salvage(true);
+    if (!composition_record_compose(&sc.comp, cb, sc.images[index], &fs)) return salvage(true);
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = &sc.leg2Done[index];
     if (!SubmitLeg(dc, queue, si, sc.fenceLeg2, waitsConsumed)) return false;
     // The network's motion history takes in only the frames that reached the queue.
     g_network.submitted(dc->inLayer);
     sc.leg2Pending = true;
-    if (sc.comp->CaptureRecorded()) CollectLeg2(dc, sc);
+    if (composition_capture_recorded(&sc.comp)) CollectLeg2(dc, sc);
     PublishFrame(dc, sc, log_now_ms() - t0);
     return true;
 }
@@ -1402,7 +1402,6 @@ static bool ProcessInLayer(DeviceChain* dc, SwapchainState& sc, VkQueue queue, u
 static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
                             uint32_t index, uint32_t waitCount,
                             const VkSemaphore* waitSemaphores, bool& waitsConsumed) {
-    if (!sc.comp) return false;
     NativeFrameGuard producer(dc->shm);
     if (!producer) return false;
     // A timed-out request still owns the sole input/output slot. Do this BEFORE
@@ -1421,7 +1420,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
         }
     } else if (hdr->helperState.load(std::memory_order_acquire) != kHelperRunning) {
         // A daemon that serves again gets a fresh offer; its predecessor's imports are gone.
-        sc.comp->WithdrawOffer();
+        composition_withdraw_offer(&sc.comp);
         StartWorker(dc->shm);
         return false;
     } else if (hdr->seq_req.load(std::memory_order_acquire) != hdr->seq_resp.load(std::memory_order_acquire)) {
@@ -1437,7 +1436,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
     // helper's round trip. The capture pair that compose recorded lands with it.
     if (sc.leg2Pending && !CollectLeg2(dc, sc)) return false;
 
-    dlssnr::FrameSettings fs = dlssnr::FrameSettings::Read(dc->shm.hdr);
+    struct composition_frame_settings fs = composition_frame_settings_read(dc->shm.hdr);
 
     // The HDR decision, made once per frame before anything is sized or encoded.
     //
@@ -1456,8 +1455,8 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
                            (colorMode == kColourAuto && sc.hdrKind != kHdrNone);
     const uint32_t hdrTransfer = linearHdr && sc.hdrKind == kHdrPq10 ? 1u : 0u;
 
-    if (!sc.comp->Prepare(sc.width, sc.height, sc.format, fs, linearHdr, hdrProxy, hdrTransfer)) {
-        log_printf("[layer] composition cannot run here: %s", sc.comp->Reason());
+    if (!composition_prepare(&sc.comp, sc.width, sc.height, sc.format, &fs, linearHdr, hdrProxy, hdrTransfer)) {
+        log_printf("[layer] composition cannot run here: %s", composition_reason(&sc.comp));
         return false;
     }
 
@@ -1465,17 +1464,17 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
         dc->shm.hdr->hdrDetected.store(sc.hdrKind);
         // The intent, not the format-gated decision: the helper builds the float images only for a
         // layer that has said it will feed them, and that handshake has to start while the proxy is
-        // still 8-bit. Publishing HdrProxyActive() here would wait on proxyFormat, which waits on
-        // this field, and neither would ever move.
+        // still 8-bit. Publishing composition_hdr_proxy_active() here would wait on proxyFormat,
+        // which waits on this field, and neither would ever move.
         dc->shm.hdr->hdrActive.store(hdrActive ? 1u : 0u);
     }
 
     // A capture is asked for by writing a frame count into the header; taking it clears the request,
     // so one press produces one run rather than one per frame for as long as nobody clears it.
     // A request published after this frame's settings snapshot belongs to the next frame.
-    if (dc->shm.hdr && dc->shm.hdr->controlSeq.load() == fs.controlSeq) {
+    if (dc->shm.hdr && dc->shm.hdr->controlSeq.load() == fs.control_seq) {
         if (const uint32_t frames = dc->shm.hdr->captureRequest.exchange(0); frames > 0)
-            sc.comp->RequestCapture(frames, fs.controlSeq);
+            composition_request_capture(&sc.comp, frames, fs.control_seq);
     }
 
     VkSubmitInfo si{};
@@ -1501,29 +1500,29 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
     // pending offer: until the answer comes, present the game's own. A refusal stages this
     // swapchain through host memory from then on; a daemon that stops serving first leaves the
     // pair for the next one.
-    if (sc.comp->TransportPending()) {
-        switch (OfferTransport(dc->shm, *sc.comp, sc.offerExpires)) {
+    if (composition_transport_pending(&sc.comp)) {
+        switch (OfferTransport(dc->shm, sc.comp, sc.offerExpires)) {
         case Offer::kReady:
-            sc.comp->SetTransportReady(true);
+            composition_set_transport_ready(&sc.comp, true);
             log_printf("[shm] device-local transport ready: frames stay in video memory");
             break;
         case Offer::kDeclined:
             log_printf("[shm] device-local transport declined; staging frames through host memory");
-            sc.comp->DisableExport();
+            composition_disable_export(&sc.comp);
             break;
         case Offer::kWaiting:
             return false;
         case Offer::kLater:
-            sc.comp->WithdrawOffer();
+            composition_withdraw_offer(&sc.comp);
             log_printf("[shm] daemon stopped before it took the transport offer; offering it again later");
             return false;
         }
     }
-    const uint32_t transportGen = sc.comp->TransportGeneration();
+    const uint32_t transportGen = composition_transport_generation(&sc.comp);
 
     // ---- leg 1: the frame the model is shown ----
     if (!BeginLeg(dc, cb)) return false;
-    if (!sc.comp->RecordCapture(cb, sc.images[index], fs)) {
+    if (!composition_record_capture(&sc.comp, cb, sc.images[index], &fs)) {
         dc->table.vkEndCommandBuffer(cb);
         return false;
     }
@@ -1532,25 +1531,26 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
     if (!SubmitLeg(dc, queue, si, sc.fenceLeg1, waitsConsumed)) return false;
     if (!WaitLeg(dc, sc.fenceLeg1)) return false;
     dropWaits();
-    sc.comp->ConsumeMeter();
+    composition_consume_meter(&sc.comp);
     const double tCapture = time ? log_now_ms() : 0.0;
 
     // ---- the round trip ----
-    if (!ShmProcessFrame(dc->shm, sc.comp->ModelWidth(), sc.comp->ModelHeight(), sc.comp->ModelBytes(),
-                         sc.comp->ProxyPixels(), sc.comp->ModelPixels(), sc.comp->HdrProxyActive(),
-                         transportGen)) {
+    if (!ShmProcessFrame(dc->shm, composition_model_width(&sc.comp), composition_model_height(&sc.comp),
+                         composition_model_bytes(&sc.comp), composition_proxy_pixels(&sc.comp),
+                         composition_model_pixels(&sc.comp), composition_hdr_proxy_active(&sc.comp), transportGen)) {
         // A restarted worker holds no imports: offer the pair again on the next frame.
-        if (transportGen && dc->shm.hdr->transportMiss.load() == transportGen) sc.comp->SetTransportReady(false);
+        if (transportGen && dc->shm.hdr->transportMiss.load() == transportGen)
+            composition_set_transport_ready(&sc.comp, false);
         // Fail-open. Leg 1 already put the image back in PRESENT_SRC_KHR, so the original frame is
         // what gets presented and nothing else is owed.
         return false;
     }
-    sc.comp->SetCaptureInference(dc->shm.hdr->seq_req.load());
+    composition_set_capture_inference(&sc.comp, dc->shm.hdr->seq_req.load());
     const double tHelper = time ? log_now_ms() : 0.0;
 
     // ---- leg 2: the answer, composed back ----
     if (!BeginLeg(dc, cb)) return false;
-    if (!sc.comp->RecordCompose(cb, sc.images[index], fs)) {
+    if (!composition_record_compose(&sc.comp, cb, sc.images[index], &fs)) {
         dc->table.vkEndCommandBuffer(cb);
         return false;
     }
@@ -1565,7 +1565,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
     // no subsequent frame. Frames without a recorded pair keep the asynchronous
     // leg-2 path, including every frame of a capture whose buffer failed.
     // The semaphore is signalled either way, so a failed wait still presents.
-    if (sc.comp->CaptureRecorded()) CollectLeg2(dc, sc);
+    if (composition_capture_recorded(&sc.comp)) CollectLeg2(dc, sc);
     const double tReturn = log_now_ms();
     PublishFrame(dc, sc, tReturn - t0);
 
@@ -1574,7 +1574,7 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
         if (++frameNo % log_time_interval() == 0) {
             log_printf("[time] encode=%.2f helper=%.2f resolve=%.2f total=%.2f ms (model %ux%u)",
                        tCapture - t0, tHelper - tCapture, tReturn - tHelper, tReturn - t0,
-                       sc.comp->ModelWidth(), sc.comp->ModelHeight());
+                       composition_model_width(&sc.comp), composition_model_height(&sc.comp));
         }
     }
     return true;

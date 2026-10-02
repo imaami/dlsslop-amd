@@ -260,15 +260,17 @@ struct Step {
 };
 
 // One presented frame: leg 1, the identity answer, then leg 2 with device-memory allocations refused or not.
-bool ComposeFrame(Context& context, dlssnr::Composition& composition, const dlssnr::FrameSettings& settings,
-                  uint32_t width, uint32_t height, VkFormat format, bool linearHdr, bool refuseMemory = false) {
-    if (!composition.Prepare(width, height, format, settings, linearHdr))
-        Fail(std::string("prepare failed: ") + composition.Reason());
-    composition.RecordCapture(context.Begin(), context.swapchain, settings);
+bool ComposeFrame(Context& context, struct composition& composition,
+                  const struct composition_frame_settings& settings, uint32_t width, uint32_t height,
+                  VkFormat format, bool linearHdr, bool refuseMemory = false) {
+    if (!composition_prepare(&composition, width, height, format, &settings, linearHdr, false, 0))
+        Fail(std::string("prepare failed: ") + composition_reason(&composition));
+    composition_record_capture(&composition, context.Begin(), context.swapchain, &settings);
     context.Submit();
-    std::memcpy(composition.ModelPixels(), composition.ProxyPixels(), composition.ModelBytes());
+    std::memcpy(composition_model_pixels(&composition), composition_proxy_pixels(&composition),
+                composition_model_bytes(&composition));
     tracker.refuseMemory = refuseMemory;
-    const bool composed = composition.RecordCompose(context.Begin(), context.swapchain, settings);
+    const bool composed = composition_record_compose(&composition, context.Begin(), context.swapchain, &settings);
     tracker.refuseMemory = false;
     context.Submit();
     return composed;
@@ -315,11 +317,13 @@ int main() {
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
     context.Submit();
 
-    dlssnr::Composition composition(&context.deviceTable, &context.instanceTable, context.device,
-                                    context.physical);
-    if (!composition.Usable()) Fail(composition.Reason());
-    // Every step changes the model raster, the colour domain or the downscaler, so Prepare
-    // destroys and recreates the composition surfaces while the pass and its sets live on.
+    struct composition composition = {};
+    if (composition_init(&composition, &context.deviceTable, &context.instanceTable, context.device,
+                         context.physical) != VK_SUCCESS)
+        Fail(composition_reason(&composition));
+    // Every step changes the model raster, the colour domain or the downscaler, so
+    // composition_prepare() destroys and recreates the composition surfaces while the pass and its
+    // sets live on.
     const Step steps[] = {
         {1.0f, false, SCALER_VK_LANCZOS3}, {0.5f, false, SCALER_VK_LANCZOS3},
         {1.0f, false, SCALER_VK_LANCZOS3}, {0.5f, false, SCALER_VK_LANCZOS3},
@@ -330,8 +334,8 @@ int main() {
     };
     unsigned composed = 0;
     for (const Step& step : steps) {
-        dlssnr::FrameSettings settings;
-        settings.workingScale = step.workingScale;
+        struct composition_frame_settings settings = composition_frame_settings();
+        settings.working_scale = step.workingScale;
         settings.downscaler = step.downscaler;
         for (int frame = 0; frame < 3; ++frame)
             composed += ComposeFrame(context, composition, settings, width, height, format, step.linearHdr);
@@ -346,25 +350,26 @@ int main() {
 
     // Static, so a failed check that exits removes it too.
     static const StateHome state;
-    const dlssnr::FrameSettings settings;
-    composition.RequestCapture(1, 7);
+    const struct composition_frame_settings settings = composition_frame_settings();
+    composition_request_capture(&composition, 1, 7);
     for (int frame = 0; frame < 2; ++frame) {
         if (!ComposeFrame(context, composition, settings, width, height, format, false, true))
             Fail("a frame whose capture buffer failed was not composed");
-        if (!composition.CaptureActive() || composition.CaptureRecorded())
+        if (!capture_writer_active(&composition.capture) || composition_capture_recorded(&composition))
             Fail("a capture without its host buffer recorded a pair");
     }
     if (!ComposeFrame(context, composition, settings, width, height, format, false) ||
-        !composition.CaptureRecorded())
+        !composition_capture_recorded(&composition))
         Fail("the capture did not record its pair once the buffer existed");
-    composition.WriteCapturedFrame();
+    composition_write_captured_frame(&composition);
     std::error_code error;
-    if (composition.CaptureActive() ||
+    if (capture_writer_active(&composition.capture) ||
         !std::filesystem::is_regular_file(state.path / "dlssnr/captures/manifest.txt", error))
         Fail("the recorded pair did not complete the capture");
     if (!ComposeFrame(context, composition, settings, width, height, format, false) ||
-        composition.CaptureRecorded())
+        composition_capture_recorded(&composition))
         Fail("a frame after the capture recorded a pair");
     std::printf("PASS: a capture records pairs only into an allocated host buffer\n");
+    composition_fini(&composition);
     return 0;
 }

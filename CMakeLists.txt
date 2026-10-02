@@ -102,8 +102,8 @@ set(METER ${SHADER_DIR}/shaders/meter_reduce)
 embed_shader(layer/meter_reduce.comp shaders/meter_reduce kMeterReduceSpv vulkan1.0)
 # Keep upstream's kMeterReduceSpv/kMeterReduceSpvLen header contract.
 file(CONFIGURE OUTPUT ${METER}_spv.h CONTENT [[#pragma once
-#include <cstddef>
-#include <cstdint>
+#include <stddef.h>
+#include <stdint.h>
 #include "meter_reduce.h"
 static const size_t kMeterReduceSpvLen = sizeof(kMeterReduceSpv) / sizeof(kMeterReduceSpv[0]);
 ]])
@@ -116,12 +116,12 @@ add_custom_target(network-shaders DEPENDS ${SHADER_DIR}/network/network_verdict.
 
 # Only layer.cpp differs between the layers; both and the layer tests link
 # the other translation units compiled once.
-add_library(dlsslop-layer-objects OBJECT layer/shader_vk.c layer/dlssnr_pass.c layer/composition.cpp
+add_library(dlsslop-layer-objects OBJECT layer/shader_vk.c layer/dlssnr_pass.c layer/composition.c
     layer/capture.c layer/scaler_vk.c layer/hotkey.c layer/log.c)
 set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_dependencies(dlsslop-layer-objects layer-shaders)
 target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC layer ${X11_HEADERS} ${XINPUT_HEADERS})
-target_link_libraries(dlsslop-layer-objects PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(dlsslop-layer-objects PUBLIC Threads::Threads ${CMAKE_DL_LIBS} m)
 
 function(add_neural_layer target)
     add_library(${target} SHARED layer/layer.cpp)
@@ -335,6 +335,11 @@ if(BUILD_TESTING)
     target_include_directories(shader-passes-test PRIVATE ${SHADER_DIR})
     target_link_libraries(shader-passes-test PRIVATE dlsslop-layer-objects)
     add_test(NAME shader-passes COMMAND shader-passes-test)
+    # The composition in C, on a fake device: what each build creates and each fini destroys, after a
+    # failure at any call too, what each leg records, and the transport offer's descriptors.
+    add_executable(composition-test tests/composition_test.c)
+    target_link_libraries(composition-test PRIVATE dlsslop-layer-objects)
+    add_test(NAME composition COMMAND composition-test)
     add_test(NAME color-metrics COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_metrics_test.py)
     add_test(NAME color-orchestrator COMMAND ${Python3_EXECUTABLE}
