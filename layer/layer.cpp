@@ -103,21 +103,16 @@ struct ShmMap {
 // slot. This is a separate file because the worker locks the SHM file for its lifetime.
 // Only this user can create it: ShmOpen's EnsureParentDir admits nothing but a private
 // directory. A failed open is retried on the next frame.
-class NativeFrameGuard {
-    int fd_ = -1;
-public:
-    explicit NativeFrameGuard(ShmMap& s) {
-        if (!s.hdr) return;
-        if (s.producerFd < 0)
-            s.producerFd = open((s.path + ".producer.lock").c_str(),
-                                O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
-        if (!flock(s.producerFd, LOCK_EX | LOCK_NB)) fd_ = s.producerFd;
-    }
-    ~NativeFrameGuard() { if (fd_ >= 0) flock(fd_, LOCK_UN); }
-    NativeFrameGuard(const NativeFrameGuard&) = delete;
-    NativeFrameGuard& operator=(const NativeFrameGuard&) = delete;
-    explicit operator bool() const { return fd_ >= 0; }
-};
+//
+// True when this process now holds the slot; the caller releases it with
+// flock(s.producerFd, LOCK_UN). Never waits.
+static bool ShmLockProducer(ShmMap& s) {
+    if (!s.hdr) return false;
+    if (s.producerFd < 0)
+        s.producerFd = open((s.path + ".producer.lock").c_str(),
+                            O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+    return !flock(s.producerFd, LOCK_EX | LOCK_NB);
+}
 
 // The directory now lives under /tmp, which is world-writable, so it is worth checking that what we
 // are about to open really is ours: a directory, owned by this uid, with nothing granted to anyone
@@ -547,6 +542,43 @@ static std::mutex g_stateMutex;
 // loaded once for the first device that enabled the network.
 static network_module g_network;
 
+static DeviceChain* FindDevice(VkDevice device) {
+    g_stateMutex.lock();
+    const auto it = g_devices.find(device);
+    DeviceChain* const dc = it == g_devices.end() ? nullptr : it->second;
+    g_stateMutex.unlock();
+    return dc;
+}
+
+// DeviceForQueue without the lock; the caller holds g_stateMutex.
+static DeviceChain* DeviceForQueue_(VkQueue queue) {
+    if (g_devices.size() == 1) return g_devices.begin()->second;
+    for (auto& kv : g_devices) {
+        DeviceChain* const dc = kv.second;
+        dc->lock.lock();
+        const bool found = dc->queueFamilies.count(queue);
+        dc->lock.unlock();
+        if (found) return dc;
+    }
+    return nullptr;
+}
+
+static DeviceChain* DeviceForQueue(VkQueue queue) {
+    g_stateMutex.lock();
+    DeviceChain* const dc = DeviceForQueue_(queue);
+    g_stateMutex.unlock();
+    return dc;
+}
+
+// The layer's own device wait. It runs outside dc->lock, but under networkSubmit, because a device
+// wait may not overlap the in-layer network's submits.
+static void WaitDeviceIdle(DeviceChain* dc) {
+    if (!dc->table.vkDeviceWaitIdle) return;
+    dc->networkSubmit.lock();
+    dc->table.vkDeviceWaitIdle(dc->self);
+    dc->networkSubmit.unlock();
+}
+
 // The one swapchain allowed to drive the neural round trip, chosen as the largest in the process.
 //
 // The shared-memory channel carries a single raster at a time, but a process can present more than
@@ -564,9 +596,8 @@ static PrimarySwap g_primary;
 // cannot invert against the device hooks.
 static std::mutex g_primaryMutex;
 
-// Adopts a larger swapchain; a present from anything else passes through untouched.
-static bool ClaimPrimary(VkDevice device, VkSwapchainKHR swapchain, uint32_t w, uint32_t h) {
-    std::lock_guard<std::mutex> lk(g_primaryMutex);
+// ClaimPrimary without the lock; the caller holds g_primaryMutex.
+static bool ClaimPrimary_(VkDevice device, VkSwapchainKHR swapchain, uint32_t w, uint32_t h) {
     const uint64_t area = uint64_t(w) * h;
     if (g_primary.swapchain == swapchain && g_primary.device == device) return true;
     if (g_primary.swapchain != VK_NULL_HANDLE && area <= g_primary.area) return false;
@@ -576,9 +607,18 @@ static bool ClaimPrimary(VkDevice device, VkSwapchainKHR swapchain, uint32_t w, 
     return true;
 }
 
+// Adopts a larger swapchain; a present from anything else passes through untouched.
+static bool ClaimPrimary(VkDevice device, VkSwapchainKHR swapchain, uint32_t w, uint32_t h) {
+    g_primaryMutex.lock();
+    const bool primary = ClaimPrimary_(device, swapchain, w, h);
+    g_primaryMutex.unlock();
+    return primary;
+}
+
 static void ReleasePrimary(VkDevice device, VkSwapchainKHR swapchain) {
-    std::lock_guard<std::mutex> lk(g_primaryMutex);
+    g_primaryMutex.lock();
     if (g_primary.swapchain == swapchain && g_primary.device == device) g_primary = PrimarySwap{};
+    g_primaryMutex.unlock();
 }
 
 // Where this copy of the layer was loaded from, for the duplicate check below.
@@ -692,15 +732,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateInstance(
     chain.table.next_gipa = next_gipa;
     instance_table_load(&chain.table, *pInstance);
 
-    std::lock_guard<std::mutex> lk(g_stateMutex);
+    g_stateMutex.lock();
     g_instances[*pInstance] = chain;
     log_printf("[layer] vkCreateInstance -> %p", (void*)*pInstance);
+    g_stateMutex.unlock();
     return VK_SUCCESS;
 }
 
-static VKAPI_ATTR void VKAPI_CALL Hook_DestroyInstance(VkInstance instance,
-                                                       const VkAllocationCallbacks* pAllocator) {
-    std::lock_guard<std::mutex> lk(g_stateMutex);
+// Hook_DestroyInstance without the lock; the caller holds g_stateMutex.
+static void Hook_DestroyInstance_(VkInstance instance, const VkAllocationCallbacks* pAllocator) {
     auto it = g_instances.find(instance);
     if (it == g_instances.end()) return;
     auto destroy = it->second.table.vkDestroyInstance;
@@ -711,19 +751,25 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyInstance(VkInstance instance,
     if (destroy) destroy(instance, pAllocator);
 }
 
+static VKAPI_ATTR void VKAPI_CALL Hook_DestroyInstance(VkInstance instance,
+                                                       const VkAllocationCallbacks* pAllocator) {
+    g_stateMutex.lock();
+    Hook_DestroyInstance_(instance, pAllocator);
+    g_stateMutex.unlock();
+}
+
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_EnumeratePhysicalDevices(
     VkInstance instance, uint32_t* pCount, VkPhysicalDevice* pPhysicalDevices) {
-    InstanceChain* chain = nullptr;
-    {
-        std::lock_guard<std::mutex> lk(g_stateMutex);
-        auto it = g_instances.find(instance);
-        if (it != g_instances.end()) chain = &it->second;
-    }
+    g_stateMutex.lock();
+    const auto it = g_instances.find(instance);
+    InstanceChain* const chain = it == g_instances.end() ? nullptr : &it->second;
+    g_stateMutex.unlock();
     if (!chain || !chain->table.vkEnumeratePhysicalDevices) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult res = chain->table.vkEnumeratePhysicalDevices(instance, pCount, pPhysicalDevices);
     if (res == VK_SUCCESS && pPhysicalDevices) {
-        std::lock_guard<std::mutex> lk(g_stateMutex);
+        g_stateMutex.lock();
         for (uint32_t i = 0; i < *pCount; ++i) g_phys[pPhysicalDevices[i]] = chain;
+        g_stateMutex.unlock();
     }
     return res;
 }
@@ -757,12 +803,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
         }
     }
 
-    InstanceChain* ic = nullptr;
-    {
-        std::lock_guard<std::mutex> lk(g_stateMutex);
-        auto it = g_phys.find(physicalDevice);
-        if (it != g_phys.end()) ic = it->second;
-    }
+    g_stateMutex.lock();
+    const auto phys = g_phys.find(physicalDevice);
+    InstanceChain* const ic = phys == g_phys.end() ? nullptr : phys->second;
+    g_stateMutex.unlock();
 
     // VK_KHR_external_memory_fd is what vkGetMemoryFdKHR needs to export the device-local
     // transport, so the proxy and the model's answer never pass through host memory. It is a device
@@ -897,26 +941,21 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
         }
     }
 
-    std::lock_guard<std::mutex> lk(g_stateMutex);
+    g_stateMutex.lock();
     g_devices[*pDevice] = dc;
     log_printf("[layer] vkCreateDevice -> %p on %s (inert=%d enabled=%d)", (void*)*pDevice, deviceName,
                (int) dc->inert.load(), (int) LayerEnabled());
+    g_stateMutex.unlock();
     return VK_SUCCESS;
 }
 
 static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
                                                      const VkAllocationCallbacks* pAllocator) {
-    DeviceChain* dc = nullptr;
-    {
-        std::lock_guard<std::mutex> lk(g_stateMutex);
-        auto it = g_devices.find(device);
-        if (it != g_devices.end()) dc = it->second;
-    }
+    DeviceChain* dc = FindDevice(device);
     if (!dc) return;
-    {
-        std::lock_guard<std::mutex> lk(dc->lock);
-        for (auto& kv : dc->swapchains) ReleasePrimary(device, kv.first);
-    }
+    dc->lock.lock();
+    for (auto& kv : dc->swapchains) ReleasePrimary(device, kv.first);
+    dc->lock.unlock();
     // Say the layer has gone. A reader that finds a pid here checks it is alive, so a crash is
     // caught too, but an orderly exit should not need anyone to go looking.
     if (dc->shm.hdr && dc->shm.hdr->layerPid.load() == uint32_t(getpid())) {
@@ -926,42 +965,32 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
         if (!dc->networkReason.empty())
             ShmStoreString(&dc->shm.hdr->layerReasonSeq, dc->shm.hdr->layerReason, kReasonBytes, "");
     }
-    if (dc->table.vkDeviceWaitIdle) {
-        std::lock_guard<std::mutex> network(dc->networkSubmit);
-        dc->table.vkDeviceWaitIdle(device);
-    }
+    WaitDeviceIdle(dc);
     // While the device is still found by its queues: the network's build submits through them.
     if (dc->inLayer) g_network.close(dc->inLayer);
-    {
-        std::lock_guard<std::mutex> lk(g_stateMutex);
-        g_devices.erase(device);
+    g_stateMutex.lock();
+    g_devices.erase(device);
+    g_stateMutex.unlock();
+    dc->lock.lock();
+    for (auto& kv : dc->swapchains) {
+        SwapchainState& sc = kv.second;
+        composition_fini(&sc.comp);
+        if (sc.fenceLeg1) dc->table.vkDestroyFence(device, sc.fenceLeg1, nullptr);
+        if (sc.fenceLeg2) dc->table.vkDestroyFence(device, sc.fenceLeg2, nullptr);
+        for (VkSemaphore semaphore : sc.leg2Done) dc->table.vkDestroySemaphore(device, semaphore, nullptr);
+        if (sc.pool) dc->table.vkDestroyCommandPool(device, sc.pool, nullptr);
     }
-    {
-        std::lock_guard<std::mutex> lk(dc->lock);
-        for (auto& kv : dc->swapchains) {
-            SwapchainState& sc = kv.second;
-            composition_fini(&sc.comp);
-            if (sc.fenceLeg1) dc->table.vkDestroyFence(device, sc.fenceLeg1, nullptr);
-            if (sc.fenceLeg2) dc->table.vkDestroyFence(device, sc.fenceLeg2, nullptr);
-            for (VkSemaphore semaphore : sc.leg2Done) dc->table.vkDestroySemaphore(device, semaphore, nullptr);
-            if (sc.pool) dc->table.vkDestroyCommandPool(device, sc.pool, nullptr);
-        }
-        dc->swapchains.clear();
-    }
+    dc->swapchains.clear();
+    dc->lock.unlock();
     if (dc->table.vkDestroyDevice) dc->table.vkDestroyDevice(device, pAllocator);
     delete dc;
 }
 
-static DeviceChain* FindDevice(VkDevice device) {
-    std::lock_guard<std::mutex> lk(g_stateMutex);
-    auto it = g_devices.find(device);
-    return it == g_devices.end() ? nullptr : it->second;
-}
-
 static void RememberQueue(DeviceChain* dc, VkQueue queue, uint32_t family) {
     if (!queue) return;
-    std::lock_guard<std::mutex> lk(dc->lock);
+    dc->lock.lock();
     dc->queueFamilies[queue] = family;
+    dc->lock.unlock();
 }
 
 static VKAPI_ATTR void VKAPI_CALL Hook_GetDeviceQueue(VkDevice device, uint32_t family,
@@ -1019,12 +1048,7 @@ static uint32_t DetectHdrKind(VkFormat f, VkColorSpaceKHR cs) {
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
     VkDevice device, const VkSwapchainCreateInfoKHR* pCreateInfo,
     const VkAllocationCallbacks* pAllocator, VkSwapchainKHR* pSwapchain) {
-    DeviceChain* dc = nullptr;
-    {
-        std::lock_guard<std::mutex> lk(g_stateMutex);
-        auto it = g_devices.find(device);
-        if (it != g_devices.end()) dc = it->second;
-    }
+    DeviceChain* dc = FindDevice(device);
     if (!dc || !dc->table.vkCreateSwapchainKHR) return VK_ERROR_INITIALIZATION_FAILED;
 
     // Native HIP supports display-referred SDR, linear scRGB/BT.709 FP16,
@@ -1067,7 +1091,7 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
     sc.passThrough = unsupportedHdr || unsupportedTransfer || !SupportedFormat(sc.format) || sc.width > kMaxW ||
                      sc.height > kMaxH || tooSmall;
 
-    std::lock_guard<std::mutex> lk(dc->lock);
+    dc->lock.lock();
     log_printf("[layer] swapchain %p %ux%u fmt=%d hdr=%u passThrough=%d%s", (void*)*pSwapchain,
                pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height,
                (int)pCreateInfo->imageFormat, sc.hdrKind, (int)sc.passThrough,
@@ -1076,28 +1100,21 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
                                  : !SupportedFormat(sc.format) ? " (unsupported format)"
                                  : tooSmall ? " (too small)" : " (too large)") : "");
     dc->swapchains[*pSwapchain] = std::move(sc);
+    dc->lock.unlock();
     return VK_SUCCESS;
 }
 
 static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
     VkSwapchainKHR swapchain, const VkAllocationCallbacks* pAllocator) {
-    DeviceChain* dc = nullptr;
-    {
-        std::lock_guard<std::mutex> lk(g_stateMutex);
-        auto it = g_devices.find(device);
-        if (it != g_devices.end()) dc = it->second;
-    }
+    DeviceChain* dc = FindDevice(device);
     if (!dc) return;
     ReleasePrimary(device, swapchain);
-    std::unique_lock<std::mutex> lk(dc->lock);
+    dc->lock.lock();
     auto it = dc->swapchains.find(swapchain);
     if (it != dc->swapchains.end()) {
-        lk.unlock();
-        if (dc->table.vkDeviceWaitIdle) {
-            std::lock_guard<std::mutex> network(dc->networkSubmit);
-            dc->table.vkDeviceWaitIdle(device);
-        }
-        lk.lock();
+        dc->lock.unlock();
+        WaitDeviceIdle(dc);
+        dc->lock.lock();
         SwapchainState& sc = it->second;
         composition_fini(&sc.comp);
         if (sc.fenceLeg1) dc->table.vkDestroyFence(device, sc.fenceLeg1, nullptr);
@@ -1107,7 +1124,7 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
         if (dc->inLayerLast == &sc) dc->inLayerLast = nullptr;
         dc->swapchains.erase(it);
     }
-    lk.unlock();
+    dc->lock.unlock();
     if (dc->table.vkDestroySwapchainKHR) dc->table.vkDestroySwapchainKHR(device, swapchain, pAllocator);
 }
 
@@ -1404,11 +1421,11 @@ static bool ProcessInLayer(DeviceChain* dc, SwapchainState& sc, VkQueue queue, u
 // The submit that takes them sets waitsConsumed, which nothing here clears.
 //
 // Every path out leaves the swapchain image in PRESENT_SRC_KHR, including the ones that give up.
-static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+//
+// ProcessPresent without the lock; the caller holds the channel's producer lock.
+static bool ProcessPresent_(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
                             uint32_t index, uint32_t waitCount,
                             const VkSemaphore* waitSemaphores, bool& waitsConsumed) {
-    NativeFrameGuard producer(dc->shm);
-    if (!producer) return false;
     // A timed-out request still owns the sole input/output slot. Do this BEFORE
     // recording the GPU download, not just before publishing seq_req: the helper may
     // still be uploading those pixels or returning its result. While it finishes,
@@ -1585,20 +1602,21 @@ static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
     return true;
 }
 
-static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
-                                                            const VkPresentInfoKHR* pPresentInfo) {
-    DeviceChain* dc = nullptr;
-    {
-        std::lock_guard<std::mutex> lk(g_stateMutex);
-        if (g_devices.size() == 1) dc = g_devices.begin()->second;
-        else {
-            for (auto& kv : g_devices) {
-                std::lock_guard<std::mutex> dl(kv.second->lock);
-                if (kv.second->queueFamilies.count(queue)) { dc = kv.second; break; }
-            }
-        }
-    }
-    if (!dc || !dc->table.vkQueuePresentKHR) return VK_ERROR_INITIALIZATION_FAILED;
+// ProcessPresent_ under the channel's producer lock, which the frame holds from the first look at
+// the channel to the last; false, presenting the game's own frame, while another process holds it.
+static bool ProcessPresent(DeviceChain* dc, SwapchainState& sc, VkQueue queue,
+                           uint32_t index, uint32_t waitCount,
+                           const VkSemaphore* waitSemaphores, bool& waitsConsumed) {
+    if (!ShmLockProducer(dc->shm)) return false;
+    const bool composed = ProcessPresent_(dc, sc, queue, index, waitCount, waitSemaphores, waitsConsumed);
+    flock(dc->shm.producerFd, LOCK_UN);
+    return composed;
+}
+
+// Hook_QueuePresentKHR without the lock; the caller holds dc->lock.
+static VkResult Hook_QueuePresentKHR_(DeviceChain* dc, VkQueue queue, const VkPresentInfoKHR* pPresentInfo) {
+    PollHotkeys(dc);
+    if (!ShmNeuralEnabled(dc->shm)) return dc->table.vkQueuePresentKHR(queue, pPresentInfo);
 
     // Whether this call's wait semaphores have already been consumed by a submit of ours. They are
     // handed to the first swapchain we actually process; every path after that presents without them,
@@ -1609,70 +1627,61 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
     // Signalled by the composition's last submit; the present waits on it.
     VkSemaphore composedSem = VK_NULL_HANDLE;
 
-    // Held from here to the present at the end, alongside the queue hooks. Vulkan requires external
-    // synchronization for every operation on a queue; the in-layer network's build submits to the
-    // application's queue from a thread of its own, so the present must not overlap it.
-    std::unique_lock<std::mutex> lk;
-    if (!dc->inert && LayerEnabled()) {
-        lk = std::unique_lock<std::mutex>(dc->lock);
-        PollHotkeys(dc);
-        if (!ShmNeuralEnabled(dc->shm)) return dc->table.vkQueuePresentKHR(queue, pPresentInfo);
-        uint32_t family = 0;
-        auto qit = dc->queueFamilies.find(queue);
-        if (qit != dc->queueFamilies.end()) family = qit->second;
-        for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
-            auto sit = dc->swapchains.find(pPresentInfo->pSwapchains[i]);
-            if (sit == dc->swapchains.end()) continue;
-            SwapchainState& sc = sit->second;
-            if (sc.passThrough || pPresentInfo->pImageIndices[i] >= sc.images.size()) continue;
-            // One swapchain drives the channel; the rest present raw. See ClaimPrimary.
-            if (!ClaimPrimary(dc->self, pPresentInfo->pSwapchains[i], sc.width, sc.height)) {
-                static std::atomic<uint32_t> n{0};
-                const uint32_t k = n.fetch_add(1);
-                if (k < 3) log_printf("[layer] present: swapchain %p is not primary", (void*)pPresentInfo->pSwapchains[i]);
-                continue;
-            }
-            // One composition, and one semaphore, per present. A larger swapchain that has just taken
-            // the primary role over composes from its next present.
-            if (composedSem) continue;
-            if (!sc.ready && !dc->shm.dead) {
-                if (!CreateResources(dc, sc, family)) {
-                    log_printf("[layer] staging resources failed for swapchain %p (%ux%u, family %u); "
-                               "passing this swapchain through",
-                               (void*)pPresentInfo->pSwapchains[i], sc.width, sc.height, family);
-                    sc.passThrough = true;
-                    // This swapchain claimed the primary role and just gave it up. Without the
-                    // release the claim would sit on a swapchain that never drives the channel,
-                    // and no peer of equal or smaller area could take it over.
-                    ReleasePrimary(dc->self, pPresentInfo->pSwapchains[i]);
-                    continue;
-                }
-                sc.ready = true;
-            }
-            if (!sc.ready || dc->shm.dead) {
+    uint32_t family = 0;
+    auto qit = dc->queueFamilies.find(queue);
+    if (qit != dc->queueFamilies.end()) family = qit->second;
+    for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
+        auto sit = dc->swapchains.find(pPresentInfo->pSwapchains[i]);
+        if (sit == dc->swapchains.end()) continue;
+        SwapchainState& sc = sit->second;
+        if (sc.passThrough || pPresentInfo->pImageIndices[i] >= sc.images.size()) continue;
+        // One swapchain drives the channel; the rest present raw. See ClaimPrimary.
+        if (!ClaimPrimary(dc->self, pPresentInfo->pSwapchains[i], sc.width, sc.height)) {
+            static std::atomic<uint32_t> n{0};
+            const uint32_t k = n.fetch_add(1);
+            if (k < 3) log_printf("[layer] present: swapchain %p is not primary", (void*)pPresentInfo->pSwapchains[i]);
+            continue;
+        }
+        // One composition, and one semaphore, per present. A larger swapchain that has just taken
+        // the primary role over composes from its next present.
+        if (composedSem) continue;
+        if (!sc.ready && !dc->shm.dead) {
+            if (!CreateResources(dc, sc, family)) {
+                log_printf("[layer] staging resources failed for swapchain %p (%ux%u, family %u); "
+                           "passing this swapchain through",
+                           (void*)pPresentInfo->pSwapchains[i], sc.width, sc.height, family);
+                sc.passThrough = true;
+                // This swapchain claimed the primary role and just gave it up. Without the
+                // release the claim would sit on a swapchain that never drives the channel,
+                // and no peer of equal or smaller area could take it over.
                 ReleasePrimary(dc->self, pPresentInfo->pSwapchains[i]);
                 continue;
             }
-            const uint32_t waitCount = waitsConsumed ? 0u : pPresentInfo->waitSemaphoreCount;
-            const bool composed = ProcessPresent(dc, sc, queue, pPresentInfo->pImageIndices[i],
-                                                 waitCount, pPresentInfo->pWaitSemaphores, waitsConsumed);
-            if (composed) composedSem = sc.leg2Done[pPresentInfo->pImageIndices[i]];
-            else ++dc->framesPassedThrough;
-            if (log_verbose()) {
-                log_printf("[present] swapchain=%p image=%u seq=%u composed=%d",
-                           (void*)pPresentInfo->pSwapchains[i], pPresentInfo->pImageIndices[i],
-                           dc->shm.hdr ? dc->shm.hdr->seq_req.load() : 0u, int(composed));
-            }
-            // On failure before the capture submit, leave the application's waits attached to the
-            // original present. Once our first submit accepted them they have been consumed.
+            sc.ready = true;
         }
-        if (log_time_enabled()) {
-            static int frameNo = 0;
-            if (++frameNo % log_time_interval() == 0) {
-                log_printf("[layer] composed=%llu passed through=%llu",
-                           (unsigned long long)dc->framesComposed,
-                           (unsigned long long)dc->framesPassedThrough);
-            }
+        if (!sc.ready || dc->shm.dead) {
+            ReleasePrimary(dc->self, pPresentInfo->pSwapchains[i]);
+            continue;
+        }
+        const uint32_t waitCount = waitsConsumed ? 0u : pPresentInfo->waitSemaphoreCount;
+        const bool composed = ProcessPresent(dc, sc, queue, pPresentInfo->pImageIndices[i],
+                                             waitCount, pPresentInfo->pWaitSemaphores, waitsConsumed);
+        if (composed) composedSem = sc.leg2Done[pPresentInfo->pImageIndices[i]];
+        else ++dc->framesPassedThrough;
+        if (log_verbose()) {
+            log_printf("[present] swapchain=%p image=%u seq=%u composed=%d",
+                       (void*)pPresentInfo->pSwapchains[i], pPresentInfo->pImageIndices[i],
+                       dc->shm.hdr ? dc->shm.hdr->seq_req.load() : 0u, int(composed));
+        }
+        // On failure before the capture submit, leave the application's waits attached to the
+        // original present. Once our first submit accepted them they have been consumed.
+    }
+    if (log_time_enabled()) {
+        static int frameNo = 0;
+        if (++frameNo % log_time_interval() == 0) {
+            log_printf("[layer] composed=%llu passed through=%llu",
+                       (unsigned long long)dc->framesComposed,
+                       (unsigned long long)dc->framesPassedThrough);
         }
     }
 
@@ -1686,53 +1695,67 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
     return dc->table.vkQueuePresentKHR(queue, &pi);
 }
 
-static DeviceChain* DeviceForQueue(VkQueue queue) {
-    std::lock_guard<std::mutex> lk(g_stateMutex);
-    if (g_devices.size() == 1) return g_devices.begin()->second;
-    for (auto& kv : g_devices) {
-        std::lock_guard<std::mutex> dl(kv.second->lock);
-        if (kv.second->queueFamilies.count(queue)) return kv.second;
-    }
-    return nullptr;
+static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueuePresentKHR(VkQueue queue,
+                                                            const VkPresentInfoKHR* pPresentInfo) {
+    DeviceChain* dc = DeviceForQueue(queue);
+    if (!dc || !dc->table.vkQueuePresentKHR) return VK_ERROR_INITIALIZATION_FAILED;
+    if (dc->inert || !LayerEnabled()) return dc->table.vkQueuePresentKHR(queue, pPresentInfo);
+    // Held from here to the present at the end, alongside the queue hooks. Vulkan requires external
+    // synchronization for every operation on a queue; the in-layer network's build submits to the
+    // application's queue from a thread of its own, so the present must not overlap it.
+    dc->lock.lock();
+    const VkResult res = Hook_QueuePresentKHR_(dc, queue, pPresentInfo);
+    dc->lock.unlock();
+    return res;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueSubmit(VkQueue queue, uint32_t submitCount,
                                                         const VkSubmitInfo* pSubmits, VkFence fence) {
     DeviceChain* dc = DeviceForQueue(queue);
     if (!dc || !dc->table.vkQueueSubmit) return VK_ERROR_INITIALIZATION_FAILED;
-    std::lock_guard<std::mutex> lk(dc->lock);
-    return dc->table.vkQueueSubmit(queue, submitCount, pSubmits, fence);
+    dc->lock.lock();
+    const VkResult res = dc->table.vkQueueSubmit(queue, submitCount, pSubmits, fence);
+    dc->lock.unlock();
+    return res;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueSubmit2(VkQueue queue, uint32_t submitCount,
                                                          const VkSubmitInfo2* pSubmits, VkFence fence) {
     DeviceChain* dc = DeviceForQueue(queue);
     if (!dc || !dc->table.vkQueueSubmit2) return VK_ERROR_INITIALIZATION_FAILED;
-    std::lock_guard<std::mutex> lk(dc->lock);
-    return dc->table.vkQueueSubmit2(queue, submitCount, pSubmits, fence);
+    dc->lock.lock();
+    const VkResult res = dc->table.vkQueueSubmit2(queue, submitCount, pSubmits, fence);
+    dc->lock.unlock();
+    return res;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueWaitIdle(VkQueue queue) {
     DeviceChain* dc = DeviceForQueue(queue);
     if (!dc || !dc->table.vkQueueWaitIdle) return VK_ERROR_INITIALIZATION_FAILED;
-    std::lock_guard<std::mutex> lk(dc->lock);
-    return dc->table.vkQueueWaitIdle(queue);
+    dc->lock.lock();
+    const VkResult res = dc->table.vkQueueWaitIdle(queue);
+    dc->lock.unlock();
+    return res;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueSubmit2KHR(VkQueue queue, uint32_t submitCount,
                                                             const VkSubmitInfo2* pSubmits, VkFence fence) {
     DeviceChain* dc = DeviceForQueue(queue);
     if (!dc || !dc->table.vkQueueSubmit2KHR) return VK_ERROR_INITIALIZATION_FAILED;
-    std::lock_guard<std::mutex> lk(dc->lock);
-    return dc->table.vkQueueSubmit2KHR(queue, submitCount, pSubmits, fence);
+    dc->lock.lock();
+    const VkResult res = dc->table.vkQueueSubmit2KHR(queue, submitCount, pSubmits, fence);
+    dc->lock.unlock();
+    return res;
 }
 
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueBindSparse(VkQueue queue, uint32_t bindInfoCount,
                                                             const VkBindSparseInfo* pBindInfo, VkFence fence) {
     DeviceChain* dc = DeviceForQueue(queue);
     if (!dc || !dc->table.vkQueueBindSparse) return VK_ERROR_INITIALIZATION_FAILED;
-    std::lock_guard<std::mutex> lk(dc->lock);
-    return dc->table.vkQueueBindSparse(queue, bindInfoCount, pBindInfo, fence);
+    dc->lock.lock();
+    const VkResult res = dc->table.vkQueueBindSparse(queue, bindInfoCount, pBindInfo, fence);
+    dc->lock.unlock();
+    return res;
 }
 
 // A device wait may not overlap a submit to any of its queues, and the network's build submits
@@ -1740,55 +1763,15 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_QueueBindSparse(VkQueue queue, uint32
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_DeviceWaitIdle(VkDevice device) {
     DeviceChain* dc = FindDevice(device);
     if (!dc || !dc->table.vkDeviceWaitIdle) return VK_ERROR_INITIALIZATION_FAILED;
-    std::lock_guard<std::mutex> lk(dc->lock);
-    return dc->table.vkDeviceWaitIdle(device);
+    dc->lock.lock();
+    const VkResult res = dc->table.vkDeviceWaitIdle(device);
+    dc->lock.unlock();
+    return res;
 }
 
 // ---------------------------------------------------------------------------
 // Loader entry points
 // ---------------------------------------------------------------------------
-static PFN_vkVoidFunction LookupHook(const char* n) {
-    if (!std::strcmp(n, "vkCreateInstance")) return (PFN_vkVoidFunction)Hook_CreateInstance;
-    if (!std::strcmp(n, "vkDestroyInstance")) return (PFN_vkVoidFunction)Hook_DestroyInstance;
-    if (!std::strcmp(n, "vkEnumeratePhysicalDevices")) return (PFN_vkVoidFunction)Hook_EnumeratePhysicalDevices;
-    if (!std::strcmp(n, "vkCreateDevice")) return (PFN_vkVoidFunction)Hook_CreateDevice;
-    if (!std::strcmp(n, "vkDestroyDevice")) return (PFN_vkVoidFunction)Hook_DestroyDevice;
-    if (!std::strcmp(n, "vkGetDeviceQueue")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue;
-    if (!std::strcmp(n, "vkGetDeviceQueue2")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue2;
-    if (!std::strcmp(n, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)Hook_CreateSwapchainKHR;
-    if (!std::strcmp(n, "vkDestroySwapchainKHR")) return (PFN_vkVoidFunction)Hook_DestroySwapchainKHR;
-    if (!std::strcmp(n, "vkQueuePresentKHR")) return (PFN_vkVoidFunction)Hook_QueuePresentKHR;
-    // The in-layer network's build submits to the game's queue from a thread of its own: the queue
-    // hooks serialize it with the game's queue operations and device waits.
-    if (!device_features_network_requested()) return nullptr;
-    if (!std::strcmp(n, "vkQueueSubmit")) return (PFN_vkVoidFunction)Hook_QueueSubmit;
-    if (!std::strcmp(n, "vkQueueSubmit2")) return (PFN_vkVoidFunction)Hook_QueueSubmit2;
-    if (!std::strcmp(n, "vkQueueWaitIdle")) return (PFN_vkVoidFunction)Hook_QueueWaitIdle;
-    if (!std::strcmp(n, "vkQueueSubmit2KHR")) return (PFN_vkVoidFunction)Hook_QueueSubmit2KHR;
-    if (!std::strcmp(n, "vkQueueBindSparse")) return (PFN_vkVoidFunction)Hook_QueueBindSparse;
-    if (!std::strcmp(n, "vkDeviceWaitIdle")) return (PFN_vkVoidFunction)Hook_DeviceWaitIdle;
-    return nullptr;
-}
-
-static PFN_vkVoidFunction LookupDeviceHook(const char* n) {
-    if (!std::strcmp(n, "vkDestroyDevice")) return (PFN_vkVoidFunction)Hook_DestroyDevice;
-    if (!std::strcmp(n, "vkGetDeviceQueue")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue;
-    if (!std::strcmp(n, "vkGetDeviceQueue2")) return (PFN_vkVoidFunction)Hook_GetDeviceQueue2;
-    if (!std::strcmp(n, "vkCreateSwapchainKHR")) return (PFN_vkVoidFunction)Hook_CreateSwapchainKHR;
-    if (!std::strcmp(n, "vkDestroySwapchainKHR")) return (PFN_vkVoidFunction)Hook_DestroySwapchainKHR;
-    if (!std::strcmp(n, "vkQueuePresentKHR")) return (PFN_vkVoidFunction)Hook_QueuePresentKHR;
-    // The in-layer network's build submits to the game's queue from a thread of its own: the queue
-    // hooks serialize it with the game's queue operations and device waits.
-    if (!device_features_network_requested()) return nullptr;
-    if (!std::strcmp(n, "vkQueueSubmit")) return (PFN_vkVoidFunction)Hook_QueueSubmit;
-    if (!std::strcmp(n, "vkQueueSubmit2")) return (PFN_vkVoidFunction)Hook_QueueSubmit2;
-    if (!std::strcmp(n, "vkQueueWaitIdle")) return (PFN_vkVoidFunction)Hook_QueueWaitIdle;
-    if (!std::strcmp(n, "vkQueueSubmit2KHR")) return (PFN_vkVoidFunction)Hook_QueueSubmit2KHR;
-    if (!std::strcmp(n, "vkQueueBindSparse")) return (PFN_vkVoidFunction)Hook_QueueBindSparse;
-    if (!std::strcmp(n, "vkDeviceWaitIdle")) return (PFN_vkVoidFunction)Hook_DeviceWaitIdle;
-    return nullptr;
-}
-
 extern "C" {
 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char* pName);
@@ -1841,35 +1824,91 @@ VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(const char
     return VK_SUCCESS;
 }
 
-VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char* pName) {
-    if (!pName) return nullptr;
-    if (!std::strcmp(pName, "vkGetInstanceProcAddr")) return (PFN_vkVoidFunction)vkGetInstanceProcAddr;
-    if (!std::strcmp(pName, "vkGetDeviceProcAddr")) return (PFN_vkVoidFunction)vkGetDeviceProcAddr;
-    if (!std::strcmp(pName, "vkNegotiateLoaderLayerInterfaceVersion"))
-        return (PFN_vkVoidFunction)vkNegotiateLoaderLayerInterfaceVersion;
-    if (!std::strcmp(pName, "vkEnumerateInstanceLayerProperties"))
-        return (PFN_vkVoidFunction)vkEnumerateInstanceLayerProperties;
-    if (!std::strcmp(pName, "vkEnumerateInstanceExtensionProperties"))
-        return (PFN_vkVoidFunction)vkEnumerateInstanceExtensionProperties;
-    if (auto fn = LookupHook(pName)) return fn;
-    if (instance) {
-        std::lock_guard<std::mutex> lk(g_stateMutex);
-        auto it = g_instances.find(instance);
-        if (it != g_instances.end() && it->second.next_gipa) return it->second.next_gipa(instance, pName);
+}  // extern "C"
+
+// The functions the layer answers for. vkGetInstanceProcAddr answers every row, and
+// vkGetDeviceProcAddr the rows from kHookDevice on. The queue rows are answered only while the
+// in-layer network is requested: its build submits to the game's queue from a thread of its own,
+// and the queue hooks serialize that with the game's queue operations and device waits.
+enum HookScope { kHookInstance, kHookDevice, kHookQueue };
+
+static const struct {
+    const char* name;
+    PFN_vkVoidFunction hook;
+    HookScope scope;
+} kHooks[] = {
+    {"vkGetInstanceProcAddr", (PFN_vkVoidFunction)vkGetInstanceProcAddr, kHookInstance},
+    {"vkNegotiateLoaderLayerInterfaceVersion", (PFN_vkVoidFunction)vkNegotiateLoaderLayerInterfaceVersion,
+     kHookInstance},
+    {"vkEnumerateInstanceLayerProperties", (PFN_vkVoidFunction)vkEnumerateInstanceLayerProperties, kHookInstance},
+    {"vkEnumerateInstanceExtensionProperties", (PFN_vkVoidFunction)vkEnumerateInstanceExtensionProperties,
+     kHookInstance},
+    {"vkCreateInstance", (PFN_vkVoidFunction)Hook_CreateInstance, kHookInstance},
+    {"vkDestroyInstance", (PFN_vkVoidFunction)Hook_DestroyInstance, kHookInstance},
+    {"vkEnumeratePhysicalDevices", (PFN_vkVoidFunction)Hook_EnumeratePhysicalDevices, kHookInstance},
+    {"vkCreateDevice", (PFN_vkVoidFunction)Hook_CreateDevice, kHookInstance},
+    {"vkGetDeviceProcAddr", (PFN_vkVoidFunction)vkGetDeviceProcAddr, kHookDevice},
+    {"vkDestroyDevice", (PFN_vkVoidFunction)Hook_DestroyDevice, kHookDevice},
+    {"vkGetDeviceQueue", (PFN_vkVoidFunction)Hook_GetDeviceQueue, kHookDevice},
+    {"vkGetDeviceQueue2", (PFN_vkVoidFunction)Hook_GetDeviceQueue2, kHookDevice},
+    {"vkCreateSwapchainKHR", (PFN_vkVoidFunction)Hook_CreateSwapchainKHR, kHookDevice},
+    {"vkDestroySwapchainKHR", (PFN_vkVoidFunction)Hook_DestroySwapchainKHR, kHookDevice},
+    {"vkQueuePresentKHR", (PFN_vkVoidFunction)Hook_QueuePresentKHR, kHookDevice},
+    {"vkQueueSubmit", (PFN_vkVoidFunction)Hook_QueueSubmit, kHookQueue},
+    {"vkQueueSubmit2", (PFN_vkVoidFunction)Hook_QueueSubmit2, kHookQueue},
+    {"vkQueueWaitIdle", (PFN_vkVoidFunction)Hook_QueueWaitIdle, kHookQueue},
+    {"vkQueueSubmit2KHR", (PFN_vkVoidFunction)Hook_QueueSubmit2KHR, kHookQueue},
+    {"vkQueueBindSparse", (PFN_vkVoidFunction)Hook_QueueBindSparse, kHookQueue},
+    {"vkDeviceWaitIdle", (PFN_vkVoidFunction)Hook_DeviceWaitIdle, kHookQueue},
+};
+
+// The layer's function NAME for a query that answers the rows from FIRST on; null where the next
+// layer answers.
+static PFN_vkVoidFunction LookupHook(const char* name, HookScope first) {
+    for (const auto& row : kHooks) {
+        if (row.scope < first || std::strcmp(row.name, name)) continue;
+        if (row.scope == kHookQueue && !device_features_network_requested()) return nullptr;
+        return row.hook;
     }
     return nullptr;
 }
 
+// The next layer's NAME for INSTANCE, null for an instance the layer does not know. The caller
+// holds g_stateMutex.
+static PFN_vkVoidFunction NextInstanceProcAddr(VkInstance instance, const char* name) {
+    const auto it = g_instances.find(instance);
+    if (it == g_instances.end() || !it->second.next_gipa) return nullptr;
+    return it->second.next_gipa(instance, name);
+}
+
+// The next layer's NAME for DEVICE, null for a device the layer does not know. The caller holds
+// g_stateMutex.
+static PFN_vkVoidFunction NextDeviceProcAddr(VkDevice device, const char* name) {
+    const auto it = g_devices.find(device);
+    if (it == g_devices.end() || !it->second->next_dpa) return nullptr;
+    return it->second->next_dpa(device, name);
+}
+
+extern "C" {
+
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(VkInstance instance, const char* pName) {
+    if (!pName) return nullptr;
+    if (const PFN_vkVoidFunction hook = LookupHook(pName, kHookInstance)) return hook;
+    if (!instance) return nullptr;
+    g_stateMutex.lock();
+    const PFN_vkVoidFunction next = NextInstanceProcAddr(instance, pName);
+    g_stateMutex.unlock();
+    return next;
+}
+
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetDeviceProcAddr(VkDevice device, const char* pName) {
     if (!pName) return nullptr;
-    if (!std::strcmp(pName, "vkGetDeviceProcAddr")) return (PFN_vkVoidFunction)vkGetDeviceProcAddr;
-    if (auto fn = LookupDeviceHook(pName)) return fn;
-    if (device) {
-        std::lock_guard<std::mutex> lk(g_stateMutex);
-        auto it = g_devices.find(device);
-        if (it != g_devices.end() && it->second->next_dpa) return it->second->next_dpa(device, pName);
-    }
-    return nullptr;
+    if (const PFN_vkVoidFunction hook = LookupHook(pName, kHookDevice)) return hook;
+    if (!device) return nullptr;
+    g_stateMutex.lock();
+    const PFN_vkVoidFunction next = NextDeviceProcAddr(device, pName);
+    g_stateMutex.unlock();
+    return next;
 }
 
 }  // extern "C"
