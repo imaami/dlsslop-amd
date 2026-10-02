@@ -323,13 +323,14 @@ network_requirements_missing_extension (VkPhysicalDevice                        
 	extensions(physical, nullptr, &count, nullptr);
 	// One more than counted, so that a device that offers none is no special case. Zeroed, so that a
 	// list the second call fails to fill holds empty names.
-	VkExtensionProperties *const offered =
+	VkExtensionProperties *offered =
 		(VkExtensionProperties *)NETWORK_STD(calloc)(1, sizeof *offered * count + sizeof *offered);
 	if (!offered)
 		return NETWORK_REQUIREMENTS_NO_MEMORY;
 	extensions(physical, nullptr, &count, offered);
 	char const *const missing = network_requirements_unoffered(offered, count, also);
 	NETWORK_STD(free)(offered);
+	offered = nullptr;
 	return missing;
 }
 
@@ -374,7 +375,7 @@ network_requirements_missing_matrix (VkPhysicalDevice                           
 	NETWORK_STD(uint32_t) count = 0;
 	if (matrices(physical, &count, nullptr) != VK_SUCCESS || !count)
 		return NETWORK_REQUIREMENTS_NO_MATRICES;
-	VkCooperativeMatrixPropertiesKHR *const listed =
+	VkCooperativeMatrixPropertiesKHR *listed =
 		(VkCooperativeMatrixPropertiesKHR *)NETWORK_STD(malloc)(sizeof *listed * count);
 	if (!listed)
 		return NETWORK_REQUIREMENTS_NO_MEMORY;
@@ -388,6 +389,7 @@ network_requirements_missing_matrix (VkPhysicalDevice                           
 	bool const found = (result == VK_SUCCESS || result == VK_INCOMPLETE) &&
 	                   network_requirements_lists_matrix(listed, count);
 	NETWORK_STD(free)(listed);
+	listed = nullptr;
 	return found ? nullptr : NETWORK_REQUIREMENTS_NO_MATRICES;
 }
 

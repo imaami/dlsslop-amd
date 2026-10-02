@@ -90,7 +90,7 @@ write_png (char const *path,
            bool        swap)
 {
 	size_t const bytes = (size_t)width * height * 4;
-	uint8_t *const rgba = malloc(bytes);
+	uint8_t *rgba = malloc(bytes);
 	if (!rgba)
 		return false;
 
@@ -104,6 +104,7 @@ write_png (char const *path,
 	}
 	bool const wrote = stbi_write_png(path, (int)width, (int)height, 4, rgba, (int)width * 4);
 	free(rgba);
+	rgba = nullptr;
 	return wrote;
 }
 

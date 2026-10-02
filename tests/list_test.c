@@ -111,11 +111,13 @@ main (void)
 			continue;
 		list_del(&it->node);
 		free(it);
+		it = nullptr;
 	}
 	require(holds(&head, (int const[]){1, 2, 3}, 3), "freeing the first and the last entry broke the list");
 	list_foreach (it, &head, struct item, node) {
 		list_del(&it->node);
 		free(it);
+		it = nullptr;
 	}
 	require(holds(&head, nullptr, 0), "freeing every entry left one");
 

@@ -152,8 +152,10 @@ fails (void)
 static void
 reset (void)
 {
-	for (uint32_t i = 0; i < fake.count; ++i)
+	for (uint32_t i = 0; i < fake.count; ++i) {
 		free(fake.objects[i].map);
+		fake.objects[i].map = nullptr;
+	}
 	for (size_t i = 0; i < sizeof fake.fds / sizeof *fake.fds; ++i) {
 		if (fake.fds[i] >= 0) {
 			close(fake.fds[i]);

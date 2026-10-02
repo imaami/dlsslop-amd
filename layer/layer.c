@@ -725,6 +725,7 @@ instance_chain_fini (struct instance_chain *dest)
 		return;
 
 	free(dest->physical);
+	dest->physical = nullptr;
 	*dest = (struct instance_chain){0};
 }
 
@@ -738,10 +739,11 @@ instance_chain_destroy (struct instance_chain **p_dest)
 	if (!p_dest || !*p_dest)
 		return;
 
-	struct instance_chain *const ptr = *p_dest;
+	struct instance_chain *ptr = *p_dest;
 	*p_dest = nullptr;
 	instance_chain_fini(ptr);
 	free(ptr);
+	ptr = nullptr;
 }
 
 /** @brief A queue that the game took from its device: the present path needs its family.
@@ -822,13 +824,16 @@ swapchain_state_create (struct device_table const *vk,
                         VkSwapchainKHR             handle,
                         uint32_t                   image_count)
 {
-	struct swapchain_state *const ret = calloc(1, sizeof *ret);
-	VkImage *const images = calloc(image_count, sizeof *images);
-	VkSemaphore *const leg2_done = calloc(image_count, sizeof *leg2_done);
+	struct swapchain_state *ret = calloc(1, sizeof *ret);
+	VkImage *images = calloc(image_count, sizeof *images);
+	VkSemaphore *leg2_done = calloc(image_count, sizeof *leg2_done);
 	if (!ret || !images || !leg2_done) {
 		free(ret);
+		ret = nullptr;
 		free(images);
+		images = nullptr;
 		free(leg2_done);
+		leg2_done = nullptr;
 		return nullptr;
 	}
 
@@ -865,8 +870,11 @@ swapchain_state_fini (struct swapchain_state *dest)
 	if (dest->pool)
 		vk->vkDestroyCommandPool(dest->device, dest->pool, nullptr);
 	free(dest->images);
+	dest->images = nullptr;
 	free(dest->leg2_done);
+	dest->leg2_done = nullptr;
 	free(dest->wait_stages);
+	dest->wait_stages = nullptr;
 	*dest = (struct swapchain_state){ .comp = composition_empty() };
 }
 
@@ -880,10 +888,11 @@ swapchain_state_destroy (struct swapchain_state **p_dest)
 	if (!p_dest || !*p_dest)
 		return;
 
-	struct swapchain_state *const ptr = *p_dest;
+	struct swapchain_state *ptr = *p_dest;
 	*p_dest = nullptr;
 	swapchain_state_fini(ptr);
 	free(ptr);
+	ptr = nullptr;
 }
 
 /** @brief The state that struct device_chain records in its flags. */
@@ -944,11 +953,13 @@ struct device_chain {
 static struct device_chain *
 device_chain_create (uint32_t queue_count)
 {
-	struct device_chain *const ret = calloc(1, sizeof *ret);
-	struct device_queue *const queues = calloc(queue_count, sizeof *queues);
+	struct device_chain *ret = calloc(1, sizeof *ret);
+	struct device_queue *queues = calloc(queue_count, sizeof *queues);
 	if (!ret || !queues) {
 		free(ret);
+		ret = nullptr;
 		free(queues);
+		queues = nullptr;
 		return nullptr;
 	}
 
@@ -975,6 +986,7 @@ device_chain_fini (struct device_chain *dest)
 		return;
 
 	free(dest->queue_store);
+	dest->queue_store = nullptr;
 	pthread_mutex_destroy(&dest->network_submit);
 	pthread_mutex_destroy(&dest->lock);
 	shm_map_fini(&dest->shm);
@@ -992,10 +1004,11 @@ device_chain_destroy (struct device_chain **p_dest)
 	if (!p_dest || !*p_dest)
 		return;
 
-	struct device_chain *const ptr = *p_dest;
+	struct device_chain *ptr = *p_dest;
 	*p_dest = nullptr;
 	device_chain_fini(ptr);
 	free(ptr);
+	ptr = nullptr;
 }
 
 static struct list     g_instances   = LIST_INIT(g_instances);   //!< Under g_state_mutex.
@@ -1600,7 +1613,7 @@ add_wanted_extensions (struct instance_chain const *ic,
 	uint32_t n = 0;
 	t->vkEnumerateDeviceExtensionProperties(physical, nullptr, &n, nullptr);
 	// One more than counted, so that a device that offers none does not read as running out.
-	VkExtensionProperties *const avail = calloc((size_t)n + 1, sizeof *avail);
+	VkExtensionProperties *avail = calloc((size_t)n + 1, sizeof *avail);
 	if (!avail) {
 		log_printf("[layer] vkCreateDevice: out of host memory to list the device's extensions; "
 		           "adding none for the transport");
@@ -1609,6 +1622,7 @@ add_wanted_extensions (struct instance_chain const *ic,
 			available[wanted_extension(avail[i].extensionName)] = true;
 	}
 	free(avail);
+	avail = nullptr;
 	for (uint32_t i = 0; i < info->enabledExtensionCount; ++i)
 		enabled[wanted_extension(info->ppEnabledExtensionNames[i])] = true;
 
@@ -1748,11 +1762,12 @@ hook_create_device (VkPhysicalDevice             physicalDevice,
 	for (uint32_t i = 0; i < pCreateInfo->queueCreateInfoCount; ++i)
 		queue_count += pCreateInfo->pQueueCreateInfos[i].queueCount;
 	struct device_chain *dc = device_chain_create(queue_count);
-	char const **const extensions = calloc((size_t)pCreateInfo->enabledExtensionCount + WANT_COUNT
-	                                       + NETWORK_FEATURE_COUNT, sizeof *extensions);
+	char const **extensions = calloc((size_t)pCreateInfo->enabledExtensionCount + WANT_COUNT
+	                                 + NETWORK_FEATURE_COUNT, sizeof *extensions);
 	if (!dc || !extensions) {
 		device_chain_destroy(&dc);
 		free(extensions);
+		extensions = nullptr;
 		log_printf("[layer] vkCreateDevice: out of host memory for the layer's state");
 		return VK_ERROR_OUT_OF_HOST_MEMORY;
 	}
@@ -1790,6 +1805,7 @@ hook_create_device (VkPhysicalDevice             physicalDevice,
 	if (res != VK_SUCCESS) {
 		device_chain_destroy(&dc);
 		free(extensions);
+		extensions = nullptr;
 		return res;
 	}
 
@@ -1815,6 +1831,7 @@ hook_create_device (VkPhysicalDevice             physicalDevice,
 	}
 	// The request's last reader is above.
 	free(extensions);
+	extensions = nullptr;
 
 	// The native HIP worker runs on an AMD GPU, so on anything else there is nothing for this layer
 	// to do but cost a round trip.
@@ -1885,8 +1902,10 @@ hook_destroy_device (VkDevice                     device,
 	}
 	wait_device_idle(dc);
 	// While the device is still found by its queues: the network's build submits through them.
-	if (dc->in_layer)
+	if (dc->in_layer) {
 		g_network.close(dc->in_layer);
+		dc->in_layer = nullptr;
+	}
 	pthread_mutex_lock(&g_state_mutex);
 	list_del(&dc->node);
 	pthread_mutex_unlock(&g_state_mutex);

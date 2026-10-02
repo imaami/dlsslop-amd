@@ -371,13 +371,14 @@ hotkey_x11_destroy (struct hotkey_x11 **p_dest)
 	if (!p_dest || !*p_dest)
 		return;
 
-	struct hotkey_x11 *const x = *p_dest;
+	struct hotkey_x11 *x = *p_dest;
 	*p_dest = nullptr;
 	if (x->xi)
 		dlclose(x->xi);
 	if (x->x11)
 		dlclose(x->x11);
 	free(x);
+	x = nullptr;
 }
 
 /** @brief Loads libX11 and libXi and selects raw key presses on the root window.
@@ -618,6 +619,7 @@ hotkeys_fini (struct hotkeys *dest)
 		}
 	}
 	free(dest->nodes);
+	dest->nodes = nullptr;
 	hotkey_x11_destroy(&dest->x11);
 	*dest = (struct hotkeys){0};
 }

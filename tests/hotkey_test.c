@@ -916,7 +916,7 @@ check_x11 (char const *dir)
 	expect_log("[hotkey] watching XInput2 raw keys on %s", display);
 
 	// F10 goes down, and its press arrives while it stays down. X key codes are evdev's plus 8.
-	Display *const xtest = open_display(display);
+	Display *xtest = open_display(display);
 	require(xtest, "cannot connect to Xvfb %s", display);
 	require(fake_key_event(xtest, KEY_F10 + 8u, True, 0), "XTEST did not press F10");
 	sync_display(xtest, False);
@@ -934,6 +934,7 @@ check_x11 (char const *dir)
 		require(fake_key_event(xtest, SENT[i].key + 8u, SENT[i].down, 0), "XTEST did not send a key");
 	sync_display(xtest, False);
 	close_display(xtest);
+	xtest = nullptr;
 
 	// The raw events arrive shortly after the sync, in order: once the second press of F10 has
 	// arrived, so have those of A.
@@ -943,6 +944,7 @@ check_x11 (char const *dir)
 	// hotkeys_fini() leaves the display open, as the layer does; the test closes it, so that leak
 	// and descriptor checkers find nothing.
 	close_display(h.x11->display);
+	h.x11->display = nullptr;
 	hotkeys_fini(&h);
 	require(is_zero(&h, sizeof h), "finished hotkeys are not empty");
 	stop_xvfb();
@@ -1034,9 +1036,10 @@ main (void)
 	check_no_backend();
 	require(descriptor_0_intact(), "descriptor 0 changed");
 
-	char *const text = read_file(log);
+	char *text = read_file(log);
 	require(!strcmp(text, expected_log), "the log holds\n%s\nnot\n%s", text, expected_log);
 	free(text);
+	text = nullptr;
 	require(!remove(log) && !rmdir(dir), "cannot remove %s", dir);
 	printf("hotkey-test: finishing, reads, sweeps, keyboards, XInput2 and the backend choice hold\n");
 	return 0;

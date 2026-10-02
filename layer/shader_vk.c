@@ -77,7 +77,7 @@ shader_vk_create_compute_pipeline (struct shader_vk    *s,
                                    size_t               size,
                                    char const          *entry_point)
 {
-	uint32_t *const words = malloc(size);
+	uint32_t *words = malloc(size);
 	if (!words) {
 		log_printf("[%s] could not copy %zu bytes of SPIR-V", s->name, size);
 		return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -92,6 +92,7 @@ shader_vk_create_compute_pipeline (struct shader_vk    *s,
 	VkShaderModule module = VK_NULL_HANDLE;
 	VkResult r = s->vk->vkCreateShaderModule(s->device, &module_info, nullptr, &module);
 	free(words);
+	words = nullptr;
 	if (r != VK_SUCCESS) {
 		log_printf("[%s] vkCreateShaderModule failed", s->name);
 		return r;
