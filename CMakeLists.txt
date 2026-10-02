@@ -84,13 +84,22 @@ add_layer_shader(layer/dlssnr/dlssnr.comp dlssnr/DlssNr_Shader_Vk dlssnr_spv)
 foreach(name bcus bcds_bicubic bcds_catmull bcds_lanczos2 bcds_lanczos3 bcds_kaiser2 bcds_kaiser3 bcds_magc)
     add_layer_shader(layer/scaling/${name}.comp scaling/${name}_Shader_Vk ${name}_spv)
 endforeach()
+# Project GLSL that a program embeds: SOURCE's SPIR-V for the target
+# environment ENV, validated, as the uint32_t array SYMBOL in OUTPUT.h below
+# the shader directory. No file of its own is loaded at run time.
+function(embed_shader source output symbol env)
+    set(output ${SHADER_DIR}/${output})
+    set(source ${CMAKE_CURRENT_SOURCE_DIR}/${source})
+    get_filename_component(directory ${output} DIRECTORY)
+    file(MAKE_DIRECTORY ${directory})
+    add_custom_command(OUTPUT ${output}.h ${output}.spv
+        COMMAND ${GLSLANG_VALIDATOR} --quiet -V --target-env ${env} -o ${output}.spv ${source}
+        COMMAND ${SPIRV_VAL} --target-env ${env} ${output}.spv
+        COMMAND ${GLSLANG_VALIDATOR} --quiet -V --target-env ${env} --vn ${symbol} -o ${output}.h ${source}
+        DEPENDS ${source} VERBATIM)
+endfunction()
 set(METER ${SHADER_DIR}/shaders/meter_reduce)
-add_custom_command(OUTPUT ${METER}.h ${METER}.spv
-    COMMAND ${GLSLANG_VALIDATOR} --quiet -V -o ${METER}.spv ${CMAKE_CURRENT_SOURCE_DIR}/layer/meter_reduce.comp
-    COMMAND ${SPIRV_VAL} --target-env vulkan1.0 ${METER}.spv
-    COMMAND ${GLSLANG_VALIDATOR} --quiet -V --vn kMeterReduceSpv -o ${METER}.h
-        ${CMAKE_CURRENT_SOURCE_DIR}/layer/meter_reduce.comp
-    DEPENDS layer/meter_reduce.comp VERBATIM)
+embed_shader(layer/meter_reduce.comp shaders/meter_reduce kMeterReduceSpv vulkan1.0)
 # Keep upstream's kMeterReduceSpv/kMeterReduceSpvLen header contract.
 file(CONFIGURE OUTPUT ${METER}_spv.h CONTENT [[#pragma once
 #include <cstddef>
@@ -99,6 +108,11 @@ file(CONFIGURE OUTPUT ${METER}_spv.h CONTENT [[#pragma once
 static const size_t kMeterReduceSpvLen = sizeof(kMeterReduceSpv) / sizeof(kMeterReduceSpv[0]);
 ]])
 add_custom_target(layer-shaders DEPENDS ${LAYER_SHADERS} ${METER}.h)
+# The Vulkan network's verdict and fallback after its last dispatch.
+embed_shader(common/network_verdict.comp network/network_verdict kNetworkVerdictSpv vulkan1.3)
+embed_shader(common/network_fallback.comp network/network_fallback kNetworkFallbackSpv vulkan1.3)
+add_custom_target(network-shaders DEPENDS ${SHADER_DIR}/network/network_verdict.h
+    ${SHADER_DIR}/network/network_fallback.h)
 
 # Only layer.cpp differs between the layers; both and the layer tests link
 # the other translation units compiled once.
@@ -142,7 +156,8 @@ add_custom_target(vulkan-nr-shaders ALL DEPENDS "${VKNR_SHADERS}/shader-constant
 add_library(dlsslop-vulkan OBJECT common/vulkan_plan.cpp common/vulkan_schedule.cpp common/vulkan_weights.cpp
     common/vulkan_runtime.cpp common/network_recorder.cpp)
 set_target_properties(dlsslop-vulkan PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_include_directories(dlsslop-vulkan PRIVATE backend)
+add_dependencies(dlsslop-vulkan network-shaders)
+target_include_directories(dlsslop-vulkan PRIVATE backend ${SHADER_DIR})
 target_link_libraries(dlsslop-vulkan PUBLIC vulkan Threads::Threads)
 
 add_library(dlsslop-codec OBJECT backend/codec.cpp)
@@ -219,9 +234,9 @@ if(BUILD_TESTING)
     add_executable(network-recorder-test tests/network_recorder_test.cpp common/network_recorder.cpp
         common/vulkan_runtime.cpp common/vulkan_plan.cpp common/vulkan_schedule.cpp common/vulkan_weights.cpp
         backend/files.cpp)
-    target_include_directories(network-recorder-test PRIVATE backend)
+    target_include_directories(network-recorder-test PRIVATE backend ${SHADER_DIR})
     target_link_libraries(network-recorder-test PRIVATE Threads::Threads)
-    add_dependencies(network-recorder-test vulkan-nr-shaders)
+    add_dependencies(network-recorder-test vulkan-nr-shaders network-shaders)
     add_test(NAME network-recorder COMMAND network-recorder-test ${VKNR_SHADERS})
     # The network's builds open exactly the files that install.py installs for
     # it, and fail without one of them. The first check needs strace: without

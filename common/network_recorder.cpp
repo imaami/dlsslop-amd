@@ -11,6 +11,9 @@ namespace dlsslop {
 namespace {
 bool uses_stages(const VulkanFrame& f) { return f.sharpness != 0 || f.color_preserve != 0; }
 uint8_t passes_of(const VulkanFrame& f) { return uint8_t(std::clamp(f.passes, 1u, NetworkRecorder::kMaxPasses)); }
+// Waits run out while other GPU work holds the device, for as long as it
+// does: a line at most this often says so.
+constexpr std::chrono::seconds kTimeoutLog{10};
 }  // namespace
 
 NetworkRecorder::NetworkRecorder(const vulkan::Device& device, VulkanPaths paths)
@@ -97,8 +100,18 @@ void NetworkRecorder::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answe
     };
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 2, pair, 0,
                          nullptr);
-    // The motion history starts over when the frame's settings change, and at a build for
-    // another pass count.
+    // The network starts over when a wait of the last frame ran out, which other GPU work
+    // that holds the device for milliseconds can cause. The motion history also starts over
+    // when the frame's settings change, and at a build for another pass count.
+    const bool timed_out = runtime_->timed_out();
+    if (timed_out) {
+        const auto now = std::chrono::steady_clock::now();
+        if (device_.log && now >= next_log_) {
+            device_.log("a wait of the network ran out while other GPU work held the device: the network "
+                        "answered that frame with its input and starts over (logged at most every 10 s)");
+            next_log_ = now + kTimeoutLog;
+        }
+    }
     const vulkan::Controls controls{frame.style,
                                     std::min(frame.intensity, kMaxControl),
                                     std::min(frame.local_tone, kMaxControl),
@@ -110,7 +123,8 @@ void NetworkRecorder::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answe
     const auto settings = [](const VulkanFrame& f) {
         return std::tie(f.intensity, f.local_tone, f.local_structure, f.style, f.skin_structure, f.auto_mask);
     };
-    runtime_->record(cmd, proxy, answer, controls, !last_ || settings(*last_) != settings(frame), queries, query);
+    runtime_->record(cmd, proxy, answer, controls, timed_out || !last_ || settings(*last_) != settings(frame), queries,
+                     query);
     recorded_ = frame;
     for (auto& b : pair) {
         std::swap(b.srcAccessMask, b.dstAccessMask);
@@ -125,5 +139,7 @@ void NetworkRecorder::submitted()
     last_ = recorded_;
     runtime_->submitted();
 }
+
+bool NetworkRecorder::timed_out() const { return runtime_->timed_out(); }
 
 }  // namespace dlsslop

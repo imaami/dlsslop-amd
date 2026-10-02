@@ -335,12 +335,19 @@ struct Plan {
     std::vector<Segment> segments;
     std::vector<uint32_t> tables;
     uint32_t blob_bytes;
-    // The activation arena, zeroed at build and never again while the network
-    // lives: the values up to VALUES_END, shared by lifetime; the persistent
-    // runs' sync regions; COUNTER_WORDS words of tile counters.
+    // The activation arena, zeroed at build: the values up to VALUES_END,
+    // shared by lifetime; the persistent runs' sync regions; COUNTER_WORDS
+    // words of tile counters. Zeroed again, [VALUES_END, ARENA_BYTES) starts
+    // the sync regions and counters over as the build left them.
     std::vector<Value> values;
     uint64_t values_end, arena_bytes;
     uint32_t counter_words;
+    // The arena's u32 words that a frame's waits set when they run out, and
+    // that nothing else writes: the one every tile-counter wait sets, then
+    // each persistent run's. A wait that runs out leaves its frame wrong; one
+    // of a persistent run also leaves its sync region and the counters it
+    // signals short of their counts.
+    std::vector<uint32_t> timeouts;
     // The noise field, which the build writes into the weight blob on the GPU.
     NoiseJob noise;
     // The steps that tile counters order instead of a barrier.

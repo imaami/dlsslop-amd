@@ -1053,9 +1053,11 @@ Result<Plan> plan(uint32_t width, uint32_t height, uint64_t storage)
                     }))
         return fail("network plan: the network lowered differently over the shared arena");
     trim(dispatches, height);
-    auto counters = chain(dispatches, blob, arena);
+    uint32_t error = 0;
+    auto counters = chain(dispatches, blob, arena, error);
     if (!counters && counters.error().rejected) return refuse(width, height, counters.error().what);
     p.counter_words = DLSSLOP_TRY(std::move(counters));
+    p.timeouts.push_back(error);
     if (arena > UINT32_MAX)
         return refuse(width, height,
                       "its activation arena of " + std::to_string(arena) + " bytes overflows 32-bit offsets");
@@ -1077,6 +1079,7 @@ Result<Plan> plan(uint32_t width, uint32_t height, uint64_t storage)
                            {d.groups[0], d.groups[1], d.groups[2]}});
         p.push.insert(p.push.end(), d.push, d.push + d.words);
         p.chained += d.after == After::kNothing;
+        if (persistent(d.kernel)) p.timeouts.push_back(load<PushPersist>(d).sync_off + kRunError);
     }
     p.steps.back().after = After::kFull;
     for (int k = 0; k < kKeys; ++k)

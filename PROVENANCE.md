@@ -208,7 +208,13 @@ motion estimate's finest flow level for sampling as well as storage and
 transfers, where upstream creates it for storage and transfers only and still
 binds it to the temporal blocks' samplers. It advances the motion history's
 latch, parity and noise seed when its caller says that a recorded frame was
-submitted, where upstream advances them when it records the frame. It leaves out
+submitted, where upstream advances them when it records the frame. Its
+tile-counter records all name one error word, which a wait sets when it runs
+out, where upstream's name one each. After the network's last dispatch, each
+frame reads and zeroes the words that its waits set and, when one ran out,
+answers with its input; the next frame then zeroes the persistent runs' sync
+regions and the tile counters and drops the motion history. Upstream's
+production path never reads those words. It leaves out
 what dlsslop-amd never calls, such as control masks, `record_engine`,
 per-feature histories, preprocessing, model scales below 1, input formats other
 than RGBA8 and RGBA16F, the GPU timing that `last_gpu_ms()` and

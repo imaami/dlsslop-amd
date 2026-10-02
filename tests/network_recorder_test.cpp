@@ -15,7 +15,15 @@
 // the proxy straight into the network's input and its answer straight out,
 // and copy or blit no image. From a model whose weights free every Swin layer
 // of the exponent's upper clamp, a frame must run the kernels and the temporal
-// pre block without that clamp. Takes the directory of the network's SPIR-V.
+// pre block without that clamp. Every frame must judge its waits after the
+// network's last dispatch, with the plan's words that waits set when they run
+// out, and answer with its input only over the grid that verdict writes: the
+// first pass's input into the image that the answer is then copied out of. A
+// verdict that says a wait ran out, poked into the fake device's memory, must
+// start the next frame over: its arena zeroed from the end of the values on,
+// between barriers, and its motion history dropped, as must the frame after
+// it when that frame was not submitted. Takes the directory of the network's
+// SPIR-V.
 // With --build, it only builds the network for one extent, which makes every
 // pipeline of the runtime's own but the temporal pre block that the plan's
 // pre block is not, so that tests/vulkan-files.py can see the files that a
@@ -28,6 +36,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -38,6 +47,9 @@
 #include <string>
 #include <string_view>
 #include <vector>
+// After <cstdint>: the runtime's SPIR-V, as it embeds it.
+#include "network/network_fallback.h"
+#include "network/network_verdict.h"
 
 namespace {
 namespace vulkan = dlsslop::vulkan;
@@ -265,11 +277,12 @@ VKAPI_ATTR VkResult VKAPI_CALL vkWaitForFences(VkDevice, uint32_t, const VkFence
 
 // The commands a frame records.
 VKAPI_ATTR void VKAPI_CALL vkCmdPipelineBarrier(VkCommandBuffer, VkPipelineStageFlags src, VkPipelineStageFlags dst,
-                                                VkDependencyFlags, uint32_t memories, const VkMemoryBarrier*,
+                                                VkDependencyFlags, uint32_t memories, const VkMemoryBarrier* memory,
                                                 uint32_t buffers, const VkBufferMemoryBarrier* buffer,
                                                 uint32_t images, const VkImageMemoryBarrier* image)
 {
     log("barrier", {}, {src, dst, memories});
+    for (uint32_t i = 0; i < memories; ++i) log(" memory", {}, {memory[i].srcAccessMask, memory[i].dstAccessMask});
     for (uint32_t i = 0; i < buffers; ++i) log(" buffer", {id(buffer[i].buffer)}, {buffer[i].srcAccessMask});
     for (uint32_t i = 0; i < images; ++i)
         log(" image", {id(image[i].image)}, {uint64_t(image[i].oldLayout), uint64_t(image[i].newLayout)});
@@ -279,9 +292,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdCopyBuffer(VkCommandBuffer, VkBuffer from, VkBuf
 {
     log("copy buffer", {id(from), id(to)});
 }
-VKAPI_ATTR void VKAPI_CALL vkCmdFillBuffer(VkCommandBuffer, VkBuffer buffer, VkDeviceSize, VkDeviceSize, uint32_t)
+VKAPI_ATTR void VKAPI_CALL vkCmdFillBuffer(VkCommandBuffer, VkBuffer buffer, VkDeviceSize offset, VkDeviceSize bytes,
+                                           uint32_t)
 {
-    log("fill", {id(buffer)});
+    log("fill", {id(buffer)}, {offset, bytes});
 }
 VKAPI_ATTR void VKAPI_CALL vkCmdCopyImage(VkCommandBuffer, VkImage from, VkImageLayout, VkImage to, VkImageLayout,
                                           uint32_t, const VkImageCopy*)
@@ -332,6 +346,10 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(VkCommandBuffer, VkPipelineLayout,
 VKAPI_ATTR void VKAPI_CALL vkCmdDispatch(VkCommandBuffer, uint32_t x, uint32_t y, uint32_t z)
 {
     log("dispatch", {}, {x, y, z});
+}
+VKAPI_ATTR void VKAPI_CALL vkCmdDispatchIndirect(VkCommandBuffer, VkBuffer buffer, VkDeviceSize offset)
+{
+    log("dispatch indirect", {id(buffer)}, {offset});
 }
 VKAPI_ATTR void VKAPI_CALL vkCmdUpdateBuffer(VkCommandBuffer, VkBuffer buffer, VkDeviceSize, VkDeviceSize bytes,
                                              const void* data)
@@ -428,6 +446,71 @@ std::string history(const Frame& f)
     return "gate " + std::to_string(f.gate) + ", seed " + std::to_string(f.seed);
 }
 
+// A pipeline made from CODE as a frame names it at its first use.
+std::string named(std::span<const uint32_t> code)
+{
+    return "(pipeline " + std::to_string(vulkan_test::fnv1a(code.data(), code.size_bytes())) + ")";
+}
+
+// The handle that TOKEN names, as a frame's line names it, without what its
+// first use says it was made as.
+std::string_view handle(std::string_view token) { return token.substr(0, token.find_first_of("(/ ")); }
+
+// Whether COMMANDS, a frame's of WIDTH x HEIGHT, judge its waits after the
+// network's last dispatch and answer with its input only over the verdict's
+// grid: the verdict over one workgroup with the fallback's grid and the
+// plan's TIMEOUTS, a barrier from its writes into the indirect read, the
+// fallback and the host, then the fallback over the grid the verdict's set
+// binds, from the first pass's input into the image the answer is then
+// copied out of, and no dispatch after it. The first pass's input is what
+// the last transfer before the network's first dispatch writes: the
+// network's input, or with later passes the image that keeps it.
+bool judged(std::string_view commands, uint32_t width, uint32_t height, const std::vector<uint32_t>& timeouts)
+{
+    std::vector<std::string_view> l;
+    for (size_t at = 0; at < commands.size();) {
+        const size_t end = commands.find('\n', at);
+        l.push_back(commands.substr(at, end - at));
+        at = end + 1;
+    }
+    const auto starts = [](std::string_view head) {
+        return [head](std::string_view s) { return s.starts_with(head); };
+    };
+    std::string_view first;
+    for (auto s = l.begin(); s != l.end() && !s->starts_with("dispatch"); ++s)
+        if (s->starts_with("copy buffer to image ") || s->starts_with("copy image #") || s->starts_with("blit "))
+            first = handle(s->substr(s->rfind(" #") + 1));
+    const auto v = std::ranges::find_if(
+        l, [](std::string_view s) { return s.starts_with("pipeline #") && s.ends_with(named(kNetworkVerdictSpv)); });
+    if (first.empty() || v == l.end() || l.end() - v < 12 || std::none_of(l.begin(), v, starts("dispatch ")))
+        return false;
+    // The handle bound at BINDING of a set's line.
+    const auto bound = [](std::string_view set, std::string_view binding) {
+        const size_t at = set.find(binding);
+        return at == std::string_view::npos ? std::string_view() : handle(set.substr(at + binding.size()));
+    };
+    // The result, which leaves GENERAL for the copy out once the fallback is done.
+    const std::string_view result = handle(v[11].substr(v[11].find('#')));
+    const auto out = std::find_if(v + 12, l.end(), [](std::string_view s) {
+        return s.starts_with("copy image to buffer ") || s.starts_with("blit ");
+    });
+    std::string push = "push " + std::to_string((width + 7) / 8) + " " + std::to_string((height + 7) / 8) + " " +
+                       std::to_string(timeouts.size());
+    for (size_t i = 0; i < 13; ++i) push += " " + std::to_string(i < timeouts.size() ? timeouts[i] : 0);
+    constexpr VkPipelineStageFlags after =
+        VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_HOST_BIT;
+    constexpr VkAccessFlags reads =
+        VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_HOST_READ_BIT;
+    return v[2] == push && v[3] == "dispatch 1 1 1" && v[4] == "barrier 2048 " + std::to_string(after) + " 1" &&
+           v[5] == " memory 64 " + std::to_string(reads) && v[6].starts_with("pipeline #") &&
+           v[6].ends_with(named(kNetworkFallbackSpv)) && bound(v[7], "set 0=") == result &&
+           bound(v[7], " 1=") == first && v[8] == "push " + std::to_string(width) + " " + std::to_string(height) &&
+           v[9] == "dispatch indirect " + std::string(bound(v[1], " 1=")) + " 0" &&
+           v[10] == "barrier 2048 4096 0" && v[11].starts_with(" image #") && v[11].ends_with(" 1 6") &&
+           std::none_of(v + 10, l.end(), starts("dispatch")) && out != l.end() &&
+           handle(out->substr(out->find('#'))) == result;
+}
+
 void check(const dlsslop::VulkanPaths& paths, unsigned passes)
 {
     dlsslop::VulkanFrame f;
@@ -488,6 +571,8 @@ void check_reshapes(const dlsslop::VulkanPaths& paths)
                 {3, true, true, 0.5f}, {1, true, true, 0.5f},  {1, true, false, 0},     {1, false, false, 0},
                 {2, false, false, 0},  {1, false, false, 0}};
     dlsslop::NetworkRecorder recorder(fake_device(), paths);
+    const auto plan = vulkan::plan(64, 64);
+    require(bool(plan), "cannot plan 64x64 frames");
     for (const auto& step : walk) {
         dlsslop::VulkanFrame f;
         f.width = f.height = 64;
@@ -507,8 +592,13 @@ void check_reshapes(const dlsslop::VulkanPaths& paths)
         require(first || (frame.commands.empty() && pipelines_made.size() == pipelines),
                 ("the reshape for " + what + " recorded a command or made a pipeline").c_str());
         // A frame that is not submitted leaves the images' layouts to the next.
-        require(lines(record(recorder, f).commands, kSettle) == 1,
+        const std::string unsubmitted = record(recorder, f).commands;
+        require(lines(unsubmitted, kSettle) == 1,
                 ("the first frame after the reshape for " + what + " does not move the images into their layouts")
+                    .c_str());
+        require(judged(unsubmitted, f.width, f.height, plan->timeouts),
+                ("a frame of " + what + " does not judge its waits after the network, or answers with its input "
+                 "otherwise than over the verdict's grid")
                     .c_str());
         const std::string after = frames_of(recorder, f);
         require(lines(after, kSettle) == 1,
@@ -562,6 +652,83 @@ void check_unclamped(const std::string& spirv)
                     ("a frame from the unclamped model does not run " + unclamped + " instead of " + clamped).c_str());
     }
 }
+// The verdict of the network built last, the fallback's grid, in the fake
+// device's memory that its runtime keeps mapped, the only memory a built
+// network keeps mapped.
+std::vector<uint8_t>& verdict()
+{
+    for (auto m = host.rbegin(); m != host.rend(); ++m)
+        if (m->second.size() == sizeof(VkDispatchIndirectCommand)) return m->second;
+    require(false, "the network keeps no verdict mapped");
+    std::abort();
+}
+
+// The lines the network logs that say a wait ran out.
+int timeout_lines = 0;
+void count_timeouts(const char* line)
+{
+    timeout_lines += std::string_view(line).find("ran out") != std::string_view::npos;
+}
+
+// After a frame whose wait ran out, as a verdict poked into the fake device's
+// memory says, the next frame starts the network over: it zeroes the arena
+// from the end of the values on before any dispatch, between barriers from
+// the compute work before it and into the compute work after it, and drops
+// the motion history. So does the frame after it, when that frame was not submitted. A
+// line says so, but not again for the frame after it. Only a frame that
+// starts over zeroes the arena.
+void check_timeouts(const dlsslop::VulkanPaths& paths)
+{
+    const auto plan = vulkan::plan(64, 64);
+    require(bool(plan), "cannot plan 64x64 frames");
+    dlsslop::VulkanFrame f;
+    f.width = f.height = 64;
+    f.motion = true;
+    vulkan::Device device = fake_device();
+    device.log = count_timeouts;
+    dlsslop::NetworkRecorder recorder(device, paths);
+    require(recorder.shape(f).value_or(false), "cannot build the network for 64x64 frames");
+    std::vector<uint8_t>& grid = verdict();
+    const std::string zeroed = "(buffer " + std::to_string(plan->arena_bytes) + ") " +
+                               std::to_string(plan->values_end) + " " + std::to_string(VK_WHOLE_SIZE);
+    // Compute (2048) to transfer (4096) stages, shader writes (64) to transfer writes (4096), and
+    // back to shader reads and writes (96).
+    const std::string_view before = "barrier 2048 4096 1\n memory 64 4096\n",
+                           after = "\nbarrier 4096 2048 1\n memory 4096 96\n";
+    const auto zeroes = [&](const Frame& frame) {
+        const std::string_view c = frame.commands;
+        const size_t fill = c.find("\nfill #") + 1, end = c.find('\n', fill);
+        return lines(c, "fill #", zeroed) == 1 && fill < c.find("\ndispatch ") && fill >= before.size() &&
+               c.substr(fill - before.size(), before.size()) == before && c.substr(end, after.size()) == after;
+    };
+    // The first frame starts over, and zeroes what the build zeroed.
+    require(zeroes(record(recorder, f)),
+            "the first frame does not zero the arena past its values first, between barriers");
+    recorder.submitted();
+    const Frame second = record(recorder, f);
+    require(!recorder.timed_out() && second.gate == 1 && !lines(second.commands, "fill"),
+            ("the second frame has " + history(second) + " or zeroes the arena").c_str());
+    // The second frame's wait ran out: its verdict gives the fallback workgroups.
+    recorder.submitted();
+    const uint32_t groups = 8;
+    std::memcpy(grid.data(), &groups, sizeof groups);
+    require(recorder.timed_out(), "a verdict that gives the fallback workgroups does not say a wait ran out");
+    const Frame over = record(recorder, f);
+    require(over.gate == 0 && over.seed == 0 && zeroes(over),
+            ("the frame after one whose wait ran out has " + history(over) +
+             ", or does not zero the arena first, between barriers")
+                .c_str());
+    const Frame again = record(recorder, f);
+    require(again.commands == over.commands,
+            "the frame after one that started over and was not submitted does not start over too");
+    require(timeout_lines == 1, "a wait that ran out is not logged once");
+    // Submitted, and none of its waits ran out.
+    recorder.submitted();
+    std::memset(grid.data(), 0, sizeof groups);
+    const Frame next = record(recorder, f);
+    require(!recorder.timed_out() && next.gate == 1 && next.seed == 1 && !lines(next.commands, "fill"),
+            ("the frame after one that started over has " + history(next) + " or zeroes the arena").c_str());
+}
 } // namespace
 
 int main(int argc, char** argv)
@@ -610,8 +777,9 @@ int main(int argc, char** argv)
     for (const unsigned passes : {1u, 2u}) check(paths, passes);
     check_reshapes(paths);
     check_unclamped(argv[optind]);
+    check_timeouts(paths);
     std::printf("network-recorder test: frames not submitted leave the motion history as it was, a reshaped "
-                "network records the frames of a built one, and weights free of the upper clamp run the kernels "
-                "without it\n");
+                "network records the frames of a built one, weights free of the upper clamp run the kernels "
+                "without it, and a frame whose wait ran out answers with its input and starts the next over\n");
     return 0;
 }

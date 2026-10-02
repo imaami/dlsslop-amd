@@ -1,0 +1,26 @@
+#version 450
+// SPDX-License-Identifier: MIT
+// After the network's last dispatch: whether a wait of the frame ran out.
+// Reads and zeroes the activation arena's words that the waits set when they
+// run out (vulkan::Plan::timeouts), and writes the grid of the fallback that
+// answers the frame with its input (network_fallback.comp): no workgroup when
+// no word was set. The host reads that grid as the frame's verdict.
+layout(local_size_x = 1) in;
+layout(set = 0, binding = 0, std430) buffer Arena { uint arena[]; };
+layout(set = 0, binding = 1, std430) writeonly buffer Grid { uint grid[3]; };
+layout(push_constant) uniform Push {
+    uint groups_x, groups_y, count;
+    uint words[13];
+} pc;
+
+void main()
+{
+    uint set = 0u;
+    for (uint i = 0u; i < pc.count; ++i) {
+        set |= arena[pc.words[i]];
+        arena[pc.words[i]] = 0u;
+    }
+    grid[0] = set != 0u ? pc.groups_x : 0u;
+    grid[1] = pc.groups_y;
+    grid[2] = 1u;
+}

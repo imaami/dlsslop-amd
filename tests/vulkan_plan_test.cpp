@@ -7,8 +7,10 @@
 // values and sizes are checked against goldens of upstream's own
 // NrSession::build (DLSSNR-AMD's nr_graph.cpp at 82560c4, built with its
 // rdna4.sh defines and stopped before the device), and the weight blob packed
-// from a synthetic model pack against upstream's. The frames the network
-// cannot take are rejected.
+// from a synthetic model pack against upstream's. Where upstream's
+// tile-counter records each name an error word of their own, the plan's name
+// one they share: the goldens are checked with upstream's words put back. The
+// frames the network cannot take are rejected.
 #include "vulkan_pack.h"
 #include "vulkan_plan.h"
 #include "vulkan_weights.h"
@@ -194,6 +196,34 @@ Plan unclamped(Plan p, const ClampFree& free)
 }
 bool operator==(const ClampFree& a, const ClampFree& b) { return std::ranges::equal(a.heads, b.heads); }
 
+// A tile-counter record (vulkan_schedule.cpp's chain()): 7 words, the counters
+// its step waits on, -, its table, the counters it signals, the frame counter,
+// the error word its waits set when they run out, and the magic word.
+enum Record : size_t { kWaits, kTable = 2, kSignals, kFrame, kError, kMagic, kRecordWords };
+// Where in P.tables the records of P's steps start: the table of a record's
+// words at the last push word of a step.
+std::vector<size_t> records(const Plan& p)
+{
+    std::vector<size_t> at;
+    for (const Step& s : p.steps) {
+        const uint32_t word = p.push[s.push + s.words - 1];
+        const auto table = std::ranges::find_if(p.segments, [&](const Segment& g) {
+            return g.recipe == Recipe::kTable && g.offset == 4ull * word && g.bytes == 4 * kRecordWords;
+        });
+        if (word != ~0u && table != p.segments.end() && p.tables[table->index + kMagic] == 0x54434852u)
+            at.push_back(table->index);
+    }
+    return at;
+}
+// P as upstream plans it: each record that waits names the word before its
+// counters as its error word.
+Plan upstream(Plan p)
+{
+    for (const size_t r : records(p))
+        if (p.tables[r + kTable] != ~0u) p.tables[r + kError] = p.tables[r + kWaits] - 1;
+    return p;
+}
+
 // The steps as the goldens hash them.
 uint64_t dispatch_hash(const Plan& p)
 {
@@ -301,6 +331,28 @@ void check_invariants(const Plan& p)
     expect(p.values_end % 256 == 0 && p.values_end + 4ull * p.counter_words <= p.arena_bytes &&
                p.arena_bytes <= UINT32_MAX,
            "%s: the arena's regions do not fit it", at);
+    // The words that waits set when they run out: one that every record that
+    // waits names, after the frame counter and before every counter, then
+    // each persistent run's, sync_off + 3, in its sync region below the frame
+    // counter. Nothing else writes them.
+    const std::vector<uint32_t>& t = p.timeouts;
+    uint32_t frame = ~0u, counters = ~0u, waits = 0;
+    for (const size_t r : records(p)) {
+        frame = p.tables[r + kFrame];
+        for (const Record c : {kWaits, kSignals}) counters = std::min(counters, p.tables[r + c]);
+        if (p.tables[r + kTable] == ~0u) continue;
+        ++waits;
+        expect(!t.empty() && p.tables[r + kError] == t[0], "%s: a record's waits set another word than the plan's", at);
+    }
+    std::vector<uint32_t> runs;
+    for (const Step& s : steps)
+        if (persistent(s.kernel)) runs.push_back(p.push[s.push + offsetof(vulkan::PushPersist, sync_off) / 4] + 3);
+    expect(waits == p.chained && !t.empty() && t[0] == frame + 1 && t[0] < counters &&
+               std::ranges::equal(t.begin() + 1, t.end(), runs.begin(), runs.end()),
+           "%s: the words that waits set are not the shared one, then each persistent run's", at);
+    for (size_t i = 1; i < t.size(); ++i)
+        expect(4ull * t[i] >= p.values_end && t[i] < frame && (i == 1 || t[i] > t[i - 1]),
+               "%s: a persistent run's word that its waits set is outside its own sync region", at);
 }
 
 void check_goldens()
@@ -329,7 +381,8 @@ void check_goldens()
         expect(dispatch_hash(free) == g.clamped,
                "%ux%u: the steps with the real model's kernels differ from upstream's dispatches (--print)", g.width,
                g.height);
-        expect(fnv1a(free.tables.data(), 4 * free.tables.size()) == g.real_tables,
+        const Plan theirs = upstream(free);
+        expect(fnv1a(theirs.tables.data(), 4 * theirs.tables.size()) == g.real_tables,
                "%ux%u: the tables with the real model's free heads differ from upstream's", g.width, g.height);
         expect(value_hash(*p) == g.values, "%ux%u: the values differ from upstream's (--print)", g.width, g.height);
         check_invariants(*p);
@@ -387,7 +440,7 @@ void check_synthetic()
     for (const auto& e : kPacked) {
         const auto q = vulkan::plan(e.width, e.height);
         ClampFree free{};
-        const auto hash = q ? blob_hash(*q, *model, blob, free) : dlsslop::Result<uint64_t>();
+        const auto hash = q ? blob_hash(upstream(*q), *model, blob, free) : dlsslop::Result<uint64_t>();
         expect(q && hash && *hash == golden(e.width, e.height)->synthetic_blob,
                "%ux%u: the blob packed from the synthetic model differs from upstream's%s%s", e.width, e.height,
                q && !hash ? ": " : "", q && !hash ? hash.error().what.c_str() : "");
@@ -414,7 +467,7 @@ int check_model(const std::string& path)
                        bytes ? "not the size the synthetic model gives it" : bytes.error().what.c_str());
             }
         ClampFree free{};
-        const auto hash = blob_hash(*p, *model, blob, free);
+        const auto hash = blob_hash(upstream(*p), *model, blob, free);
         expect(!hash || free == kModelClampFree, "%ux%u: %s frees other heads of the upper clamp than upstream's audit",
                g.width, g.height, path.c_str());
         if (expect(hash && *hash == g.real_blob, "%ux%u: the blob packed from %s differs from upstream's%s%s",

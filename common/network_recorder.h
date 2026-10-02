@@ -8,6 +8,7 @@
 #include "vulkan_frame.h"
 #include "vulkan_runtime.h"
 
+#include <chrono>
 #include <optional>
 #include <string>
 
@@ -41,17 +42,22 @@ public:
     // the network as it was.
     Result<bool> shape(const VulkanFrame& frame);
     // Records one frame of the shape it has: from PROXY, w x h RGBA8 or RGBA16F,
-    // through the network, into ANSWER in the same form. Transfers on FAMILY's
-    // queue wrote the proxy and read the last answer before, and do after.
-    // EXPORTED: both belong to VK_QUEUE_FAMILY_EXTERNAL between frames. With
-    // QUERIES, writes timestamps QUERY, once the frame is in the network's
-    // input, and QUERY + 1, once the network is done.
+    // through the network, into ANSWER in the same form, or PROXY unchanged
+    // when a wait of the frame runs out. Transfers on FAMILY's queue wrote the
+    // proxy and read the last answer before, and do after. EXPORTED: both
+    // belong to VK_QUEUE_FAMILY_EXTERNAL between frames. With QUERIES, writes
+    // timestamps QUERY, once the frame is in the network's input, and
+    // QUERY + 1, once the network is done. The frame submitted last must have
+    // finished: when a wait of it ran out, this frame starts the network over.
     void record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const VulkanFrame& frame, uint32_t family,
                 bool exported, VkQueryPool queries = VK_NULL_HANDLE, uint32_t query = 0);
     // Says that the frame record() recorded last was submitted, so that the
     // next frame follows it in the motion history. A frame that is recorded
     // and not submitted leaves the history as it was.
     void submitted();
+    // Whether a wait of the frame submitted last ran out, so that its answer
+    // is its proxy. That frame must have finished.
+    bool timed_out() const;
 
 private:
     vulkan::Device device_;
@@ -67,6 +73,8 @@ private:
     std::optional<vulkan::Plan> plan_;
     uint32_t rejected_[2] = {};
     std::string rejection_;
+    // When the next line about a wait that ran out may be logged.
+    std::chrono::steady_clock::time_point next_log_{};
 
     Result<void> plan_for(uint32_t width, uint32_t height);
 };

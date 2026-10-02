@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "vulkan_runtime.h"
 #include "files.h"
+#include "network/network_fallback.h"
+#include "network/network_verdict.h"
 #include "vulkan_weights.h"
 
 #include <algorithm>
@@ -75,23 +77,36 @@ struct StagePush {
 struct AlphaPush {
     uint32_t w, h, rgba8;
 };
+// The verdict's push block (network_verdict.comp): the fallback's grid, and
+// the arena's words that the waits set when they run out.
+struct VerdictPush {
+    uint32_t groups_x, groups_y, count, words[13];
+};
+// The fallback's (network_fallback.comp).
+struct FallbackPush {
+    uint32_t w, h;
+};
 
 // A pipeline's bindings: its storage buffers ('a' the activation arena, 'w'
-// the weights, 'p' the motion parameters), then its images ('s' storage, 't'
-// sampled), and its push range; for the runtime's own, its SPIR-V below the
-// network's directory.
+// the weights, 'p' the motion parameters, 'v' the verdict), then its images
+// ('s' storage, 't' sampled), and its push range; for the runtime's own, its
+// SPIR-V below the network's directory, or the SPIR-V CODE it embeds from the
+// source FILE.
 struct Bindings {
     const char* buffers;
     const char* images;
     uint32_t push;
     const char* file;
+    std::span<const uint32_t> code;
 };
 // The runtime's own pipelines, in Runtime::Adapter's order (upstream: the
 // adapters of nr_runtime.cpp and the temporal variants of the pre and post
 // blocks): the alpha pass, which restores the frame's alpha when later passes
 // overwrote the input; dlsslop-amd's pass stages; the motion estimate's luma
 // pyramid and flow; the pre block with motion history, with the upper clamp
-// and without; the post block with motion history.
+// and without; the post block with motion history; dlsslop-amd's verdict on
+// the frame's waits and the fallback that answers with the input when one ran
+// out.
 constexpr Bindings kAdapterBindings[] = {
     {"", "st", sizeof(AlphaPush), "runtime/runtime_alpha.spv"},
     {"", "sts", sizeof(StagePush), "runtime/pass_stages.spv"},
@@ -101,6 +116,8 @@ constexpr Bindings kAdapterBindings[] = {
     {"aawwwap", "tttt", sizeof(PushFSwin) + sizeof(PushPreImage), "temporal/temporal_pre_fp32nh.spv"},
     {"aawwwp", "ssttt", sizeof(PushFSwin) + sizeof(PushUps) + sizeof(PushImageTail),
      "temporal/temporal_post_fp32.spv"},
+    {"av", "", sizeof(VerdictPush), "network_verdict.comp", kNetworkVerdictSpv},
+    {"", "st", sizeof(FallbackPush), "network_fallback.comp", kNetworkFallbackSpv},
 };
 // A kernel's images, by Images.
 constexpr const char* kKernelImages[] = {"", "t", "sst"};
@@ -351,9 +368,9 @@ Result<void> make_sampler(VkDevice device, VkFilter filter, VkSamplerAddressMode
     return vk_check(vkCreateSampler(device, &info, nullptr, &sampler), "create a network sampler");
 }
 
-// PIPELINE's compute pipeline, through CACHE, from its SPIR-V below SHADERS:
-// one set of its bindings and a push range, and 32 lanes, which the
-// cooperative matrices' fragments assume (upstream: nrvk::Kernel::create).
+// PIPELINE's compute pipeline, through CACHE, from its SPIR-V below SHADERS
+// or embedded: one set of its bindings and a push range, and 32 lanes, which
+// the cooperative matrices' fragments assume (upstream: nrvk::Kernel::create).
 Result<void> make_pipeline(VkDevice device, VkPipelineCache cache, const std::string& shaders, size_t pipeline,
                            Pipeline& p)
 {
@@ -378,7 +395,9 @@ Result<void> make_pipeline(VkDevice device, VkPipelineCache cache, const std::st
     layout.pushConstantRangeCount = 1;
     layout.pPushConstantRanges = &range;
     DLSSLOP_TRY(vk_check(vkCreatePipelineLayout(device, &layout, nullptr, &p.layout), what.c_str()));
-    const auto code = DLSSLOP_TRY(read_spirv(join(shaders, file)));
+    std::vector<uint32_t> read;
+    if (b.code.empty()) read = DLSSLOP_TRY(read_spirv(join(shaders, file)));
+    const std::span<const uint32_t> code = b.code.empty() ? read : b.code;
     VkShaderModuleCreateInfo module_info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
     module_info.codeSize = 4 * code.size();
     module_info.pCode = code.data();
@@ -601,7 +620,8 @@ Result<Runtime> Runtime::build(const Device& device, const VulkanPaths& paths, c
 Runtime::Runtime(Runtime&& other) noexcept
     : device_(other.device_), objects_(std::exchange(other.objects_, {})), state_(other.state_),
       history_(other.history_), recorded_(other.recorded_), settled_(other.settled_),
-      steps_(std::move(other.steps_)), push_(std::move(other.push_))
+      steps_(std::move(other.steps_)), push_(std::move(other.push_)), values_end_(other.values_end_),
+      timeouts_(std::move(other.timeouts_))
 {
 }
 
@@ -620,7 +640,7 @@ Runtime::~Runtime()
     for (auto& pyramid : o.luma)
         for (Image& i : pyramid) destroy(d, i);
     for (Image* i : {&o.frame, &o.scratch, &o.shown, &o.second, &o.answer, &o.input}) destroy(d, *i);
-    for (Buffer* b : {&o.params, &o.weights, &o.arena}) destroy(d, *b);
+    for (Buffer* b : {&o.verdict, &o.params, &o.weights, &o.arena}) destroy(d, *b);
 }
 
 Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, Plan& plan)
@@ -628,7 +648,8 @@ Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, Plan& p
     const auto start = std::chrono::steady_clock::now();
     if (plan.width != shape.width || plan.height != shape.height || plan.steps.size() < 2 ||
         plan.steps.front().kernel != Kernel::kFswinImagePreds32 ||
-        plan.steps.back().kernel != Kernel::kFswinImagePost32 || plan.steps.back().after != After::kFull)
+        plan.steps.back().kernel != Kernel::kFswinImagePost32 || plan.steps.back().after != After::kFull ||
+        plan.timeouts.size() > std::size(VerdictPush{}.words))
         return fail("network plan: not a plan of the frames the network is built for");
     // What the build reads and what the device offers, before any object.
     DLSSLOP_TRY(check_constants(paths.shaders));
@@ -638,6 +659,8 @@ Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, Plan& p
     unclamp(plan, DLSSLOP_TRY(clamp_free(plan.segments, model)));
     steps_ = plan.steps;
     push_ = plan.push;
+    values_end_ = plan.values_end;
+    timeouts_ = plan.timeouts;
     DLSSLOP_TRY(adopt(shape));
     // What stays while the runtime lives: the activation arena, the weights
     // and the input's sampler.
@@ -645,6 +668,15 @@ Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, Plan& p
     Objects& o = objects_;
     DLSSLOP_TRY(make_buffer(d, plan.arena_bytes, kBuffers, false, "the network's activation arena", o.arena));
     DLSSLOP_TRY(make_buffer(d, plan.blob_bytes, kBuffers, false, "the network's weights", o.weights));
+    // The verdict, which the host reads after each frame: no wait ran out
+    // before the first.
+    DLSSLOP_TRY(make_buffer(d, sizeof(VkDispatchIndirectCommand),
+                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, true,
+                            "the network's verdict", o.verdict));
+    void* grid = nullptr;
+    DLSSLOP_TRY(
+        vk_check(vkMapMemory(d.device, o.verdict.memory, 0, VK_WHOLE_SIZE, 0, &grid), "map the network's verdict"));
+    o.grid = static_cast<uint32_t*>(std::memset(grid, 0, sizeof(VkDispatchIndirectCommand)));
     DLSSLOP_TRY(make_sampler(d.device, VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT, o.nearest));
     const auto compiling = std::chrono::steady_clock::now();
     DLSSLOP_TRY(make_pipelines(paths));
@@ -840,6 +872,9 @@ Result<void> Runtime::make_sets()
         sets.push_back({kStages, &o.stage_sets[0], {stored(o.answer), first, stored(o.scratch)}});
         sets.push_back({kStages, &o.stage_sets[1], {stored(o.scratch), first, stored(o.answer)}});
     }
+    sets.push_back({kVerdict, &o.verdict_set, {}});
+    sets.push_back({kFallback, &o.fallback_sets[0], {stored(o.answer), first}});
+    if (s.stages) sets.push_back({kFallback, &o.fallback_sets[1], {stored(o.scratch), first}});
     if (s.motion) {
         for (uint32_t p = 0; p < 2; ++p)
             for (uint32_t k = 0; k < kLevels; ++k) {
@@ -903,7 +938,7 @@ Result<void> Runtime::make_sets()
         const Bindings b = bindings_of(sets[i].pipeline);
         uint32_t binding = 0;
         for (const char* t = b.buffers; *t; ++t) {
-            const Buffer& buffer = *t == 'a' ? o.arena : *t == 'w' ? o.weights : o.params;
+            const Buffer& buffer = *t == 'a' ? o.arena : *t == 'w' ? o.weights : *t == 'v' ? o.verdict : o.params;
             buffers.push_back({buffer.buffer, 0, VK_WHOLE_SIZE});
             VkWriteDescriptorSet& w = writes.emplace_back(VkWriteDescriptorSet{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET});
             w.dstSet = made[i];
@@ -1027,13 +1062,18 @@ std::string Runtime::described() const
            (s.answer_direct ? "stored in the frame's format" : "blitted from RGBA32F");
 }
 
-void Runtime::dispatch(VkCommandBuffer cmd, size_t pipeline, VkDescriptorSet set, uint32_t x, uint32_t y,
-                       const void* push, uint32_t bytes, uint32_t z) const
+void Runtime::bind(VkCommandBuffer cmd, size_t pipeline, VkDescriptorSet set, const void* push, uint32_t bytes) const
 {
     const Pipeline& p = objects_.pipelines[pipeline];
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.pipeline);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, p.layout, 0, 1, &set, 0, nullptr);
     vkCmdPushConstants(cmd, p.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, bytes, push);
+}
+
+void Runtime::dispatch(VkCommandBuffer cmd, size_t pipeline, VkDescriptorSet set, uint32_t x, uint32_t y,
+                       const void* push, uint32_t bytes, uint32_t z) const
+{
+    bind(cmd, pipeline, set, push, bytes);
     vkCmdDispatch(cmd, x, y, z);
 }
 
@@ -1053,6 +1093,17 @@ void Runtime::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const
     const State& s = state_;
     const uint32_t w = s.width, h = s.height, gx = (w + 7) / 8, gy = (h + 7) / 8;
     if (!settled_) settle_images(cmd);
+    // A frame that starts over zeroes the sync regions and tile counters as
+    // the build left them. After a wait of a persistent run ran out, they
+    // stay short of their counts until then, and every later frame's waits
+    // would run out.
+    if (reset) {
+        const VkMemoryBarrier before{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, kWrite, kCopyWrite};
+        vkCmdPipelineBarrier(cmd, kCompute, kTransfer, 0, 1, &before, 0, nullptr, 0, nullptr);
+        vkCmdFillBuffer(cmd, o.arena.buffer, values_end_, VK_WHOLE_SIZE, 0);
+        const VkMemoryBarrier after{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, kCopyWrite, kRead | kWrite};
+        vkCmdPipelineBarrier(cmd, kTransfer, kCompute, 0, 1, &after, 0, nullptr, 0, nullptr);
+    }
     // The proxy into the input: copied straight in the frame's format, or
     // copied into the frame's image and blitted into RGBA32F. With later
     // passes, which overwrite the input, the first pass's input is kept.
@@ -1182,6 +1233,19 @@ void Runtime::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const
         dispatch(cmd, kAlpha, o.alpha_sets[in_scratch], gx, gy, &push, sizeof push);
     }
     if (queries) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries, query + 1);
+    // Whether a wait of the frame ran out, which the host reads once the
+    // frame has run; then the first pass's input into the result, over the
+    // grid that the verdict leaves empty when none did.
+    VerdictPush verdict{gx, gy, uint32_t(timeouts_.size()), {}};
+    std::ranges::copy(timeouts_, verdict.words);
+    dispatch(cmd, kVerdict, o.verdict_set, 1, 1, &verdict, sizeof verdict);
+    const VkMemoryBarrier judged{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, kWrite,
+                                 VK_ACCESS_INDIRECT_COMMAND_READ_BIT | kWrite | VK_ACCESS_HOST_READ_BIT};
+    vkCmdPipelineBarrier(cmd, kCompute, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | kCompute | VK_PIPELINE_STAGE_HOST_BIT,
+                         0, 1, &judged, 0, nullptr, 0, nullptr);
+    const FallbackPush fallback{w, h};
+    bind(cmd, kFallback, o.fallback_sets[in_scratch], &fallback, sizeof fallback);
+    vkCmdDispatchIndirect(cmd, o.verdict.buffer, 0);
     barrier(cmd, result, kGeneral, kSource, kCompute, kWrite, kTransfer, kCopyRead);
     if (s.answer_direct) {
         vkCmdCopyImageToBuffer(cmd, result, kSource, answer, 1, &region);
@@ -1204,5 +1268,7 @@ void Runtime::submitted()
     history_ = recorded_;
     settled_ = true;
 }
+
+bool Runtime::timed_out() const { return objects_.grid[0] != 0; }
 
 } // namespace dlsslop::vulkan

@@ -116,9 +116,10 @@ struct Pipeline {
 // finished its work before it is destroyed or reshaped.
 //
 // Invariants:
-// - The activation arena is zeroed once at build and never cleared or laid
-//   out again while the runtime lives: its zero tails, the persistent runs'
-//   epochs and the tile counters depend on it.
+// - The activation arena is zeroed at build and never laid out again while
+//   the runtime lives: its values' zero tails depend on it. The persistent
+//   runs' sync regions and the tile counters past the values count frames
+//   from the build on, or from the last frame that started over.
 // - Descriptors are written only by build() and reshape(). Every dispatch
 //   runs with the network's input image in SHADER_READ_ONLY_OPTIMAL and
 //   every other image that a set binds in GENERAL. The first frame recorded
@@ -155,27 +156,38 @@ public:
     // Records a frame of the shape: from PROXY, the frame's pixels packed in
     // its format, through the network with CONTROLS into ANSWER in the same
     // form. Transfers read PROXY and write ANSWER, which the caller's
-    // barriers order against the transfers before and after. RESET drops the
-    // motion history for this frame. With QUERIES, writes timestamps QUERY,
-    // once the frame is in the network's input, and QUERY + 1, once the
-    // network is done.
+    // barriers order against the transfers before and after. When a wait of
+    // the frame runs out, ANSWER is PROXY unchanged. RESET starts the frame
+    // over: it zeroes the sync regions and tile counters as the build left
+    // them, and drops the motion history for this frame. With QUERIES,
+    // writes timestamps QUERY, once the frame is in the network's input, and
+    // QUERY + 1, once the network is done.
     void record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const Controls& controls, bool reset,
                 VkQueryPool queries, uint32_t query);
     // Says that the frame record() recorded last was submitted, so that the
     // next frame reads the motion history it writes. A frame that is
     // recorded and not submitted leaves the history as it was.
     void submitted();
+    // Whether a wait of the frame submitted last ran out; that frame must
+    // have finished. Its answer is then its proxy, and the sync regions and
+    // counters may stay short of their counts until a frame starts over.
+    bool timed_out() const;
 
 private:
     // The network's kernels' pipelines, then the runtime's own.
-    enum Adapter : size_t { kAlpha = size_t(Kernel::kCount), kStages, kLuma, kFlow, kPre, kPreNh, kPost, kPipelines };
+    enum Adapter : size_t {
+        kAlpha = size_t(Kernel::kCount), kStages, kLuma, kFlow, kPre, kPreNh, kPost, kVerdict, kFallback, kPipelines
+    };
     static constexpr size_t kAdapters = kPipelines - kAlpha;
     static constexpr uint32_t kLevels = 4; // the motion estimate's pyramid
     static constexpr uint32_t kMaxPasses = 16;
 
     // Every object the runtime owns.
     struct Objects {
-        Buffer arena, weights, params;
+        // The activation arena, the weights, the motion parameters, and the
+        // verdict: the fallback's grid, which the host reads mapped at GRID.
+        Buffer arena, weights, params, verdict;
+        uint32_t* grid;
         // The network's input and answer, its second output, the first
         // pass's input for later passes, the pass stages' scratch, the
         // frame's image that blits convert through, and the motion history's
@@ -190,7 +202,7 @@ private:
         // the history.
         VkDescriptorSet kernel_sets[size_t(Kernel::kCount)];
         VkDescriptorSet alpha_sets[2], stage_sets[2], luma_sets[2][kLevels], flow_sets[2][kLevels];
-        VkDescriptorSet pre_sets[2], post_sets[2];
+        VkDescriptorSet pre_sets[2], post_sets[2], verdict_set, fallback_sets[2];
     };
     // How frames are recorded.
     struct State {
@@ -227,6 +239,9 @@ private:
     bool settled_ = false;
     std::vector<Step> steps_;
     std::vector<uint32_t> push_;
+    // The plan's values_end and timeouts.
+    uint64_t values_end_ = 0;
+    std::vector<uint32_t> timeouts_;
 
     // The commands of a build, submitted once.
     struct Setup;
@@ -245,6 +260,7 @@ private:
     Result<void> upload(const Plan& plan, const Model& model, Setup& setup) const;
     Result<void> end_setup(Setup& setup);
     std::string described() const;
+    void bind(VkCommandBuffer cmd, size_t pipeline, VkDescriptorSet set, const void* push, uint32_t bytes) const;
     void dispatch(VkCommandBuffer cmd, size_t pipeline, VkDescriptorSet set, uint32_t x, uint32_t y,
                   const void* push, uint32_t bytes, uint32_t z = 1) const;
     void run_step(VkCommandBuffer cmd, const Step& step, size_t pipeline, VkDescriptorSet set,

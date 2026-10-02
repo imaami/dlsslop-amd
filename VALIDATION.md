@@ -25,7 +25,11 @@ every dispatch with its push constants, as planned and with the kernels built
 without that clamp that the real model's weights allow, the tables of the
 weight blob with the heads that model frees, and the activation arena's values
 and sizes, and at 8 of them the weight blob packed from a synthetic model pack,
-whose weights free no layer of the clamp. Frames that
+whose weights free no layer of the clamp. Upstream's tile-counter records each
+name an error word of their own, which a wait sets when it runs out; the plan's
+records all name one, between the frame counter and the first counter, and the
+tables and blobs are checked with upstream's words put back. The plan must list
+that word and each persistent run's as the words its waits set. Frames that
 upstream fails on, and frames whose arena overflows 32-bit offsets, must be
 rejected. The Vulkan network's weight digests were recorded from the DLSSNR-AMD
 fork's host code at `3dfdddc`, and its plan goldens from the fork's host code
@@ -43,7 +47,15 @@ not submitted. A network reshaped for another
 shape of its extent must record no command and make no pipeline, and then
 record the frames of a network built for that shape. From a model whose weights
 free every Swin layer of the upper clamp, a frame must run the kernels and the
-temporal pre block built without it. Under `strace`, it checks that the files
+temporal pre block built without it. Every frame must judge its waits after the
+network's last dispatch, reading and zeroing the words the plan lists, and
+answer with its input only over the grid that judgement writes: the first
+pass's input, or with later passes the copy that keeps it, into the image that
+the answer is then copied out of, with the pass stages too. After a frame whose
+wait ran out, as a verdict poked into the fake device's memory says, the next
+frame must zero the arena past its values between barriers before any dispatch
+and drop the motion history, as must the frame after it when that frame was not
+submitted. Under `strace`, it checks that the files
 `install.py` installs for the Vulkan network are those that the network's
 builds on that fake device open, at extents whose plans, one of them from that
 model, run every kernel; without `strace` that check skips. A build there

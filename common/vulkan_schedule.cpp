@@ -435,10 +435,15 @@ void trim(std::vector<Dispatch>& d, uint32_t height)
     }
 }
 
-Result<uint32_t> chain(std::vector<Dispatch>& d, Blob& blob, uint64_t& arena)
+Result<uint32_t> chain(std::vector<Dispatch>& d, Blob& blob, uint64_t& arena, uint32_t& error)
 {
     arena = align(arena, 256);
     const uint64_t base = arena / 4;
+    // Every consumer's wait sets one error word, the first pair's, so that one
+    // word says whether a wait of the frame ran out; upstream's records name
+    // each pair's own. Each pair keeps its word before its counters, which
+    // stay where upstream puts them.
+    error = uint32_t(base + 1);
     // The frame counter, which the first fswin32 ticks.
     const size_t tick =
         size_t(std::find_if(d.begin(), d.end(), [](const Dispatch& d) { return d.kernel == Kernel::kFswin32; }) -
@@ -559,7 +564,6 @@ Result<uint32_t> chain(std::vector<Dispatch>& d, Blob& blob, uint64_t& arena)
             for (uint32_t k = 0; k < (load<PushFfwd3>(p).M + 15) / 16; ++k) fits &= set_entry(table, k, k, 8);
         }
         if (!fits) return reject("its tile counters overflow their tables");
-        const uint32_t error = uint32_t(base + words);
         const uint32_t counter = uint32_t(base + words + 1);
         words += 1 + uint64_t(counters);
         // A C=512 projection that waits takes its M tiles in order.
