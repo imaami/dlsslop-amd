@@ -89,7 +89,7 @@ shader_vk_create_compute_pipeline (struct shader_vk    *s,
 		.codeSize = size,
 		.pCode    = words
 	};
-	VkShaderModule module = VK_NULL_HANDLE;
+	VkShaderModule module;
 	VkResult r = s->vk->vkCreateShaderModule(s->device, &module_info, nullptr, &module);
 	free(words);
 	words = nullptr;

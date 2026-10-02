@@ -307,7 +307,7 @@ static void
 hotkeys_check (struct hotkeys     *h,
                struct hotkey_node *node)
 {
-	int version = 0;
+	int version;
 	if (node->fd < 0 || ioctl(node->fd, EVIOCGVERSION, &version) >= 0)
 		return;
 
@@ -425,8 +425,8 @@ hotkey_x11_open (struct hotkey_x11 *x)
 
 	// A display that cannot serve the backend is closed before its libraries are unloaded. The server
 	// has just answered, so the close does not meet one that has gone.
-	int event = 0;
-	int error = 0;
+	int event;
+	int error;
 	if (!query_extension(display, "XInputExtension", &x->opcode, &event, &error)) {
 		close_display(display);
 		display = nullptr;

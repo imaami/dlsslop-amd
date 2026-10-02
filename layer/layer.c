@@ -227,7 +227,7 @@ ensure_parent_dir (char   *path,
 	}
 	made = made && make_dir(path);
 
-	struct stat st = {0};
+	struct stat st;
 	bool const exists = made && lstat(path, &st) == 0;
 	bool const ours = exists && S_ISDIR(st.st_mode) && st.st_uid == getuid()
 	                  && (st.st_mode & (S_IRWXG | S_IRWXO)) == 0;
@@ -354,7 +354,7 @@ shm_map_open (struct shm_map *s)
 	// The file still spans the whole protocol -- the offsets are fixed and both sides agree on them --
 	// but it is sparse, so the size on disk is what has actually been written.
 	off_t const total = (off_t)ShmTotalBytes();
-	struct stat st = {0};
+	struct stat st;
 	if ((fstat(fd, &st) != 0 || st.st_size < total) && ftruncate(fd, total) != 0) {
 		close(fd);
 		fd = -1;
@@ -760,7 +760,7 @@ offer_transport (struct shm_map     *s,
 	struct pollfd answer = { .fd = composition_offer_connection(comp), .events = POLLIN };
 	if (poll(&answer, 1, wait) != 1)
 		return log_now_ms() >= *expires ? OFFER_DECLINED : OFFER_WAITING;
-	uint8_t imported = 0;
+	uint8_t imported;
 	if (recv(answer.fd, &imported, 1, 0) != 1)
 		return OFFER_LATER; // Closed unanswered.
 	return imported ? OFFER_READY : OFFER_DECLINED;
@@ -1397,7 +1397,7 @@ release_primary (VkDevice       device,
 static char const *
 layer_object_path (void)
 {
-	Dl_info info = {0};
+	Dl_info info;
 	if (dladdr((void const *)&layer_object_path, &info) && info.dli_fname)
 		return info.dli_fname;
 	return "";
@@ -1956,7 +1956,7 @@ hook_create_device (VkPhysicalDevice             physicalDevice,
 	// loader builds, including the integrated one a game may well be running on.
 	char device_name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE] = "?";
 	if (ic && ic->table.vkGetPhysicalDeviceProperties) {
-		VkPhysicalDeviceProperties props = {0};
+		VkPhysicalDeviceProperties props;
 		ic->table.vkGetPhysicalDeviceProperties(physicalDevice, &props);
 		snprintf(device_name, sizeof device_name, "%s", props.deviceName);
 		bool vendor_supported = props.vendorID == 0x1002u;
@@ -2176,7 +2176,7 @@ surface_transfers (struct device_chain const *dc,
 		return false;
 
 	VkImageUsageFlags const required = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-	VkSurfaceCapabilitiesKHR capabilities = {0};
+	VkSurfaceCapabilitiesKHR capabilities;
 	return dc->instance->table.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(dc->physical, surface,
 	                                                                     &capabilities) == VK_SUCCESS
 	       && (capabilities.supportedUsageFlags & required) == required;

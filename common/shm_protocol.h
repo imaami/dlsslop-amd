@@ -779,7 +779,7 @@ ShmTransportPath (char            *buf,
 SHM_INLINE SHM_STD(uint32_t)
 FloatToBits (float f)
 {
-	SHM_STD(uint32_t) u = 0;
+	SHM_STD(uint32_t) u;
 	SHM_STD(memcpy)(&u, &f, sizeof u);
 	return u;
 }
@@ -792,7 +792,7 @@ FloatToBits (float f)
 SHM_INLINE float
 BitsToFloat (SHM_STD(uint32_t) u)
 {
-	float f = 0.0f;
+	float f;
 	SHM_STD(memcpy)(&f, &u, sizeof f);
 	return f;
 }
