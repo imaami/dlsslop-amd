@@ -55,11 +55,8 @@ enum scaler_vk_filter : SCALER_VK_STD(uint32_t) {
 	SCALER_VK_COUNT       = 8
 };
 
-// The protocol carries this number, so the two enumerations have to agree. They are separate types
-// because the layer should not have to include the shared header to name a filter -- but a mismatch
-// between them was a real bug: the default came out as Catmull-Rom because the protocol's older,
-// narrower numbering put Lanczos3 at 2.
-static_assert(SCALER_VK_LANCZOS3 == 4, "the protocol's Downscaler numbering must match this one");
+// The protocol carries this number as its enum Downscaler, so the two enumerations have to agree;
+// composition.c, which sees both, checks that they do.
 
 /** @brief The constant slots, and the descriptor sets: one of each per dispatch. */
 static constexpr SCALER_VK_STD(uint32_t) SCALER_VK_SLOTS = 6;

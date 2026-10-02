@@ -183,6 +183,25 @@ static struct frame_override const FRAME_OVERRIDES[] = {
 
 #undef FRAME_OVERRIDE
 
+// The header's scalingDownscaler becomes the scaler's filter, so the two numberings have to agree.
+// They are separate types because the layer should not have to include the shared header to name a
+// filter -- but a mismatch between them was a real bug: the default came out as Catmull-Rom because
+// the protocol's older, narrower numbering put Lanczos3 at 2. Unary plus compares the numbers rather
+// than two enumerations.
+#define SAME_DOWNSCALER(scaler, protocol) \
+	static_assert(+SCALER_VK_##scaler == +kDownscale##protocol, "the protocol's Downscaler numbering " \
+	              "must match the scaler's")
+SAME_DOWNSCALER(FSR1, Fsr1);
+SAME_DOWNSCALER(BICUBIC, Bicubic);
+SAME_DOWNSCALER(CATMULL_ROM, CatmullRom);
+SAME_DOWNSCALER(LANCZOS2, Lanczos2);
+SAME_DOWNSCALER(LANCZOS3, Lanczos3);
+SAME_DOWNSCALER(KAISER2, Kaiser2);
+SAME_DOWNSCALER(KAISER3, Kaiser3);
+SAME_DOWNSCALER(MAGIC, Magic);
+#undef SAME_DOWNSCALER
+static_assert(+SCALER_VK_COUNT == +kDownscalerCount, "the protocol has as many downscalers as the scaler");
+
 /** @brief The number of overrides. */
 static constexpr size_t FRAME_OVERRIDE_COUNT = sizeof FRAME_OVERRIDES / sizeof *FRAME_OVERRIDES;
 
