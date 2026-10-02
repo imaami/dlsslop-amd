@@ -675,26 +675,27 @@ external_ownership (struct composition const             *c,
  * composition_disable_export(), after each has dropped the old pair. Does nothing without a frame.
  *
  * @param c The composition.
+ * @return  true if both buffers exist, or there is no frame to build them for.
  */
-static void
+static bool
 ensure_transport (struct composition *c)
 {
 	if (!c->frame.image)
-		return;
+		return true;
 
 	size_t const bytes = composition_model_bytes(c);
 	c->flags &= ~COMPOSITION_TRANSPORT_READY;
 	composition_withdraw_offer(c); // New buffers: any offer was of the old ones.
 	if ((c->flags & COMPOSITION_EXPORT) && make_export_buffer(c, &c->download, bytes)
 	    && make_export_buffer(c, &c->upload, bytes))
-		return;
+		return true;
 
 	// make_host_buffer() drops an exported buffer that a failed pair left behind.
 	// Both ways: the in-layer network reads the proxy and writes the answer between the copies.
 	VkBufferUsageFlags const transfer = VK_BUFFER_USAGE_TRANSFER_SRC_BIT
 	                                    | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
-	make_host_buffer(c, &c->download, bytes, transfer);
-	make_host_buffer(c, &c->upload, bytes, transfer);
+	return make_host_buffer(c, &c->download, bytes, transfer)
+	       && make_host_buffer(c, &c->upload, bytes, transfer);
 }
 
 // ---------------------------------------------------------------------------
@@ -949,6 +950,9 @@ make_meter_state (struct composition *c)
 		drop_meter_state(c);
 		return false;
 	}
+	// New memory holds anything, and the mirror is read before a leg 1 copies the state in: zero
+	// reads as no reading.
+	memset(c->meter_mirror.mapped, 0, COMPOSITION_METER_STATE_BYTES);
 	c->flags &= ~COMPOSITION_METER_STATE_CLEARED;
 	return true;
 }
@@ -1059,8 +1063,16 @@ void
 composition_await_answer (struct composition *c,
                           int                 connection)
 {
+	// Without a composition to own the connection, nothing would close it.
+	if (!c) {
+		if (connection >= 0) {
+			close(connection);
+			connection = -1;
+		}
+		return;
+	}
 	composition_withdraw_offer(c);
-	if (!c || connection < 0)
+	if (connection < 0)
 		return;
 	c->offer = connection;
 }
@@ -1103,8 +1115,10 @@ composition_export_transport (struct composition       *c,
 {
 	fds[0] = -1;
 	fds[1] = -1;
-	// Opaque fds import only on the device and driver that made them: the offer names both.
-	if (!composition_usable(c) || !c->instance->vkGetPhysicalDeviceProperties2)
+	// Opaque fds import only on the device and driver that made them: the offer names both. Only
+	// memory made for export has a descriptor to give.
+	if (!composition_usable(c) || !composition_transport_exported(c) || !c->vk->vkGetMemoryFdKHR
+	    || !c->instance->vkGetPhysicalDeviceProperties2)
 		return false;
 
 	VkPhysicalDeviceIDProperties ids = { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES };
@@ -1156,7 +1170,9 @@ composition_disable_export (struct composition *c)
 	c->flags &= ~COMPOSITION_EXPORT;
 	drop_host_buffer(c, &c->download);
 	drop_host_buffer(c, &c->upload);
-	ensure_transport(c);
+	// Without a pair, no leg may record against the surfaces: the next frame builds them again.
+	if (!ensure_transport(c))
+		drop_all(c);
 }
 
 // ---------------------------------------------------------------------------
@@ -1405,8 +1421,7 @@ composition_prepare (struct composition                      *c,
 	// export is on, staging otherwise.
 	c->model_w = model.width;
 	c->model_h = model.height;
-	ensure_transport(c);
-	bool const ok_transport = c->download.buffer && c->upload.buffer;
+	bool const ok_transport = ensure_transport(c);
 
 	// The meter is a fixed 64x64 grid whatever the frame is, and is only built when there is
 	// something to measure: on a frame the game already tone mapped there is no white point to find,

@@ -1320,6 +1320,13 @@ check_offer (void)
 	fd = -1;
 	composition_withdraw_offer(&c);
 
+	// Without a composition, the connection is closed at once.
+	fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+	require(fd >= 0, "cannot open /dev/null");
+	composition_await_answer(nullptr, fd);
+	require(!open_fd(fd), "a connection without a composition stayed open");
+	fd = -1;
+
 	// Each end of an offer closes its connection once: an answer, a replacement, a new pair, the
 	// fini.
 	for (uint32_t end = 0; end < 4; ++end) {
@@ -1390,6 +1397,28 @@ check_export (void)
 	        && !composition_transport_generation(&c) && composition_proxy_pixels(&c), "host staging after the"
 	        " export");
 	require_held(&c, "host staging after the export");
+
+	// Host staging has no descriptor to give.
+	uint32_t const made = fake.fd_count;
+	require(!composition_export_transport(&c, fds, &offer) && fake.fd_count == made && fds[0] == -1
+	        && fds[1] == -1, "host staging was exported");
+	composition_fini(&c);
+	require(!live_objects(), "the fini left %u objects", live_objects());
+
+	// A pair declined while no staging pair can be made drops the surfaces; the next frame builds.
+	reset();
+	c = built();
+	composition_enable_export(&c, 3);
+	require(prepare(&c, a) && composition_transport_pending(&c), "an exported pair was not pending");
+	fake.creates = 0;
+	fake.fail_at = 1;
+	composition_disable_export(&c);
+	fake.fail_at = 0;
+	require(!c.frame.image && !c.download.buffer && !c.upload.buffer, "a pair declined without staging left"
+	        " surfaces to record against");
+	require_held(&c, "a pair declined without staging");
+	require(prepare(&c, a) && composition_proxy_pixels(&c) && composition_model_pixels(&c), "the frame after a"
+	        " pair declined without staging did not build");
 	composition_fini(&c);
 	require(!live_objects(), "the fini left %u objects", live_objects());
 }

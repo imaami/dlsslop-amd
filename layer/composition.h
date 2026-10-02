@@ -488,8 +488,8 @@ composition_offer_connection (struct composition const *c)
 /** @brief Withdraws any offer and awaits the daemon's answer to a new one on a connection.
  *
  * @param c          The composition, or nullptr.
- * @param connection The connection, which the composition then owns; a negative value only
- *                   withdraws.
+ * @param connection The connection, which the composition then owns, or which is closed at once
+ *                   for nullptr; a negative value only withdraws.
  */
 extern void
 composition_await_answer (struct composition *c,
@@ -518,7 +518,8 @@ composition_set_transport_ready (struct composition *c,
  * @param c     The composition, or nullptr.
  * @param fds   Receives the descriptors, which the caller owns; both are -1 if the export fails.
  * @param offer Receives the device's and driver's UUIDs, the sizes and the generation.
- * @return      true if both descriptors were made; otherwise none is open.
+ * @return      true if both descriptors were made; otherwise none is open. A pair that is not
+ *              exported memory makes none.
  */
 extern bool
 composition_export_transport (struct composition       *c,
@@ -526,6 +527,9 @@ composition_export_transport (struct composition       *c,
                               struct ShmTransportOffer *offer);
 
 /** @brief The worker cannot import the pair: carry frames through host staging from now on.
+ *
+ * A staging pair that cannot be made drops every surface, which the next composition_prepare()
+ * builds again.
  *
  * @param c The composition, or nullptr.
  */
