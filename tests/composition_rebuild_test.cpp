@@ -317,7 +317,7 @@ int main() {
                          0, 0, nullptr, 0, nullptr, 1, &barrier);
     context.Submit();
 
-    struct composition composition = {};
+    struct composition composition = composition_empty();
     if (composition_init(&composition, &context.deviceTable, &context.instanceTable, context.device,
                          context.physical) != VK_SUCCESS)
         Fail(composition_reason(&composition));

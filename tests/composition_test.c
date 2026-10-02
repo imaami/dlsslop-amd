@@ -70,8 +70,8 @@ static struct {
 	struct object        objects[16384]; //!< Every object handed out, in order.
 	VkFormatFeatureFlags features;       //!< What every format's optimal tiling supports.
 	VkFormat             no_storage[2];  //!< Formats that cannot be storage images.
-	int                  fds[4];         //!< The descriptors vkGetMemoryFdKHR() made.
-	uint32_t             fd_count;       //!< Their number.
+	int                  fds[4];         //!< The descriptors vkGetMemoryFdKHR() made, open or -1.
+	uint32_t             fd_count;       //!< The descriptors it made.
 	uint32_t             count;          //!< Objects handed out.
 	uint32_t             creates;        //!< Fallible calls so far.
 	uint32_t             fail_at;        //!< The fallible call that fails, from 1; 0: none.
@@ -85,7 +85,7 @@ static struct {
 	uint32_t             uploads;        //!< Buffer-to-image copies recorded.
 	uint32_t             fills;          //!< Buffer fills recorded.
 	size_t               ownership;      //!< Barriers that move a buffer to or from another family.
-} fake;
+} fake = { .fds = { -1, -1, -1, -1 } };
 
 /** @brief Hands out an object of a kind. */
 static uint64_t
@@ -154,9 +154,15 @@ reset (void)
 {
 	for (uint32_t i = 0; i < fake.count; ++i)
 		free(fake.objects[i].map);
-	for (uint32_t i = 0; i < fake.fd_count; ++i)
-		close(fake.fds[i]);
+	for (size_t i = 0; i < sizeof fake.fds / sizeof *fake.fds; ++i) {
+		if (fake.fds[i] >= 0) {
+			close(fake.fds[i]);
+			fake.fds[i] = -1;
+		}
+	}
 	memset(&fake, 0, sizeof fake);
+	for (size_t i = 0; i < sizeof fake.fds / sizeof *fake.fds; ++i)
+		fake.fds[i] = -1;
 	fake.features = ~(VkFormatFeatureFlags)0;
 }
 
@@ -708,6 +714,7 @@ memory_fd (VkDevice                    d,
 	int const fd = open("/dev/null", O_RDONLY | O_CLOEXEC);
 	require(fd >= 0, "cannot open /dev/null");
 	fake.fds[fake.fd_count++] = fd;
+	// The caller owns it now, and closes it; reset() closes it if the caller did not.
 	*out = fd;
 	return VK_SUCCESS;
 }
@@ -861,6 +868,17 @@ zeroed (void const *p,
 		if (bytes[i])
 			return false;
 	return true;
+}
+
+/** @brief Whether a composition is empty: its offer is -1, and every other byte is zero. */
+static bool
+empty (struct composition const *c)
+{
+	struct composition copy = *c;
+	if (copy.offer != -1)
+		return false;
+	copy.offer = 0;
+	return zeroed(&copy, sizeof copy);
 }
 
 /** @brief Counts a handle that the composition holds, which must be alive. */
@@ -1064,7 +1082,7 @@ check_arrangements (void)
 		        a->objects);
 
 		composition_fini(&c);
-		require(!live_objects() && !fake.mapped && zeroed(&c, sizeof c), "%s: the fini left %u objects and %u"
+		require(!live_objects() && !fake.mapped && empty(&c), "%s: the fini left %u objects and %u"
 		        " maps", a->name, live_objects(), fake.mapped);
 	}
 }
@@ -1077,7 +1095,7 @@ check_build_failures (void)
 	struct composition c = built();
 	uint32_t const steps = fake.creates;
 	composition_fini(&c);
-	require(!live_objects() && !fake.mapped && zeroed(&c, sizeof c), "a built composition's fini left %u"
+	require(!live_objects() && !fake.mapped && empty(&c), "a built composition's fini left %u"
 	        " objects", live_objects());
 
 	for (uint32_t k = 1; k <= steps; ++k) {
@@ -1094,7 +1112,7 @@ check_build_failures (void)
 		        && !composition_record_capture(&c, CMD, SWAPCHAIN, &s)
 		        && !composition_record_compose(&c, CMD, SWAPCHAIN, &s), "an unbuilt composition ran");
 		composition_fini(&c);
-		require(!live_objects() && zeroed(&c, sizeof c), "with call %u failing, the fini left %u objects", k,
+		require(!live_objects() && empty(&c), "with call %u failing, the fini left %u objects", k,
 		        live_objects());
 	}
 
@@ -1107,7 +1125,7 @@ check_build_failures (void)
 	        && !strcmp(composition_reason(&c), "the device does not expose everything a compute pass needs"),
 	        "a composition on an incomplete table: %d, %s", c.error, composition_reason(&c));
 	composition_fini(&c);
-	require(!fake.calls && zeroed(&c, sizeof c), "the fini of an unbuilt composition called the device");
+	require(!fake.calls && empty(&c), "the fini of an unbuilt composition called the device");
 }
 
 /** @brief Builds an arrangement with one fallible call failing, then again without one, and records
@@ -1145,7 +1163,7 @@ prepare_failing (struct arrangement const *a,
 	require_held(&c, when);
 	record(&c, a);
 	composition_fini(&c);
-	require(!live_objects() && !fake.mapped && zeroed(&c, sizeof c), "%s: the fini left %u objects", when,
+	require(!live_objects() && !fake.mapped && empty(&c), "%s: the fini left %u objects", when,
 	        live_objects());
 	return steps;
 }
@@ -1280,12 +1298,12 @@ check_offer (void)
 {
 	reset();
 	bool const stdin_open = open_fd(0);
-	struct composition zero = {};
-	require(composition_offer_connection(&zero) == -1 && composition_offer_connection(nullptr) == -1,
+	struct composition none = composition_empty();
+	require(composition_offer_connection(&none) == -1 && composition_offer_connection(nullptr) == -1,
 	        "an empty composition has an offer");
-	composition_fini(&zero);
-	composition_withdraw_offer(&zero);
-	require(open_fd(0) == stdin_open, "an empty composition closed descriptor 0");
+	composition_fini(&none);
+	composition_withdraw_offer(&none);
+	require(open_fd(0) == stdin_open && empty(&none), "an empty composition closed descriptor 0");
 
 	struct composition c = built();
 	struct arrangement const *const a = &ARRANGEMENTS[0];
@@ -1296,6 +1314,7 @@ check_offer (void)
 	        composition_offer_connection(&c), fd);
 	composition_withdraw_offer(&c);
 	require(!open_fd(fd) && composition_offer_connection(&c) == -1, "a withdrawn offer's connection");
+	fd = -1;
 	composition_withdraw_offer(&c);
 
 	// Each end of an offer closes its connection once: an answer, a replacement, a new pair, the
@@ -1317,6 +1336,7 @@ check_offer (void)
 			composition_fini(&c);
 		}
 		require(!open_fd(fd) && composition_offer_connection(&c) == -1, "end %u left the connection", end);
+		fd = -1;
 	}
 	require(open_fd(0) == stdin_open && !live_objects(), "descriptor 0 closed, or %u objects left",
 	        live_objects());
@@ -1344,8 +1364,11 @@ check_export (void)
 	        && !memcmp(offer.driverUuid, DRIVER_UUID, VK_UUID_SIZE) && (offer.generation & 1),
 	        "the offer's sizes, UUIDs or generation");
 	close(fds[0]);
+	fds[0] = -1;
+	fake.fds[0] = -1;
 	close(fds[1]);
-	fake.fd_count = 0;
+	fds[1] = -1;
+	fake.fds[1] = -1;
 
 	composition_set_transport_ready(&c, true);
 	require(!composition_transport_pending(&c) && composition_transport_generation(&c) == offer.generation,
@@ -1354,9 +1377,9 @@ check_export (void)
 	// The second descriptor fails: the first is closed.
 	fake.creates = 0;
 	fake.fail_at = 2;
-	require(!composition_export_transport(&c, fds, &offer) && fake.fd_count == 1 && !open_fd(fake.fds[0]),
-	        "a failed export left a descriptor open");
-	fake.fd_count = 0;
+	require(!composition_export_transport(&c, fds, &offer) && fake.fd_count == 3 && !open_fd(fake.fds[2])
+	        && fds[0] == -1 && fds[1] == -1, "a failed export left a descriptor open, or in its output");
+	fake.fds[2] = -1;
 	fake.fail_at = 0;
 
 	composition_disable_export(&c);
@@ -1422,7 +1445,7 @@ static void
 check_empty (void)
 {
 	reset();
-	struct composition c = {};
+	struct composition c = composition_empty();
 	struct composition_frame_settings const s = composition_frame_settings();
 	composition_fini(&c);
 	composition_fini(nullptr);
@@ -1453,10 +1476,11 @@ check_empty (void)
 	composition_write_captured_frame(&c);
 	composition_consume_meter(nullptr);
 	composition_consume_meter(&c);
-	require(!composition_export_transport(nullptr, (int[2]){}, &(struct ShmTransportOffer){})
-	        && !composition_export_transport(&c, (int[2]){}, &(struct ShmTransportOffer){}),
-	        "an empty or absent composition exported");
-	require(!fake.calls && zeroed(&c, sizeof c), "an empty composition called the device %u times",
+	int fds[2] = { -1, -1 };
+	require(!composition_export_transport(nullptr, fds, &(struct ShmTransportOffer){})
+	        && !composition_export_transport(&c, fds, &(struct ShmTransportOffer){}) && fds[0] == -1
+	        && fds[1] == -1, "an empty or absent composition exported");
+	require(!fake.calls && empty(&c), "an empty composition called the device %u times",
 	        fake.calls);
 	require(composition_init(nullptr, &device_table, &instance_table, DEVICE, PHYSICAL)
 	        == VK_ERROR_INITIALIZATION_FAILED, "an init without a destination");

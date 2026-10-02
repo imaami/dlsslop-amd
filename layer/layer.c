@@ -71,10 +71,8 @@ min_d (double a,
 
 /** @brief The state that struct shm_map records in its flags. */
 enum shm_map_flags {
-	SHM_MAP_FD          = 1 << 0, //!< fd is the channel's, and the map closes it.
-	SHM_MAP_PRODUCER_FD = 1 << 1, //!< producer_fd is the producer lock's, and the map closes it.
-	SHM_MAP_ANSWERED    = 1 << 2, //!< The helper has answered a frame.
-	SHM_MAP_DEAD        = 1 << 3  //!< Frames pass through until the helper is back.
+	SHM_MAP_ANSWERED = 1 << 0, //!< The helper has answered a frame.
+	SHM_MAP_DEAD     = 1 << 1  //!< Frames pass through until the helper is back.
 };
 
 /** @brief The layer's mappings of the channel, and what it knows of the helper behind it.
@@ -90,8 +88,8 @@ enum shm_map_flags {
  *
  * The rest is liveness, so a game is never made to wait on a helper that is not there.
  *
- * A zeroed object is an empty one: shm_map_open() maps the header, and shm_map_fini() unmaps and
- * closes what the map holds. A descriptor can be 0, so the flags say which descriptors it holds.
+ * shm_map() makes an empty map, whose descriptors are -1. shm_map_open() maps the header, and
+ * shm_map_fini() unmaps and closes what the map holds, and leaves it empty.
  */
 struct shm_map {
 	struct ShmHeader *hdr;                //!< The header, mapped; nullptr until shm_map_open().
@@ -104,10 +102,20 @@ struct shm_map {
 	uint32_t          last_control_seq;   //!< The header's controlSeq, as last seen.
 	uint32_t          last_heartbeat;     //!< The header's heartbeat, as last seen.
 	uint32_t          flags;              //!< enum shm_map_flags.
-	int               fd;                 //!< The channel's descriptor, with SHM_MAP_FD.
-	int               producer_fd;        //!< The producer lock's descriptor, with SHM_MAP_PRODUCER_FD.
+	int               fd;                 //!< The channel's descriptor, or -1.
+	int               producer_fd;        //!< The producer lock's descriptor, or -1.
 	char              path[PATH_MAX];     //!< The file's path: the socket and the lock are beside it.
 };
+
+/** @brief An empty map: nothing mapped, and no descriptor.
+ *
+ * @return The map.
+ */
+static struct shm_map
+shm_map (void)
+{
+	return (struct shm_map){ .fd = -1, .producer_fd = -1 };
+}
 
 /** @brief Unmaps the channel and closes the descriptors that the map holds, then leaves it empty.
  *
@@ -125,11 +133,15 @@ shm_map_fini (struct shm_map *dest)
 		munmap(dest->out_pixels, dest->mapped_frame_bytes);
 	if (dest->hdr)
 		munmap(dest->hdr, kHeaderBytes);
-	if (dest->flags & SHM_MAP_FD)
+	if (dest->fd >= 0) {
 		close(dest->fd);
-	if (dest->flags & SHM_MAP_PRODUCER_FD)
+		dest->fd = -1;
+	}
+	if (dest->producer_fd >= 0) {
 		close(dest->producer_fd);
-	*dest = (struct shm_map){0};
+		dest->producer_fd = -1;
+	}
+	*dest = shm_map();
 }
 
 /** @brief Takes the channel's pixel slot for this process, without waiting.
@@ -150,7 +162,7 @@ shm_map_lock_producer (struct shm_map *s)
 	if (!s->hdr)
 		return false;
 
-	if (!(s->flags & SHM_MAP_PRODUCER_FD)) {
+	if (s->producer_fd < 0) {
 		// A name cut to fit would be another file; the kernel refuses a path this long anyway.
 		char lock[PATH_MAX];
 		if ((size_t)snprintf(lock, sizeof lock, "%s.producer.lock", s->path) >= sizeof lock)
@@ -159,7 +171,6 @@ shm_map_lock_producer (struct shm_map *s)
 		if (fd < 0)
 			return false;
 		s->producer_fd = fd;
-		s->flags |= SHM_MAP_PRODUCER_FD;
 	}
 	return !flock(s->producer_fd, LOCK_EX | LOCK_NB);
 }
@@ -273,7 +284,7 @@ shm_map_open (struct shm_map *s)
 	}
 	if (!ensure_parent_dir(p))
 		return false;
-	int const fd = open(p, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+	int fd = open(p, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
 	if (fd < 0) {
 		log_printf("[shm] open %s failed", p);
 		return false;
@@ -284,6 +295,7 @@ shm_map_open (struct shm_map *s)
 	struct stat st = {0};
 	if ((fstat(fd, &st) != 0 || (size_t)st.st_size < total) && ftruncate(fd, (off_t)total) != 0) {
 		close(fd);
+		fd = -1;
 		return false;
 	}
 
@@ -291,10 +303,10 @@ shm_map_open (struct shm_map *s)
 	if (m == MAP_FAILED) {
 		log_printf("[shm] mmap of the header failed");
 		close(fd);
+		fd = -1;
 		return false;
 	}
 	s->fd = fd;
-	s->flags |= SHM_MAP_FD;
 	s->hdr = m;
 	// A mapping left by an older build has a different magic, a different version, or a header laid
 	// out differently; re-initialising is the only safe reading of any of those.
@@ -565,9 +577,10 @@ start_worker (struct shm_map *s)
 	if ((size_t)ShmTransportPath(address.sun_path, sizeof address.sun_path, s->path)
 	    >= sizeof address.sun_path)
 		return;
-	int const sock = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	int sock = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 	connect(sock, (struct sockaddr const *)&address, sizeof address);
 	close(sock);
+	sock = -1;
 }
 
 /** @brief What became of a device-local transport offer. */
@@ -594,7 +607,7 @@ send_offer (struct shm_map     *s,
 	    >= sizeof address.sun_path || !shm_map_open(s))
 		return -1;
 	struct ShmTransportOffer offer = { .magic = kShmMagic };
-	int fds[2];
+	int fds[2] = { -1, -1 };
 	if (!composition_export_transport(comp, fds, &offer))
 		return -1;
 	alignas(struct cmsghdr) char control[CMSG_SPACE(sizeof fds)] = {0};
@@ -610,14 +623,18 @@ send_offer (struct shm_map     *s,
 	rights->cmsg_type = SCM_RIGHTS;
 	rights->cmsg_len = CMSG_LEN(sizeof fds);
 	memcpy(CMSG_DATA(rights), fds, sizeof fds);
-	int const sock = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
+	int sock = socket(AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
 	bool const sent = sock >= 0 && !connect(sock, (struct sockaddr const *)&address, sizeof address)
 	                  && sendmsg(sock, &message, MSG_NOSIGNAL) == (ssize_t)sizeof offer;
 	close(fds[0]);
+	fds[0] = -1;
 	close(fds[1]);
+	fds[1] = -1;
 	if (!sent) {
-		if (sock >= 0)
+		if (sock >= 0) {
 			close(sock);
+			sock = -1;
+		}
 		return -1;
 	}
 	// The daemon takes offers between requests.
@@ -815,6 +832,7 @@ swapchain_state_create (struct device_table const *vk,
 		return nullptr;
 	}
 
+	ret->comp = composition_empty();
 	ret->vk = vk;
 	ret->device = device;
 	ret->handle = handle;
@@ -849,7 +867,7 @@ swapchain_state_fini (struct swapchain_state *dest)
 	free(dest->images);
 	free(dest->leg2_done);
 	free(dest->wait_stages);
-	*dest = (struct swapchain_state){0};
+	*dest = (struct swapchain_state){ .comp = composition_empty() };
 }
 
 /** @brief Destroys what the layer made for a swapchain and frees its state.
@@ -885,8 +903,9 @@ enum device_chain_flags {
  * belongs to the queue family it opened on. A build of the network frees what the frame of
  * in_layer_last used.
  *
- * device_chain_create() makes a chain in place, with its mutexes, and device_chain_destroy() frees
- * it once the swapchains' states are destroyed and the network is closed.
+ * device_chain_create() makes a chain in place, with its mutexes and an empty channel map, and
+ * device_chain_destroy() frees it once the swapchains' states are destroyed and the network is
+ * closed.
  */
 struct device_chain {
 	struct list                node;                   //!< The chain's hook in g_devices.
@@ -916,7 +935,8 @@ struct device_chain {
 /** @brief Allocates and initializes the chain of a device that is about to be created.
  *
  * A device_queue entry for each queue the device is created with is allocated with the chain,
- * because vkGetDeviceQueue cannot fail. Both mutexes are initialized here, in place.
+ * because vkGetDeviceQueue cannot fail. Both mutexes are initialized here, in place, and the
+ * channel's map is shm_map()'s, whose descriptors are -1.
  *
  * @param queue_count The number of queues the device is created with.
  * @return            The chain, unlinked and without a device, or nullptr without memory.
@@ -932,6 +952,7 @@ device_chain_create (uint32_t queue_count)
 		return nullptr;
 	}
 
+	ret->shm = shm_map();
 	ret->queue_store = queues;
 	ret->queue_store_count = queue_count;
 	list_init(&ret->swapchains);
@@ -957,7 +978,7 @@ device_chain_fini (struct device_chain *dest)
 	pthread_mutex_destroy(&dest->network_submit);
 	pthread_mutex_destroy(&dest->lock);
 	shm_map_fini(&dest->shm);
-	*dest = (struct device_chain){0};
+	*dest = (struct device_chain){ .shm = shm_map() };
 }
 
 /** @brief Frees a device chain.

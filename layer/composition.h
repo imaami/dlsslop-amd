@@ -125,28 +125,27 @@ struct composition_host_buffer {
 
 /** @brief The state that struct composition records in its flags. */
 enum composition_flags {
-	COMPOSITION_OFFER               = 1 << 0, //!< offer is a connection that the composition closes.
-	COMPOSITION_BLIT_SWAPCHAIN      = 1 << 1, //!< work_format is not the swapchain's twin: blit.
-	COMPOSITION_LINEAR_HDR          = 1 << 2, //!< The frame holds linear light.
-	COMPOSITION_HDR_PROXY           = 1 << 3, //!< The surfaces that cross are float16.
-	COMPOSITION_METER_STATE_CLEARED = 1 << 4, //!< The fill that clears the meter's state is recorded.
-	COMPOSITION_EXPORT              = 1 << 5, //!< The transport pair is to be exported.
-	COMPOSITION_TRANSPORT_READY     = 1 << 6, //!< The daemon imported the exported pair.
-	COMPOSITION_CAPTURE_RECORDED    = 1 << 7, //!< This frame's compose recorded a capture pair.
-	COMPOSITION_HOLDING             = 1 << 8, //!< The frame is held.
-	COMPOSITION_FRAME_CAPTURED      = 1 << 9  //!< frame holds a frame that leg 1 copied.
+	COMPOSITION_BLIT_SWAPCHAIN      = 1 << 0, //!< work_format is not the swapchain's twin: blit.
+	COMPOSITION_LINEAR_HDR          = 1 << 1, //!< The frame holds linear light.
+	COMPOSITION_HDR_PROXY           = 1 << 2, //!< The surfaces that cross are float16.
+	COMPOSITION_METER_STATE_CLEARED = 1 << 3, //!< The fill that clears the meter's state is recorded.
+	COMPOSITION_EXPORT              = 1 << 4, //!< The transport pair is to be exported.
+	COMPOSITION_TRANSPORT_READY     = 1 << 5, //!< The daemon imported the exported pair.
+	COMPOSITION_CAPTURE_RECORDED    = 1 << 6, //!< This frame's compose recorded a capture pair.
+	COMPOSITION_HOLDING             = 1 << 7, //!< The frame is held.
+	COMPOSITION_FRAME_CAPTURED      = 1 << 8  //!< frame holds a frame that leg 1 copied.
 };
 
 /** @brief The composition of one swapchain: the pass, the surfaces sized to its frames, and the
  *         transport pair.
  *
- * A zeroed object is an empty one. composition() builds the pass, composition_prepare() the
- * surfaces, and composition_fini() destroys what the composition owns. A failed Vulkan call leaves
- * its output undefined, so a handle is stored only once the call that made it has succeeded. A
- * descriptor can be 0, so the flags say whether offer holds one. error is the build's failure, or
- * VK_ERROR_FORMAT_NOT_SUPPORTED once composition_prepare() finds that the device cannot write the
- * swapchain's format. The flags are 64 bits wide, which fills the padding that a narrower member
- * would leave.
+ * composition_empty() makes an empty composition: its offer is -1, and every other member is zero.
+ * composition() builds the pass, composition_prepare() the surfaces, and composition_fini() destroys
+ * what the composition owns and leaves it empty. A failed Vulkan call leaves its output undefined,
+ * so a handle is stored only once the call that made it has succeeded. error is the build's
+ * failure, or VK_ERROR_FORMAT_NOT_SUPPORTED once composition_prepare() finds that the device cannot
+ * write the swapchain's format. The flags are 64 bits wide, which fills the padding that a narrower
+ * member would leave.
  *
  * Supersampling: the model works above the frame, so the proxy is enlarged on the way in and the
  * answer averaged back on the way out. model_native holds that average; without it the resolve would
@@ -210,7 +209,7 @@ struct composition {
 	COMPOSITION_STD(uint32_t)       export_family;           //!< The queue family that both legs run on.
 	COMPOSITION_STD(uint32_t)       transport_gen;           //!< The exported pair's generation.
 	VkResult                        error;                   //!< Why the composition cannot run.
-	int                             offer;                   //!< The connection of an offer.
+	int                             offer;                   //!< The connection of an offer, or -1.
 };
 
 /** @brief Whether a swapchain format can be composed at all, and what this pass works in when it can.
@@ -259,6 +258,18 @@ composition_frame_settings (void);
  */
 extern struct composition_frame_settings
 composition_frame_settings_read (struct ShmHeader const *h);
+
+/** @brief An empty composition, which owns nothing.
+ *
+ * @return A composition whose offer is -1 and whose other members are zero.
+ */
+static inline struct composition
+composition_empty (void)
+{
+	struct composition ret = {};
+	ret.offer = -1;
+	return ret;
+}
 
 /** @brief Builds a composition's pass on a device.
  *
@@ -471,7 +482,7 @@ composition_transport_generation (struct composition const *c)
 static inline int
 composition_offer_connection (struct composition const *c)
 {
-	return c && (c->flags & COMPOSITION_OFFER) ? c->offer : -1;
+	return c ? c->offer : -1;
 }
 
 /** @brief Withdraws any offer and awaits the daemon's answer to a new one on a connection.
@@ -505,7 +516,7 @@ composition_set_transport_ready (struct composition *c,
  *         fresh generation number.
  *
  * @param c     The composition, or nullptr.
- * @param fds   Receives the descriptors, which the caller owns.
+ * @param fds   Receives the descriptors, which the caller owns; both are -1 if the export fails.
  * @param offer Receives the device's and driver's UUIDs, the sizes and the generation.
  * @return      true if both descriptors were made; otherwise none is open.
  */

@@ -14,9 +14,8 @@
 
 /** @brief What the hotkeys know about an event node. */
 enum hotkey_node_flags {
-	HOTKEY_NODE_KEYBOARD = 1, //!< Open as a keyboard: fd is the hotkeys' to close.
-	HOTKEY_NODE_REJECTED = 2, //!< Not a keyboard, as long as the node's inode is ino.
-	HOTKEY_NODE_SEEN     = 4  //!< In the directory, during a look at it.
+	HOTKEY_NODE_REJECTED = 1, //!< Not a keyboard, as long as the node's inode is ino.
+	HOTKEY_NODE_SEEN     = 2  //!< In the directory, during a look at it.
 };
 
 /** @brief One of /dev/input's event nodes.
@@ -29,10 +28,12 @@ enum hotkey_node_flags {
  * destroyed and recreated, so an unplug/replug that reuses "event6" still looks new here and is
  * probed again. Name alone would cache the verdict for whatever device lands on that path next,
  * which is the same class of bug the EVIOCGVERSION check exists to avoid.
+ *
+ * A node is open as a keyboard exactly while its fd is not -1, and the hotkeys close that fd.
  */
 struct hotkey_node {
 	ino_t    ino;   //!< The inode it had when it was rejected.
-	int      fd;    //!< The keyboard's descriptor, if flags has HOTKEY_NODE_KEYBOARD.
+	int      fd;    //!< The keyboard's descriptor, or -1.
 	uint16_t event; //!< N in eventN.
 	uint16_t flags; //!< enum hotkey_node_flags.
 };

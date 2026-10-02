@@ -214,7 +214,7 @@ hotkeys_node (struct hotkeys *h,
 		return nullptr;
 
 	h->nodes = nodes;
-	nodes[h->node_count] = (struct hotkey_node){ .event = event };
+	nodes[h->node_count] = (struct hotkey_node){ .fd = -1, .event = event };
 	return &nodes[h->node_count++];
 }
 
@@ -234,16 +234,16 @@ hotkeys_probe (struct hotkeys     *h,
                char const         *path,
                char const         *name)
 {
-	int const fd = openat(dirfd(dir), name, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	int fd = openat(dirfd(dir), name, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
 	if (fd < 0)
 		return false;
 
 	if (!looks_like_a_keyboard(fd)) {
 		close(fd);
+		fd = -1;
 		return true;
 	}
 	node->fd = fd;
-	node->flags |= HOTKEY_NODE_KEYBOARD;
 	++h->keyboards;
 	if (h->flags & HOTKEYS_ANNOUNCED)
 		log_printf("[hotkey] picked up a keyboard that appeared later: %s/%s", path, name);
@@ -272,7 +272,7 @@ hotkeys_look_at (struct hotkeys *h,
 		return;
 
 	node->flags |= HOTKEY_NODE_SEEN;
-	if (node->flags & HOTKEY_NODE_KEYBOARD)
+	if (node->fd >= 0)
 		return;
 
 	// Already judged not to be a keyboard? Only trust that verdict if it is still the same node: a
@@ -309,11 +309,11 @@ hotkeys_check (struct hotkeys     *h,
                struct hotkey_node *node)
 {
 	int version = 0;
-	if (!(node->flags & HOTKEY_NODE_KEYBOARD) || ioctl(node->fd, EVIOCGVERSION, &version) >= 0)
+	if (node->fd < 0 || ioctl(node->fd, EVIOCGVERSION, &version) >= 0)
 		return;
 
 	close(node->fd);
-	node->flags &= ~HOTKEY_NODE_KEYBOARD;
+	node->fd = -1;
 	--h->keyboards;
 }
 
@@ -331,8 +331,8 @@ hotkeys_forget (struct hotkeys *h)
 	for (uint32_t i = 0; i < h->node_count; ++i) {
 		struct hotkey_node node = h->nodes[i];
 		if (!(node.flags & HOTKEY_NODE_SEEN))
-			node.flags &= HOTKEY_NODE_KEYBOARD;
-		if (!node.flags)
+			node.flags = 0;
+		if (!node.flags && node.fd < 0)
 			continue;
 
 		node.flags &= ~HOTKEY_NODE_SEEN;
@@ -552,7 +552,7 @@ hotkeys_pressed_evdev (struct hotkeys *h,
 	}
 
 	for (uint32_t i = 0; i < h->node_count; ++i) {
-		if (!(h->nodes[i].flags & HOTKEY_NODE_KEYBOARD))
+		if (h->nodes[i].fd < 0)
 			continue;
 		while (hotkeys_read(h, h->nodes[i].fd))
 			continue;
@@ -611,9 +611,12 @@ hotkeys_fini (struct hotkeys *dest)
 	if (!dest)
 		return;
 
-	for (uint32_t i = 0; i < dest->node_count; ++i)
-		if (dest->nodes[i].flags & HOTKEY_NODE_KEYBOARD)
+	for (uint32_t i = 0; i < dest->node_count; ++i) {
+		if (dest->nodes[i].fd >= 0) {
 			close(dest->nodes[i].fd);
+			dest->nodes[i].fd = -1;
+		}
+	}
 	free(dest->nodes);
 	hotkey_x11_destroy(&dest->x11);
 	*dest = (struct hotkeys){0};

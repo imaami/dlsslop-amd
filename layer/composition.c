@@ -999,7 +999,8 @@ composition (struct device_table const   *vk,
 		.device           = device,
 		.physical_device  = physical_device,
 		.scaler_filter    = SCALER_VK_LANCZOS3,
-		.held_white_point = 1.0f
+		.held_white_point = 1.0f,
+		.offer            = -1
 	};
 	if (!device_table_complete(vk)) {
 		ret.reason = "the device does not expose everything a compute pass needs";
@@ -1038,7 +1039,7 @@ composition_fini (struct composition *dest)
 	drop_all(dest);
 	drop_meter_objects(dest);
 	dlss_nr_pass_fini(&dest->pass);
-	*dest = (struct composition){0};
+	*dest = composition_empty();
 }
 
 // ---------------------------------------------------------------------------
@@ -1048,10 +1049,10 @@ composition_fini (struct composition *dest)
 void
 composition_withdraw_offer (struct composition *c)
 {
-	if (!c || !(c->flags & COMPOSITION_OFFER))
+	if (!c || c->offer < 0)
 		return;
 	close(c->offer);
-	c->flags &= ~(uint64_t)COMPOSITION_OFFER;
+	c->offer = -1;
 }
 
 void
@@ -1062,7 +1063,6 @@ composition_await_answer (struct composition *c,
 	if (!c || connection < 0)
 		return;
 	c->offer = connection;
-	c->flags |= COMPOSITION_OFFER;
 }
 
 void
@@ -1080,20 +1080,20 @@ composition_set_transport_ready (struct composition *c,
  *
  * @param c   The composition.
  * @param buf The buffer.
- * @param fd  Receives the descriptor.
- * @return    true if @a fd holds a new descriptor.
+ * @return    A new descriptor, or -1.
  */
-static bool
+static int
 export_memory (struct composition const             *c,
-               struct composition_host_buffer const *buf,
-               int                                  *fd)
+               struct composition_host_buffer const *buf)
 {
 	VkMemoryGetFdInfoKHR const info = {
 		.sType      = VK_STRUCTURE_TYPE_MEMORY_GET_FD_INFO_KHR,
 		.memory     = buf->memory,
 		.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT
 	};
-	return c->vk->vkGetMemoryFdKHR(c->device, &info, fd) == VK_SUCCESS;
+	// A failed call leaves its output undefined.
+	int fd = -1;
+	return c->vk->vkGetMemoryFdKHR(c->device, &info, &fd) == VK_SUCCESS ? fd : -1;
 }
 
 bool
@@ -1101,6 +1101,8 @@ composition_export_transport (struct composition       *c,
                               int                       fds[2],
                               struct ShmTransportOffer *offer)
 {
+	fds[0] = -1;
+	fds[1] = -1;
 	// Opaque fds import only on the device and driver that made them: the offer names both.
 	if (!composition_usable(c) || !c->instance->vkGetPhysicalDeviceProperties2)
 		return false;
@@ -1114,10 +1116,13 @@ composition_export_transport (struct composition       *c,
 	memcpy(offer->deviceUuid, ids.deviceUUID, sizeof offer->deviceUuid);
 	memcpy(offer->driverUuid, ids.driverUUID, sizeof offer->driverUuid);
 
-	if (!export_memory(c, &c->download, &fds[0]))
+	int proxy = export_memory(c, &c->download);
+	if (proxy < 0)
 		return false;
-	if (!export_memory(c, &c->upload, &fds[1])) {
-		close(fds[0]);
+	int answer = export_memory(c, &c->upload);
+	if (answer < 0) {
+		close(proxy);
+		proxy = -1;
 		return false;
 	}
 	offer->allocation[0] = c->download.allocation;
@@ -1130,12 +1135,16 @@ composition_export_transport (struct composition       *c,
 	// transport).
 	uint32_t generation;
 	if (getrandom(&generation, sizeof generation, 0) != (ssize_t)sizeof generation) {
-		close(fds[0]);
-		close(fds[1]);
+		close(proxy);
+		proxy = -1;
+		close(answer);
+		answer = -1;
 		return false;
 	}
 	c->transport_gen = generation | 1u;
 	offer->generation = c->transport_gen;
+	fds[0] = proxy;
+	fds[1] = answer;
 	return true;
 }
 

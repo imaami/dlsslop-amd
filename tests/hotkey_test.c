@@ -172,11 +172,12 @@ fake_device (char const     *dir,
 {
 	char path[PATH_MAX];
 	join(path, dir, name);
-	int const fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+	int fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
 	require(fd >= 0, "cannot create %s", path);
 	struct stat st;
 	require((!size || write(fd, events, size) == (ssize_t)size) && !fstat(fd, &st) && !close(fd),
 	        "cannot write %s", path);
+	fd = -1;
 
 	struct fake_device *device = fake_device_at(st.st_dev, st.st_ino);
 	if (!device) {
@@ -351,19 +352,19 @@ check_fini (void)
 	hotkeys_fini(nullptr);
 	require(descriptor_0_intact(), "finishing empty hotkeys closed descriptor 0");
 
-	int first[2], second[2];
+	int first[2] = { -1, -1 };
+	int second[2] = { -1, -1 };
 	make_pipe(first);
 	make_pipe(second);
-	int const other = open("/dev/null", O_RDONLY | O_CLOEXEC);
+	int other = open("/dev/null", O_RDONLY | O_CLOEXEC);
 	require(other >= 0, "cannot open /dev/null");
 	struct hotkey_node *const nodes = malloc(4 * sizeof *nodes);
 	require(nodes, "out of memory");
-	nodes[0] = (struct hotkey_node){ .fd = first[0], .event = 3, .flags = HOTKEY_NODE_KEYBOARD };
-	// A rejected node and a node nobody could open own no descriptor, whatever fd says.
-	nodes[1] = (struct hotkey_node){ .ino = 7, .event = 4, .flags = HOTKEY_NODE_REJECTED };
-	nodes[2] = (struct hotkey_node){ .ino = 8, .fd = second[0], .event = 9,
-	                                 .flags = HOTKEY_NODE_KEYBOARD | HOTKEY_NODE_REJECTED };
-	nodes[3] = (struct hotkey_node){ .fd = other, .event = 12 };
+	// Every node whose fd is not -1 is a keyboard, whatever its flags say; the others own nothing.
+	nodes[0] = (struct hotkey_node){ .fd = first[0], .event = 3 };
+	nodes[1] = (struct hotkey_node){ .ino = 7, .fd = -1, .event = 4, .flags = HOTKEY_NODE_REJECTED };
+	nodes[2] = (struct hotkey_node){ .ino = 8, .fd = second[0], .event = 9, .flags = HOTKEY_NODE_REJECTED };
+	nodes[3] = (struct hotkey_node){ .fd = -1, .event = 12 };
 	struct hotkeys h = {
 		.nodes         = nodes,
 		.last_scan     = 1.0,
@@ -375,12 +376,14 @@ check_fini (void)
 	h.pending[KEY_F10] = 3;
 	hotkeys_fini(&h);
 	require(!is_open(first[0]) && !is_open(second[0]), "the keyboards stayed open");
+	first[0] = -1;
+	second[0] = -1;
 	require(is_open(first[1]) && is_open(second[1]) && is_open(other) && descriptor_0_intact(),
 	        "hotkeys_fini() closed a descriptor that no keyboard owned");
 	require(is_zero(&h, sizeof h), "finished hotkeys are not empty");
 
 	// The keyboards' descriptors, reused: finishing again closes nothing.
-	int const reused[2] = {
+	int reused[2] = {
 		open("/dev/null", O_RDONLY | O_CLOEXEC),
 		open("/dev/null", O_RDONLY | O_CLOEXEC)
 	};
@@ -388,9 +391,11 @@ check_fini (void)
 	hotkeys_fini(&h);
 	require(is_open(reused[0]) && is_open(reused[1]) && is_open(other) && descriptor_0_intact(),
 	        "finishing hotkeys twice closed descriptors");
-	int const opened[] = { reused[0], reused[1], first[1], second[1], other };
-	for (size_t i = 0; i < sizeof opened / sizeof *opened; ++i)
-		close(opened[i]);
+	int *const opened[] = { &reused[0], &reused[1], &first[1], &second[1], &other };
+	for (size_t i = 0; i < sizeof opened / sizeof *opened; ++i) {
+		close(*opened[i]);
+		*opened[i] = -1;
+	}
 }
 
 /** @brief hotkeys_fini() unloads the X libraries that the XInput2 backend loaded. */
@@ -430,11 +435,11 @@ check_reads (void)
 	require(!hotkeys_pressed(nullptr, KEY_F10), "no hotkeys read a press");
 	require(!hotkeys_pressed(&h, 0) && is_zero(&h, sizeof h), "an unbound key opened a backend");
 
-	int keyboard[2];
+	int keyboard[2] = { -1, -1 };
 	make_pipe(keyboard);
 	h.nodes = malloc(sizeof *h.nodes);
 	require(h.nodes, "out of memory");
-	*h.nodes = (struct hotkey_node){ .fd = keyboard[0], .flags = HOTKEY_NODE_KEYBOARD };
+	*h.nodes = (struct hotkey_node){ .fd = keyboard[0] };
 	h.node_count = 1;
 	h.keyboards = 1;
 	// Opened, and /dev/input looked at forever from now: no sweep while this runs.
@@ -480,8 +485,10 @@ check_reads (void)
 	        && !presses(&h, UINT32_MAX) && !h.pending_total, "a code beyond the key codes counted");
 
 	close(keyboard[1]);
+	keyboard[1] = -1;
 	hotkeys_fini(&h);
 	require(!is_open(keyboard[0]), "the keyboard stayed open");
+	keyboard[0] = -1;
 }
 
 /** @brief Creates a plain file. */
@@ -491,8 +498,9 @@ make_file (char const *dir,
 {
 	char path[PATH_MAX];
 	join(path, dir, name);
-	int const fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+	int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
 	require(fd >= 0 && !close(fd), "cannot create %s", path);
+	fd = -1;
 }
 
 /** @brief Removes a file. */
@@ -547,7 +555,7 @@ rejected (struct hotkeys const *h,
 	char name[16];
 	event_name(name, event);
 	struct hotkey_node const *const node = node_of(h, event);
-	return node && node->flags == HOTKEY_NODE_REJECTED && node->ino == inode(dir, name);
+	return node && node->flags == HOTKEY_NODE_REJECTED && node->fd == -1 && node->ino == inode(dir, name);
 }
 
 /** @brief Whether eventN is open as a keyboard, on a fake device's file. */
@@ -557,7 +565,7 @@ keyboard (struct hotkeys const     *h,
           struct fake_device const *device)
 {
 	struct hotkey_node const *const node = node_of(h, event);
-	return node && node->flags == HOTKEY_NODE_KEYBOARD && is_device(node->fd, device);
+	return node && !node->flags && node->fd >= 0 && is_device(node->fd, device);
 }
 
 /** @brief The sweeps of a directory that stands in for /dev/input. Plain files open, but they are
@@ -571,11 +579,11 @@ check_sweeps (char const *dir)
 	require(is_zero(&h, sizeof h), "a sweep of a missing directory changed the hotkeys");
 
 	// A keyboard that has gone away, and whose node has left the directory.
-	int gone[2];
+	int gone[2] = { -1, -1 };
 	make_pipe(gone);
 	h.nodes = malloc(sizeof *h.nodes);
 	require(h.nodes, "out of memory");
-	*h.nodes = (struct hotkey_node){ .fd = gone[0], .event = 20, .flags = HOTKEY_NODE_KEYBOARD };
+	*h.nodes = (struct hotkey_node){ .fd = gone[0], .event = 20 };
 	h.node_count = 1;
 	h.keyboards = 1;
 
@@ -585,10 +593,12 @@ check_sweeps (char const *dir)
 		make_file(dir, SWEPT_NAMES[i]);
 	hotkeys_rescan_evdev(&h, dir);
 	require(!is_open(gone[0]) && !h.keyboards, "a keyboard that went away stayed open");
+	gone[0] = -1;
 	require(h.flags == HOTKEYS_ANNOUNCED, "a sweep did not mark the hotkeys announced");
 	require(h.node_count == 3 && rejected(&h, dir, 3) && rejected(&h, dir, 10) && rejected(&h, dir, 65535),
 	        "a sweep found %u nodes, not events 3, 10 and 65535 rejected", h.node_count);
 	close(gone[1]);
+	gone[1] = -1;
 
 	// Again: the same nodes, the same verdicts.
 	hotkeys_rescan_evdev(&h, dir);
@@ -625,7 +635,7 @@ check_sweeps (char const *dir)
 	require(!mkdir(sub, 0700), "cannot create event8");
 	hotkeys_rescan_evdev(&h, dir);
 	struct hotkey_node const *const seven = node_of(&h, 7);
-	require(seven && (geteuid() ? !seven->flags : seven->flags == HOTKEY_NODE_REJECTED),
+	require(seven && seven->fd == -1 && (geteuid() ? !seven->flags : seven->flags == HOTKEY_NODE_REJECTED),
 	        "a node that does not open was remembered wrongly");
 	require(rejected(&h, dir, 8) && h.node_count == 4, "a directory node was not rejected");
 
@@ -805,7 +815,7 @@ static bool
 start_xvfb (char const *log,
             char        display[static 16])
 {
-	int fds[2];
+	int fds[2] = { -1, -1 };
 	require(!pipe2(fds, O_CLOEXEC), "cannot make Xvfb's pipe");
 	pid_t const parent = getpid();
 	xvfb = fork();
@@ -813,6 +823,7 @@ start_xvfb (char const *log,
 	if (!xvfb)
 		exec_xvfb(log, fds[1], parent);
 	close(fds[1]);
+	fds[1] = -1;
 
 	// Xvfb writes the display's number and a newline once it takes connections, and the child
 	// writes nothing if it does not run Xvfb.
@@ -827,6 +838,7 @@ start_xvfb (char const *log,
 		length += (size_t)n;
 	}
 	close(fds[0]);
+	fds[0] = -1;
 	if (!length) {
 		int status = 0;
 		require(waitpid(xvfb, &status, 0) == xvfb, "waitpid failed");
@@ -992,10 +1004,12 @@ int
 main (void)
 {
 	// Descriptor 0 holds a file of the test's own, so that a close of it shows.
-	int const null = open("/dev/null", O_RDONLY | O_CLOEXEC);
+	int null = open("/dev/null", O_RDONLY | O_CLOEXEC);
 	require(null >= 0 && dup2(null, 0) == 0 && !fstat(0, &descriptor_0), "cannot replace descriptor 0");
-	if (null)
+	if (null) {
 		close(null);
+		null = -1;
+	}
 	require(!atexit(stop_xvfb), "atexit failed");
 
 	char const *const tmp = getenv("TMPDIR");
