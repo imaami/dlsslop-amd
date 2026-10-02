@@ -106,6 +106,7 @@ the rule:
 | `DownsampleBlob` and `Blob` in scaler_vk.cpp | `SCALER_VK_AVERAGES` and `struct scaler_shader` in scaler_vk.c | one table of the averages' SPIR-V and names |
 | `ScalerFilterName`, `ScalerFilter` and its `kScaler*` enumerators | `scaler_vk_filter_name`, `enum scaler_vk_filter` and `SCALER_VK_*` | the module's prefix replaces the names' own `Scaler` |
 | `FrameSettings` and `FrameSettings::Read` in composition.h | `struct composition_frame_settings`, `composition_frame_settings` and `composition_frame_settings_read` | a function with external linkage carries its module's prefix, and the struct keeps the name of the function that returns one |
+| `g_phys` in layer.cpp | none; `InstanceChain` holds `physical` and `physicalCount` | an instance's physical devices are freed with the instance |
 
 The headers that C and C++ share stay valid C++23. `common/shm_protocol.h`
 declares the channel for both languages, `layer/vk_table.h` the dispatch tables,

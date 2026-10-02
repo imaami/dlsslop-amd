@@ -17,10 +17,11 @@
 #include <cstring>
 #include <algorithm>
 #include <mutex>
+#include <new>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
+#include "../common/list.h"
 #include "../common/shm_protocol.h"
 #include "composition.h"
 #include "hotkey.h"
@@ -447,18 +448,33 @@ static Offer OfferTransport(ShmMap& s, struct composition& comp, double& expires
 // ---------------------------------------------------------------------------
 // Dispatch chains
 // ---------------------------------------------------------------------------
+// Allocated zeroed, by calloc().
 struct InstanceChain {
-    VkInstance self = VK_NULL_HANDLE;
-    PFN_vkGetInstanceProcAddr next_gipa = nullptr;
+    struct list node;  // In g_instances.
+    VkInstance self;
+    PFN_vkGetInstanceProcAddr next_gipa;
     // The game's own: device features beyond it need extensions of their own.
-    uint32_t apiVersion = VK_API_VERSION_1_0;
+    uint32_t apiVersion;
+    // What vkEnumeratePhysicalDevices returned for the instance, so that vkCreateDevice finds the
+    // instance of its physical device.
+    uint32_t physicalCount;
+    VkPhysicalDevice* physical;
 
     // The instance-level entry points the layer and the composition need, resolved once. Kept here
     // rather than on the device chain because this is where the VkInstance handle is in scope.
-    struct instance_table table = {};
+    struct instance_table table;
+};
+
+// A queue that the game took from its device: the present path needs its family.
+struct DeviceQueue {
+    struct list node;  // In DeviceChain::queueFamilies.
+    VkQueue queue;
+    uint32_t family;
 };
 
 struct SwapchainState {
+    struct list node;  // In DeviceChain::swapchains.
+    VkSwapchainKHR handle = VK_NULL_HANDLE;
     std::vector<VkImage> images;
     // The present queue's family: the composition's, and the in-layer network's, which converts
     // formats with blits and so needs a graphics family.
@@ -497,6 +513,7 @@ struct SwapchainState {
 };
 
 struct DeviceChain {
+    struct list node;  // In g_devices.
     InstanceChain* instance = nullptr;
     VkPhysicalDevice physical = VK_NULL_HANDLE;
     VkDevice self = VK_NULL_HANDLE;
@@ -527,36 +544,106 @@ struct DeviceChain {
     SwapchainState* inLayerLast = nullptr;
     // What the channel's layer reason last said of it.
     std::string networkReason;
-    std::unordered_map<VkSwapchainKHR, SwapchainState> swapchains;
-    std::unordered_map<VkQueue, uint32_t> queueFamilies;
+    // The SwapchainStates of the swapchains the layer tracks.
+    struct list swapchains;
+    // The DeviceQueues of the queues the game took, in queueStore: one entry for each queue the
+    // device was created with, allocated with the device because vkGetDeviceQueue cannot fail.
+    struct list queueFamilies;
+    DeviceQueue* queueStore = nullptr;
+    uint32_t queueStoreCount = 0;
+    uint32_t queueStoreUsed = 0;
     ShmMap shm;
     uint64_t framesComposed = 0;
     uint64_t framesPassedThrough = 0;
 };
 
-static std::unordered_map<VkInstance, InstanceChain> g_instances;
-static std::unordered_map<VkPhysicalDevice, InstanceChain*> g_phys;
-static std::unordered_map<VkDevice, DeviceChain*> g_devices;
+// The InstanceChains and the DeviceChains, under g_stateMutex.
+static struct list g_instances = LIST_INIT(g_instances);
+static struct list g_devices = LIST_INIT(g_devices);
 static std::mutex g_stateMutex;
 // The in-layer network's module (layer/network_module.h), beside the layer,
 // loaded once for the first device that enabled the network.
 static network_module g_network;
 
+// The chain of INSTANCE, or null. The caller holds g_stateMutex.
+static InstanceChain* FindInstance(VkInstance instance) {
+    InstanceChain* ic;
+    list_foreach(ic, &g_instances, InstanceChain, node)
+        if (ic->self == instance) return ic;
+    return nullptr;
+}
+
+// Whether IC's instance enumerated PHYSICAL. The caller holds g_stateMutex.
+static bool HasPhysical(const InstanceChain* ic, VkPhysicalDevice physical) {
+    for (uint32_t i = 0; i < ic->physicalCount; ++i)
+        if (ic->physical[i] == physical) return true;
+    return false;
+}
+
+// The chain of the instance that enumerated PHYSICAL, or null. The caller holds g_stateMutex.
+static InstanceChain* InstanceForPhysical(VkPhysicalDevice physical) {
+    InstanceChain* ic;
+    list_foreach(ic, &g_instances, InstanceChain, node)
+        if (HasPhysical(ic, physical)) return ic;
+    return nullptr;
+}
+
+// Adds the physical devices of DEVICES that IC does not hold yet. False, adding none, when out of
+// memory. The caller holds g_stateMutex.
+static bool RememberPhysical(InstanceChain* ic, const VkPhysicalDevice* devices, uint32_t count) {
+    // The array grows only when a device is new to IC, by the devices from the first new one on.
+    uint32_t i = 0;
+    while (i < count && HasPhysical(ic, devices[i])) ++i;
+    if (i == count) return true;
+    VkPhysicalDevice* const grown =
+        (VkPhysicalDevice*)realloc(ic->physical, (ic->physicalCount + size_t(count - i)) * sizeof *grown);
+    if (!grown) return false;
+    ic->physical = grown;
+    ic->physical[ic->physicalCount++] = devices[i];
+    while (++i < count)
+        if (!HasPhysical(ic, devices[i])) ic->physical[ic->physicalCount++] = devices[i];
+    return true;
+}
+
+// FindDevice without the lock; the caller holds g_stateMutex.
+static DeviceChain* FindDevice_(VkDevice device) {
+    DeviceChain* dc;
+    list_foreach(dc, &g_devices, DeviceChain, node)
+        if (dc->self == device) return dc;
+    return nullptr;
+}
+
+// The chain of DEVICE, or null.
 static DeviceChain* FindDevice(VkDevice device) {
     g_stateMutex.lock();
-    const auto it = g_devices.find(device);
-    DeviceChain* const dc = it == g_devices.end() ? nullptr : it->second;
+    DeviceChain* const dc = FindDevice_(device);
     g_stateMutex.unlock();
     return dc;
 }
 
+// DC's entry of QUEUE, or null. The caller holds dc->lock.
+static DeviceQueue* FindQueue(DeviceChain* dc, VkQueue queue) {
+    DeviceQueue* q;
+    list_foreach(q, &dc->queueFamilies, DeviceQueue, node)
+        if (q->queue == queue) return q;
+    return nullptr;
+}
+
+// DC's state of SWAPCHAIN, or null. The caller holds dc->lock.
+static SwapchainState* FindSwapchain(DeviceChain* dc, VkSwapchainKHR swapchain) {
+    SwapchainState* sc;
+    list_foreach(sc, &dc->swapchains, SwapchainState, node)
+        if (sc->handle == swapchain) return sc;
+    return nullptr;
+}
+
 // DeviceForQueue without the lock; the caller holds g_stateMutex.
 static DeviceChain* DeviceForQueue_(VkQueue queue) {
-    if (g_devices.size() == 1) return g_devices.begin()->second;
-    for (auto& kv : g_devices) {
-        DeviceChain* const dc = kv.second;
+    if (struct list* const only = list_only(&g_devices)) return container_of(only, DeviceChain, node);
+    DeviceChain* dc;
+    list_foreach(dc, &g_devices, DeviceChain, node) {
         dc->lock.lock();
-        const bool found = dc->queueFamilies.count(queue);
+        const bool found = FindQueue(dc, queue);
         dc->lock.unlock();
         if (found) return dc;
     }
@@ -716,24 +803,33 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateInstance(
     PFN_vkGetInstanceProcAddr next_gipa = link->u.pLayerInfo->pfnNextGetInstanceProcAddr;
     auto create = (PFN_vkCreateInstance)next_gipa(VK_NULL_HANDLE, "vkCreateInstance");
     if (!create) return VK_ERROR_INITIALIZATION_FAILED;
+    // Before the instance, so that running out leaves nothing to destroy.
+    InstanceChain* const chain = (InstanceChain*)calloc(1, sizeof *chain);
+    if (!chain) {
+        log_printf("[layer] vkCreateInstance: out of host memory for the layer's state");
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
 
     // Documented pattern: keep the link node in pNext (layers below need it)
     // and advance u.pLayerInfo so the next layer resolves its own chain entry.
     link->u.pLayerInfo = link->u.pLayerInfo->pNext;
     VkResult res = create(pCreateInfo, pAllocator, pInstance);
-    if (res != VK_SUCCESS) return res;
+    if (res != VK_SUCCESS) {
+        free(chain);
+        return res;
+    }
 
-    InstanceChain chain{};
-    chain.self = *pInstance;
-    chain.next_gipa = next_gipa;
+    chain->self = *pInstance;
+    chain->next_gipa = next_gipa;
+    chain->apiVersion = VK_API_VERSION_1_0;
     if (pCreateInfo->pApplicationInfo && pCreateInfo->pApplicationInfo->apiVersion)
-        chain.apiVersion = pCreateInfo->pApplicationInfo->apiVersion;
+        chain->apiVersion = pCreateInfo->pApplicationInfo->apiVersion;
 
-    chain.table.next_gipa = next_gipa;
-    instance_table_load(&chain.table, *pInstance);
+    chain->table.next_gipa = next_gipa;
+    instance_table_load(&chain->table, *pInstance);
 
     g_stateMutex.lock();
-    g_instances[*pInstance] = chain;
+    list_append(&g_instances, &chain->node);
     log_printf("[layer] vkCreateInstance -> %p", (void*)*pInstance);
     g_stateMutex.unlock();
     return VK_SUCCESS;
@@ -741,13 +837,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateInstance(
 
 // Hook_DestroyInstance without the lock; the caller holds g_stateMutex.
 static void Hook_DestroyInstance_(VkInstance instance, const VkAllocationCallbacks* pAllocator) {
-    auto it = g_instances.find(instance);
-    if (it == g_instances.end()) return;
-    auto destroy = it->second.table.vkDestroyInstance;
-    InstanceChain* chain = &it->second;
-    g_instances.erase(it);
-    for (auto pit = g_phys.begin(); pit != g_phys.end();)
-        pit = (pit->second == chain) ? g_phys.erase(pit) : std::next(pit);
+    InstanceChain* const chain = FindInstance(instance);
+    if (!chain) return;
+    const PFN_vkDestroyInstance destroy = chain->table.vkDestroyInstance;
+    list_del(&chain->node);
+    free(chain->physical);
+    free(chain);
     if (destroy) destroy(instance, pAllocator);
 }
 
@@ -761,16 +856,17 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyInstance(VkInstance instance,
 static VKAPI_ATTR VkResult VKAPI_CALL Hook_EnumeratePhysicalDevices(
     VkInstance instance, uint32_t* pCount, VkPhysicalDevice* pPhysicalDevices) {
     g_stateMutex.lock();
-    const auto it = g_instances.find(instance);
-    InstanceChain* const chain = it == g_instances.end() ? nullptr : &it->second;
+    InstanceChain* const chain = FindInstance(instance);
     g_stateMutex.unlock();
     if (!chain || !chain->table.vkEnumeratePhysicalDevices) return VK_ERROR_INITIALIZATION_FAILED;
     VkResult res = chain->table.vkEnumeratePhysicalDevices(instance, pCount, pPhysicalDevices);
-    if (res == VK_SUCCESS && pPhysicalDevices) {
-        g_stateMutex.lock();
-        for (uint32_t i = 0; i < *pCount; ++i) g_phys[pPhysicalDevices[i]] = chain;
-        g_stateMutex.unlock();
-    }
+    if (res != VK_SUCCESS || !pPhysicalDevices) return res;
+    g_stateMutex.lock();
+    const bool remembered = RememberPhysical(chain, pPhysicalDevices, *pCount);
+    g_stateMutex.unlock();
+    if (!remembered) log_printf("[layer] vkEnumeratePhysicalDevices: out of host memory; a device created "
+                                "on these physical devices before a later enumeration records them "
+                                "presents untouched");
     return res;
 }
 
@@ -803,9 +899,22 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
         }
     }
 
+    // The layer's state, before the device, so that running out leaves nothing to destroy: the
+    // chain, and an entry for each queue the device is created with.
+    uint32_t queueCount = 0;
+    for (uint32_t i = 0; i < pCreateInfo->queueCreateInfoCount; ++i)
+        queueCount += pCreateInfo->pQueueCreateInfos[i].queueCount;
+    DeviceChain* const dc = new (std::nothrow) DeviceChain();
+    DeviceQueue* const queues = (DeviceQueue*)calloc(queueCount, sizeof *queues);
+    if (!dc || !queues) {
+        delete dc;
+        free(queues);
+        log_printf("[layer] vkCreateDevice: out of host memory for the layer's state");
+        return VK_ERROR_OUT_OF_HOST_MEMORY;
+    }
+
     g_stateMutex.lock();
-    const auto phys = g_phys.find(physicalDevice);
-    InstanceChain* const ic = phys == g_phys.end() ? nullptr : phys->second;
+    InstanceChain* const ic = InstanceForPhysical(physicalDevice);
     g_stateMutex.unlock();
 
     // VK_KHR_external_memory_fd is what vkGetMemoryFdKHR needs to export the device-local
@@ -897,9 +1006,12 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
         effective = pCreateInfo;
         res = create(physicalDevice, pCreateInfo, pAllocator, pDevice);
     }
-    if (res != VK_SUCCESS) return res;
+    if (res != VK_SUCCESS) {
+        delete dc;
+        free(queues);
+        return res;
+    }
 
-    DeviceChain* dc = new DeviceChain();
     dc->instance = ic;
     dc->physical = physicalDevice;
     dc->self = *pDevice;
@@ -907,6 +1019,10 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
     dc->setDeviceLoaderData = setLoaderData;
     dc->table.next_dpa = next_dpa;
     device_table_load(&dc->table, *pDevice);
+    list_init(&dc->swapchains);
+    list_init(&dc->queueFamilies);
+    dc->queueStore = queues;
+    dc->queueStoreCount = queueCount;
     for (uint32_t i = 0; i < effective->enabledExtensionCount; ++i)
         if (!std::strcmp(effective->ppEnabledExtensionNames[i], VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME))
             dc->exportMemory = dc->table.vkGetMemoryFdKHR != nullptr;
@@ -942,19 +1058,33 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateDevice(
     }
 
     g_stateMutex.lock();
-    g_devices[*pDevice] = dc;
+    list_append(&g_devices, &dc->node);
     log_printf("[layer] vkCreateDevice -> %p on %s (inert=%d enabled=%d)", (void*)*pDevice, deviceName,
                (int) dc->inert.load(), (int) LayerEnabled());
     g_stateMutex.unlock();
     return VK_SUCCESS;
 }
 
+// Destroys what the layer created for SC, then unlinks SC from DC and frees it. The caller holds
+// dc->lock.
+static void DestroySwapchainState(DeviceChain* dc, SwapchainState* sc) {
+    composition_fini(&sc->comp);
+    if (sc->fenceLeg1) dc->table.vkDestroyFence(dc->self, sc->fenceLeg1, nullptr);
+    if (sc->fenceLeg2) dc->table.vkDestroyFence(dc->self, sc->fenceLeg2, nullptr);
+    for (VkSemaphore semaphore : sc->leg2Done) dc->table.vkDestroySemaphore(dc->self, semaphore, nullptr);
+    if (sc->pool) dc->table.vkDestroyCommandPool(dc->self, sc->pool, nullptr);
+    if (dc->inLayerLast == sc) dc->inLayerLast = nullptr;
+    list_del(&sc->node);
+    delete sc;
+}
+
 static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
                                                      const VkAllocationCallbacks* pAllocator) {
     DeviceChain* dc = FindDevice(device);
     if (!dc) return;
+    SwapchainState* sc;
     dc->lock.lock();
-    for (auto& kv : dc->swapchains) ReleasePrimary(device, kv.first);
+    list_foreach(sc, &dc->swapchains, SwapchainState, node) ReleasePrimary(device, sc->handle);
     dc->lock.unlock();
     // Say the layer has gone. A reader that finds a pid here checks it is alive, so a crash is
     // caught too, but an orderly exit should not need anyone to go looking.
@@ -969,27 +1099,35 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroyDevice(VkDevice device,
     // While the device is still found by its queues: the network's build submits through them.
     if (dc->inLayer) g_network.close(dc->inLayer);
     g_stateMutex.lock();
-    g_devices.erase(device);
+    list_del(&dc->node);
     g_stateMutex.unlock();
     dc->lock.lock();
-    for (auto& kv : dc->swapchains) {
-        SwapchainState& sc = kv.second;
-        composition_fini(&sc.comp);
-        if (sc.fenceLeg1) dc->table.vkDestroyFence(device, sc.fenceLeg1, nullptr);
-        if (sc.fenceLeg2) dc->table.vkDestroyFence(device, sc.fenceLeg2, nullptr);
-        for (VkSemaphore semaphore : sc.leg2Done) dc->table.vkDestroySemaphore(device, semaphore, nullptr);
-        if (sc.pool) dc->table.vkDestroyCommandPool(device, sc.pool, nullptr);
-    }
-    dc->swapchains.clear();
+    list_foreach(sc, &dc->swapchains, SwapchainState, node) DestroySwapchainState(dc, sc);
     dc->lock.unlock();
     if (dc->table.vkDestroyDevice) dc->table.vkDestroyDevice(device, pAllocator);
+    free(dc->queueStore);
     delete dc;
+}
+
+// RememberQueue without the lock; the caller holds dc->lock. A queue beyond the ones the device was
+// created with, which a valid game cannot take, stays unknown.
+static void RememberQueue_(DeviceChain* dc, VkQueue queue, uint32_t family) {
+    DeviceQueue* const known = FindQueue(dc, queue);
+    if (known) {
+        known->family = family;
+        return;
+    }
+    if (dc->queueStoreUsed == dc->queueStoreCount) return;
+    DeviceQueue* const q = &dc->queueStore[dc->queueStoreUsed++];
+    q->queue = queue;
+    q->family = family;
+    list_append(&dc->queueFamilies, &q->node);
 }
 
 static void RememberQueue(DeviceChain* dc, VkQueue queue, uint32_t family) {
     if (!queue) return;
     dc->lock.lock();
-    dc->queueFamilies[queue] = family;
+    RememberQueue_(dc, queue, family);
     dc->lock.unlock();
 }
 
@@ -1075,31 +1213,36 @@ static VKAPI_ATTR VkResult VKAPI_CALL Hook_CreateSwapchainKHR(
 
     VkResult res = dc->table.vkCreateSwapchainKHR(device, &m, pAllocator, pSwapchain);
     if (res != VK_SUCCESS || dc->inert || !LayerEnabled()) return res;
+    SwapchainState* const sc = new (std::nothrow) SwapchainState();
+    if (!sc) {
+        log_printf("[layer] swapchain %p: out of host memory for the layer's state; presenting it untouched",
+                   (void*)*pSwapchain);
+        return VK_SUCCESS;
+    }
 
     uint32_t count = 0;
     dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, nullptr);
-    std::vector<VkImage> images(count);
-    dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, images.data());
+    sc->images.resize(count);
+    dc->table.vkGetSwapchainImagesKHR(device, *pSwapchain, &count, sc->images.data());
 
-    SwapchainState sc{};
-    sc.images = std::move(images);
-    sc.format = pCreateInfo->imageFormat;
-    sc.hdrKind = DetectHdrKind(sc.format, pCreateInfo->imageColorSpace);
-    sc.width = pCreateInfo->imageExtent.width;
-    sc.height = pCreateInfo->imageExtent.height;
-    const bool tooSmall = sc.width < kMinW || sc.height < kMinH;
-    sc.passThrough = unsupportedHdr || unsupportedTransfer || !SupportedFormat(sc.format) || sc.width > kMaxW ||
-                     sc.height > kMaxH || tooSmall;
+    sc->handle = *pSwapchain;
+    sc->format = pCreateInfo->imageFormat;
+    sc->hdrKind = DetectHdrKind(sc->format, pCreateInfo->imageColorSpace);
+    sc->width = pCreateInfo->imageExtent.width;
+    sc->height = pCreateInfo->imageExtent.height;
+    const bool tooSmall = sc->width < kMinW || sc->height < kMinH;
+    sc->passThrough = unsupportedHdr || unsupportedTransfer || !SupportedFormat(sc->format) || sc->width > kMaxW ||
+                      sc->height > kMaxH || tooSmall;
 
     dc->lock.lock();
     log_printf("[layer] swapchain %p %ux%u fmt=%d hdr=%u passThrough=%d%s", (void*)*pSwapchain,
                pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height,
-               (int)pCreateInfo->imageFormat, sc.hdrKind, (int)sc.passThrough,
-               sc.passThrough ? (unsupportedHdr ? " (unsupported color space for native HIP)"
-                                 : unsupportedTransfer ? " (surface cannot transfer frames)"
-                                 : !SupportedFormat(sc.format) ? " (unsupported format)"
-                                 : tooSmall ? " (too small)" : " (too large)") : "");
-    dc->swapchains[*pSwapchain] = std::move(sc);
+               (int)pCreateInfo->imageFormat, sc->hdrKind, (int)sc->passThrough,
+               sc->passThrough ? (unsupportedHdr ? " (unsupported color space for native HIP)"
+                                  : unsupportedTransfer ? " (surface cannot transfer frames)"
+                                  : !SupportedFormat(sc->format) ? " (unsupported format)"
+                                  : tooSmall ? " (too small)" : " (too large)") : "");
+    list_append(&dc->swapchains, &sc->node);
     dc->lock.unlock();
     return VK_SUCCESS;
 }
@@ -1110,19 +1253,15 @@ static VKAPI_ATTR void VKAPI_CALL Hook_DestroySwapchainKHR(VkDevice device,
     if (!dc) return;
     ReleasePrimary(device, swapchain);
     dc->lock.lock();
-    auto it = dc->swapchains.find(swapchain);
-    if (it != dc->swapchains.end()) {
+    // SC stays valid while the lock is released for the wait: an entry never moves when others are
+    // linked or unlinked, and only this hook and Hook_DestroyDevice free one, which the game may not
+    // call for this swapchain or its device while this call runs.
+    SwapchainState* const sc = FindSwapchain(dc, swapchain);
+    if (sc) {
         dc->lock.unlock();
         WaitDeviceIdle(dc);
         dc->lock.lock();
-        SwapchainState& sc = it->second;
-        composition_fini(&sc.comp);
-        if (sc.fenceLeg1) dc->table.vkDestroyFence(device, sc.fenceLeg1, nullptr);
-        if (sc.fenceLeg2) dc->table.vkDestroyFence(device, sc.fenceLeg2, nullptr);
-        for (VkSemaphore semaphore : sc.leg2Done) dc->table.vkDestroySemaphore(device, semaphore, nullptr);
-        if (sc.pool) dc->table.vkDestroyCommandPool(device, sc.pool, nullptr);
-        if (dc->inLayerLast == &sc) dc->inLayerLast = nullptr;
-        dc->swapchains.erase(it);
+        DestroySwapchainState(dc, sc);
     }
     dc->lock.unlock();
     if (dc->table.vkDestroySwapchainKHR) dc->table.vkDestroySwapchainKHR(device, swapchain, pAllocator);
@@ -1627,13 +1766,12 @@ static VkResult Hook_QueuePresentKHR_(DeviceChain* dc, VkQueue queue, const VkPr
     // Signalled by the composition's last submit; the present waits on it.
     VkSemaphore composedSem = VK_NULL_HANDLE;
 
-    uint32_t family = 0;
-    auto qit = dc->queueFamilies.find(queue);
-    if (qit != dc->queueFamilies.end()) family = qit->second;
+    const DeviceQueue* const presentQueue = FindQueue(dc, queue);
+    const uint32_t family = presentQueue ? presentQueue->family : 0;
     for (uint32_t i = 0; i < pPresentInfo->swapchainCount; ++i) {
-        auto sit = dc->swapchains.find(pPresentInfo->pSwapchains[i]);
-        if (sit == dc->swapchains.end()) continue;
-        SwapchainState& sc = sit->second;
+        SwapchainState* const state = FindSwapchain(dc, pPresentInfo->pSwapchains[i]);
+        if (!state) continue;
+        SwapchainState& sc = *state;
         if (sc.passThrough || pPresentInfo->pImageIndices[i] >= sc.images.size()) continue;
         // One swapchain drives the channel; the rest present raw. See ClaimPrimary.
         if (!ClaimPrimary(dc->self, pPresentInfo->pSwapchains[i], sc.width, sc.height)) {
@@ -1876,17 +2014,17 @@ static PFN_vkVoidFunction LookupHook(const char* name, HookScope first) {
 // The next layer's NAME for INSTANCE, null for an instance the layer does not know. The caller
 // holds g_stateMutex.
 static PFN_vkVoidFunction NextInstanceProcAddr(VkInstance instance, const char* name) {
-    const auto it = g_instances.find(instance);
-    if (it == g_instances.end() || !it->second.next_gipa) return nullptr;
-    return it->second.next_gipa(instance, name);
+    const InstanceChain* const ic = FindInstance(instance);
+    if (!ic || !ic->next_gipa) return nullptr;
+    return ic->next_gipa(instance, name);
 }
 
 // The next layer's NAME for DEVICE, null for a device the layer does not know. The caller holds
 // g_stateMutex.
 static PFN_vkVoidFunction NextDeviceProcAddr(VkDevice device, const char* name) {
-    const auto it = g_devices.find(device);
-    if (it == g_devices.end() || !it->second->next_dpa) return nullptr;
-    return it->second->next_dpa(device, name);
+    const DeviceChain* const dc = FindDevice_(device);
+    if (!dc || !dc->next_dpa) return nullptr;
+    return dc->next_dpa(device, name);
 }
 
 extern "C" {

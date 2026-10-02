@@ -344,6 +344,9 @@ if(BUILD_TESTING)
     add_executable(composition-test tests/composition_test.c)
     target_link_libraries(composition-test PRIVATE dlsslop-layer-objects)
     add_test(NAME composition COMMAND composition-test)
+    # The layer's intrusive list: linking, walking, unlinking and freeing during a walk.
+    add_executable(list-test tests/list_test.c)
+    add_test(NAME list COMMAND list-test)
     add_test(NAME color-metrics COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_metrics_test.py)
     add_test(NAME color-orchestrator COMMAND ${Python3_EXECUTABLE}

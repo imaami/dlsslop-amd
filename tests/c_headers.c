@@ -4,6 +4,7 @@
  */
 #include "device_features.h"
 #include "dlssnr/DlssNr_Layout.h"
+#include "list.h"
 #include "log.h"
 #include "network_module.h"
 #include "network_requirements.h"

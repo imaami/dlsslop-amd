@@ -154,9 +154,14 @@ copies of the arrangement and name no destroyed object, and that finishing the
 composition frees everything once. It also checks that a rebuild keeps a held
 frame of the same shape, that whatever ends a transport offer closes its
 connection once, the exported pair's offer, and the swapchain formats that the
-composition blits through half float or cannot write. With the tests, the build
-compiles `tests/c_headers.c`, which includes as C the headers that C and C++
-share.
+composition blits through half float or cannot write. The list test checks the
+intrusive list that holds the layer's instances, devices, swapchains and
+queues: that a head starts empty, static or in place; that entries are walked
+in the order they were linked, forwards and backwards, through a hook that is
+not their first member; that a walk may unlink and free its entry, the first,
+the last or one in the middle; and which lists have exactly one entry. With the
+tests, the build compiles `tests/c_headers.c`, which includes as C the headers
+that C and C++ share.
 
 Two checks disassemble the built HIP modules and need `llvm-objdump`. The
 LDS-barrier check fails when a shared-memory access can still be outstanding at
