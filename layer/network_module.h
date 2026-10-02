@@ -209,19 +209,16 @@ network_module_load (struct network_module *m,
 	struct network_module found = {.library = dlopen(path, RTLD_NOW | RTLD_LOCAL)};
 	if (!found.library)
 		return network_module_refuse(m, path);
+	// The lookups stop at the first that fails, whose dlerror() a later lookup that succeeds would
+	// clear.
 #define NETWORK_MODULE_FIND(name) \
-	found.name = (dlsslop_network_##name##_fn *)dlsym(found.library, "dlsslop_network_" #name)
-	NETWORK_MODULE_FIND(open);
-	NETWORK_MODULE_FIND(prepare);
-	NETWORK_MODULE_FIND(record);
-	NETWORK_MODULE_FIND(submitted);
-	NETWORK_MODULE_FIND(error);
-	NETWORK_MODULE_FIND(close);
-#undef NETWORK_MODULE_FIND
-	if (found.open && found.prepare && found.record && found.submitted && found.error && found.close) {
+	(found.name = (dlsslop_network_##name##_fn *)dlsym(found.library, "dlsslop_network_" #name))
+	if (NETWORK_MODULE_FIND(open) && NETWORK_MODULE_FIND(prepare) && NETWORK_MODULE_FIND(record)
+	    && NETWORK_MODULE_FIND(submitted) && NETWORK_MODULE_FIND(error) && NETWORK_MODULE_FIND(close)) {
 		*m = found;
 		return true;
 	}
+#undef NETWORK_MODULE_FIND
 	network_module_refuse(m, path);
 	dlclose(found.library);
 	return false;
