@@ -47,7 +47,7 @@ struct hotkey_node;
 struct hotkey_x11;
 
 /** @brief The state that struct hotkeys records in its flags. */
-enum hotkeys_flags : HOTKEY_STD(uint32_t) {
+enum hotkeys_flags : HOTKEY_STD(uint64_t) {
 	HOTKEYS_OPENED    = 1, //!< The first hotkeys_pressed() chose a backend.
 	HOTKEYS_ANNOUNCED = 2, //!< /dev/input was read once: a keyboard found later is logged.
 	HOTKEYS_EVDEV     = 4  //!< The backend is evdev, also while no keyboard is open.
@@ -56,16 +56,16 @@ enum hotkeys_flags : HOTKEY_STD(uint32_t) {
 /** @brief The keyboards that the layer reads its key from, and the presses it has not answered.
  *
  * A zeroed object is an empty one: the first hotkeys_pressed() opens a backend. hotkeys_fini()
- * closes what that opened.
+ * closes what that opened. The flags are 64 bits wide, which fills the padding that a narrower
+ * member would leave.
  */
 struct hotkeys {
 	struct hotkey_node  *nodes;                   //!< /dev/input's event nodes; hotkey_priv.h.
 	struct hotkey_x11   *x11;                     //!< The XInput2 backend, if it works; hotkey_priv.h.
 	double               last_scan;               //!< log_now_ms() of the last look at /dev/input.
+	HOTKEY_STD(uint64_t) flags;                   //!< enum hotkeys_flags.
 	HOTKEY_STD(uint32_t) node_count;              //!< The entries of nodes.
-	HOTKEY_STD(uint32_t) keyboards;               //!< The nodes open as keyboards.
 	HOTKEY_STD(uint32_t) pending_total;           //!< Presses not answered yet, of every key.
-	HOTKEY_STD(uint32_t) flags;                   //!< enum hotkeys_flags.
 	HOTKEY_STD(uint8_t)  pending[HOTKEYS_CODES];  //!< Presses not answered yet, per key, at most 255.
 };
 

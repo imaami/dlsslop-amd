@@ -373,7 +373,6 @@ check_fini (void)
 		.nodes         = nodes,
 		.last_scan     = 1.0,
 		.node_count    = 4,
-		.keyboards     = 2,
 		.pending_total = 3,
 		.flags         = HOTKEYS_OPENED | HOTKEYS_ANNOUNCED
 	};
@@ -445,7 +444,6 @@ check_reads (void)
 	require(h.nodes, "out of memory");
 	*h.nodes = (struct hotkey_node){ .fd = keyboard[0] };
 	h.node_count = 1;
-	h.keyboards = 1;
 	// Opened on evdev, and /dev/input looked at forever from now: no sweep while this runs.
 	h.flags = HOTKEYS_OPENED | HOTKEYS_ANNOUNCED | HOTKEYS_EVDEV;
 	h.last_scan = INFINITY;
@@ -550,6 +548,17 @@ node_of (struct hotkeys const *h,
 	return nullptr;
 }
 
+/** @brief The nodes that are open as keyboards: those whose fd is not -1. */
+static uint32_t
+keyboard_count (struct hotkeys const *h)
+{
+	uint32_t count = 0;
+	for (uint32_t i = 0; i < h->node_count; ++i)
+		if (h->nodes[i].fd >= 0)
+			++count;
+	return count;
+}
+
 /** @brief Whether eventN is known as rejected with its file's inode. */
 static bool
 rejected (struct hotkeys const *h,
@@ -589,14 +598,13 @@ check_sweeps (char const *dir)
 	require(h.nodes, "out of memory");
 	*h.nodes = (struct hotkey_node){ .fd = gone[0], .event = 20 };
 	h.node_count = 1;
-	h.keyboards = 1;
 
 	static char const *const SWEPT_NAMES[] = { "event3", "event10", "event65535", "event65536", "eventX",
 	                                           "event", "event1a", "event-1", "mouse0", "js0" };
 	for (size_t i = 0; i < sizeof SWEPT_NAMES / sizeof *SWEPT_NAMES; ++i)
 		make_file(dir, SWEPT_NAMES[i]);
 	hotkeys_rescan_evdev(&h, dir);
-	require(!is_open(gone[0]) && !h.keyboards, "a keyboard that went away stayed open");
+	require(!is_open(gone[0]) && !keyboard_count(&h), "a keyboard that went away stayed open");
 	gone[0] = -1;
 	require(h.flags == HOTKEYS_ANNOUNCED, "a sweep did not mark the hotkeys announced");
 	require(h.node_count == 3 && rejected(&h, dir, 3) && rejected(&h, dir, 10) && rejected(&h, dir, 65535),
@@ -657,7 +665,7 @@ check_sweeps (char const *dir)
 		remove_file(dir, name);
 	}
 	hotkeys_rescan_evdev(&h, dir);
-	require(h.node_count == 4 && !h.keyboards, "the table did not shrink to 4 nodes");
+	require(h.node_count == 4 && !keyboard_count(&h), "the table did not shrink to 4 nodes");
 	hotkeys_fini(&h);
 
 	require(!rmdir(sub), "cannot remove event8");
@@ -703,7 +711,7 @@ check_keyboards (char const *parent)
 
 	struct hotkeys h = {0};
 	hotkeys_rescan_evdev(&h, dir);
-	require(h.keyboards == 1 && keyboard(&h, 1, one) && one->probes == 1, "the keyboard was not opened");
+	require(keyboard_count(&h) == 1 && keyboard(&h, 1, one) && one->probes == 1, "the keyboard was not opened");
 	for (uint16_t i = 0; i < OTHER_COUNT; ++i)
 		require(rejected(&h, dir, i + 2) && others[i]->probes == 1, "a %s was not rejected",
 		        OTHERS[i].what);
@@ -718,7 +726,7 @@ check_keyboards (char const *parent)
 	// Again: the live keyboard stays open, and nothing is judged again.
 	int const fd = node_of(&h, 1)->fd;
 	hotkeys_rescan_evdev(&h, dir);
-	require(h.keyboards == 1 && keyboard(&h, 1, one) && node_of(&h, 1)->fd == fd && one->probes == 1,
+	require(keyboard_count(&h) == 1 && keyboard(&h, 1, one) && node_of(&h, 1)->fd == fd && one->probes == 1,
 	        "a live keyboard was closed, or judged again");
 	for (uint16_t i = 0; i < OTHER_COUNT; ++i)
 		require(rejected(&h, dir, i + 2) && others[i]->probes == 1, "a %s was judged again",
@@ -728,20 +736,20 @@ check_keyboards (char const *parent)
 	struct fake_device *const late = fake_device(dir, "event21", FAKE_KEYBOARD, nullptr, 0);
 	hotkeys_rescan_evdev(&h, dir);
 	expect_log("[hotkey] picked up a keyboard that appeared later: %s/event21", dir);
-	require(h.keyboards == 2 && keyboard(&h, 21, late) && keyboard(&h, 1, one),
+	require(keyboard_count(&h) == 2 && keyboard(&h, 21, late) && keyboard(&h, 1, one),
 	        "a later keyboard was not opened");
 
 	// A live keyboard whose node has left the directory stays open.
 	remove_file(dir, "event1");
 	hotkeys_rescan_evdev(&h, dir);
-	require(h.keyboards == 2 && keyboard(&h, 1, one) && node_of(&h, 1)->fd == fd,
+	require(keyboard_count(&h) == 2 && keyboard(&h, 1, one) && node_of(&h, 1)->fd == fd,
 	        "a live keyboard whose node left was dropped");
 
 	// Once it is gone, it is closed and forgotten. Nothing else opens during the sweep, so its
 	// descriptor stays closed.
 	one->dead = true;
 	hotkeys_rescan_evdev(&h, dir);
-	require(h.keyboards == 1 && !node_of(&h, 1) && !is_open(fd), "a keyboard that is gone was kept");
+	require(keyboard_count(&h) == 1 && !node_of(&h, 1) && !is_open(fd), "a keyboard that is gone was kept");
 
 	// One keyboard unplugged, and another plugged in at its path: the new one is opened and logged.
 	struct fake_device *const replug = fake_device(dir, "event21.new", FAKE_KEYBOARD, nullptr, 0);
@@ -752,13 +760,13 @@ check_keyboards (char const *parent)
 	late->dead = true;
 	hotkeys_rescan_evdev(&h, dir);
 	expect_log("[hotkey] picked up a keyboard that appeared later: %s/event21", dir);
-	require(h.keyboards == 1 && keyboard(&h, 21, replug) && replug->probes == 1,
+	require(keyboard_count(&h) == 1 && keyboard(&h, 21, replug) && replug->probes == 1,
 	        "a keyboard plugged in at the path of another was not opened");
 
 	// A keyboard that is gone while its node is still there closes, and its node is rejected.
 	replug->dead = true;
 	hotkeys_rescan_evdev(&h, dir);
-	require(!h.keyboards && rejected(&h, dir, 21), "a keyboard that is gone was not closed and rejected");
+	require(!keyboard_count(&h) && rejected(&h, dir, 21), "a keyboard that is gone was not closed and rejected");
 
 	hotkeys_fini(&h);
 	require(open_descriptors() == descriptors, "the hotkeys did not close every descriptor they opened");
@@ -925,7 +933,7 @@ check_x11 (char const *dir)
 
 	require(!setenv("DISPLAY", display, 1) && !setenv("DLSSNR_HOTKEY_BACKEND", "x11", 1), "setenv failed");
 	struct hotkeys h = {0};
-	require(!hotkeys_pressed(&h, KEY_F10) && h.x11 && h.flags == HOTKEYS_OPENED && !h.nodes && !h.keyboards,
+	require(!hotkeys_pressed(&h, KEY_F10) && h.x11 && h.flags == HOTKEYS_OPENED && !h.nodes && !keyboard_count(&h),
 	        "the XInput2 backend did not open on Xvfb %s", display);
 	expect_log("[hotkey] watching XInput2 raw keys on %s", display);
 
@@ -989,7 +997,7 @@ check_no_backend (void)
 		bool const xi = loaded("libXi.so.6");
 		struct hotkeys h = {0};
 		require(!hotkeys_pressed(&h, KEY_F10) && h.flags == HOTKEYS_OPENED && !h.nodes && !h.x11
-		        && !h.keyboards, "DLSSNR_HOTKEY_BACKEND=%s opened something", CHOICES[i].backend);
+		        && !keyboard_count(&h), "DLSSNR_HOTKEY_BACKEND=%s opened something", CHOICES[i].backend);
 		expect_log("%s", NO_WAY);
 		require(xi || !loaded("libXi.so.6"), "a backend that did not open left libXi loaded");
 		require(!hotkeys_pressed(&h, KEY_F10) && h.flags == HOTKEYS_OPENED, "a second press opened again");

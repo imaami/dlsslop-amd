@@ -243,7 +243,6 @@ hotkeys_probe (struct hotkeys     *h,
 		return true;
 	}
 	node->fd = fd;
-	++h->keyboards;
 	if (h->flags & HOTKEYS_ANNOUNCED)
 		log_printf("[hotkey] picked up a keyboard that appeared later: %s/%s", path, name);
 	return false;
@@ -300,12 +299,10 @@ hotkeys_look_at (struct hotkeys *h,
  * stayed known. The next device to take that path was then never opened, and the key silently
  * stopped working. EVIOCGVERSION asks the same question without consuming anything.
  *
- * @param h    The hotkeys.
  * @param node A node.
  */
 static void
-hotkeys_check (struct hotkeys     *h,
-               struct hotkey_node *node)
+hotkeys_check (struct hotkey_node *node)
 {
 	int version;
 	if (node->fd < 0 || ioctl(node->fd, EVIOCGVERSION, &version) >= 0)
@@ -313,7 +310,6 @@ hotkeys_check (struct hotkeys     *h,
 
 	close(node->fd);
 	node->fd = -1;
-	--h->keyboards;
 }
 
 /** @brief Forgets the nodes that have left the directory, so that the table tracks the directory
@@ -345,7 +341,7 @@ hotkeys_rescan_evdev (struct hotkeys *h,
                       char const     *path)
 {
 	for (uint32_t i = 0; i < h->node_count; ++i)
-		hotkeys_check(h, &h->nodes[i]);
+		hotkeys_check(&h->nodes[i]);
 
 	DIR *const dir = opendir(path);
 	if (!dir)
@@ -492,6 +488,21 @@ hotkeys_open_x11 (struct hotkeys *h,
 	return h->x11;
 }
 
+/** @brief Counts the nodes that are open as keyboards: those whose fd is not -1.
+ *
+ * @param h The hotkeys.
+ * @return  The number of keyboards.
+ */
+static uint32_t
+hotkeys_keyboards (struct hotkeys const *h)
+{
+	uint32_t keyboards = 0;
+	for (uint32_t i = 0; i < h->node_count; ++i)
+		if (h->nodes[i].fd >= 0)
+			++keyboards;
+	return keyboards;
+}
+
 /** @brief Opens whichever backend is available, once.
  *
  * Forced backends exist for testing: the fallback is otherwise unreachable on a machine where evdev
@@ -514,9 +525,10 @@ hotkeys_open (struct hotkeys *h)
 		hotkeys_rescan_evdev(h, "/dev/input");
 		// The first press's look at /dev/input is this one.
 		h->last_scan = log_now_ms();
-		if (h->keyboards) {
+		uint32_t const keyboards = hotkeys_keyboards(h);
+		if (keyboards) {
 			h->flags |= HOTKEYS_EVDEV;
-			log_printf("[hotkey] watching %u keyboard(s) through evdev", h->keyboards);
+			log_printf("[hotkey] watching %u keyboard(s) through evdev", keyboards);
 			return;
 		}
 	}
