@@ -222,9 +222,10 @@ if(BUILD_TESTING)
     target_include_directories(vulkan-storage-test PRIVATE ${SHADER_DIR} layer)
     target_link_libraries(vulkan-storage-test PRIVATE dlsslop-layer-objects dlsslop-common-c)
     add_test(NAME vulkan-storage COMMAND vulkan-storage-test)
-    add_executable(network-module-test tests/network_module_test.cpp)
+    add_executable(network-module-test tests/network_module_test.c)
     target_include_directories(network-module-test PRIVATE layer)
-    target_link_libraries(network-module-test PRIVATE dlsslop-layer-objects dlsslop-common-c ${CMAKE_DL_LIBS})
+    target_link_libraries(network-module-test PRIVATE dlsslop-layer-objects dlsslop-common-c test-support
+        ${CMAKE_DL_LIBS})
     # The module without dlsslop_network_close(), and one of another interface, which the loader
     # refuses.
     add_library(network-module-incomplete MODULE tests/network_module_incomplete.c)
