@@ -6,6 +6,7 @@
  * two entries; and container_of() back from a hook.
  */
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -15,7 +16,7 @@
 struct item {
 	double      weight; //!< Something before the hook.
 	struct list node;   //!< In a test's list.
-	int         value;  //!< What the walks report.
+	uint32_t    value;  //!< What the walks report.
 };
 
 /** @brief Ends the test with a message unless a condition holds. */
@@ -40,11 +41,11 @@ require (bool        condition,
 /** @brief Whether a walk of a list meets its entries' values in this order, both ways round. */
 static bool
 holds (struct list const *head,
-       int const         *values,
-       int                count)
+       uint32_t const    *values,
+       uint32_t           count)
 {
 	struct item *it;
-	int n = 0;
+	uint32_t n = 0;
 	list_foreach (it, head, struct item, node) {
 		if (n == count || it->value != values[n])
 			return false;
@@ -78,19 +79,19 @@ main (void)
 	list_append(&g_list, &b.node);
 	require(!list_only(&g_list), "a list of two entries has an only entry");
 	list_append(&g_list, &c.node);
-	require(holds(&g_list, (int const[]){1, 2, 3}, 3), "the entries are not in the order they came");
+	require(holds(&g_list, (uint32_t const[]){1, 2, 3}, 3), "the entries are not in the order they came");
 
 	// The middle entry, unlinked during the walk.
 	struct item *it;
-	int visited = 0;
+	uint32_t visited = 0;
 	list_foreach (it, &g_list, struct item, node) {
 		visited++;
 		if (it == &b)
 			list_del(&it->node);
 	}
-	require(visited == 3, "a walk that unlinked an entry visited %d entries", visited);
+	require(visited == 3, "a walk that unlinked an entry visited %u entries", visited);
 	require(!b.node.next && !b.node.prev, "an unlinked hook keeps its pointers");
-	require(holds(&g_list, (int const[]){1, 3}, 2), "unlinking the middle entry broke the list");
+	require(holds(&g_list, (uint32_t const[]){1, 3}, 2), "unlinking the middle entry broke the list");
 
 	list_del(&a.node);
 	list_del(&c.node);
@@ -100,7 +101,7 @@ main (void)
 	struct list head;
 	list_init(&head);
 	require(holds(&head, nullptr, 0) && !list_only(&head), "an in-place head does not start empty");
-	for (int i = 0; i < 5; i++) {
+	for (uint32_t i = 0; i < 5; i++) {
 		struct item *p = calloc(1, sizeof *p);
 		require(p, "out of memory");
 		p->value = i;
@@ -113,7 +114,7 @@ main (void)
 		free(it);
 		it = nullptr;
 	}
-	require(holds(&head, (int const[]){1, 2, 3}, 3), "freeing the first and the last entry broke the list");
+	require(holds(&head, (uint32_t const[]){1, 2, 3}, 3), "freeing the first and the last entry broke the list");
 	list_foreach (it, &head, struct item, node) {
 		list_del(&it->node);
 		free(it);
