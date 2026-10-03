@@ -118,9 +118,9 @@ reviews:
         exception to the AGENTS.md shell rule.
     - path: "**/CMakeLists.txt"
       instructions: >-
-        Shader headers and SPIR-V are generated at build time from the
-        submodule sources and layer/ with glslangValidator and
-        cmake/spirv-header.cmake and are never committed;
+        Shader headers, sources and SPIR-V are generated at build time
+        from the submodule sources and layer/ with glslangValidator and
+        cmake/spirv-array.cmake and are never committed;
         do not suggest committing them.
   tools:
     # clang-tidy's default checks (readability-identifier-length,

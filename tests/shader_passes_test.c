@@ -18,17 +18,7 @@
 #include "scaler_vk.h"
 #include "shader_vk_priv.h"
 
-// The SPIR-V that the passes must run, under names of the test's own: the passes' objects define the
-// headers' names.
-#define bcds_bicubic_spv  expected_bicubic
-#define bcds_catmull_spv  expected_catmull
-#define bcds_kaiser2_spv  expected_kaiser2
-#define bcds_kaiser3_spv  expected_kaiser3
-#define bcds_lanczos2_spv expected_lanczos2
-#define bcds_lanczos3_spv expected_lanczos3
-#define bcds_magc_spv     expected_magc
-#define bcus_spv          expected_bcus
-#define dlssnr_spv        expected_dlssnr
+// The SPIR-V that the passes must run.
 #include "dlssnr/DlssNr_Shader_Vk.h"
 #include "scaling/bcds_bicubic_Shader_Vk.h"
 #include "scaling/bcds_catmull_Shader_Vk.h"
@@ -38,15 +28,6 @@
 #include "scaling/bcds_lanczos3_Shader_Vk.h"
 #include "scaling/bcds_magc_Shader_Vk.h"
 #include "scaling/bcus_Shader_Vk.h"
-#undef dlssnr_spv
-#undef bcus_spv
-#undef bcds_magc_spv
-#undef bcds_lanczos3_spv
-#undef bcds_lanczos2_spv
-#undef bcds_kaiser3_spv
-#undef bcds_kaiser2_spv
-#undef bcds_catmull_spv
-#undef bcds_bicubic_spv
 
 /** @brief Ends the test with a message unless a condition holds. */
 [[gnu::format(printf, 2, 3)]]
@@ -1073,8 +1054,8 @@ check_shaders (void)
 {
 	reset();
 	struct dlss_nr_pass pass = dlss_nr_pass(&device_table, &instance_table, DEVICE, PHYSICAL);
-	require(pass.error == VK_SUCCESS && fake.module_size == sizeof expected_dlssnr
-	        && fake.module_hash == fnv1a(expected_dlssnr, sizeof expected_dlssnr),
+	require(pass.error == VK_SUCCESS && fake.module_size == sizeof dlssnr_spv
+	        && fake.module_hash == fnv1a(dlssnr_spv, sizeof dlssnr_spv),
 	        "the composition pass runs %zu bytes of other SPIR-V", fake.module_size);
 	dlss_nr_pass_fini(&pass);
 
@@ -1083,22 +1064,22 @@ check_shaders (void)
 		struct expected_scaler average;
 		uint32_t               filter;
 	} const cases[] = {
-		{ AVERAGE(expected_lanczos3), SCALER_VK_FSR1        },
-		{ AVERAGE(expected_bicubic),  SCALER_VK_BICUBIC     },
-		{ AVERAGE(expected_catmull),  SCALER_VK_CATMULL_ROM },
-		{ AVERAGE(expected_lanczos2), SCALER_VK_LANCZOS2    },
-		{ AVERAGE(expected_lanczos3), SCALER_VK_LANCZOS3    },
-		{ AVERAGE(expected_kaiser2),  SCALER_VK_KAISER2     },
-		{ AVERAGE(expected_kaiser3),  SCALER_VK_KAISER3     },
-		{ AVERAGE(expected_magc),     SCALER_VK_MAGIC       },
-		{ AVERAGE(expected_lanczos3), SCALER_VK_COUNT       },
-		{ AVERAGE(expected_lanczos3), 9                     },
-		{ AVERAGE(expected_lanczos3), 100                   },
-		{ AVERAGE(expected_lanczos3), UINT32_MAX            }
+		{ AVERAGE(bcds_lanczos3_spv), SCALER_VK_FSR1        },
+		{ AVERAGE(bcds_bicubic_spv),  SCALER_VK_BICUBIC     },
+		{ AVERAGE(bcds_catmull_spv),  SCALER_VK_CATMULL_ROM },
+		{ AVERAGE(bcds_lanczos2_spv), SCALER_VK_LANCZOS2    },
+		{ AVERAGE(bcds_lanczos3_spv), SCALER_VK_LANCZOS3    },
+		{ AVERAGE(bcds_kaiser2_spv),  SCALER_VK_KAISER2     },
+		{ AVERAGE(bcds_kaiser3_spv),  SCALER_VK_KAISER3     },
+		{ AVERAGE(bcds_magc_spv),     SCALER_VK_MAGIC       },
+		{ AVERAGE(bcds_lanczos3_spv), SCALER_VK_COUNT       },
+		{ AVERAGE(bcds_lanczos3_spv), 9                     },
+		{ AVERAGE(bcds_lanczos3_spv), 100                   },
+		{ AVERAGE(bcds_lanczos3_spv), UINT32_MAX            }
 	};
 #undef AVERAGE
 	struct expected_scaler const enlarge = {
-		expected_bcus, sizeof expected_bcus, "dlssnr-enlarge", SCALER_VK_UPSAMPLE
+		bcus_spv, sizeof bcus_spv, "dlssnr-enlarge", SCALER_VK_UPSAMPLE
 	};
 	for (size_t c = 0; c < sizeof cases / sizeof *cases; ++c) {
 		struct expected_scaler const *const directions[] = { &cases[c].average, &enlarge };

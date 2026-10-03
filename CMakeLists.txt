@@ -44,20 +44,22 @@ find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 find_program(SPIRV_VAL spirv-val REQUIRED)
 set(SHADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
 # The composition and scaling shaders, ported to GLSL from the layer's and
-# OptiScaler's HLSL. Each header holds its module as the unsigned char array
-# SYMBOL with the entry point CSMain, as DXC wrote them for the layer.
+# OptiScaler's HLSL. Each module is the unsigned char array SYMBOL with the
+# entry point CSMain, as DXC wrote them for the layer: NAME.c below the shader
+# directory defines it for the layer's objects, and NAME.h declares it.
 # glslang's depfile names the .spv, so it is the first output: the Makefile
 # generator attaches the depfile to that one.
-function(add_layer_shader source output symbol)
-    set(output ${SHADER_DIR}/${output})
-    add_custom_command(OUTPUT ${output}.spv ${output}.h
+function(add_layer_shader source name symbol)
+    set(output ${SHADER_DIR}/${name})
+    add_custom_command(OUTPUT ${output}.spv ${output}.h ${output}.c
         COMMAND ${GLSLANG_VALIDATOR} --quiet -V -e CSMain --source-entrypoint main --depfile ${output}.d
             -o ${output}.spv ${CMAKE_CURRENT_SOURCE_DIR}/${source}
         COMMAND ${SPIRV_VAL} --target-env vulkan1.0 ${output}.spv
-        COMMAND ${CMAKE_COMMAND} -D SPIRV=${output}.spv -D HEADER=${output}.h -D SYMBOL=${symbol}
-            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/spirv-header.cmake
-        DEPENDS ${source} cmake/spirv-header.cmake DEPFILE ${output}.d VERBATIM)
+        COMMAND ${CMAKE_COMMAND} -D SPIRV=${output}.spv -D HEADER=${output}.h -D SOURCE=${output}.c
+            -D NAME=${name} -D SYMBOL=${symbol} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/spirv-array.cmake
+        DEPENDS ${source} cmake/spirv-array.cmake DEPFILE ${output}.d VERBATIM)
     set(LAYER_SHADERS ${LAYER_SHADERS} ${output}.h PARENT_SCOPE)
+    set(LAYER_SHADER_SOURCES ${LAYER_SHADER_SOURCES} ${output}.c PARENT_SCOPE)
 endfunction()
 file(MAKE_DIRECTORY ${SHADER_DIR}/dlssnr ${SHADER_DIR}/scaling)
 add_layer_shader(layer/dlssnr/dlssnr.comp dlssnr/DlssNr_Shader_Vk dlssnr_spv)
@@ -108,7 +110,7 @@ target_link_libraries(dlsslop-common-c PUBLIC m)
 # Only layer.c differs between the layers; both and the layer tests link the
 # other translation units compiled once.
 add_library(dlsslop-layer-objects OBJECT layer/shader_vk.c layer/dlssnr_pass.c layer/composition.c
-    layer/capture.c layer/scaler_vk.c layer/hotkey.c layer/log.c)
+    layer/capture.c layer/scaler_vk.c layer/hotkey.c layer/log.c ${LAYER_SHADER_SOURCES})
 set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_dependencies(dlsslop-layer-objects layer-shaders)
 target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC layer ${X11_HEADERS} ${XINPUT_HEADERS})
@@ -213,6 +215,7 @@ if(BUILD_TESTING)
     add_executable(vulkan-storage-test tests/vulkan_storage_test.c)
     add_dependencies(vulkan-storage-test layer-shaders)
     target_include_directories(vulkan-storage-test PRIVATE ${SHADER_DIR} layer)
+    target_link_libraries(vulkan-storage-test PRIVATE dlsslop-layer-objects dlsslop-common-c)
     add_test(NAME vulkan-storage COMMAND vulkan-storage-test)
     add_executable(network-module-test tests/network_module_test.cpp)
     target_include_directories(network-module-test PRIVATE layer)
