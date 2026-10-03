@@ -16,8 +16,8 @@ uint8_t passes_of(const VulkanFrame& f) { return uint8_t(std::clamp(f.passes, 1u
 constexpr std::chrono::seconds kTimeoutLog{10};
 }  // namespace
 
-NetworkRecorder::NetworkRecorder(const vulkan::Device& device, VulkanPaths paths)
-    : device_(device), paths_(std::move(paths)), storage_(vulkan::storage_limit(device))
+NetworkRecorder::NetworkRecorder(const vulkan::Device& device, VulkanPaths paths, bool external)
+    : device_(device), paths_(std::move(paths)), external_(external), storage_(vulkan::storage_limit(device))
 {
 }
 
@@ -60,28 +60,42 @@ Result<void> NetworkRecorder::plan_for(uint32_t width, uint32_t height)
     return {};
 }
 
-Result<bool> NetworkRecorder::shape(const VulkanFrame& frame)
+Result<bool> NetworkRecorder::shape(const VulkanFrame& frame, const vulkan::FrameImages* images)
 {
-    if (!shape_differs(frame)) return false;
+    if (!shape_differs(frame)) {
+        // Images of another generation: a reshape for the runtime's own shape binds them.
+        if (!images || images->generation == runtime_->bound()) return false;
+        DLSSLOP_TRY(reshape(shape_, images));
+        return true;
+    }
     const vulkan::Shape shape{frame.width, frame.height, frame.fp16, frame.motion, uses_stages(frame),
-                              passes_of(frame)};
+                              external_, passes_of(frame)};
     // A runtime of the frame's extent keeps its weights and pipelines.
     if (has_extent(frame)) {
-        if (auto reshaped = runtime_->reshape(shape); !reshaped) {
-            runtime_.reset();
-            return forward(std::move(reshaped).error());
-        }
+        DLSSLOP_TRY(reshape(shape, images));
     } else {
         DLSSLOP_TRY(plan_for(frame.width, frame.height));
         // The plan is not kept: the runtime takes the steps and push words it records.
         vulkan::Plan plan = *std::exchange(plan_, std::nullopt);
         runtime_.reset();
         runtime_.emplace(DLSSLOP_TRY(vulkan::Runtime::build(device_, paths_, shape, std::move(plan))));
+        // A build binds no images.
+        if (images) DLSSLOP_TRY(reshape(shape, images));
     }
     shape_ = shape;
     last_.reset();
     recorded_.reset();
     return true;
+}
+
+// The runtime reshaped for SHAPE with IMAGES; one that fails to is dropped.
+Result<void> NetworkRecorder::reshape(const vulkan::Shape& shape, const vulkan::FrameImages* images)
+{
+    if (auto reshaped = runtime_->reshape(shape, images); !reshaped) {
+        runtime_.reset();
+        return forward(std::move(reshaped).error());
+    }
+    return {};
 }
 
 void NetworkRecorder::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const VulkanFrame& frame,
@@ -100,9 +114,30 @@ void NetworkRecorder::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answe
     };
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 2, pair, 0,
                          nullptr);
-    // The network starts over when a wait of the last frame ran out, which other GPU work
-    // that holds the device for milliseconds can cause. The motion history also starts over
-    // when the frame's settings change, and at a build for another pass count.
+    const auto [controls, reset] = begin(frame);
+    runtime_->record(cmd, proxy, answer, controls, reset, queries, query);
+    recorded_ = frame;
+    for (auto& b : pair) {
+        std::swap(b.srcAccessMask, b.dstAccessMask);
+        std::swap(b.srcQueueFamilyIndex, b.dstQueueFamilyIndex);
+    }
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 2, pair, 0,
+                         nullptr);
+}
+
+void NetworkRecorder::record(VkCommandBuffer cmd, const VulkanFrame& frame)
+{
+    const auto [controls, reset] = begin(frame);
+    runtime_->record(cmd, controls, reset);
+    recorded_ = frame;
+}
+
+// FRAME's controls, and whether it starts the network over: when a wait of the last frame ran out,
+// which other GPU work that holds the device for milliseconds can cause, and which is logged. The
+// motion history also starts over when the frame's settings change, and at a build for another
+// pass count.
+std::pair<vulkan::Controls, bool> NetworkRecorder::begin(const VulkanFrame& frame)
+{
     const bool timed_out = runtime_->timed_out();
     if (timed_out) {
         const auto now = std::chrono::steady_clock::now();
@@ -123,15 +158,7 @@ void NetworkRecorder::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answe
     const auto settings = [](const VulkanFrame& f) {
         return std::tie(f.intensity, f.local_tone, f.local_structure, f.style, f.skin_structure, f.auto_mask);
     };
-    runtime_->record(cmd, proxy, answer, controls, timed_out || !last_ || settings(*last_) != settings(frame), queries,
-                     query);
-    recorded_ = frame;
-    for (auto& b : pair) {
-        std::swap(b.srcAccessMask, b.dstAccessMask);
-        std::swap(b.srcQueueFamilyIndex, b.dstQueueFamilyIndex);
-    }
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 2, pair, 0,
-                         nullptr);
+    return {controls, timed_out || !last_ || settings(*last_) != settings(frame)};
 }
 
 void NetworkRecorder::submitted()

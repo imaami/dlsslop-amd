@@ -11,6 +11,7 @@
 #include <chrono>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace dlsslop {
 
@@ -21,8 +22,9 @@ public:
     static constexpr unsigned kMaxPasses = 16;
     static constexpr float kMaxControl = 2;
 
-    // DEVICE's queue takes the runtime's build.
-    NetworkRecorder(const vulkan::Device& device, VulkanPaths paths);
+    // DEVICE's queue takes the runtime's build. EXTERNAL: frames go through
+    // a caller's images (vulkan::FrameImages) instead of buffers.
+    NetworkRecorder(const vulkan::Device& device, VulkanPaths paths, bool external = false);
     NetworkRecorder(const NetworkRecorder&) = delete;
 
     // True when shape() would build or reshape.
@@ -37,10 +39,12 @@ public:
     Result<void> plan(const VulkanFrame& frame);
     // Builds the network for a frame's shape, unless it has it: seconds of work
     // for a new extent; for another shape of the same extent, a reshape that
-    // keeps the weights and pipelines. True after a build or reshape. The
-    // device must have finished the recorder's work. A rejected extent keeps
-    // the network as it was.
-    Result<bool> shape(const VulkanFrame& frame);
+    // keeps the weights and pipelines. In image mode it also binds IMAGES
+    // when their generation is not the one bound, which a build does not: a
+    // bind alone keeps the motion history. True after a build, reshape or
+    // bind. The device must have finished the recorder's work. A rejected
+    // extent keeps the network as it was.
+    Result<bool> shape(const VulkanFrame& frame, const vulkan::FrameImages* images = nullptr);
     // Records one frame of the shape it has: from PROXY, w x h RGBA8 or RGBA16F,
     // through the network, into ANSWER in the same form, or PROXY unchanged
     // when a wait of the frame runs out. Transfers on FAMILY's queue wrote the
@@ -51,6 +55,14 @@ public:
     // finished: when a wait of it ran out, this frame starts the network over.
     void record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const VulkanFrame& frame, uint32_t family,
                 bool exported, VkQueryPool queries = VK_NULL_HANDLE, uint32_t query = 0);
+    // Records one frame of the shape it has in image mode: from the frame
+    // image that shape() bound, through the network, into its answer image,
+    // or the frame unchanged when a wait of the frame runs out. Before it,
+    // the caller's barriers make the frame readable by compute shaders in
+    // SHADER_READ_ONLY_OPTIMAL and the answer writable by compute shaders
+    // and transfers in GENERAL; after it, they take the answer's writes. The
+    // frame submitted last must have finished.
+    void record(VkCommandBuffer cmd, const VulkanFrame& frame);
     // Says that the frame record() recorded last was submitted, so that the
     // next frame follows it in the motion history. A frame that is recorded
     // and not submitted leaves the history as it was.
@@ -62,6 +74,7 @@ public:
 private:
     vulkan::Device device_;
     VulkanPaths paths_;
+    bool external_;
     vulkan::Shape shape_{};
     std::optional<vulkan::Runtime> runtime_;
     // The history's last frame submitted, and the last frame recorded; none
@@ -77,6 +90,8 @@ private:
     std::chrono::steady_clock::time_point next_log_{};
 
     Result<void> plan_for(uint32_t width, uint32_t height);
+    Result<void> reshape(const vulkan::Shape& shape, const vulkan::FrameImages* images);
+    std::pair<vulkan::Controls, bool> begin(const VulkanFrame& frame);
 };
 
 }  // namespace dlsslop

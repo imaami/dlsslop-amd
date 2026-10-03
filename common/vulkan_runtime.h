@@ -72,11 +72,27 @@ uint64_t storage_limit(const Device& device);
 
 // What a runtime is built for: frames of WIDTH x HEIGHT, RGBA8 or with FP16
 // RGBA16F, PASSES chained evaluations, with or without motion history and
-// the pass stages.
+// the pass stages; with EXTERNAL, in a caller's images (FrameImages) instead
+// of buffers.
 struct Shape {
     uint32_t width, height;
-    bool fp16, motion, stages;
+    bool fp16, motion, stages, external;
     uint8_t passes;
+    bool operator==(const Shape&) const = default;
+};
+
+// The caller's images that frames go through, for a runtime built with
+// Shape::external: FRAME, sampled in SHADER_READ_ONLY_OPTIMAL by the first
+// pass, the motion estimate, the pass stages, the alpha pass and the
+// fallback; ANSWER with ANSWER_VIEW, in GENERAL, which one pass's post block
+// and the fallback store into, or which a blit fills from the network's
+// RGBA32F answer. Both are of the shape's extent and frame format.
+// GENERATION is nonzero and changes whenever a handle may have.
+struct FrameImages {
+    uint64_t generation;
+    VkImageView frame;
+    VkImage answer;
+    VkImageView answer_view;
 };
 
 // A frame's controls (upstream: nr::Controls, whose pass count is the
@@ -121,10 +137,12 @@ struct Pipeline {
 //   runs' sync regions and the tile counters past the values count frames
 //   from the build on, or from the last frame that started over.
 // - Descriptors are written only by build() and reshape(). Every dispatch
-//   runs with the network's input image in SHADER_READ_ONLY_OPTIMAL and
-//   every other image that a set binds in GENERAL. The first frame recorded
-//   after build() or reshape() moves every image there from UNDEFINED, and so
-//   does each frame after it until submitted() says one was submitted.
+//   runs with the network's input image, or the caller's frame image in
+//   image mode, in SHADER_READ_ONLY_OPTIMAL and every other image that a set
+//   binds in GENERAL. The first frame recorded after build() or reshape()
+//   moves every image of the runtime's own there from UNDEFINED, and so does
+//   each frame after it until submitted() says one was submitted; the caller
+//   moves its own images into those layouts.
 // - The invalidate-only barriers between steps rely on gfx1201's caches
 //   below L2 being write-through (upstream: nr_graph.cpp:4660-4688); the
 //   steps that tile counters order rely on the queue starting consecutive
@@ -146,12 +164,17 @@ public:
     ~Runtime();
 
     // Makes the runtime what build() makes for SHAPE, of the extent it was
-    // built for: its images and every descriptor set as SHAPE wants them. It
-    // makes no pipeline and submits nothing; the next frame moves the images
-    // into their layouts. The weights, the arena and the pipelines stay, and
-    // so does each image that SHAPE wants as it is, its contents discarded as
-    // a new image's are. A runtime that fails to reshape must be destroyed.
-    Result<void> reshape(const Shape& shape);
+    // built for, with IMAGES bound in image mode (none: those bound before):
+    // its images and every descriptor set as SHAPE wants them. It makes no
+    // pipeline and submits nothing; the next frame moves the images into
+    // their layouts. The weights, the arena and the pipelines stay, and so
+    // does each image that SHAPE wants as it is, its contents discarded as a
+    // new image's are. For the runtime's own shape it only writes the sets,
+    // which binds IMAGES, and keeps its images, their contents and the motion
+    // history. A build in image mode binds no images: its sets that would bind
+    // them wait for a reshape. A runtime that fails to reshape must be
+    // destroyed.
+    Result<void> reshape(const Shape& shape, const FrameImages* images = nullptr);
 
     // Records a frame of the shape: from PROXY, the frame's pixels packed in
     // its format, through the network with CONTROLS into ANSWER in the same
@@ -164,6 +187,12 @@ public:
     // QUERY + 1, once the network is done.
     void record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const Controls& controls, bool reset,
                 VkQueryPool queries, uint32_t query);
+    // Records a frame of the shape in image mode, as above, from the frame
+    // image that reshape() bound into its answer image. Compute shaders sample
+    // the frame, and compute shaders or a blit write the answer; the caller's
+    // barriers order them against the work before and after, and the runtime
+    // records none on either image.
+    void record(VkCommandBuffer cmd, const Controls& controls, bool reset);
     // Says that the frame record() recorded last was submitted, so that the
     // next frame reads the motion history it writes. A frame that is
     // recorded and not submitted leaves the history as it was.
@@ -172,6 +201,8 @@ public:
     // have finished. Its answer is then its proxy, and the sync regions and
     // counters may stay short of their counts until a frame starts over.
     bool timed_out() const;
+    // The generation of the caller's images that reshape() bound; 0: none.
+    uint64_t bound() const { return images_.generation; }
 
 private:
     // The network's kernels' pipelines, then the runtime's own.
@@ -191,7 +222,10 @@ private:
         // The network's input and answer, its second output, the first
         // pass's input for later passes, the pass stages' scratch, the
         // frame's image that blits convert through, and the motion history's
-        // luma pyramids, flow, histories, depth and one history a pass.
+        // luma pyramids, flow, histories, depth and one history a pass. In
+        // image mode the caller's frame stands in for the first pass's input
+        // and its copy, and the caller's answer for an answer in the frame's
+        // format and for the frame's image.
         Image input, answer, second, shown, scratch, frame;
         Image luma[2][kLevels], flow[kLevels], history[2], depth, history_store[kMaxPasses];
         VkSampler nearest, linear;
@@ -203,14 +237,19 @@ private:
         VkDescriptorSet kernel_sets[size_t(Kernel::kCount)];
         VkDescriptorSet alpha_sets[2], stage_sets[2], luma_sets[2][kLevels], flow_sets[2][kLevels];
         VkDescriptorSet pre_sets[2], post_sets[2], verdict_set, fallback_sets[2];
+        // The pre and post blocks' sets of the passes after the first, which
+        // sample the input where the first samples the frame: in image mode
+        // sets of their own, otherwise the first pass's.
+        VkDescriptorSet later_sets[2];
     };
     // How frames are recorded.
     struct State {
         uint32_t width, height, passes;
-        bool motion, stages, rgba8;
+        bool motion, stages, rgba8, external;
         // The proxy is copied into the input, not blitted; the post block
-        // stores the answer in the frame's format, which is then copied out;
-        // the post block restores the frame's alpha itself.
+        // stores the answer in the frame's format, which is then copied out,
+        // or in image mode is the caller's answer; the post block restores the
+        // frame's alpha itself.
         bool input_direct, answer_direct, post_alpha;
         // One pass with motion: the post block writes the history the next
         // frame reads, in turn into history[0] and history[1]. More passes
@@ -230,7 +269,11 @@ private:
 
     Device device_;
     Objects objects_{};
+    // The shape the runtime is built or reshaped for, how frames of it are
+    // recorded, and in image mode the caller's images bound (none: generation 0).
+    Shape shape_{};
     State state_{};
+    FrameImages images_{};
     // The history after the last frame submitted, and after the last frame
     // recorded.
     History history_{}, recorded_{};
@@ -256,6 +299,8 @@ private:
     Result<void> make_pipelines(const VulkanPaths& paths);
     Result<void> make_sets();
     void settle_images(VkCommandBuffer cmd) const;
+    void begin(VkCommandBuffer cmd, bool reset) const;
+    VkImage record_network(VkCommandBuffer cmd, const Controls& c, bool reset, VkQueryPool queries, uint32_t query);
     Result<void> begin_setup(Setup& setup) const;
     Result<void> upload(const Plan& plan, const Model& model, Setup& setup) const;
     Result<void> end_setup(Setup& setup);

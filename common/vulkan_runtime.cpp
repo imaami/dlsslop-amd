@@ -618,8 +618,8 @@ Result<Runtime> Runtime::build(const Device& device, const VulkanPaths& paths, c
 }
 
 Runtime::Runtime(Runtime&& other) noexcept
-    : device_(other.device_), objects_(std::exchange(other.objects_, {})), state_(other.state_),
-      history_(other.history_), recorded_(other.recorded_), settled_(other.settled_),
+    : device_(other.device_), objects_(std::exchange(other.objects_, {})), shape_(other.shape_), state_(other.state_),
+      images_(other.images_), history_(other.history_), recorded_(other.recorded_), settled_(other.settled_),
       steps_(std::move(other.steps_)), push_(std::move(other.push_)), values_end_(other.values_end_),
       timeouts_(std::move(other.timeouts_))
 {
@@ -705,11 +705,15 @@ Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, Plan& p
     return {};
 }
 
-Result<void> Runtime::reshape(const Shape& shape)
+Result<void> Runtime::reshape(const Shape& shape, const FrameImages* images)
 {
     const auto start = std::chrono::steady_clock::now();
     if (shape.width != state_.width || shape.height != state_.height)
         return fail("network reshape: frames of another extent need a build");
+    if (images) images_ = *images;
+    // The runtime's own shape: the sets alone, which bind the images, while the
+    // images, their contents and the motion history stay.
+    if (shape == shape_) return make_sets();
     DLSSLOP_TRY(adopt(shape));
     DLSSLOP_TRY(make_sets());
     history_ = recorded_ = {};
@@ -725,6 +729,7 @@ Result<void> Runtime::reshape(const Shape& shape)
 Result<void> Runtime::adopt(const Shape& shape)
 {
     const Capabilities caps = DLSSLOP_TRY(query(device_, shape));
+    shape_ = shape;
     State& s = state_;
     s.width = shape.width;
     s.height = shape.height;
@@ -732,6 +737,7 @@ Result<void> Runtime::adopt(const Shape& shape)
     s.motion = shape.motion;
     s.stages = shape.stages;
     s.rgba8 = !shape.fp16;
+    s.external = shape.external;
     s.input_direct = caps.input_direct;
     s.answer_direct = caps.answer_direct;
     s.post_alpha = s.passes == 1;
@@ -760,17 +766,23 @@ Result<void> Runtime::make_images()
     // stands in for it. The first pass's input when later passes overwrite
     // it, and the pass stages' scratch. The frame's image, through which
     // blits convert the answer from RGBA32F and, when the input is RGBA32F,
-    // the proxy into it; an RGBA32F input implies an RGBA32F answer.
+    // the proxy into it; an RGBA32F input implies an RGBA32F answer. In image
+    // mode the caller's frame is the first pass's input, kept, and the
+    // caller's answer takes the answer in the frame's format or a blit of
+    // it: the input exists for later passes only, and neither the frame's
+    // image nor the copy of the first pass's input does.
     const VkFormat frame = s.rgba8 ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R16G16B16A16_SFLOAT;
     const uint32_t w = s.width, h = s.height;
     const VkExtent2D second = s.stored ? VkExtent2D{w, h} : VkExtent2D{1, 1};
-    DLSSLOP_TRY(make_image(d, w, h, s.input_direct ? frame : kWide,
+    const bool own = !s.external;
+    const VkFormat input = s.input_direct ? frame : kWide;
+    DLSSLOP_TRY(make_image(d, w, h, own || s.passes > 1 ? input : kNone,
                            s.input_direct ? kCopies | VK_IMAGE_USAGE_SAMPLED_BIT : kSampledStorage, o.input));
-    DLSSLOP_TRY(make_image(d, w, h, s.answer_direct ? frame : kWide, kStorage, o.answer));
+    DLSSLOP_TRY(make_image(d, w, h, s.answer_direct ? (own ? frame : kNone) : kWide, kStorage, o.answer));
     DLSSLOP_TRY(make_image(d, second.width, second.height, kWide, kStorage, o.second));
-    DLSSLOP_TRY(make_image(d, w, h, s.passes > 1 ? kWide : kNone, kSampledStorage, o.shown));
+    DLSSLOP_TRY(make_image(d, w, h, own && s.passes > 1 ? kWide : kNone, kSampledStorage, o.shown));
     DLSSLOP_TRY(make_image(d, w, h, s.stages ? kWide : kNone, kStorage, o.scratch));
-    DLSSLOP_TRY(make_image(d, w, h, s.answer_direct ? kNone : frame, kCopies, o.frame));
+    DLSSLOP_TRY(make_image(d, w, h, own && !s.answer_direct ? frame : kNone, kCopies, o.frame));
     // The motion history: this frame's and the last frame's luma pyramids,
     // the flow between them, the history the pre and post blocks read, one
     // a pass with later passes, a depth nothing writes, and the parameters.
@@ -850,21 +862,32 @@ Result<void> Runtime::make_sets()
         VkDescriptorSet* set;
         ImageDescriptor images[5];
     };
-    const ImageDescriptor input{o.input.view, kSampled, o.nearest};
     const auto stored = [](const Image& i) { return ImageDescriptor{i.view, kGeneral, VK_NULL_HANDLE}; };
     const auto linear = [&o](const Image& i) { return ImageDescriptor{i.view, kGeneral, o.linear}; };
+    // What frames go through: the frame, which the first pass and the motion
+    // estimate sample; the input of later passes; the target, which the post
+    // block and the fallback store into; and the first pass's input, which
+    // the pass stages, the alpha pass and the fallback sample, kept when
+    // later passes overwrite the input. In buffer mode the frame is the
+    // input; in image mode the frame is the caller's, so is the target when
+    // the post block stores in the frame's format, and the frame stays the
+    // first pass's input.
+    const ImageDescriptor input{o.input.view, kSampled, o.nearest};
+    const ImageDescriptor frame = s.external ? ImageDescriptor{images_.frame, kSampled, o.nearest} : input;
+    const ImageDescriptor target = s.external && s.answer_direct
+                                       ? ImageDescriptor{images_.answer_view, kGeneral, VK_NULL_HANDLE}
+                                       : stored(o.answer);
+    const ImageDescriptor first =
+        !s.external && s.passes > 1 ? ImageDescriptor{o.shown.view, kGeneral, o.nearest} : frame;
     // A kernel's images, by Images.
-    const ImageDescriptor kernel_images[][3] = {{}, {input}, {stored(o.answer), stored(o.second), input}};
+    const ImageDescriptor kernel_images[][3] = {{}, {frame}, {target, stored(o.second), frame}};
     std::vector<SetDescriptor> sets;
     for (size_t k = 0; k < size_t(Kernel::kCount); ++k)
         if (o.pipelines[k].pipeline) {
             SetDescriptor& set = sets.emplace_back(SetDescriptor{k, &o.kernel_sets[k], {}});
             std::copy_n(kernel_images[size_t(kKernels[k].images)], 3, set.images);
         }
-    // The first pass's input, which later passes overwrite in the input.
-    ImageDescriptor first = input;
     if (s.passes > 1) {
-        first = {o.shown.view, kGeneral, o.nearest};
         sets.push_back({kAlpha, &o.alpha_sets[0], {stored(o.answer), first}});
         if (s.stages) sets.push_back({kAlpha, &o.alpha_sets[1], {stored(o.scratch), first}});
     }
@@ -873,7 +896,7 @@ Result<void> Runtime::make_sets()
         sets.push_back({kStages, &o.stage_sets[1], {stored(o.scratch), first, stored(o.answer)}});
     }
     sets.push_back({kVerdict, &o.verdict_set, {}});
-    sets.push_back({kFallback, &o.fallback_sets[0], {stored(o.answer), first}});
+    sets.push_back({kFallback, &o.fallback_sets[0], {target, first}});
     if (s.stages) sets.push_back({kFallback, &o.fallback_sets[1], {stored(o.scratch), first}});
     if (s.motion) {
         for (uint32_t p = 0; p < 2; ++p)
@@ -882,7 +905,7 @@ Result<void> Runtime::make_sets()
                 // flow reads no coarser one: they bind a level of their own.
                 const Image& finer = o.luma[p][k ? k - 1 : kLevels - 1];
                 const Image& coarser = o.flow[k + 1 < kLevels ? k + 1 : k];
-                sets.push_back({kLuma, &o.luma_sets[p][k], {input, stored(finer), stored(o.luma[p][k])}});
+                sets.push_back({kLuma, &o.luma_sets[p][k], {frame, stored(finer), stored(o.luma[p][k])}});
                 sets.push_back({kFlow,
                                 &o.flow_sets[p][k],
                                 {stored(o.luma[p][k]), stored(o.luma[1 - p][k]), stored(coarser), stored(o.flow[k])}});
@@ -891,13 +914,35 @@ Result<void> Runtime::make_sets()
         // or, with later passes, into the second output.
         for (uint32_t c = 0; c < (s.pingpong ? 2u : 1u); ++c) {
             sets.push_back(
-                {temporal_pre(), &o.pre_sets[c], {input, linear(o.flow[0]), linear(o.history[c]), linear(o.depth)}});
+                {temporal_pre(), &o.pre_sets[c], {frame, linear(o.flow[0]), linear(o.history[c]), linear(o.depth)}});
             sets.push_back({kPost,
                             &o.post_sets[c],
-                            {stored(o.answer), stored(s.pingpong ? o.history[c ^ 1] : o.second), input,
-                             linear(o.flow[0]), linear(o.history[c])}});
+                            {target, stored(s.pingpong ? o.history[c ^ 1] : o.second), frame, linear(o.flow[0]),
+                             linear(o.history[c])}});
         }
     }
+    // The pre and post blocks of later passes, which read history 0 and
+    // store into the answer: in image mode sets of their own, which sample
+    // the input; otherwise the first pass's.
+    const size_t pre = s.motion ? temporal_pre() : size_t(steps_.front().kernel);
+    const size_t post = s.motion ? size_t(kPost) : size_t(steps_.back().kernel);
+    const bool later = s.external && s.passes > 1;
+    if (later && s.motion) {
+        sets.push_back({pre, &o.later_sets[0], {input, linear(o.flow[0]), linear(o.history[0]), linear(o.depth)}});
+        sets.push_back({post,
+                        &o.later_sets[1],
+                        {stored(o.answer), stored(o.second), input, linear(o.flow[0]), linear(o.history[0])}});
+    } else if (later) {
+        sets.push_back({pre, &o.later_sets[0], {input}});
+        sets.push_back({post, &o.later_sets[1], {stored(o.answer), stored(o.second), input}});
+    }
+    // A build in image mode binds none of the caller's images: the sets that
+    // would bind them are left out until a reshape binds them.
+    if (s.external && !images_.generation)
+        std::erase_if(sets, [](const SetDescriptor& set) {
+            return std::any_of(set.images, set.images + std::strlen(bindings_of(set.pipeline).images),
+                               [](const ImageDescriptor& i) { return !i.view; });
+        });
 
     // One pool for them all, which replaces the last shape's, and one
     // allocation and one update.
@@ -959,6 +1004,9 @@ Result<void> Runtime::make_sets()
         }
     }
     vkUpdateDescriptorSets(d, uint32_t(writes.size()), writes.data(), 0, nullptr);
+    if (later) return {};
+    o.later_sets[0] = s.motion ? o.pre_sets[0] : o.kernel_sets[pre];
+    o.later_sets[1] = s.motion ? o.post_sets[0] : o.kernel_sets[post];
     return {};
 }
 
@@ -1055,11 +1103,15 @@ Result<void> Runtime::end_setup(Setup& setup)
 std::string Runtime::described() const
 {
     const State& s = state_;
+    // The input and the answer, by the mode and whether each is in the frame's format.
+    static constexpr const char* inputs[2][2] = {{"blitted to RGBA32F", "copied"},
+                                                 {"sampled in place", "sampled in place"}};
+    static constexpr const char* answers[2][2] = {{"blitted from RGBA32F", "stored in the frame's format"},
+                                                  {"blitted from RGBA32F into the caller's image", "stored in place"}};
     return std::to_string(s.width) + "x" + std::to_string(s.height) + (s.rgba8 ? " RGBA8" : " FP16") +
            (s.passes > 1 ? ", " + std::to_string(s.passes) + " passes" : "") +
            (s.stages ? ", pass stages" : "") + (s.motion ? ", motion" : "") + ": input " +
-           (s.input_direct ? "copied" : "blitted to RGBA32F") + ", answer " +
-           (s.answer_direct ? "stored in the frame's format" : "blitted from RGBA32F");
+           inputs[s.external][s.input_direct] + ", answer " + answers[s.external][s.answer_direct];
 }
 
 void Runtime::bind(VkCommandBuffer cmd, size_t pipeline, VkDescriptorSet set, const void* push, uint32_t bytes) const
@@ -1086,24 +1138,29 @@ void Runtime::run_step(VkCommandBuffer cmd, const Step& step, size_t pipeline, V
     if (step.after != After::kNothing) compute_barrier(cmd, step.after == After::kInvalidate);
 }
 
+// Starts a frame: the images into their layouts until a frame was
+// submitted, and with RESET the arena's sync regions and tile counters
+// zeroed. A frame that starts over zeroes them as the build left them. After
+// a wait of a persistent run ran out, they stay short of their counts until
+// then, and every later frame's waits would run out.
+void Runtime::begin(VkCommandBuffer cmd, bool reset) const
+{
+    if (!settled_) settle_images(cmd);
+    if (!reset) return;
+    const VkMemoryBarrier before{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, kWrite, kCopyWrite};
+    vkCmdPipelineBarrier(cmd, kCompute, kTransfer, 0, 1, &before, 0, nullptr, 0, nullptr);
+    vkCmdFillBuffer(cmd, objects_.arena.buffer, values_end_, VK_WHOLE_SIZE, 0);
+    const VkMemoryBarrier after{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, kCopyWrite, kRead | kWrite};
+    vkCmdPipelineBarrier(cmd, kTransfer, kCompute, 0, 1, &after, 0, nullptr, 0, nullptr);
+}
+
 void Runtime::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const Controls& c, bool reset,
                      VkQueryPool queries, uint32_t query)
 {
     const Objects& o = objects_;
     const State& s = state_;
-    const uint32_t w = s.width, h = s.height, gx = (w + 7) / 8, gy = (h + 7) / 8;
-    if (!settled_) settle_images(cmd);
-    // A frame that starts over zeroes the sync regions and tile counters as
-    // the build left them. After a wait of a persistent run ran out, they
-    // stay short of their counts until then, and every later frame's waits
-    // would run out.
-    if (reset) {
-        const VkMemoryBarrier before{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, kWrite, kCopyWrite};
-        vkCmdPipelineBarrier(cmd, kCompute, kTransfer, 0, 1, &before, 0, nullptr, 0, nullptr);
-        vkCmdFillBuffer(cmd, o.arena.buffer, values_end_, VK_WHOLE_SIZE, 0);
-        const VkMemoryBarrier after{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, kCopyWrite, kRead | kWrite};
-        vkCmdPipelineBarrier(cmd, kTransfer, kCompute, 0, 1, &after, 0, nullptr, 0, nullptr);
-    }
+    const uint32_t w = s.width, h = s.height;
+    begin(cmd, reset);
     // The proxy into the input: copied straight in the frame's format, or
     // copied into the frame's image and blitted into RGBA32F. With later
     // passes, which overwrite the input, the first pass's input is kept.
@@ -1127,6 +1184,44 @@ void Runtime::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const
         barrier(cmd, o.input.image, kSource, kSampled, kTransfer, kCopyRead, kCompute, kRead);
     }
     if (queries) vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, queries, query);
+    // Then the answer out into ANSWER: copied straight in the frame's format,
+    // or blitted from RGBA32F into the frame's image and copied from there.
+    const VkImage result = record_network(cmd, c, reset, queries, query);
+    barrier(cmd, result, kGeneral, kSource, kCompute, kWrite, kTransfer, kCopyRead);
+    if (s.answer_direct) {
+        vkCmdCopyImageToBuffer(cmd, result, kSource, answer, 1, &region);
+    } else {
+        barrier(cmd, o.frame.image, kUndefined, kTarget, kTransfer, 0, kTransfer, kCopyWrite);
+        transfer(cmd, result, kSource, o.frame.image, kTarget, w, h, true);
+        barrier(cmd, o.frame.image, kTarget, kSource, kTransfer, kCopyWrite, kTransfer, kCopyRead);
+        vkCmdCopyImageToBuffer(cmd, o.frame.image, kSource, answer, 1, &region);
+    }
+    barrier(cmd, result, kSource, kGeneral, kTransfer, kCopyRead, kCompute, kRead | kWrite);
+}
+
+void Runtime::record(VkCommandBuffer cmd, const Controls& c, bool reset)
+{
+    begin(cmd, reset);
+    // The post block stored the answer in the caller's image, or it is
+    // blitted there from RGBA32F.
+    const VkImage result = record_network(cmd, c, reset, VK_NULL_HANDLE, 0);
+    if (state_.answer_direct) return;
+    barrier(cmd, result, kGeneral, kSource, kCompute, kWrite, kTransfer, kCopyRead);
+    transfer(cmd, result, kSource, images_.answer, kGeneral, state_.width, state_.height, true);
+    barrier(cmd, result, kSource, kGeneral, kTransfer, kCopyRead, kCompute, kRead | kWrite);
+}
+
+// The network's dispatches of a frame whose first pass's input is in place,
+// the alpha pass, and the verdict and the fallback, which answers with the
+// first pass's input when a wait ran out; with QUERIES, timestamp QUERY + 1
+// once the network is done. Returns the image of the runtime's own that holds
+// the answer, or none when the answer is the caller's.
+VkImage Runtime::record_network(VkCommandBuffer cmd, const Controls& c, bool reset, VkQueryPool queries,
+                                uint32_t query)
+{
+    const Objects& o = objects_;
+    const State& s = state_;
+    const uint32_t w = s.width, h = s.height, gx = (w + 7) / 8, gy = (h + 7) / 8;
     compute_barrier(cmd);
     // The pre and post blocks, which carry the frame's controls, or with
     // motion their temporal variants.
@@ -1181,7 +1276,8 @@ void Runtime::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const
     for (uint32_t pass = 0; pass < s.passes; ++pass) {
         if (pass) {
             // The last pass's answer is this pass's input, and this pass's
-            // own history the history.
+            // own history the history. From the second pass on, the blocks
+            // sample the input.
             const VkImage previous = in_scratch ? o.scratch.image : o.answer.image;
             barrier(cmd, previous, kGeneral, kSource, kCompute, kWrite, kTransfer, kCopyRead);
             barrier(cmd, o.input.image, kSampled, kTarget, kCompute, kRead, kTransfer, kCopyWrite);
@@ -1189,6 +1285,8 @@ void Runtime::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const
             barrier(cmd, o.input.image, kTarget, kSampled, kTransfer, kCopyWrite, kCompute, kRead);
             barrier(cmd, previous, kSource, kGeneral, kTransfer, kCopyRead, kCompute, kRead | kWrite);
             if (s.motion) copy_general(cmd, o.history_store[pass].image, o.history[0].image, w, h);
+            pre_set = o.later_sets[0];
+            post_set = o.later_sets[1];
         }
         uint32_t words[32];
         std::copy_n(push_.data() + first.push, first.words, words);
@@ -1224,10 +1322,7 @@ void Runtime::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const
     }
     // The first pass's history is what the next frame's first pass reads.
     if (s.stored) copy_general(cmd, o.history_store[0].image, o.history[0].image, w, h);
-    // The frame's alpha, which one pass's post block restores itself. Then
-    // the answer out into ANSWER: copied straight in the frame's format, or
-    // blitted from RGBA32F into the frame's image and copied from there.
-    const VkImage result = in_scratch ? o.scratch.image : o.answer.image;
+    // The frame's alpha, which one pass's post block restores itself.
     if (!s.post_alpha) {
         const AlphaPush push{w, h, s.rgba8};
         dispatch(cmd, kAlpha, o.alpha_sets[in_scratch], gx, gy, &push, sizeof push);
@@ -1246,16 +1341,7 @@ void Runtime::record(VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, const
     const FallbackPush fallback{w, h};
     bind(cmd, kFallback, o.fallback_sets[in_scratch], &fallback, sizeof fallback);
     vkCmdDispatchIndirect(cmd, o.verdict.buffer, 0);
-    barrier(cmd, result, kGeneral, kSource, kCompute, kWrite, kTransfer, kCopyRead);
-    if (s.answer_direct) {
-        vkCmdCopyImageToBuffer(cmd, result, kSource, answer, 1, &region);
-    } else {
-        barrier(cmd, o.frame.image, kUndefined, kTarget, kTransfer, 0, kTransfer, kCopyWrite);
-        transfer(cmd, result, kSource, o.frame.image, kTarget, w, h, true);
-        barrier(cmd, o.frame.image, kTarget, kSource, kTransfer, kCopyWrite, kTransfer, kCopyRead);
-        vkCmdCopyImageToBuffer(cmd, o.frame.image, kSource, answer, 1, &region);
-    }
-    barrier(cmd, result, kSource, kGeneral, kTransfer, kCopyRead, kCompute, kRead | kWrite);
+    return in_scratch ? o.scratch.image : o.answer.image;
 }
 
 size_t Runtime::temporal_pre() const

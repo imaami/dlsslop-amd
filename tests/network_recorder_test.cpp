@@ -22,8 +22,10 @@
 // verdict that says a wait ran out, poked into the fake device's memory, must
 // start the next frame over: its arena zeroed from the end of the values on,
 // between barriers, and its motion history dropped, as must the frame after
-// it when that frame was not submitted. Takes the directory of the network's
-// SPIR-V.
+// it when that frame was not submitted. A network built for frames in a
+// caller's images binds them only when their generation changes, which keeps
+// the motion history; its frames copy no buffer, and blit at most once, into
+// the caller's answer. Takes the directory of the network's SPIR-V.
 // With --build, it only builds the network for one extent, which makes every
 // pipeline of the runtime's own but the temporal pre block that the plan's
 // pre block is not, so that tests/vulkan-files.py can see the files that a
@@ -80,6 +82,8 @@ struct Descriptor {
 };
 std::map<uint64_t, std::map<uint32_t, Descriptor>> contents;
 std::vector<std::string> pipelines_made;
+// The descriptors written so far, and those of them that named no image view.
+size_t descriptors_written = 0, null_views = 0;
 template <class T>
 uint64_t id(T handle)
 {
@@ -101,6 +105,8 @@ struct Frame {
     float gate = -1;
     uint32_t seed = UINT32_MAX;
     bool pre = false; // the next push constants are the pre block's
+    // The descriptor sets bound, in order.
+    std::vector<uint64_t> sets;
 };
 Frame frame;
 
@@ -253,6 +259,8 @@ VKAPI_ATTR void VKAPI_CALL vkUpdateDescriptorSets(VkDevice, uint32_t count, cons
                                                   uint32_t, const VkCopyDescriptorSet*)
 {
     for (const VkWriteDescriptorSet& w : std::span(writes, count)) {
+        ++descriptors_written;
+        null_views += w.pImageInfo && !w.pImageInfo->imageView;
         Descriptor& d = contents[id(w.dstSet)][w.dstBinding];
         d = w.pBufferInfo ? Descriptor{id(w.pBufferInfo->buffer), 0, VK_IMAGE_LAYOUT_UNDEFINED}
                           : Descriptor{views[id(w.pImageInfo->imageView)], id(w.pImageInfo->sampler),
@@ -326,6 +334,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdBindDescriptorSets(VkCommandBuffer, VkPipelineBi
                                                    const uint32_t*)
 {
     for (uint32_t i = 0; i < count; ++i) {
+        frame.sets.push_back(id(sets[i]));
         frame.commands += "set";
         for (const auto& [binding, d] : contents[id(sets[i])])
             frame.commands += " " + std::to_string(binding) + "=" + name(d.resource) +
@@ -464,8 +473,12 @@ std::string_view handle(std::string_view token) { return token.substr(0, token.f
 // binds, from the first pass's input into the image the answer is then
 // copied out of, and no dispatch after it. The first pass's input is what
 // the last transfer before the network's first dispatch writes: the
-// network's input, or with later passes the image that keeps it.
-bool judged(std::string_view commands, uint32_t width, uint32_t height, const std::vector<uint32_t>& timeouts)
+// network's input, or with later passes the image that keeps it. In image
+// mode it is FRAME, and ANSWER, the caller's answer, is the image the
+// fallback stores into, with nothing after it, or what that image is blitted
+// into last.
+bool judged(std::string_view commands, uint32_t width, uint32_t height, const std::vector<uint32_t>& timeouts,
+            std::string_view frame = {}, std::string_view answer = {})
 {
     std::vector<std::string_view> l;
     for (size_t at = 0; at < commands.size();) {
@@ -476,24 +489,22 @@ bool judged(std::string_view commands, uint32_t width, uint32_t height, const st
     const auto starts = [](std::string_view head) {
         return [head](std::string_view s) { return s.starts_with(head); };
     };
-    std::string_view first;
-    for (auto s = l.begin(); s != l.end() && !s->starts_with("dispatch"); ++s)
-        if (s->starts_with("copy buffer to image ") || s->starts_with("copy image #") || s->starts_with("blit "))
-            first = handle(s->substr(s->rfind(" #") + 1));
+    std::string_view first = frame;
+    if (first.empty())
+        for (auto s = l.begin(); s != l.end() && !s->starts_with("dispatch"); ++s)
+            if (s->starts_with("copy buffer to image ") || s->starts_with("copy image #") || s->starts_with("blit "))
+                first = handle(s->substr(s->rfind(" #") + 1));
     const auto v = std::ranges::find_if(
         l, [](std::string_view s) { return s.starts_with("pipeline #") && s.ends_with(named(kNetworkVerdictSpv)); });
-    if (first.empty() || v == l.end() || l.end() - v < 12 || std::none_of(l.begin(), v, starts("dispatch ")))
+    if (first.empty() || v == l.end() || l.end() - v < 10 || std::none_of(l.begin(), v, starts("dispatch ")))
         return false;
     // The handle bound at BINDING of a set's line.
     const auto bound = [](std::string_view set, std::string_view binding) {
         const size_t at = set.find(binding);
         return at == std::string_view::npos ? std::string_view() : handle(set.substr(at + binding.size()));
     };
-    // The result, which leaves GENERAL for the copy out once the fallback is done.
-    const std::string_view result = handle(v[11].substr(v[11].find('#')));
-    const auto out = std::find_if(v + 12, l.end(), [](std::string_view s) {
-        return s.starts_with("copy image to buffer ") || s.starts_with("blit ");
-    });
+    // The result, which the fallback stores into.
+    const std::string_view result = bound(v[7], "set 0=");
     std::string push = "push " + std::to_string((width + 7) / 8) + " " + std::to_string((height + 7) / 8) + " " +
                        std::to_string(timeouts.size());
     for (size_t i = 0; i < 13; ++i) push += " " + std::to_string(i < timeouts.size() ? timeouts[i] : 0);
@@ -501,14 +512,24 @@ bool judged(std::string_view commands, uint32_t width, uint32_t height, const st
         VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_HOST_BIT;
     constexpr VkAccessFlags reads =
         VK_ACCESS_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_HOST_READ_BIT;
-    return v[2] == push && v[3] == "dispatch 1 1 1" && v[4] == "barrier 2048 " + std::to_string(after) + " 1" &&
-           v[5] == " memory 64 " + std::to_string(reads) && v[6].starts_with("pipeline #") &&
-           v[6].ends_with(named(kNetworkFallbackSpv)) && bound(v[7], "set 0=") == result &&
-           bound(v[7], " 1=") == first && v[8] == "push " + std::to_string(width) + " " + std::to_string(height) &&
-           v[9] == "dispatch indirect " + std::string(bound(v[1], " 1=")) + " 0" &&
-           v[10] == "barrier 2048 4096 0" && v[11].starts_with(" image #") && v[11].ends_with(" 1 6") &&
-           std::none_of(v + 10, l.end(), starts("dispatch")) && out != l.end() &&
-           handle(out->substr(out->find('#'))) == result;
+    if (v[2] != push || v[3] != "dispatch 1 1 1" || v[4] != "barrier 2048 " + std::to_string(after) + " 1" ||
+        v[5] != " memory 64 " + std::to_string(reads) || !v[6].starts_with("pipeline #") ||
+        !v[6].ends_with(named(kNetworkFallbackSpv)) || result.empty() || bound(v[7], " 1=") != first ||
+        v[8] != "push " + std::to_string(width) + " " + std::to_string(height) ||
+        v[9] != "dispatch indirect " + std::string(bound(v[1], " 1=")) + " 0")
+        return false;
+    if (!answer.empty() && result == answer) return v + 10 == l.end();
+    // The result leaves GENERAL for the copy out, or in image mode the blit into the answer, once
+    // the fallback is done.
+    if (l.end() - v < 12 || v[10] != "barrier 2048 4096 0" || v[11] != " image " + std::string(result) + " 1 6" ||
+        std::any_of(v + 10, l.end(), starts("dispatch")))
+        return false;
+    const auto out = std::find_if(v + 12, l.end(), [](std::string_view s) {
+        return s.starts_with("copy image to buffer ") || s.starts_with("blit ");
+    });
+    if (out == l.end() || handle(out->substr(out->find('#'))) != result) return false;
+    return answer.empty() || (out == v + 12 && out->starts_with("blit ") && l.end() - v == 15 &&
+                              handle(out->substr(out->rfind(" #") + 1)) == answer);
 }
 
 void check(const dlsslop::VulkanPaths& paths, unsigned passes)
@@ -652,6 +673,176 @@ void check_unclamped(const std::string& spirv)
                     ("a frame from the unclamped model does not run " + unclamped + " instead of " + clamped).c_str());
     }
 }
+// The caller's images of GENERATION, made on the fake device, which names
+// them by what they are and their generation.
+vulkan::FrameImages caller_images(uint64_t generation)
+{
+    vulkan::FrameImages images{generation, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE};
+    VkImage frame_image;
+    make(&frame_image);
+    make(&images.answer);
+    make(&images.frame);
+    make(&images.answer_view);
+    made[id(frame_image)] = "caller frame " + std::to_string(generation);
+    made[id(images.answer)] = "caller answer " + std::to_string(generation);
+    views[id(images.frame)] = id(frame_image);
+    views[id(images.answer_view)] = id(images.answer);
+    return images;
+}
+
+// F recorded in image mode by RECORDER.
+Frame record_in_place(dlsslop::NetworkRecorder& recorder, const dlsslop::VulkanFrame& f)
+{
+    static VkCommandBuffer cmd;
+    if (!cmd) make(&cmd);
+    frame = {};
+    recorder.record(cmd, f);
+    return frame;
+}
+
+// The first two frames of F in image mode, the second following the first in
+// the motion history.
+std::string frames_in_place(dlsslop::NetworkRecorder& recorder, const dlsslop::VulkanFrame& f)
+{
+    std::string commands = record_in_place(recorder, f).commands;
+    recorder.submitted();
+    return commands + record_in_place(recorder, f).commands;
+}
+
+// How many of the sets that F bound name IMAGE.
+size_t naming(const Frame& f, uint64_t image)
+{
+    return size_t(std::ranges::count_if(f.sets, [image](uint64_t set) {
+        const auto at = contents.find(set);
+        return at != contents.end() &&
+               std::ranges::any_of(at->second, [image](const auto& b) { return b.second.resource == image; });
+    }));
+}
+
+// IMAGE as F names it, or nothing when F does not.
+std::string as_named(const Frame& f, uint64_t image)
+{
+    const auto at = f.names.find(image);
+    return at == f.names.end() ? std::string() : "#" + std::to_string(at->second);
+}
+
+// In image mode: a build binds no images and leaves out the sets that
+// would, writing no descriptor without one. A bind of the caller's images
+// records nothing, makes no pipeline and writes the sets; a bind of a new
+// generation keeps the motion history and the images' layouts, and the
+// frames after it sample the new images only; images of the generation bound
+// write nothing. Through the walk of check_reshapes, each shape with images
+// of its own: no frame copies a buffer, makes an image in the frame's format
+// or transfers before the network's first dispatch. One pass without the pass
+// stages stores its answer in the caller's, which its fallback binds with the
+// caller's frame, and copies or blits no image; any other shape blits its
+// answer into the caller's last, its only blit. Only the first pass's blocks,
+// the stages, the alpha pass, the fallback and the motion estimate sample the
+// caller's frame. Each shape's frames after
+// the reshape must be those of a network built for the shape and bound to
+// the same images.
+void check_images(const dlsslop::VulkanPaths& paths)
+{
+    const auto plan = vulkan::plan(64, 64);
+    require(bool(plan), "cannot plan 64x64 frames");
+    dlsslop::VulkanFrame f;
+    f.width = f.height = 64;
+    f.motion = true;
+    dlsslop::NetworkRecorder recorder(fake_device(), paths, true);
+    const size_t nulls = null_views;
+    require(recorder.shape(f).value_or(false) && null_views == nulls,
+            "a build in image mode failed, or wrote a descriptor without an image");
+    uint64_t generation = 0;
+    const vulkan::FrameImages images = caller_images(++generation);
+    frame = {};
+    size_t pipelines = pipelines_made.size(), written = descriptors_written;
+    require(recorder.shape(f, &images).value_or(false) && frame.commands.empty() &&
+                pipelines_made.size() == pipelines && descriptors_written > written,
+            "a bind of the caller's images recorded a command, made a pipeline or wrote no descriptor");
+    const Frame first = record_in_place(recorder, f);
+    require(first.gate == 0 && first.seed == 0 && lines(first.commands, kSettle) == 1,
+            ("the first frame in image mode has " + history(first) + ", or does not settle the images once").c_str());
+    recorder.submitted();
+    require(record_in_place(recorder, f).gate == 1, "the second frame in image mode does not follow the first");
+    recorder.submitted();
+    const vulkan::FrameImages next = caller_images(++generation);
+    frame = {};
+    written = descriptors_written;
+    require(recorder.shape(f, &next).value_or(false) && frame.commands.empty() &&
+                pipelines_made.size() == pipelines && descriptors_written > written,
+            "a bind of new images recorded a command, made a pipeline or wrote no descriptor");
+    const Frame third = record_in_place(recorder, f);
+    require(third.gate == 1 && third.seed == 2 && lines(third.commands, kSettle) == 0,
+            ("the frame after a bind of new images has " + history(third) + ", or settles the images again").c_str());
+    require(naming(third, views[id(next.frame)]) && naming(third, id(next.answer)) &&
+                !naming(third, views[id(images.frame)]) && !naming(third, id(images.answer)),
+            "the frame after a bind of new images does not bind them, or binds the old ones");
+    written = descriptors_written;
+    require(!recorder.shape(f, &next).value_or(true) && descriptors_written == written,
+            "images of the generation bound were bound again");
+
+    const struct {
+        unsigned passes;
+        bool fp16, motion;
+        float sharpness;
+    } walk[] = {{1, false, false, 0}, {1, false, false, 0.5f}, {2, false, false, 0.5f}, {2, false, true, 0.5f},
+                {2, true, true, 0.5f}, {1, true, false, 0},    {1, false, true, 0},     {3, false, true, 0},
+                {3, true, true, 0.5f}, {1, true, true, 0.5f},  {1, true, false, 0},     {1, false, false, 0},
+                {2, false, false, 0},  {1, false, false, 0}};
+    for (const auto& step : walk) {
+        f.passes = step.passes;
+        f.fp16 = step.fp16;
+        f.motion = step.motion;
+        f.sharpness = step.sharpness;
+        const std::string what = std::to_string(f.passes) + " passes, " + (f.fp16 ? "FP16" : "RGBA8") +
+                                 (f.motion ? ", motion" : "") + (f.sharpness != 0 ? ", pass stages" : "");
+        const vulkan::FrameImages own = caller_images(++generation);
+        frame = {};
+        pipelines = pipelines_made.size();
+        require(recorder.shape(f, &own).value_or(false) && frame.commands.empty() &&
+                    pipelines_made.size() == pipelines,
+                ("the reshape in image mode for " + what + " recorded a command or made a pipeline").c_str());
+        const Frame one = record_in_place(recorder, f);
+        const std::string frame_name = as_named(one, views[id(own.frame)]);
+        const std::string answer_name = as_named(one, id(own.answer));
+        const bool direct = f.passes == 1 && f.sharpness == 0;
+        const std::string format =
+            "format " + std::to_string(f.fp16 ? VK_FORMAT_R16G16B16A16_SFLOAT : VK_FORMAT_R8G8B8A8_UNORM) + " ";
+        const std::string_view head = std::string_view(one.commands).substr(0, one.commands.find("\ndispatch "));
+        require(!lines(one.commands, "copy buffer") && !lines(one.commands, "copy image to buffer") &&
+                    one.commands.find(format) == std::string::npos && head.find("\ncopy") == std::string::npos &&
+                    head.find("\nblit") == std::string::npos,
+                ("a frame of " + what + " in image mode copies a buffer, makes an image in the frame's format or "
+                 "transfers before the network")
+                    .c_str());
+        require(direct ? !lines(one.commands, "copy image") && !lines(one.commands, "blit") &&
+                             naming(one, id(own.answer))
+                       : lines(one.commands, "blit") == 1,
+                ("a frame of " + what + " in image mode does not store into the caller's answer without a copy, or "
+                 "blits other than once")
+                    .c_str());
+        // The sets that sample the caller's frame: the first pass's pre and post blocks, each pass's
+        // stage, the alpha pass after later passes, the fallback, and with motion the finest luma
+        // level of each of the four; later passes' blocks sample the input instead.
+        const size_t samplers = 3 + (f.sharpness != 0 ? f.passes : 0) + (f.passes > 1) + (f.motion ? 4 : 0);
+        require(naming(one, views[id(own.frame)]) == samplers,
+                ("a frame of " + what + " in image mode samples the caller's frame in "
+                 + std::to_string(naming(one, views[id(own.frame)])) + " sets, not " + std::to_string(samplers))
+                    .c_str());
+        require(judged(one.commands, f.width, f.height, plan->timeouts, frame_name, answer_name),
+                ("a frame of " + what + " in image mode does not judge its waits after the network, or answers "
+                 "with the caller's frame otherwise than into the caller's answer")
+                    .c_str());
+        const std::string after = frames_in_place(recorder, f);
+        dlsslop::NetworkRecorder built(fake_device(), paths, true);
+        require(built.shape(f, &own).value_or(false), ("cannot build the network in image mode for " + what).c_str());
+        record_in_place(built, f);
+        require(after == frames_in_place(built, f),
+                ("the frames after the reshape in image mode for " + what + " differ from those of a build").c_str());
+    }
+    require(null_views == nulls, "image mode wrote a descriptor without an image");
+}
+
 // The verdict of the network built last, the fallback's grid, in the fake
 // device's memory that its runtime keeps mapped, the only memory a built
 // network keeps mapped.
@@ -778,8 +969,10 @@ int main(int argc, char** argv)
     check_reshapes(paths);
     check_unclamped(argv[optind]);
     check_timeouts(paths);
+    check_images(paths);
     std::printf("network-recorder test: frames not submitted leave the motion history as it was, a reshaped "
                 "network records the frames of a built one, weights free of the upper clamp run the kernels "
-                "without it, and a frame whose wait ran out answers with its input and starts the next over\n");
+                "without it, a frame whose wait ran out answers with its input and starts the next over, and "
+                "frames in a caller's images copy no buffer and blit at most once\n");
     return 0;
 }
