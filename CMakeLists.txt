@@ -353,6 +353,10 @@ if(BUILD_TESTING)
     add_executable(control-settings-test tests/control_settings_test.c)
     target_link_libraries(control-settings-test PRIVATE dlsslop-common-c)
     add_test(NAME control-settings COMMAND control-settings-test)
+    # The channel's text fields and 64-bit counts, in C.
+    add_executable(shm-protocol-test tests/shm_protocol_test.c)
+    target_link_libraries(shm-protocol-test PRIVATE dlsslop-common-c)
+    add_test(NAME shm-protocol COMMAND shm-protocol-test)
     add_test(NAME color-metrics COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_metrics_test.py)
     add_test(NAME color-orchestrator COMMAND ${Python3_EXECUTABLE}
