@@ -189,6 +189,9 @@ set_source_files_properties(backend/main.cpp backend/options.cpp backend/paths.c
     backend/hip_plan.cpp PROPERTIES COMPILE_OPTIONS -Os)
 
 if(BUILD_TESTING)
+    # What several C tests need: a temporary directory removed with what it holds, a whole file and a
+    # formatted string on the heap.
+    add_library(test-support OBJECT tests/support.c)
     add_test(NAME control-cli COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/control-cli.py $<TARGET_FILE:dlssnr-shmctl>)
     add_test(NAME launcher-cli COMMAND ${Python3_EXECUTABLE}
@@ -325,8 +328,8 @@ if(BUILD_TESTING)
     add_test(NAME capture-writer COMMAND capture-writer-test)
     # The layer's settings snapshot, model raster, format table, scaler names and key names, on
     # the host.
-    add_executable(layer-units-test tests/layer_units_test.cpp)
-    target_link_libraries(layer-units-test PRIVATE dlsslop-layer-objects dlsslop-common-c)
+    add_executable(layer-units-test tests/layer_units_test.c)
+    target_link_libraries(layer-units-test PRIVATE dlsslop-layer-objects dlsslop-common-c test-support)
     add_test(NAME layer-units COMMAND layer-units-test)
     # The hotkeys' internals, in C: hotkeys_fini() with fake keyboards, the evdev reads and sweeps,
     # the choice of a backend, and XInput2 on a private Xvfb if Xvfb and libXtst are installed.
