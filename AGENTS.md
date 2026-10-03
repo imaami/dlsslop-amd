@@ -84,6 +84,22 @@ share.
     fundamentally unacceptable;
   - limited because a function type can forward declare a function but a
     function pointer type can not.
+- `PATH_MAX` is not for defining array sizes. Don't trust its value to be
+  reasonable.
+- Always initialize and invalidate file descriptors by setting them to `-1`.
+- Don't use an external flag to track a file descriptor's state. `-1` means
+  not in use. Always uphold this rule.
+- Immediately set pointers to `nullptr` after calling `free()`. Passing a null
+  pointer to `free()` is a no-op per the C standard.
+- If you must compare a signed integer variable to a `sizeof` expression,
+  don't cast the variable to `size_t`, cast `sizeof` to the signed type
+  instead. The former is a runtime conversion but the latter is not.
+- If you keep casting signed variables to unsigned or vice versa, you're not
+  planning ahead. Think of what you need to accomplish and pick the types
+  based on that.
+- Always check the return value of libc calls when they're not completely
+  inconsequential.
+- Do not assign to `errno`.
 
 ## C coding style
 
