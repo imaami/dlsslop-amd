@@ -863,9 +863,10 @@ enum swapchain_state_flags : uint32_t {
  * The family is the present queue's: the composition's, and the in-layer network's, which converts
  * formats with blits and so needs a graphics family. hdr_kind is what the swapchain's format and
  * colour space say the frame carries: the float swapchain holds linear light, and a 10-bit one with a
- * PQ colour space holds ST 2084 code. The composition owns every surface it needs, including the
- * transport pair -- exported device-local memory when the daemon imports it, host-visible staging
- * when it does not. It is empty until create_resources() builds it.
+ * PQ colour space holds ST 2084 code. The composition owns every surface it needs, including, for
+ * frames that go to dlsslopd, the transport pair -- exported device-local memory when the daemon
+ * imports it, host-visible staging when it does not. The in-layer network takes the composition's
+ * images instead. It is empty until create_resources() builds it.
  *
  * swapchain_state_create() makes a state, create_resources() its Vulkan objects, and
  * swapchain_state_destroy() frees it. A handle is stored only once the call that made it succeeded.
@@ -2866,15 +2867,25 @@ process_in_layer (struct device_chain                     *dc,
 	// The previous frame's meter, whose fence the frame waited for.
 	composition_consume_meter(&sc->comp);
 	// A swapchain that takes over, a resized one, has not waited for its predecessor's last frame,
-	// which may still run the network that a build or a reshape at the new shape frees.
+	// which may still run the network that a build or a reshape at the new shape frees, or whose
+	// sets the binding of this swapchain's images rewrites.
 	struct swapchain_state *const last = dc->in_layer_last;
 	if (last && last != sc && (last->flags & SWAPCHAIN_STATE_LEG2_PENDING) && !collect_leg2(dc, last))
 		return false;
 	dc->in_layer_last = sc;
-	enum dlsslop_network_state const state = g_network.prepare(dc->in_layer, dc->shm.hdr,
-	                                                           composition_model_width(&sc->comp),
-	                                                           composition_model_height(&sc->comp),
-	                                                           composition_hdr_proxy_active(&sc->comp));
+	// The network samples the composition's proxy and answers into its model image.
+	struct composition_image const *const input = composition_network_input(&sc->comp);
+	struct composition_image const *const answer = composition_network_answer(&sc->comp);
+	struct dlsslop_network_images const images = {
+		.generation  = composition_generation(&sc->comp),
+		.input_view  = input->view,
+		.answer      = answer->image,
+		.answer_view = answer->view,
+		.format      = answer->format,
+		.width       = answer->width,
+		.height      = answer->height
+	};
+	enum dlsslop_network_state const state = g_network.prepare(dc->in_layer, dc->shm.hdr, &images);
 	switch (state) {
 	case DLSSLOP_NETWORK_READY:
 		network_reason(dc, "in-layer network running", "", "");
@@ -2894,9 +2905,7 @@ process_in_layer (struct device_chain                     *dc,
 	// A failure submits what was recorded (salvage()): the composition's state moved with it.
 	if (!composition_record_capture(&sc->comp, cb, sc->images[index], fs))
 		return salvage(dc, sc, queue, si, waits_consumed, false);
-	if (g_network.record(dc->in_layer, cb, composition_proxy_buffer(&sc->comp),
-	                     composition_answer_buffer(&sc->comp), sc->family,
-	                     composition_transport_exported(&sc->comp)) != DLSSLOP_NETWORK_READY) {
+	if (g_network.record(dc->in_layer, cb) != DLSSLOP_NETWORK_READY) {
 		network_failed(dc);
 		return salvage(dc, sc, queue, si, waits_consumed, false);
 	}
@@ -3031,7 +3040,7 @@ process_present_ (struct device_chain    *dc,
 	uint32_t const hdr_transfer = linear_hdr && sc->hdr_kind == kHdrPq10 ? 1u : 0u;
 
 	if (!composition_prepare(&sc->comp, sc->width, sc->height, sc->format, &fs, linear_hdr, hdr_proxy,
-	                         hdr_transfer, false)) {
+	                         hdr_transfer, in_layer)) {
 		log_printf("[layer] composition cannot run here: %s", composition_reason(&sc->comp));
 		return false;
 	}

@@ -622,32 +622,6 @@ composition_proxy_pixels (struct composition const *c)
 	return c ? c->download.mapped : nullptr;
 }
 
-/** @brief The buffer that leg 1 copies the proxy into, for a network recorded on this device.
- *
- * Exported, it belongs to VK_QUEUE_FAMILY_EXTERNAL between uses.
- *
- * @param c The composition, or nullptr.
- * @return  The buffer, or VK_NULL_HANDLE.
- */
-static inline VkBuffer
-composition_proxy_buffer (struct composition const *c)
-{
-	return c ? c->download.buffer : VK_NULL_HANDLE;
-}
-
-/** @brief The buffer that leg 2 reads the answer from, for a network recorded on this device.
- *
- * Exported, it belongs to VK_QUEUE_FAMILY_EXTERNAL between uses.
- *
- * @param c The composition, or nullptr.
- * @return  The buffer, or VK_NULL_HANDLE.
- */
-static inline VkBuffer
-composition_answer_buffer (struct composition const *c)
-{
-	return c ? c->upload.buffer : VK_NULL_HANDLE;
-}
-
 /** @brief Whether the transport pair is exported memory.
  *
  * @param c The composition, or nullptr.

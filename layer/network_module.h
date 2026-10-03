@@ -4,12 +4,12 @@
  * device whose ledger enabled the network, and reaches it through these C functions only: the
  * network's code and the C++ runtime it links stay out of the layer.
  *
- * The functions' names, network_module.map, the layout of struct dlsslop_network_device and the
- * values of enum dlsslop_network_state are the contract between the layer and the module. Each
- * function has a function type, which declares it and types the loader's pointer to it. The module
- * exports DLSSLOP_NETWORK_INTERFACE as dlsslop_network_interface, and the layer puts it first in
- * struct dlsslop_network_device: each side refuses the other's of another interface, and a change to
- * any part of the contract takes a new DLSSLOP_NETWORK_INTERFACE.
+ * The functions' names, network_module.map, the layouts of struct dlsslop_network_device and struct
+ * dlsslop_network_images and the values of enum dlsslop_network_state are the contract between the
+ * layer and the module. Each function has a function type, which declares it and types the loader's
+ * pointer to it. The module exports DLSSLOP_NETWORK_INTERFACE as dlsslop_network_interface, and the
+ * layer puts it first in struct dlsslop_network_device: each side refuses the other's of another
+ * interface, and a change to any part of the contract takes a new DLSSLOP_NETWORK_INTERFACE.
  *
  * Plain C API, consumable from C++.
  */
@@ -43,9 +43,9 @@ struct ShmHeader;
  *
  * It is odd and has its top bit set, so no pointer equals it: an older layer's struct
  * dlsslop_network_device begins with an aligned VkInstance where this one begins with this number.
- * Bits 8-31 count the versions: 1 with buffers.
+ * Bits 8-31 count the versions: 1 with buffers, 2 with images.
  */
-#define DLSSLOP_NETWORK_INTERFACE UINT64_C(0xd155100000000101)
+#define DLSSLOP_NETWORK_INTERFACE UINT64_C(0xd155100000000201)
 
 /** @brief The module's DLSSLOP_NETWORK_INTERFACE, which network_module_load() requires to equal the
  *         layer's. */
@@ -87,6 +87,23 @@ struct dlsslop_network_device {
 	dlsslop_network_log_fn          *log;               //!< Where the network's log lines go.
 };
 
+/** @brief The composition's images that a frame goes through.
+ *
+ * Both are width x height and of format, which is R8G8B8A8_UNORM or R16G16B16A16_SFLOAT. generation is
+ * nonzero, and new whenever any handle may be: a destroyed image's handle can come back for a new one,
+ * so the module never compares handles. The 32-bit members leave 4 bytes of trailing padding, which a
+ * 64-bit height would only fill with casts.
+ */
+struct dlsslop_network_images {
+	NETWORK_MODULE_STD(uint64_t) generation;  //!< The composition's build of these images.
+	VkImageView                  input_view;  //!< The frame that the network samples.
+	VkImage                      answer;      //!< Takes the answer; storage and transfer-target usage.
+	VkImageView                  answer_view; //!< The answer's view.
+	VkFormat                     format;      //!< Both images' format.
+	NETWORK_MODULE_STD(uint32_t) width;       //!< Both images' width.
+	NETWORK_MODULE_STD(uint32_t) height;      //!< Both images' height.
+};
+
 /** @brief What dlsslop_network_prepare() says of the next frame. */
 enum dlsslop_network_state {
 	DLSSLOP_NETWORK_READY,    //!< dlsslop_network_record() records it.
@@ -103,45 +120,38 @@ enum dlsslop_network_state {
 typedef struct DlsslopNetwork *
 dlsslop_network_open_fn (struct dlsslop_network_device const *device);
 
-/** @brief Readies the network for the next frame.
+/** @brief Readies the network for the next frame, in the composition's images.
  *
- * A frame of another extent starts a build in the background; one of another shape of the same
- * extent reshapes the network here, in a fraction of a millisecond. Neither may overlap the
- * network's recorded work: the caller has waited for its last frame.
+ * A frame of another extent starts a build in the background, which binds no images. Another shape
+ * of the same extent reshapes the network here, and images of another generation are bound here.
+ * Both take a fraction of a millisecond, and neither may overlap the network's recorded work: the
+ * caller has waited for its last frame.
  *
  * @param network The network.
  * @param channel The channel, whose settings the frame takes.
- * @param width   The frame's width.
- * @param height  The frame's height.
- * @param fp16    true for RGBA16F frames, false for RGBA8.
- * @return        What the network can do with the frame.
+ * @param images  The images that the frame goes through.
+ * @return        What the network can do with the frame. Images of another format fail the network.
  */
 typedef enum dlsslop_network_state
-dlsslop_network_prepare_fn (struct DlsslopNetwork        *network,
-                            struct ShmHeader const       *channel,
-                            NETWORK_MODULE_STD(uint32_t)  width,
-                            NETWORK_MODULE_STD(uint32_t)  height,
-                            bool                          fp16);
+dlsslop_network_prepare_fn (struct DlsslopNetwork               *network,
+                            struct ShmHeader const              *channel,
+                            struct dlsslop_network_images const *images);
 
-/** @brief Records the frame that dlsslop_network_prepare() readied: the proxy that the composition
- *         captured, through the network, into the answer for the composition.
+/** @brief Records the frame that dlsslop_network_prepare() readied, from its input image through the
+ *         network into its answer image; if a wait of the frame runs out, the answer is the input.
  *
- * @param network  The network.
- * @param cmd      The command buffer. If the frame failed, it still holds valid commands, which give
- *                 the pair back as they found it.
- * @param proxy    The composition's transfer buffer that holds the proxy.
- * @param answer   The composition's transfer buffer that takes the answer.
- * @param family   The queue's family.
- * @param exported true if both buffers belong to VK_QUEUE_FAMILY_EXTERNAL between uses.
- * @return         DLSSLOP_NETWORK_READY or DLSSLOP_NETWORK_FAILED.
+ * Before it, the caller's barriers make the input readable by compute shaders in
+ * SHADER_READ_ONLY_OPTIMAL and the answer writable by compute shaders and transfers in GENERAL. After
+ * it, the caller's barrier takes the answer's compute-shader and transfer writes. The network leaves
+ * both images in those layouts and records no barrier on them.
+ *
+ * @param network The network.
+ * @param cmd     The command buffer.
+ * @return        DLSSLOP_NETWORK_READY or DLSSLOP_NETWORK_FAILED.
  */
 typedef enum dlsslop_network_state
-dlsslop_network_record_fn (struct DlsslopNetwork        *network,
-                           VkCommandBuffer               cmd,
-                           VkBuffer                      proxy,
-                           VkBuffer                      answer,
-                           NETWORK_MODULE_STD(uint32_t)  family,
-                           bool                          exported);
+dlsslop_network_record_fn (struct DlsslopNetwork *network,
+                           VkCommandBuffer        cmd);
 
 /** @brief Says that the frame that dlsslop_network_record() recorded last was submitted.
  *

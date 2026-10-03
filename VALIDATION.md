@@ -243,10 +243,14 @@ XT through `dlsslop-run --layer-network`. Its layer log must report `in-layer
 network features enabled`, `in-layer network on the game's device` and `in-layer
 network running`, and no `in-layer network off`. At the same tier, captures
 (`dlsslopctl --capture 8`) of the same input must match those taken without
-`--layer-network` byte for byte. With `libdlsslop-network.so` moved away from
-beside the layer, the log must say the module is unavailable and frames must go
-to the daemon. A Vulkan 1.1 application logs `in-layer network unavailable:
-needs a Vulkan 1.3 instance`.
+`--layer-network` byte for byte. The in-layer network runs dlsslopd's
+dispatches, but in the composition's images: its first pass samples the
+composition's proxy, and with one pass and no pass stages its post block stores
+the answer into the composition's model image, which otherwise takes a blit of
+the answer. Nothing copies the proxy or the answer through a buffer. With
+`libdlsslop-network.so` moved away from beside the layer, the log must say the
+module is unavailable and frames must go to the daemon. A Vulkan 1.1 application
+logs `in-layer network unavailable: needs a Vulkan 1.3 instance`.
 
 ### The Vulkan network's waits under load
 
@@ -320,8 +324,11 @@ answers with its input, which transfer modes 1 and 2 compose into the game's
 own frame byte for byte, and mode 0 within a few levels. With the default mode,
 every composed frame (`after_NN`) must equal the one captured without the load
 or its own `before_NN`. The layer log says `a wait of the network ran out` at
-most every 10 s while waits run out. The in-layer network records the same
-commands as dlsslopd, whose check above covers motion.
+most every 10 s while waits run out. The in-layer network records dlsslopd's
+dispatches, whose check above covers motion. Its fallback writes the input into
+the composition's model image itself with one pass and no pass stages, and
+through its answer and the blit with FP16 and two passes, so both of the
+configurations above are needed.
 
 ### Tracing the HIP network
 
@@ -544,6 +551,24 @@ revision's frame N + 1 compares with frame N of the older revision's trace, as
 in `--frames 0-463:1-464`. The older revision's layer sends dlsslopd other
 proxies than the current layer does, so the traces of dlsslopd behind the two
 layers must differ in the answers alone.
+
+From "layer: run the in-layer network in the composition's images" on, a
+game's trace of the in-layer network has no copy of the proxy into a buffer or
+into the network's input, and no copy of the answer out of it: the first pass,
+the motion estimate, the pass stages, the alpha pass and the fallback sample
+the composition's proxy, and the post block stores into the composition's model
+image, or with pass stages or more passes the answer is blitted there.
+Compared with dlsslopd's frames with `--span network --skip-setup`, a frame of
+one pass without pass stages has the same commands, but the image that the
+first pass samples is the composition's work or proxy image (usage 0xd) and
+the one the post block stores into is its model image (usage 0xf), where
+dlsslopd's network has its own input (0x7) and answer (0xb); no
+image-to-buffer copy follows the network, so the comparison prints
+`DIFFERENT`. Compare such a trace with one of the revision before with
+`--hash imgN` of the model image, an image of the model's raster in the
+proxy's format whose usage is 0xf since that revision and 0x7 before, hashed
+after each frame, against the earlier trace's `i2b` hash of the answer; the
+two are of the same bytes.
 
 Upstream's graph build at `82560c4` has switches for most of the changes that
 the commits after "external: pin the Vulkan fork rebased on DLSSNR-AMD

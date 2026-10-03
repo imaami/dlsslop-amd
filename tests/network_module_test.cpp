@@ -3,7 +3,8 @@
 // it, without a GPU: a missing module, a library without the module's
 // functions, or a module of another interface, is refused, naming why, and
 // the loader keeps no pointer into it; the module opens no network for a
-// device of another interface; a frame whose settings are out of range is
+// device of another interface; images of another format or of no generation
+// fail the network, naming why; a frame whose settings are out of range is
 // rejected and says which, a
 // missing model fails the network for good, naming the model's
 // path and how to get it, and a frame of an extent the network does not take,
@@ -60,6 +61,15 @@ void require(bool value, const char* message)
     std::exit(1);
 }
 
+// Images of WIDTH x HEIGHT and FORMAT, of the first generation; no handle: nothing here reaches
+// Vulkan.
+const dlsslop_network_images* images(uint32_t width, uint32_t height, VkFormat format = VK_FORMAT_R8G8B8A8_UNORM)
+{
+    static dlsslop_network_images i;
+    i = {1, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, format, width, height};
+    return &i;
+}
+
 // The first frame's failure, of a network opened while dlsslopd's config file
 // CONFIG holds TEXT.
 std::string failure_with(const network_module& module, const ShmHeader* header, const std::string& config,
@@ -72,7 +82,7 @@ std::string failure_with(const network_module& module, const ShmHeader* header, 
     device.physical_dispatch = no_functions;
     DlsslopNetwork* network = module.open(&device);
     require(network, "the module did not open");
-    const bool failed = module.prepare(network, header, 1280, 720, false) == DLSSLOP_NETWORK_FAILED;
+    const bool failed = module.prepare(network, header, images(1280, 720)) == DLSSLOP_NETWORK_FAILED;
     std::string error = failed ? module.error(network) : "";
     module.close(network);
     return error;
@@ -130,14 +140,31 @@ int main(int argc, char** argv)
     auto* header = static_cast<ShmHeader*>(memory);
     ShmInitNativeDefaults(header, false);
 
+    // Images of another format, or of no generation, fail the network, naming why.
+    DlsslopNetwork* other_format = module.open(&device);
+    require(other_format, "the module did not open");
+    require(module.prepare(other_format, header, images(1280, 720, VK_FORMAT_B8G8R8A8_UNORM)) ==
+                    DLSSLOP_NETWORK_FAILED &&
+                std::strstr(module.error(other_format), "not of format 44") &&
+                module.prepare(other_format, header, images(1280, 720)) == DLSSLOP_NETWORK_FAILED,
+            "images of another format did not fail the network for good, naming the format");
+    module.close(other_format);
+    DlsslopNetwork* no_generation = module.open(&device);
+    require(no_generation, "the module did not open");
+    dlsslop_network_images none = *images(1280, 720);
+    none.generation = 0;
+    require(module.prepare(no_generation, header, &none) == DLSSLOP_NETWORK_FAILED &&
+                std::strstr(module.error(no_generation), "no generation"),
+            "images of no generation did not fail the network, naming why");
+    module.close(no_generation);
     header->style.store(3);
-    require(module.prepare(network, header, 1280, 720, false) == DLSSLOP_NETWORK_REJECTED &&
+    require(module.prepare(network, header, images(1280, 720)) == DLSSLOP_NETWORK_REJECTED &&
                 std::strstr(module.error(network), "style 0..2"),
             "a setting out of range was not rejected, naming it");
     header->style.store(0);
     const std::string model = std::string(directory) + "/dlsslop-amd/dlssnr.bin";
     for (int frame = 0; frame < 2; ++frame)
-        require(module.prepare(network, header, 1280, 720, false) == DLSSLOP_NETWORK_FAILED &&
+        require(module.prepare(network, header, images(1280, 720)) == DLSSLOP_NETWORK_FAILED &&
                     std::strstr(module.error(network), model.c_str()) &&
                     std::strstr(module.error(network), "dlsslop-setup --dll"),
                 "a missing model did not fail the network for good, naming it");
@@ -153,7 +180,7 @@ int main(int argc, char** argv)
     require(network, "the module did not open");
     for (uint32_t passes = 1; passes <= 2; ++passes) {
         header->passes.store(passes);
-        require(module.prepare(network, header, 16, 16, false) == DLSSLOP_NETWORK_REJECTED &&
+        require(module.prepare(network, header, images(16, 16)) == DLSSLOP_NETWORK_REJECTED &&
                     std::strstr(module.error(network), "does not take 16x16 frames"),
                 "a frame of an extent the network does not take, or another shape of it, was not rejected, naming it");
     }
@@ -163,7 +190,7 @@ int main(int argc, char** argv)
     network = module.open(&device);
     require(network, "the module did not open");
     for (int frame = 0; frame < 2; ++frame)
-        require(module.prepare(network, header, 1280, 720, false) == DLSSLOP_NETWORK_REJECTED &&
+        require(module.prepare(network, header, images(1280, 720)) == DLSSLOP_NETWORK_REJECTED &&
                     std::strstr(module.error(network), "does not take 1280x720 frames") &&
                     std::strstr(module.error(network), "exceed the device's storage buffers of 1048576 bytes"),
                 "a frame whose arena exceeds the device's storage buffers was not rejected, naming it");
@@ -176,7 +203,8 @@ int main(int argc, char** argv)
             "a config file dlsslopd refuses did not fail the network, naming it");
     munmap(memory, kHeaderBytes);
     std::puts("network module: a missing module, one without the functions or one of another interface is "
-              "refused, naming why, and so is a device of another interface; out-of-range "
+              "refused, naming why, and so is a device of another interface; images of another format or no "
+              "generation fail the network; out-of-range "
               "settings rejected, a missing model fails for good, extents the network or the device's storage "
               "buffers do not take rejected in any shape, and the model is the one dlsslopd's config file names");
 }

@@ -1745,8 +1745,7 @@ check_empty (void)
 	require(!composition_model_width(nullptr) && !composition_model_height(nullptr)
 	        && !composition_model_bytes(nullptr) && !composition_hdr_proxy_active(nullptr)
 	        && !composition_transport_pending(nullptr) && !composition_transport_generation(nullptr)
-	        && !composition_proxy_pixels(nullptr) && !composition_proxy_buffer(nullptr)
-	        && !composition_answer_buffer(nullptr) && !composition_transport_exported(nullptr)
+	        && !composition_proxy_pixels(nullptr) && !composition_transport_exported(nullptr)
 	        && !composition_model_pixels(nullptr) && !composition_capture_recorded(nullptr)
 	        && composition_measured_white_point(nullptr) == 0.0f, "an absent composition answered");
 	composition_enable_export(nullptr, 0);

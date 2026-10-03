@@ -72,7 +72,7 @@ struct DlsslopNetwork {
 
     DlsslopNetwork(const dlsslop_network_device& d)
         : model(dlsslop::configured_vulkan_model()),
-          recorder(network_device(d), module_paths(model.value_or(std::string())))
+          recorder(network_device(d), module_paths(model.value_or(std::string())), true)
     {
         if (!model) fail(model.error().what);
     }
@@ -106,8 +106,8 @@ DlsslopNetwork* dlsslop_network_open(const dlsslop_network_device* device)
     return new (std::nothrow) DlsslopNetwork(*device);
 }
 
-dlsslop_network_state dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader* channel, uint32_t width,
-                                              uint32_t height, bool fp16)
+dlsslop_network_state dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader* channel,
+                                              const dlsslop_network_images* images)
 {
     if (n->building.load(std::memory_order_acquire)) return DLSSLOP_NETWORK_BUILDING;
     if (n->joinable) {
@@ -115,6 +115,12 @@ dlsslop_network_state dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader
         n->joinable = false;
     }
     if (n->failed) return DLSSLOP_NETWORK_FAILED;
+    // The frame's format: the composition's proxy, RGBA8 or the float16 proxy.
+    const bool fp16 = images->format == VK_FORMAT_R16G16B16A16_SFLOAT;
+    if (!fp16 && images->format != VK_FORMAT_R8G8B8A8_UNORM)
+        return n->fail("the network takes frames of RGBA8 or RGBA16F, not of format " +
+                       std::to_string(int(images->format)));
+    if (!images->generation) return n->fail("the composition's images have no generation");
     auto settings = dlsslop::read_settings(channel);
     if (!settings) {
         n->error = std::move(settings).error().what;
@@ -122,11 +128,14 @@ dlsslop_network_state dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader
     }
     settings->fp16 = fp16;
     const unsigned passes = std::min(ShmPasses(channel), NetworkRecorder::kMaxPasses);
-    const auto frame = dlsslop::vulkan_frame(width, height, passes, *settings);
+    const auto frame = dlsslop::vulkan_frame(images->width, images->height, passes, *settings);
     // A frame of the network's extent: of its shape, or of another that it is reshaped for here,
-    // between frames, with no GPU work.
+    // between frames, with no GPU work, and in images that are bound here when they are new.
     if (n->recorder.has_extent(frame)) {
-        if (auto shaped = n->recorder.shape(frame); !shaped) return n->fail(std::move(shaped).error().what);
+        const dlsslop::vulkan::FrameImages surfaces{images->generation, images->input_view, images->answer,
+                                                    images->answer_view};
+        if (auto shaped = n->recorder.shape(frame, &surfaces); !shaped)
+            return n->fail(std::move(shaped).error().what);
         n->prepared = frame;
         return DLSSLOP_NETWORK_READY;
     }
@@ -148,10 +157,9 @@ dlsslop_network_state dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader
     return DLSSLOP_NETWORK_BUILDING;
 }
 
-dlsslop_network_state dlsslop_network_record(DlsslopNetwork* n, VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer,
-                                             uint32_t family, bool exported)
+dlsslop_network_state dlsslop_network_record(DlsslopNetwork* n, VkCommandBuffer cmd)
 {
-    n->recorder.record(cmd, proxy, answer, n->prepared, family, exported);
+    n->recorder.record(cmd, n->prepared);
     return DLSSLOP_NETWORK_READY;
 }
 

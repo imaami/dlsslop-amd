@@ -239,13 +239,19 @@ history. Upstream's production path never reads those words. It leaves out
 what dlsslop-amd never calls, such as control masks, `record_engine`,
 per-feature histories, preprocessing, model scales below 1, input formats other
 than RGBA8 and RGBA16F, the GPU timing that `last_gpu_ms()` and
-`average_gpu_ms()` report, and every `NR_*` environment variable.
-`vulkan-plan-abi` and `vulkan-constants` check the fetched shaders and the model
-tools' entry list against the port. `common/vulkan_plan.h` holds the constants
-that the plan takes from `linux/build/arch/rdna4.sh` and from `nr_graph.cpp`'s
-defaults at `a75ac49`; `vulkan-constants` checks those that the markers in
-`pipelines.json` record and the tile of `gemmvqkvnorms` that its defines set,
-and a change of the pin must re-check the rest.
+`average_gpu_ms()` report, and every `NR_*` environment variable. Like
+upstream's OptiScaler route at `b1419b0` (`Impl::DirectSrc` in
+`nr_runtime.cpp`), the in-layer network samples the composition's proxy in place
+and stores its answer into the composition's model image. Unlike upstream, which
+does so for one pass with motion history only and makes views and sets for each
+recording in a ring, it does so for every shape, blitting an RGBA32F answer into
+the model image, and writes its sets only between frames, when the composition's
+generation changes. `vulkan-plan-abi` and `vulkan-constants` check the fetched
+shaders and the model tools' entry list against the port. `common/vulkan_plan.h`
+holds the constants that the plan takes from `linux/build/arch/rdna4.sh` and
+from `nr_graph.cpp`'s defaults at `a75ac49`; `vulkan-constants` checks those
+that the markers in `pipelines.json` record and the tile of `gemmvqkvnorms` that
+its defines set, and a change of the pin must re-check the rest.
 
 Preserve `layer/ATTRIBUTION.md` and all inherited notices of upstream
 code. The layer's shader/dispatch lineage includes OptiScaler and
