@@ -24,31 +24,18 @@
  * The composition itself -- what the resolve does with the model's answer -- is entirely the vendored
  * shader's. Everything in this file is plumbing: which image is bound where, in what layout, and what
  * goes in the constant block.
- *
- * Plain C API, consumable from C++.
  */
 #ifndef DLSSLOP_AMD_LAYER_COMPOSITION_H_
 #define DLSSLOP_AMD_LAYER_COMPOSITION_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-# include <cstdint>
-# define COMPOSITION_STD(x) std::x
-#else
-# include <stddef.h>
-# include <stdint.h>
-# define COMPOSITION_STD(x) x
-#endif
+#include <stddef.h>
+#include <stdint.h>
 
 #include "../common/shm_protocol.h"
 #include "capture.h"
 #include "dlssnr_pass.h"
 #include "scaler_vk.h"
 #include "vk_table.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /** @brief One frame's worth of settings, read from the shared header once so that a control changed
  *         mid-frame cannot make the encode and the resolve disagree about what they are doing.
@@ -69,36 +56,36 @@ extern "C" {
  * snapshot.
  */
 struct composition_frame_settings {
-	COMPOSITION_STD(uint32_t) control_seq;             //!< The header's controlSeq.
-	COMPOSITION_STD(uint32_t) tuning_seq;              //!< The header's tuningSeq.
-	COMPOSITION_STD(uint32_t) passes;                  //!< The requested number of passes.
-	float                     transfer_strength;       //!< The detail transfer's strength, 0..4.
-	float                     colour_strength;         //!< The colour transfer's strength, 0..4.
-	float                     max_ratio;               //!< The largest relighting ratio.
-	float                     debug_scale;             //!< The debug views' scale.
-	float                     white_point_manual;      //!< The slider's white point.
-	float                     white_point_scale;       //!< The multiplier of what is white.
-	float                     white_point_trim;        //!< The trim of a measured reading.
-	COMPOSITION_STD(uint32_t) white_point_source;      //!< enum WhitePointSource.
-	float                     compare_split;           //!< Where the compare view splits, 0..1.
-	float                     compare_zoom;            //!< The compare view's zoom, 1..2.
-	float                     working_scale;           //!< The model's raster over the frame's, 0.25..2.
-	COMPOSITION_STD(uint32_t) native_model_max_width;  //!< The native model's widest raster, or 0.
-	COMPOSITION_STD(uint32_t) native_model_max_height; //!< The native model's tallest raster, or 0.
-	COMPOSITION_STD(uint32_t) transfer;                //!< The transfer mode, 0..2.
-	COMPOSITION_STD(uint32_t) debug_view;              //!< The debug view, 0..5.
-	COMPOSITION_STD(uint32_t) compare_mode;            //!< The compare mode, 0..2.
-	COMPOSITION_STD(uint32_t) compare_swap;            //!< Whether the compare view swaps its sides.
-	COMPOSITION_STD(uint32_t) reversible_mode;         //!< enum ReversibleMode.
-	COMPOSITION_STD(uint32_t) apply_model;             //!< Whether the model's answer is applied.
-	COMPOSITION_STD(uint32_t) hold_frame;              //!< Whether the frame is held.
-	COMPOSITION_STD(uint32_t) downscaler;              //!< enum scaler_vk_filter, never SCALER_VK_FSR1.
-	COMPOSITION_STD(uint32_t) composition_bypass;      //!< 1: the model's raw answer is the frame.
-	float                     ghost_slack;             //!< The running pair's step toward a new answer.
-	float                     edit_blur;               //!< The stale edit's split radius, in uv.
-	float                     motion_smooth;           //!< The motion smoothing, 0..1.
-	float                     colour_trust;            //!< The chroma-agreement gate's share.
-	float                     ratio_smooth;            //!< The neighbourhood's share of the ratio.
+	uint32_t control_seq;             //!< The header's controlSeq.
+	uint32_t tuning_seq;              //!< The header's tuningSeq.
+	uint32_t passes;                  //!< The requested number of passes.
+	float    transfer_strength;       //!< The detail transfer's strength, 0..4.
+	float    colour_strength;         //!< The colour transfer's strength, 0..4.
+	float    max_ratio;               //!< The largest relighting ratio.
+	float    debug_scale;             //!< The debug views' scale.
+	float    white_point_manual;      //!< The slider's white point.
+	float    white_point_scale;       //!< The multiplier of what is white.
+	float    white_point_trim;        //!< The trim of a measured reading.
+	uint32_t white_point_source;      //!< enum WhitePointSource.
+	float    compare_split;           //!< Where the compare view splits, 0..1.
+	float    compare_zoom;            //!< The compare view's zoom, 1..2.
+	float    working_scale;           //!< The model's raster over the frame's, 0.25..2.
+	uint32_t native_model_max_width;  //!< The native model's widest raster, or 0.
+	uint32_t native_model_max_height; //!< The native model's tallest raster, or 0.
+	uint32_t transfer;                //!< The transfer mode, 0..2.
+	uint32_t debug_view;              //!< The debug view, 0..5.
+	uint32_t compare_mode;            //!< The compare mode, 0..2.
+	uint32_t compare_swap;            //!< Whether the compare view swaps its sides.
+	uint32_t reversible_mode;         //!< enum ReversibleMode.
+	uint32_t apply_model;             //!< Whether the model's answer is applied.
+	uint32_t hold_frame;              //!< Whether the frame is held.
+	uint32_t downscaler;              //!< enum scaler_vk_filter, never SCALER_VK_FSR1.
+	uint32_t composition_bypass;      //!< 1: the model's raw answer is the frame.
+	float    ghost_slack;             //!< The running pair's step toward a new answer.
+	float    edit_blur;               //!< The stale edit's split radius, in uv.
+	float    motion_smooth;           //!< The motion smoothing, 0..1.
+	float    colour_trust;            //!< The chroma-agreement gate's share.
+	float    ratio_smooth;            //!< The neighbourhood's share of the ratio.
 };
 
 /** @brief A surface of the composition.
@@ -106,13 +93,13 @@ struct composition_frame_settings {
  * A zeroed image is an empty one. An image owns the handles that are not VK_NULL_HANDLE.
  */
 struct composition_image {
-	VkImage                   image;  //!< The image.
-	VkDeviceMemory            memory; //!< Its device-local memory.
-	VkImageView               view;   //!< Its view.
-	VkFormat                  format; //!< Its format.
-	COMPOSITION_STD(uint32_t) width;  //!< Its width.
-	COMPOSITION_STD(uint32_t) height; //!< Its height.
-	VkImageLayout             layout; //!< The layout that the commands recorded so far leave it in.
+	VkImage        image;  //!< The image.
+	VkDeviceMemory memory; //!< Its device-local memory.
+	VkImageView    view;   //!< Its view.
+	VkFormat       format; //!< Its format.
+	uint32_t       width;  //!< Its width.
+	uint32_t       height; //!< Its height.
+	VkImageLayout  layout; //!< The layout that the commands recorded so far leave it in.
 };
 
 /** @brief A buffer that the host or the daemon reads or writes.
@@ -120,15 +107,15 @@ struct composition_image {
  * A zeroed buffer is an empty one. A buffer owns the handles that are not VK_NULL_HANDLE.
  */
 struct composition_host_buffer {
-	VkBuffer                buffer;     //!< The buffer.
-	VkDeviceMemory          memory;     //!< Its memory.
-	void                   *mapped;     //!< The memory, mapped; nullptr for exported memory.
-	COMPOSITION_STD(size_t) size;       //!< The buffer's size in bytes.
-	VkDeviceSize            allocation; //!< Exported device-local memory: its size; otherwise 0.
+	VkBuffer       buffer;     //!< The buffer.
+	VkDeviceMemory memory;     //!< Its memory.
+	void          *mapped;     //!< The memory, mapped; nullptr for exported memory.
+	size_t         size;       //!< The buffer's size in bytes.
+	VkDeviceSize   allocation; //!< Exported device-local memory: its size; otherwise 0.
 };
 
 /** @brief The state that struct composition records in its flags. */
-enum composition_flags : COMPOSITION_STD(uint64_t) {
+enum composition_flags : uint64_t {
 	COMPOSITION_BLIT_SWAPCHAIN      = 1 << 0, //!< work_format is not the swapchain's twin: blit.
 	COMPOSITION_LINEAR_HDR          = 1 << 1, //!< The frame holds linear light.
 	COMPOSITION_HDR_PROXY           = 1 << 2, //!< The surfaces that cross are float16.
@@ -201,20 +188,20 @@ struct composition {
 	VkDescriptorPool                meter_descriptor_pool;   //!< The pool of its set.
 	VkDescriptorSet                 meter_descriptor_set;    //!< Its set.
 	VkSampler                       meter_sampler;           //!< The sampler it reads the grid with.
-	COMPOSITION_STD(uint64_t)       flags;                   //!< enum composition_flags.
-	COMPOSITION_STD(uint64_t)       generation;              //!< The surfaces' build, unique; 0: none.
-	COMPOSITION_STD(uint32_t)       width;                   //!< The frame's width.
-	COMPOSITION_STD(uint32_t)       height;                  //!< The frame's height.
-	COMPOSITION_STD(uint32_t)       model_w;                 //!< The model's width.
-	COMPOSITION_STD(uint32_t)       model_h;                 //!< The model's height.
+	uint64_t                        flags;                   //!< enum composition_flags.
+	uint64_t                        generation;              //!< The surfaces' build, unique; 0: none.
+	uint32_t                        width;                   //!< The frame's width.
+	uint32_t                        height;                  //!< The frame's height.
+	uint32_t                        model_w;                 //!< The model's width.
+	uint32_t                        model_h;                 //!< The model's height.
 	VkFormat                        swapchain_format;        //!< The swapchain's format.
 	VkFormat                        work_format;             //!< Usually the swapchain's UNORM twin.
-	COMPOSITION_STD(uint32_t)       hdr_transfer;            //!< 1: the swapchain carries PQ.
-	COMPOSITION_STD(uint32_t)       scaler_filter;           //!< The supersampling's scaler_vk_filter.
+	uint32_t                        hdr_transfer;            //!< 1: the swapchain carries PQ.
+	uint32_t                        scaler_filter;           //!< The supersampling's scaler_vk_filter.
 	float                           measured_white_point;    //!< What the meter settled on, or 0.
 	float                           held_white_point;        //!< The white point that a held frame keeps.
-	COMPOSITION_STD(uint32_t)       export_family;           //!< The queue family that both legs run on.
-	COMPOSITION_STD(uint32_t)       transport_gen;           //!< The exported pair's generation.
+	uint32_t                        export_family;           //!< The queue family that both legs run on.
+	uint32_t                        transport_gen;           //!< The exported pair's generation.
 	VkResult                        error;                   //!< Why the composition cannot run.
 	int                             offer;                   //!< The connection of an offer, or -1.
 };
@@ -243,8 +230,8 @@ composition_format (VkFormat swapchain_format);
  * @return                 true for linear light.
  */
 extern bool
-composition_colour_is_linear_hdr (VkFormat                  swapchain_format,
-                                  COMPOSITION_STD(uint32_t) colour_mode);
+composition_colour_is_linear_hdr (VkFormat swapchain_format,
+                                  uint32_t colour_mode);
 
 /** @brief The settings that a frame without a header composes with.
  *
@@ -355,8 +342,8 @@ composition_reason (struct composition const *c)
  * @return       The model's extent.
  */
 extern VkExtent2D
-composition_model_extent (COMPOSITION_STD(uint32_t)                width,
-                          COMPOSITION_STD(uint32_t)                height,
+composition_model_extent (uint32_t                                 width,
+                          uint32_t                                 height,
                           struct composition_frame_settings const *s);
 
 /** @brief Builds or rebuilds everything sized to this frame and this model resolution.
@@ -389,13 +376,13 @@ composition_model_extent (COMPOSITION_STD(uint32_t)                width,
  */
 extern bool
 composition_prepare (struct composition                      *c,
-                     COMPOSITION_STD(uint32_t)                width,
-                     COMPOSITION_STD(uint32_t)                height,
+                     uint32_t                                 width,
+                     uint32_t                                 height,
                      VkFormat                                 swapchain_format,
                      struct composition_frame_settings const *s,
                      bool                                     linear_hdr,
                      bool                                     hdr_proxy,
-                     COMPOSITION_STD(uint32_t)                hdr_transfer,
+                     uint32_t                                 hdr_transfer,
                      bool                                     network);
 
 /** @brief The build of the composition's surfaces.
@@ -404,7 +391,7 @@ composition_prepare (struct composition                      *c,
  * @return  A number that no other build in the process had, or 0 while there are no surfaces and for
  *          nullptr.
  */
-static inline COMPOSITION_STD(uint64_t)
+static inline uint64_t
 composition_generation (struct composition const *c)
 {
 	return c ? c->generation : 0;
@@ -443,7 +430,7 @@ composition_network_answer (struct composition const *c)
  * @param c The composition, or nullptr.
  * @return  The width, or 0 for nullptr.
  */
-static inline COMPOSITION_STD(uint32_t)
+static inline uint32_t
 composition_model_width (struct composition const *c)
 {
 	return c ? c->model_w : 0;
@@ -454,7 +441,7 @@ composition_model_width (struct composition const *c)
  * @param c The composition, or nullptr.
  * @return  The height, or 0 for nullptr.
  */
-static inline COMPOSITION_STD(uint32_t)
+static inline uint32_t
 composition_model_height (struct composition const *c)
 {
 	return c ? c->model_h : 0;
@@ -467,12 +454,12 @@ composition_model_height (struct composition const *c)
  * @param c The composition, or nullptr.
  * @return  The size in bytes, or 0 for nullptr.
  */
-static inline COMPOSITION_STD(size_t)
+static inline size_t
 composition_model_bytes (struct composition const *c)
 {
 	if (!c)
 		return 0;
-	COMPOSITION_STD(size_t) const pixels = (COMPOSITION_STD(size_t))c->model_w * c->model_h;
+	size_t const pixels = (size_t)c->model_w * c->model_h;
 	return pixels * ((c->flags & COMPOSITION_HDR_PROXY) ? 8 : 4);
 }
 
@@ -494,8 +481,8 @@ composition_hdr_proxy_active (struct composition const *c)
  * @param family The queue family both legs run on.
  */
 static inline void
-composition_enable_export (struct composition        *c,
-                           COMPOSITION_STD(uint32_t)  family)
+composition_enable_export (struct composition *c,
+                           uint32_t            family)
 {
 	if (!c)
 		return;
@@ -521,7 +508,7 @@ composition_transport_pending (struct composition const *c)
  * @param c The composition, or nullptr.
  * @return  The generation, or 0 for the host transport.
  */
-static inline COMPOSITION_STD(uint32_t)
+static inline uint32_t
 composition_transport_generation (struct composition const *c)
 {
 	return c && (c->flags & COMPOSITION_TRANSPORT_READY) ? c->transport_gen : 0;
@@ -672,9 +659,9 @@ composition_record_compose (struct composition                      *c,
  * @param control_seq The control sequence that asked for them.
  */
 static inline void
-composition_request_capture (struct composition        *c,
-                             COMPOSITION_STD(uint32_t)  frames,
-                             COMPOSITION_STD(uint32_t)  control_seq)
+composition_request_capture (struct composition *c,
+                             uint32_t            frames,
+                             uint32_t            control_seq)
 {
 	if (c)
 		capture_writer_begin(&c->capture, frames, control_seq);
@@ -686,8 +673,8 @@ composition_request_capture (struct composition        *c,
  * @param seq The request's sequence number.
  */
 static inline void
-composition_set_capture_inference (struct composition        *c,
-                                   COMPOSITION_STD(uint32_t)  seq)
+composition_set_capture_inference (struct composition *c,
+                                   uint32_t            seq)
 {
 	if (c)
 		c->capture_metadata.inference_seq = seq;
@@ -731,11 +718,5 @@ composition_measured_white_point (struct composition const *c)
 {
 	return c ? c->measured_white_point : 0.0f;
 }
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
-
-#undef COMPOSITION_STD
 
 #endif /* DLSSLOP_AMD_LAYER_COMPOSITION_H_ */

@@ -6,18 +6,12 @@
  * its own, which points to itself while the list is empty. Linking and unlinking an entry take
  * constant time and move no other entry, so a pointer to an entry stays valid until the entry's
  * owner frees it. list_foreach() walks the entries as their own type, through container_of().
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_COMMON_LIST_H_
 #define DLSSLOP_AMD_COMMON_LIST_H_
 
 #include "util.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /** @brief A list's head, or an entry's hook in a list. */
 struct list {
@@ -95,9 +89,5 @@ list_only (struct list const *head)
 	for (struct list *list_node_ = (head)->next, *list_next_ = list_node_->next; \
 	     list_node_ != (head) && ((entry) = container_of(list_node_, type, member), true); \
 	     list_node_ = list_next_, list_next_ = list_node_->next)
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_COMMON_LIST_H_ */

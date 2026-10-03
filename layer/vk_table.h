@@ -9,8 +9,6 @@
  * The lists are long because the composition runs a real compute pipeline on the game's device --
  * images, views, descriptors, a pipeline and the dispatch -- rather than the transfer copies the
  * first version of this layer needed.
- *
- * Plain C API, consumable from C++.
  */
 #ifndef DLSSLOP_AMD_LAYER_VK_TABLE_H_
 #define DLSSLOP_AMD_LAYER_VK_TABLE_H_
@@ -19,10 +17,6 @@
 # define VK_NO_PROTOTYPES
 #endif
 #include <vulkan/vulkan.h>
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #define DLSSNR_INSTANCE_FN_LIST(X) \
 	X(vkDestroyInstance) \
@@ -174,10 +168,6 @@ device_table_complete (struct device_table const *table)
 	       && table->vkCmdPipelineBarrier && table->vkCmdCopyImage && table->vkCmdCopyImageToBuffer
 	       && table->vkCmdCopyBufferToImage;
 }
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #undef DLSSNR_DEVICE_FN_LIST
 #undef DLSSNR_INSTANCE_FN_LIST

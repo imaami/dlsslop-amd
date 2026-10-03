@@ -20,39 +20,27 @@
  *
  * Layouts are the caller's to declare and this pass's to respect. It never guesses what state an
  * image arrived in.
- *
- * Plain C API, consumable from C++.
  */
 #ifndef DLSSLOP_AMD_LAYER_DLSSNR_PASS_H_
 #define DLSSLOP_AMD_LAYER_DLSSNR_PASS_H_
 
-#ifdef __cplusplus
-# include <cstdint>
-# define DLSS_NR_PASS_STD(x) std::x
-#else
-# include <stdint.h>
-# define DLSS_NR_PASS_STD(x) x
-#endif
+#include <stdint.h>
 
 #include "dlssnr/DlssNr_Common.h"
 #include "shader_vk.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /** @brief Constant slots for each frame in flight.
  *
  * Enough for several dispatches per frame across the frames that can be in flight. Encode and
  * resolve are two; the debug views, the calibration grid and the downsample are the others.
  */
-static constexpr DLSS_NR_PASS_STD(uint32_t) DLSS_NR_PASS_SLOTS_PER_FRAME = 6;
+static constexpr uint32_t DLSS_NR_PASS_SLOTS_PER_FRAME = 6;
 
 /** @brief The frames that can be in flight. */
-static constexpr DLSS_NR_PASS_STD(uint32_t) DLSS_NR_PASS_FRAMES_IN_FLIGHT = 3;
+static constexpr uint32_t DLSS_NR_PASS_FRAMES_IN_FLIGHT = 3;
 
 /** @brief The constant slots, and the descriptor sets: one of each per dispatch. */
-static constexpr DLSS_NR_PASS_STD(uint32_t) DLSS_NR_PASS_SLOTS =
+static constexpr uint32_t DLSS_NR_PASS_SLOTS =
 	DLSS_NR_PASS_SLOTS_PER_FRAME * DLSS_NR_PASS_FRAMES_IN_FLIGHT;
 
 /** @brief The composition shader's pass.
@@ -64,14 +52,14 @@ static constexpr DLSS_NR_PASS_STD(uint32_t) DLSS_NR_PASS_SLOTS =
  * uniform buffer binding can be offset only to a multiple of it.
  */
 struct dlss_nr_pass {
-	struct shader_vk           shader;                              //!< The pipeline, ring and sampler.
-	VkDescriptorSet            descriptor_sets[DLSS_NR_PASS_SLOTS]; //!< One per constant slot.
-	VkDeviceSize               slot_stride;                         //!< A constant slot's size.
-	VkImage                    dummy_image;                         //!< The placeholder's image.
-	VkDeviceMemory             dummy_memory;                        //!< The placeholder's memory.
-	VkImageView                dummy_view;                          //!< The placeholder's view.
-	VkResult                   error;                               //!< What the build returned.
-	DLSS_NR_PASS_STD(uint32_t) slot;                                //!< The next dispatch's slot.
+	struct shader_vk shader;                              //!< The pipeline, ring and sampler.
+	VkDescriptorSet  descriptor_sets[DLSS_NR_PASS_SLOTS]; //!< One per constant slot.
+	VkDeviceSize     slot_stride;                         //!< A constant slot's size.
+	VkImage          dummy_image;                         //!< The placeholder's image.
+	VkDeviceMemory   dummy_memory;                        //!< The placeholder's memory.
+	VkImageView      dummy_view;                          //!< The placeholder's view.
+	VkResult         error;                               //!< What the build returned.
+	uint32_t         slot;                                //!< The next dispatch's slot.
 };
 
 /** @brief Builds the composition pass on a device.
@@ -147,8 +135,8 @@ extern bool
 dlss_nr_pass_dispatch (struct dlss_nr_pass            *p,
                        VkCommandBuffer                 cmd_list,
                        struct dlss_nr_constants const *constants,
-                       DLSS_NR_PASS_STD(uint32_t)      threads_x,
-                       DLSS_NR_PASS_STD(uint32_t)      threads_y,
+                       uint32_t                        threads_x,
+                       uint32_t                        threads_y,
                        VkImageView                     source,
                        VkImageView                     model,
                        VkImageView                     original,
@@ -157,11 +145,5 @@ dlss_nr_pass_dispatch (struct dlss_nr_pass            *p,
                        VkImageView                     keep,
                        VkImageLayout                   source_layout,
                        VkImageLayout                   motion_layout);
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
-
-#undef DLSS_NR_PASS_STD
 
 #endif /* DLSSLOP_AMD_LAYER_DLSSNR_PASS_H_ */

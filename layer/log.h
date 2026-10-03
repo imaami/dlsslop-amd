@@ -8,19 +8,12 @@
  * per frame.
  *
  * The first call of log_printf(), log_verbose(), log_time_enabled() or
- * log_time_interval() reads the environment. Plain C API, consumable from C++.
+ * log_time_interval() reads the environment.
  */
 #ifndef DLSSLOP_AMD_LAYER_LOG_H_
 #define DLSSLOP_AMD_LAYER_LOG_H_
 
-#ifdef __cplusplus
-# include <cstdint>
-# define LOG_STD(x) std::x
-extern "C" {
-#else
-# include <stdint.h>
-# define LOG_STD(x) x
-#endif
+#include <stdint.h>
 
 /** @brief Writes one line to the log.
  *
@@ -63,7 +56,7 @@ log_time_enabled (void);
  *
  * @return DLSSNR_TIME_EVERY if it is a positive number of at most 32 bits, otherwise 30.
  */
-extern LOG_STD(uint32_t)
+extern uint32_t
 log_time_interval (void);
 
 /** @brief The time of CLOCK_MONOTONIC.
@@ -72,11 +65,5 @@ log_time_interval (void);
  */
 extern double
 log_now_ms (void);
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
-
-#undef LOG_STD
 
 #endif /* DLSSLOP_AMD_LAYER_LOG_H_ */

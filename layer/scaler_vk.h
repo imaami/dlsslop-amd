@@ -17,25 +17,13 @@
  * copy: "sized its dispatch from the global current feature rather than from the resources passed in.
  * Those coincide for the conventional Output Scaling chain, so the bug stayed invisible until something
  * else called it." This is something else calling it.
- *
- * Plain C API, consumable from C++.
  */
 #ifndef DLSSLOP_AMD_LAYER_SCALER_VK_H_
 #define DLSSLOP_AMD_LAYER_SCALER_VK_H_
 
-#ifdef __cplusplus
-# include <cstdint>
-# define SCALER_VK_STD(x) std::x
-#else
-# include <stdint.h>
-# define SCALER_VK_STD(x) x
-#endif
+#include <stdint.h>
 
 #include "shader_vk.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /** @brief Upstream's Scaler numbering, kept identical so a value copied from an OptiScaler profile
  *         means the same thing here.
@@ -43,7 +31,7 @@ extern "C" {
  * FSR1 is absent: it needs a different constant block and its own shader, and it is an upscaler
  * rather than the averaging filter this pass wants.
  */
-enum scaler_vk_filter : SCALER_VK_STD(uint32_t) {
+enum scaler_vk_filter : uint32_t {
 	SCALER_VK_FSR1        = 0, //!< Not supported here; falls back to Lanczos3.
 	SCALER_VK_BICUBIC     = 1,
 	SCALER_VK_CATMULL_ROM = 2,
@@ -59,10 +47,10 @@ enum scaler_vk_filter : SCALER_VK_STD(uint32_t) {
 // composition.c, which sees both, checks that they do.
 
 /** @brief The constant slots, and the descriptor sets: one of each per dispatch. */
-static constexpr SCALER_VK_STD(uint32_t) SCALER_VK_SLOTS = 6;
+static constexpr uint32_t SCALER_VK_SLOTS = 6;
 
 /** @brief What struct scaler_vk records in its flags. */
-enum scaler_vk_flags : SCALER_VK_STD(uint64_t) {
+enum scaler_vk_flags : uint64_t {
 	SCALER_VK_UPSAMPLE = 1 //!< The pass enlarges, with bcus; otherwise it averages.
 };
 
@@ -74,12 +62,12 @@ enum scaler_vk_flags : SCALER_VK_STD(uint64_t) {
  * member would leave.
  */
 struct scaler_vk {
-	struct shader_vk        shader;                           //!< The pipeline, ring and sampler.
-	VkDescriptorSet         descriptor_sets[SCALER_VK_SLOTS]; //!< One per constant slot.
-	VkDeviceSize            slot_stride;                      //!< A constant slot's size.
-	SCALER_VK_STD(uint64_t) flags;                            //!< enum scaler_vk_flags.
-	VkResult                error;                            //!< What the build returned.
-	SCALER_VK_STD(uint32_t) slot;                             //!< The next dispatch's slot.
+	struct shader_vk shader;                           //!< The pipeline, ring and sampler.
+	VkDescriptorSet  descriptor_sets[SCALER_VK_SLOTS]; //!< One per constant slot.
+	VkDeviceSize     slot_stride;                      //!< A constant slot's size.
+	uint64_t         flags;                            //!< enum scaler_vk_flags.
+	VkResult         error;                            //!< What the build returned.
+	uint32_t         slot;                             //!< The next dispatch's slot.
 };
 
 /** @brief The name of a downscaler.
@@ -89,7 +77,7 @@ struct scaler_vk {
  *               which fall back to Lanczos3.
  */
 extern char const *
-scaler_vk_filter_name (SCALER_VK_STD(uint32_t) filter);
+scaler_vk_filter_name (uint32_t filter);
 
 /** @brief Builds a scaling pass on a device.
  *
@@ -112,7 +100,7 @@ scaler_vk (struct device_table const   *vk,
            VkDevice                     device,
            VkPhysicalDevice             physical_device,
            bool                         upsample,
-           SCALER_VK_STD(uint32_t)      filter);
+           uint32_t                     filter);
 
 /** @brief Builds a scaling pass in place.
  *
@@ -133,7 +121,7 @@ scaler_vk_init (struct scaler_vk            *dest,
                 VkDevice                     device,
                 VkPhysicalDevice             physical_device,
                 bool                         upsample,
-                SCALER_VK_STD(uint32_t)      filter);
+                uint32_t                     filter);
 
 /** @brief Destroys what the pass owns, then leaves it empty.
  *
@@ -159,19 +147,13 @@ scaler_vk_fini (struct scaler_vk *dest);
  *                    and both views are set.
  */
 extern bool
-scaler_vk_dispatch (struct scaler_vk        *p,
-                    VkCommandBuffer          cb,
-                    VkImageView              source,
-                    VkImageView              dest,
-                    SCALER_VK_STD(uint32_t)  src_width,
-                    SCALER_VK_STD(uint32_t)  src_height,
-                    SCALER_VK_STD(uint32_t)  dest_width,
-                    SCALER_VK_STD(uint32_t)  dest_height);
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
-
-#undef SCALER_VK_STD
+scaler_vk_dispatch (struct scaler_vk *p,
+                    VkCommandBuffer   cb,
+                    VkImageView       source,
+                    VkImageView       dest,
+                    uint32_t          src_width,
+                    uint32_t          src_height,
+                    uint32_t          dest_width,
+                    uint32_t          dest_height);
 
 #endif /* DLSSLOP_AMD_LAYER_SCALER_VK_H_ */

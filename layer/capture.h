@@ -13,25 +13,15 @@
  * a file you can open is worth a great deal more than one you cannot -- so an 8-bit frame is written
  * as PNG. A 10-bit or float frame has no PNG that can hold it and is written raw, as upstream does,
  * with a manifest saying how to read it. The manifest is written either way.
- *
- * Plain C API, consumable from C++.
  */
 #ifndef DLSSLOP_AMD_LAYER_CAPTURE_H_
 #define DLSSLOP_AMD_LAYER_CAPTURE_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-# include <cstdint>
-# define CAPTURE_STD(x) std::x
-extern "C" {
-#else
-# include <stddef.h>
-# include <stdint.h>
-# define CAPTURE_STD(x) x
-#endif
+#include <stddef.h>
+#include <stdint.h>
 
 /** @brief The most frames that one batch writes. */
-static constexpr CAPTURE_STD(uint32_t) CAPTURE_WRITER_FRAMES = 64;
+static constexpr uint32_t CAPTURE_WRITER_FRAMES = 64;
 
 /** @brief What the manifest says about one frame.
  *
@@ -39,25 +29,25 @@ static constexpr CAPTURE_STD(uint32_t) CAPTURE_WRITER_FRAMES = 64;
  * answered the frame; passes is the layer's observed requested count.
  */
 struct capture_metadata {
-	CAPTURE_STD(uint64_t) before_hash;       //!< The frame as presented; capture_writer_write_frame() sets it.
-	CAPTURE_STD(uint32_t) frame_control_seq;
-	CAPTURE_STD(uint32_t) tuning_seq;
-	CAPTURE_STD(uint32_t) inference_seq;
-	CAPTURE_STD(uint32_t) passes;
-	CAPTURE_STD(uint32_t) debug_view;
-	CAPTURE_STD(uint32_t) apply_model;
-	CAPTURE_STD(uint32_t) bypass;
-	CAPTURE_STD(uint32_t) hold;
-	CAPTURE_STD(uint32_t) compare;
-	CAPTURE_STD(uint32_t) transfer;
-	CAPTURE_STD(uint32_t) model_width;
-	CAPTURE_STD(uint32_t) model_height;
-	CAPTURE_STD(uint32_t) hdr_proxy;
-	CAPTURE_STD(uint32_t) linear_hdr;
-	CAPTURE_STD(uint32_t) hdr_transfer;
-	float                 detail;
-	float                 color;
-	float                 debug_scale;
+	uint64_t before_hash;       //!< The frame as presented; capture_writer_write_frame() sets it.
+	uint32_t frame_control_seq;
+	uint32_t tuning_seq;
+	uint32_t inference_seq;
+	uint32_t passes;
+	uint32_t debug_view;
+	uint32_t apply_model;
+	uint32_t bypass;
+	uint32_t hold;
+	uint32_t compare;
+	uint32_t transfer;
+	uint32_t model_width;
+	uint32_t model_height;
+	uint32_t hdr_proxy;
+	uint32_t linear_hdr;
+	uint32_t hdr_transfer;
+	float    detail;
+	float    color;
+	float    debug_scale;
 };
 
 /** @brief A batch of matched frames that is being written.
@@ -69,11 +59,11 @@ struct capture_metadata {
 struct capture_writer {
 	struct capture_metadata metadata[CAPTURE_WRITER_FRAMES]; //!< Each frame written so far.
 	char                   *batch_dir;                       //!< The batch's directory, or nullptr.
-	CAPTURE_STD(size_t)     batch_length;                    //!< The length of batch_dir.
-	CAPTURE_STD(size_t)     batch_name;                      //!< Where the batch's own name starts in batch_dir.
-	CAPTURE_STD(uint64_t)   control_seq;                     //!< The control sequence of the request.
-	CAPTURE_STD(uint32_t)   remaining;                       //!< Frames still to write; 0: idle.
-	CAPTURE_STD(uint32_t)   index;                           //!< Frames written, and the next one's number.
+	size_t                  batch_length;                    //!< The length of batch_dir.
+	size_t                  batch_name;                      //!< Where the batch's own name starts in batch_dir.
+	uint64_t                control_seq;                     //!< The control sequence of the request.
+	uint32_t                remaining;                       //!< Frames still to write; 0: idle.
+	uint32_t                index;                           //!< Frames written, and the next one's number.
 };
 
 /** @brief Returns a metadata record with the renderer's defaults.
@@ -99,8 +89,8 @@ capture_metadata (void)
  *             holds only the start of it.
  */
 extern int
-capture_writer_directory (char                *buf,
-                          CAPTURE_STD(size_t)  size);
+capture_writer_directory (char   *buf,
+                          size_t  size);
 
 /** @brief Starts a batch in a new directory under capture_writer_directory(), which it creates.
  *
@@ -113,8 +103,8 @@ capture_writer_directory (char                *buf,
  */
 extern void
 capture_writer_begin (struct capture_writer *w,
-                      CAPTURE_STD(uint32_t)  frames,
-                      CAPTURE_STD(uint32_t)  control_seq);
+                      uint32_t               frames,
+                      uint32_t               control_seq);
 
 /** @brief Whether a batch is being written.
  *
@@ -146,9 +136,9 @@ extern void
 capture_writer_write_frame (struct capture_writer         *w,
                             void const                    *before,
                             void const                    *after,
-                            CAPTURE_STD(uint32_t)          width,
-                            CAPTURE_STD(uint32_t)          height,
-                            CAPTURE_STD(uint32_t)          vk_format,
+                            uint32_t                       width,
+                            uint32_t                       height,
+                            uint32_t                       vk_format,
                             struct capture_metadata const *metadata);
 
 /** @brief Abandons the batch that is being written and frees the writer's path, then leaves the
@@ -158,11 +148,5 @@ capture_writer_write_frame (struct capture_writer         *w,
  */
 extern void
 capture_writer_fini (struct capture_writer *dest);
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
-
-#undef CAPTURE_STD
 
 #endif /* DLSSLOP_AMD_LAYER_CAPTURE_H_ */

@@ -1,7 +1,7 @@
 # Link-time optimization links C and C++ objects together: the programs link
-# the C functions that common/ and layer/ declare for both languages. Under it
-# the objects hold the compiler's intermediate code, which only the same
-# compiler of the same version can read.
+# the C functions that common/ declares for both languages. Under it the
+# objects hold the compiler's intermediate code, which only the same compiler
+# of the same version can read.
 if(CMAKE_INTERPROCEDURAL_OPTIMIZATION AND NOT (CMAKE_C_COMPILER_ID STREQUAL CMAKE_CXX_COMPILER_ID AND
         CMAKE_C_COMPILER_VERSION VERSION_EQUAL CMAKE_CXX_COMPILER_VERSION))
     message(FATAL_ERROR "Link-time optimization (CMAKE_INTERPROCEDURAL_OPTIMIZATION) cannot link the C "

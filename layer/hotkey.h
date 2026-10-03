@@ -25,29 +25,20 @@
  * XQueryKeymap, which is what vkBasalt uses, was tried first and does not work here: on an XWayland
  * session it reports nothing for a real key press. It is fine on a true Xorg session and that is
  * increasingly not what people run.
- *
- * Plain C API, consumable from C++.
  */
 #ifndef DLSSLOP_AMD_LAYER_HOTKEY_H_
 #define DLSSLOP_AMD_LAYER_HOTKEY_H_
 
-#ifdef __cplusplus
-# include <cstdint>
-# define HOTKEY_STD(x) std::x
-extern "C" {
-#else
-# include <stdint.h>
-# define HOTKEY_STD(x) x
-#endif
+#include <stdint.h>
 
 /** @brief The number of Linux key codes, KEY_CNT: the codes a press can have. */
-static constexpr HOTKEY_STD(uint32_t) HOTKEYS_CODES = 0x300;
+static constexpr uint32_t HOTKEYS_CODES = 0x300;
 
 struct hotkey_node;
 struct hotkey_x11;
 
 /** @brief The state that struct hotkeys records in its flags. */
-enum hotkeys_flags : HOTKEY_STD(uint64_t) {
+enum hotkeys_flags : uint64_t {
 	HOTKEYS_OPENED    = 1, //!< The first hotkeys_pressed() chose a backend.
 	HOTKEYS_ANNOUNCED = 2, //!< /dev/input was read once: a keyboard found later is logged.
 	HOTKEYS_EVDEV     = 4  //!< The backend is evdev, also while no keyboard is open.
@@ -60,13 +51,13 @@ enum hotkeys_flags : HOTKEY_STD(uint64_t) {
  * member would leave.
  */
 struct hotkeys {
-	struct hotkey_node  *nodes;                   //!< /dev/input's event nodes; hotkey_priv.h.
-	struct hotkey_x11   *x11;                     //!< The XInput2 backend, if it works; hotkey_priv.h.
-	double               last_scan;               //!< log_now_ms() of the last look at /dev/input.
-	HOTKEY_STD(uint64_t) flags;                   //!< enum hotkeys_flags.
-	HOTKEY_STD(uint32_t) node_count;              //!< The entries of nodes.
-	HOTKEY_STD(uint32_t) pending_total;           //!< Presses not answered yet, of every key.
-	HOTKEY_STD(uint8_t)  pending[HOTKEYS_CODES];  //!< Presses not answered yet, per key, at most 255.
+	struct hotkey_node *nodes;                   //!< /dev/input's event nodes; hotkey_priv.h.
+	struct hotkey_x11  *x11;                     //!< The XInput2 backend, if it works; hotkey_priv.h.
+	double              last_scan;               //!< log_now_ms() of the last look at /dev/input.
+	uint64_t            flags;                   //!< enum hotkeys_flags.
+	uint32_t            node_count;              //!< The entries of nodes.
+	uint32_t            pending_total;           //!< Presses not answered yet, of every key.
+	uint8_t             pending[HOTKEYS_CODES];  //!< Presses not answered yet, per key, at most 255.
 };
 
 /** @brief A Linux KEY_* code from a name.
@@ -78,7 +69,7 @@ struct hotkeys {
  * @return     The code, or 0 (unbound) for anything unrecognised, and for a number that is no key
  *             code.
  */
-extern HOTKEY_STD(uint32_t)
+extern uint32_t
 hotkey_key_code_from_name (char const *name);
 
 /** @brief The name of a Linux KEY_* code.
@@ -87,7 +78,7 @@ hotkey_key_code_from_name (char const *name);
  * @return     Its name in upper case, or "?" for a key that has none here.
  */
 extern char const *
-hotkey_key_name_from_code (HOTKEY_STD(uint32_t) code);
+hotkey_key_name_from_code (uint32_t code);
 
 /** @brief Whether the key went down since the last time this was asked.
  *
@@ -104,8 +95,8 @@ hotkey_key_name_from_code (HOTKEY_STD(uint32_t) code);
  * @return         true if a press of the key is pending; it is then answered.
  */
 extern bool
-hotkeys_pressed (struct hotkeys       *h,
-                 HOTKEY_STD(uint32_t)  key_code);
+hotkeys_pressed (struct hotkeys *h,
+                 uint32_t        key_code);
 
 /** @brief Closes the keyboards and unloads libX11 and libXi, then leaves the hotkeys empty.
  *
@@ -116,11 +107,5 @@ hotkeys_pressed (struct hotkeys       *h,
  */
 extern void
 hotkeys_fini (struct hotkeys *dest);
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
-
-#undef HOTKEY_STD
 
 #endif /* DLSSLOP_AMD_LAYER_HOTKEY_H_ */

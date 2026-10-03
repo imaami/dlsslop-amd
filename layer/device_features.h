@@ -3,35 +3,20 @@
  * What the layer adds to a game's vkCreateDevice: formatless storage writes for the composition,
  * and on request the in-layer network's features and extensions. And the ledger, which tells from
  * the request that vkCreateDevice accepted whether the network may run on the device.
- *
- * Plain C API, consumable from C++.
  */
 #ifndef DLSSLOP_AMD_LAYER_DEVICE_FEATURES_H_
 #define DLSSLOP_AMD_LAYER_DEVICE_FEATURES_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-# include <cstdint>
-# include <cstdlib>
-# include <cstring>
-# define DEVICE_FEATURES_STD(x) std::x
-#else
-# include <stddef.h>
-# include <stdint.h>
-# include <stdlib.h>
-# include <string.h>
-# define DEVICE_FEATURES_STD(x) x
-#endif
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include <vulkan/vk_layer.h>
 #include <vulkan/vulkan.h>
 
 #include "../common/network_requirements.h"
 #include "../common/vk_chain.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 #ifdef VK_VERSION_1_4
 # define DEVICE_FEATURES_VULKAN_1_4(X) \
@@ -75,8 +60,8 @@ union device_features_copy {
 
 /** @brief A structure that struct device_features copies. */
 struct device_features_copyable {
-	VkStructureType               type; //!< The structure's type.
-	DEVICE_FEATURES_STD(uint32_t) size; //!< Its size.
+	VkStructureType type; //!< The structure's type.
+	uint32_t        size; //!< Its size.
 };
 
 /** @brief The structures that struct device_features copies. */
@@ -90,7 +75,7 @@ static struct device_features_copyable const DEVICE_FEATURES_COPYABLE[] = {
 #undef DEVICE_FEATURES_VULKAN_1_4
 
 /** @brief The number of DEVICE_FEATURES_COPYABLE. */
-static constexpr DEVICE_FEATURES_STD(uint32_t) DEVICE_FEATURES_COPYABLE_COUNT =
+static constexpr uint32_t DEVICE_FEATURES_COPYABLE_COUNT =
 	sizeof DEVICE_FEATURES_COPYABLE / sizeof *DEVICE_FEATURES_COPYABLE;
 
 /** @brief The most structures of a game's chain that struct device_features copies.
@@ -98,7 +83,7 @@ static constexpr DEVICE_FEATURES_STD(uint32_t) DEVICE_FEATURES_COPYABLE_COUNT =
  * A valid chain needs at most 20 copies: each structure that DEVICE_FEATURES_COPYABLE names but the
  * loader's once (VUID-VkDeviceCreateInfo-sType-unique), and the loader's once per VkLayerFunction.
  */
-static constexpr DEVICE_FEATURES_STD(uint32_t) DEVICE_FEATURES_COPIES = 32;
+static constexpr uint32_t DEVICE_FEATURES_COPIES = 32;
 
 /** @brief What the layer adds to a game's vkCreateDevice.
  *
@@ -120,8 +105,8 @@ struct device_features {
 
 /** @brief Where a feature bit is. */
 struct device_features_place {
-	void const                  *node;   //!< The structure, or nullptr if no structure carries the bit.
-	DEVICE_FEATURES_STD(size_t)  offset; //!< The bit's offset in it.
+	void const *node;   //!< The structure, or nullptr if no structure carries the bit.
+	size_t      offset; //!< The bit's offset in it.
 };
 
 /** @brief The VkPhysicalDeviceFeatures2 of a request.
@@ -183,7 +168,7 @@ device_features_network_enabled (VkDeviceCreateInfo const *info)
 {
 	if (!info)
 		return false;
-	for (DEVICE_FEATURES_STD(uint32_t) i = 0; i < NETWORK_FEATURE_COUNT; ++i) {
+	for (uint32_t i = 0; i < NETWORK_FEATURE_COUNT; ++i) {
 		struct network_feature const *const f = &NETWORK_FEATURES[i];
 		if (f->extension && !network_requirements_listed(info->ppEnabledExtensionNames,
 		                                                 info->enabledExtensionCount, f->extension))
@@ -202,8 +187,8 @@ device_features_network_enabled (VkDeviceCreateInfo const *info)
 static inline bool
 device_features_network_requested (void)
 {
-	char const *const value = DEVICE_FEATURES_STD(getenv)("DLSSLOP_LAYER_NETWORK");
-	return value && !DEVICE_FEATURES_STD(strcmp)(value, "1");
+	char const *const value = getenv("DLSSLOP_LAYER_NETWORK");
+	return value && !strcmp(value, "1");
 }
 
 /** @brief What keeps the in-layer network off a game's device.
@@ -221,7 +206,7 @@ device_features_network_requested (void)
  */
 static inline char const *
 device_features_network_unavailable (VkPhysicalDevice                                      physical,
-                                     DEVICE_FEATURES_STD(uint32_t)                         instance_version,
+                                     uint32_t                                              instance_version,
                                      PFN_vkGetPhysicalDeviceProperties2                    properties2,
                                      PFN_vkGetPhysicalDeviceFeatures2                      features2,
                                      PFN_vkEnumerateDeviceExtensionProperties              extensions,
@@ -246,13 +231,13 @@ device_features_add_network_extensions (VkDeviceCreateInfo  *info,
 {
 	if (!info || !list)
 		return false;
-	DEVICE_FEATURES_STD(uint32_t) const count = info->enabledExtensionCount;
+	uint32_t const count = info->enabledExtensionCount;
 	// The request's own list is in place already.
 	if (list != info->ppEnabledExtensionNames) {
-		for (DEVICE_FEATURES_STD(uint32_t) i = 0; i < count; ++i)
+		for (uint32_t i = 0; i < count; ++i)
 			list[i] = info->ppEnabledExtensionNames[i];
 	}
-	DEVICE_FEATURES_STD(uint32_t) const total = network_requirements_append_extensions(list, count);
+	uint32_t const total = network_requirements_append_extensions(list, count);
 	if (total == count)
 		return false;
 	info->enabledExtensionCount = total;
@@ -265,11 +250,11 @@ device_features_add_network_extensions (VkDeviceCreateInfo  *info,
  * @param structure The structure.
  * @return          Its size, or 0 if it is not one that struct device_features copies.
  */
-static inline DEVICE_FEATURES_STD(uint32_t)
+static inline uint32_t
 device_features_copy_size (void const *structure)
 {
 	VkStructureType const type = vk_chain_type(structure);
-	for (DEVICE_FEATURES_STD(uint32_t) i = 0; i < DEVICE_FEATURES_COPYABLE_COUNT; ++i) {
+	for (uint32_t i = 0; i < DEVICE_FEATURES_COPYABLE_COUNT; ++i) {
 		if (DEVICE_FEATURES_COPYABLE[i].type == type)
 			return DEVICE_FEATURES_COPYABLE[i].size;
 	}
@@ -284,14 +269,14 @@ device_features_copy_size (void const *structure)
  * @param count   The bits in @a changes.
  * @return        The bits of @a node that were set.
  */
-static inline DEVICE_FEATURES_STD(uint32_t)
+static inline uint32_t
 device_features_apply (void                               *copy,
                        void const                         *node,
                        struct device_features_place const *changes,
-                       DEVICE_FEATURES_STD(uint32_t)       count)
+                       uint32_t                            count)
 {
-	DEVICE_FEATURES_STD(uint32_t) applied = 0;
-	for (DEVICE_FEATURES_STD(uint32_t) i = 0; i < count; ++i) {
+	uint32_t applied = 0;
+	for (uint32_t i = 0; i < count; ++i) {
 		if (changes[i].node != node)
 			continue;
 		*vk_chain_bit(copy, changes[i].offset) = VK_TRUE;
@@ -315,19 +300,19 @@ static inline bool
 device_features_copy_prefix (struct device_features             *r,
                              void const                        **head,
                              struct device_features_place const *changes,
-                             DEVICE_FEATURES_STD(uint32_t)       count)
+                             uint32_t                            count)
 {
 	// The copies are linked behind an anchor, whose pNext is the chain's first structure.
 	VkBaseOutStructure anchor = {};
 	vk_chain_link(&anchor, *head);
 	void *previous = &anchor;
-	DEVICE_FEATURES_STD(uint32_t) copies = 0;
-	DEVICE_FEATURES_STD(uint32_t) left = count;
+	uint32_t copies = 0;
+	uint32_t left = count;
 	for (void const *node = *head; left; node = vk_chain_next(node)) {
-		DEVICE_FEATURES_STD(uint32_t) const size = device_features_copy_size(node);
+		uint32_t const size = device_features_copy_size(node);
 		if (!size || copies == DEVICE_FEATURES_COPIES)
 			return false;
-		void *const copy = DEVICE_FEATURES_STD(memcpy)(&r->copies[copies++], node, size);
+		void *const copy = memcpy(&r->copies[copies++], node, size);
 		vk_chain_link(previous, copy);
 		previous = copy;
 		left -= device_features_apply(copy, node, changes, count);
@@ -344,11 +329,11 @@ device_features_copy_prefix (struct device_features             *r,
  * @return          true if @a list holds @a structure.
  */
 static inline bool
-device_features_holds (void *const                   *list,
-                       DEVICE_FEATURES_STD(uint32_t)  count,
-                       void const                    *structure)
+device_features_holds (void *const *list,
+                       uint32_t     count,
+                       void const  *structure)
 {
-	for (DEVICE_FEATURES_STD(uint32_t) i = 0; i < count; ++i) {
+	for (uint32_t i = 0; i < count; ++i) {
 		if (list[i] == structure)
 			return true;
 	}
@@ -368,12 +353,12 @@ static inline void const *
 device_features_add_own (struct device_features              *r,
                          void const                          *head,
                          struct network_feature const *const *missing,
-                         DEVICE_FEATURES_STD(uint32_t)        count)
+                         uint32_t                             count)
 {
 	network_feature_chain_init(&r->added);
 	void *own[NETWORK_FEATURE_COUNT];
-	DEVICE_FEATURES_STD(uint32_t) owned = 0;
-	for (DEVICE_FEATURES_STD(uint32_t) i = 0; i < count; ++i) {
+	uint32_t owned = 0;
+	for (uint32_t i = 0; i < count; ++i) {
 		void *const structure = network_feature_chain_structure(&r->added, missing[i]->type);
 		*vk_chain_bit(structure, missing[i]->offset) = VK_TRUE;
 		if (!device_features_holds(own, owned, structure))
@@ -427,8 +412,8 @@ device_features_enable (struct device_features *r,
 	// The bits to set in the game's structures, and the network's that no structure carries.
 	struct device_features_place changes[1 + NETWORK_FEATURE_COUNT];
 	struct network_feature const *missing[NETWORK_FEATURE_COUNT];
-	DEVICE_FEATURES_STD(uint32_t) change_count = 0;
-	DEVICE_FEATURES_STD(uint32_t) missing_count = 0;
+	uint32_t change_count = 0;
+	uint32_t missing_count = 0;
 	VkPhysicalDeviceFeatures2 const *const features2 = device_features_core_features2(info);
 	VkPhysicalDeviceFeatures const *enabled = info->pEnabledFeatures;
 	// Without a VkPhysicalDeviceFeatures2, formatless storage writes go in a copy of pEnabledFeatures.
@@ -441,8 +426,8 @@ device_features_enable (struct device_features *r,
 		};
 		changes[change_count++] = place;
 	}
-	DEVICE_FEATURES_STD(uint32_t) const asked = network ? NETWORK_FEATURE_COUNT : 0;
-	for (DEVICE_FEATURES_STD(uint32_t) i = 0; i < asked; ++i) {
+	uint32_t const asked = network ? NETWORK_FEATURE_COUNT : 0;
+	for (uint32_t i = 0; i < asked; ++i) {
 		struct device_features_place const place =
 			device_features_network_feature_in(info->pNext, &NETWORK_FEATURES[i]);
 		if (!place.node)
@@ -457,11 +442,5 @@ device_features_enable (struct device_features *r,
 	info->pEnabledFeatures = enabled;
 	return true;
 }
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
-
-#undef DEVICE_FEATURES_STD
 
 #endif /* DLSSLOP_AMD_LAYER_DEVICE_FEATURES_H_ */

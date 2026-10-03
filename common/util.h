@@ -1,25 +1,19 @@
 /** @file
  *
  * Helpers for the project's C: force_inline, container_of() and min_d().
- *
- * Plain C, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_COMMON_UTIL_H_
 #define DLSSLOP_AMD_COMMON_UTIL_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-#else
-# include <stddef.h>
-#endif
+#include <stddef.h>
 
 /** @brief Declares a function of a header that every call inlines. */
 #define force_inline [[gnu::always_inline]] static inline
 
 /** @brief The struct that holds a member.
  *
- * A pointer of another type than the member's does not compile in C++, and draws a warning in C.
+ * A pointer of another type than the member's draws a warning.
  * A pointer to a const member gives a pointer to a struct that is not const.
  *
  * @param ptr    A pointer to the member.

@@ -112,14 +112,11 @@ These upstream names do not follow the rule:
 | `ShmMap::seq` and `firstHeartbeat`, `InstanceChain::next_gipa` and `DeviceChain::next_dpa` | none; the chains call their tables' `next_gipa` and `next_dpa` | nothing read the first two, and the others repeated their tables' members |
 | `Initialised` in shmctl.cpp | none; `attach` and `print_status` compare the magic and the version that they read | each word of the header is read once |
 
-The headers that C and C++ share stay valid C++23. `common/shm_protocol.h`
-declares the channel for both languages, `layer/vk_table.h` the dispatch tables,
-and `layer/dlssnr/DlssNr_Common.h` and `DlssNr_Layout.h` the composition
-shader's constant block. `common/shm_protocol.c` defines the channel header's
-functions, which both languages call. `ShmStoreString`, `ShmLoadString`,
-`ShmStore64` and `ShmLoad64` take the header and an `enum shm_text` or
-`enum shm_count` instead of the field's words, because a word is a
-`std::atomic<uint32_t>` in C++ and an `_Atomic(uint32_t)` in C.
+`common/shm_protocol.h` declares the channel for C and C++, and
+`common/shm_protocol.c` defines its functions, which both languages call.
+`ShmStoreString`, `ShmLoadString`, `ShmStore64` and `ShmLoad64` take the header
+and an `enum shm_text` or `enum shm_count` instead of the field's words, because
+a word is a `std::atomic<uint32_t>` in C++ and an `_Atomic(uint32_t)` in C.
 `common/shm_protocol.hpp` holds overloads that return a `std::string` of the
 functions that write a string into the caller's buffer and that C++ calls:
 `ShmNativeDefaultPath`, `ShmNativeChannelPath`, `ShmTransportPath` and

@@ -14,17 +14,11 @@
  * If a re-vendor changes the block, this stops compiling and whoever did it is pointed at the one
  * command that says what the new layout is. That is the whole intent: it is cheaper to re-read the
  * offsets than to debug a frame that is subtly wrong.
- *
- * The pins hold in C and C++ alike.
  */
 #ifndef DLSSLOP_AMD_LAYER_DLSSNR_DLSSNR_LAYOUT_H_
 #define DLSSLOP_AMD_LAYER_DLSSNR_DLSSNR_LAYOUT_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-#else
-# include <stddef.h>
-#endif
+#include <stddef.h>
 
 #include "DlssNr_Common.h"
 

@@ -11,17 +11,11 @@
  *
  * A pass embeds struct shader_vk as its first member: struct dlss_nr_pass and struct scaler_vk. What
  * a pass builds itself with is in shader_vk_priv.h.
- *
- * Plain C API, consumable from C++.
  */
 #ifndef DLSSLOP_AMD_LAYER_SHADER_VK_H_
 #define DLSSLOP_AMD_LAYER_SHADER_VK_H_
 
 #include "vk_table.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /** @brief The Vulkan objects that every pass has.
  *
@@ -70,9 +64,5 @@ shader_vk_set_image_layout (struct shader_vk const  *s,
                             VkImageLayout            old_layout,
                             VkImageLayout            new_layout,
                             VkImageSubresourceRange  subresource_range);
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_LAYER_SHADER_VK_H_ */
