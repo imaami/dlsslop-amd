@@ -725,6 +725,17 @@ zeroed (void const *p,
 	return true;
 }
 
+/** @brief Whether a pass holds a descriptor set that a failed allocation left. */
+static bool
+holds_poison (VkDescriptorSet const *sets,
+              uint32_t               count)
+{
+	for (uint32_t i = 0; i < count; ++i)
+		if (sets[i] == HANDLE(VkDescriptorSet, POISON))
+			return true;
+	return false;
+}
+
 /** @brief Builds and finishes a composition pass with each fallible call failing in turn. */
 static void
 check_pass_failures (void)
@@ -748,6 +759,8 @@ check_pass_failures (void)
 		VkResult const r = dlss_nr_pass_init(&pass, &device_table, &instance_table, DEVICE, PHYSICAL);
 		require(r == FAILURE && pass.error == FAILURE && !pass.shader.pipeline,
 		        "the composition pass's build with call %u failing returned %d", k, r);
+		require(!holds_poison(pass.descriptor_sets, DLSS_NR_PASS_SLOTS),
+		        "with call %u failing, the composition pass kept a set that it was not given", k);
 		require(!dlss_nr_pass_dispatch(&pass, CMD, &(struct dlss_nr_constants){}, 8, 8, VK_NULL_HANDLE,
 		                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, HANDLE(VkImageView, 1),
 		                               VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -788,6 +801,8 @@ check_scaler_failures (void)
 			                                  SCALER_VK_LANCZOS3);
 			require(r == FAILURE && scaler.error == FAILURE && !scaler.shader.pipeline,
 			        "the scaling pass's build with call %u failing returned %d", k, r);
+			require(!holds_poison(scaler.descriptor_sets, SCALER_VK_SLOTS),
+			        "with call %u failing, the scaling pass kept a set that it was not given", k);
 			require(!scaler_vk_dispatch(&scaler, CMD, HANDLE(VkImageView, 1), HANDLE(VkImageView, 2), 8, 8, 4, 4)
 			        && !fake.dispatches, "an unbuilt scaling pass dispatched");
 			scaler_vk_fini(&scaler);

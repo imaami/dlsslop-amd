@@ -244,10 +244,15 @@ shader_vk_create_descriptor_sets (struct shader_vk const *s,
 		.descriptorSetCount = count,
 		.pSetLayouts        = layouts
 	};
-	VkResult const r = s->vk->vkAllocateDescriptorSets(s->device, &allocate_info, sets);
-	if (r != VK_SUCCESS)
+	// A failed call leaves its output undefined, so the sets reach the caller only on success.
+	VkDescriptorSet allocated[SHADER_VK_SETS_MAX];
+	VkResult const r = s->vk->vkAllocateDescriptorSets(s->device, &allocate_info, allocated);
+	if (r != VK_SUCCESS) {
 		log_printf("[%s] vkAllocateDescriptorSets failed (%u sets)", s->name, count);
-	return r;
+		return r;
+	}
+	memcpy(sets, allocated, count * sizeof *sets);
+	return VK_SUCCESS;
 }
 
 VkResult

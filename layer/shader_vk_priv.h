@@ -127,7 +127,7 @@ static constexpr uint32_t SHADER_VK_SETS_MAX = 18;
  *
  * @param s     A base whose descriptor set layout and pool exist.
  * @param count The number of sets, from 1 to SHADER_VK_SETS_MAX.
- * @param sets  Receives the sets.
+ * @param sets  Receives the sets, and is left as it was if they were not allocated.
  * @return      VK_SUCCESS, VK_ERROR_INITIALIZATION_FAILED for a count out of range, or what
  *              vkAllocateDescriptorSets() returned.
  */
