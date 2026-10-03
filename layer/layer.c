@@ -381,15 +381,17 @@ shm_map_open (struct shm_map *s)
 	// indistinguishable from "the new feature does nothing", which is how a stale layer reads until
 	// someone checks the log.
 	// Each word read once: another process may be rewriting them.
-	uint32_t const magic = atomic_load(&s->hdr->magic);
-	uint32_t const version = atomic_load(&s->hdr->version);
-	if (magic != kShmMagic || version != kShmVersion || atomic_load(&s->hdr->passes) == 0) {
-		if (magic == kShmMagic && version != kShmVersion)
+	bool stale = atomic_load(&s->hdr->magic) != kShmMagic;
+	if (!stale) {
+		uint32_t const version = atomic_load(&s->hdr->version);
+		stale = version != kShmVersion;
+		if (stale)
 			log_printf("[shm] header is version %u but this layer is v%u -- another process is out of "
 			           "date, re-initialising it; update the layer, the helper and the GUI together",
 			           version, kShmVersion);
-		ShmInitDefaults(s->hdr);
 	}
+	if (stale || atomic_load(&s->hdr->passes) == 0)
+		ShmInitDefaults(s->hdr);
 	s->last_heartbeat = atomic_load(&s->hdr->heartbeat);
 	log_printf("[shm] attached %s seq_req=%u seq_resp=%u", s->path, atomic_load(&s->hdr->seq_req),
 	           atomic_load(&s->hdr->seq_resp));
@@ -1827,7 +1829,7 @@ network_available (struct instance_chain const *ic,
  * copies of the game's structures it changes; behind a structure it cannot copy it declines, which
  * disables composition safely.
  *
- * @param ic       The instance's chain, or nullptr.
+ * @param ic       The instance's chain.
  * @param physical The physical device.
  * @param features The request, empty.
  * @param modified The create info that the request changes.
@@ -1842,9 +1844,8 @@ add_features (struct instance_chain const *ic,
               bool                         network)
 {
 	VkPhysicalDeviceFeatures supported = {0};
-	PFN_vkGetPhysicalDeviceFeatures const query = ic ? ic->table.vkGetPhysicalDeviceFeatures : nullptr;
-	if (query)
-		query(physical, &supported);
+	if (ic->table.vkGetPhysicalDeviceFeatures)
+		ic->table.vkGetPhysicalDeviceFeatures(physical, &supported);
 	if (!supported.shaderStorageImageWriteWithoutFormat) {
 		log_printf("[layer] formatless storage writes unsupported; compositor disabled");
 		return false;
@@ -1917,23 +1918,27 @@ hook_create_device (VkPhysicalDevice             physicalDevice,
 	struct instance_chain *const ic = instance_for_physical(physicalDevice);
 	pthread_mutex_unlock(&g_state_mutex);
 
+	link->u.pLayerInfo = link->u.pLayerInfo->pNext;
+	VkLayerDeviceLink *const next_layer_info = link->u.pLayerInfo;
+
+	// The layer's additions, where it is on and knows the instance.
 	bool const enabled = layer_enabled();
 	VkDeviceCreateInfo const *effective = pCreateInfo;
 	VkDeviceCreateInfo modified = *pCreateInfo;
-	if (enabled && ic && add_wanted_extensions(ic, physicalDevice, pCreateInfo, &modified, extensions))
-		effective = &modified;
-	// The in-layer network, on request, where the game's instance and device allow it.
-	bool const network = enabled && ic && network_available(ic, physicalDevice);
-	// The request's extensions and the network's, in the layer's list.
-	if (network && device_features_add_network_extensions(&modified, extensions))
-		effective = &modified;
-
-	link->u.pLayerInfo = link->u.pLayerInfo->pNext;
-	VkLayerDeviceLink *const next_layer_info = link->u.pLayerInfo;
-	// After the link moved on: the request may copy the loader's node.
 	struct device_features features = {0};
-	if (enabled && add_features(ic, physicalDevice, &features, &modified, network))
-		effective = &modified;
+	bool network = false;
+	if (enabled && ic) {
+		if (add_wanted_extensions(ic, physicalDevice, pCreateInfo, &modified, extensions))
+			effective = &modified;
+		// The in-layer network, on request, where the game's instance and device allow it.
+		network = network_available(ic, physicalDevice);
+		// The request's extensions and the network's, in the layer's list.
+		if (network && device_features_add_network_extensions(&modified, extensions))
+			effective = &modified;
+		// After the link moved on: the request may copy the loader's node.
+		if (add_features(ic, physicalDevice, &features, &modified, network))
+			effective = &modified;
+	}
 	VkResult res = create(physicalDevice, effective, pAllocator, pDevice);
 	if (res != VK_SUCCESS && effective != pCreateInfo) {
 		// Nothing added here is worth failing a device creation over.
@@ -2217,24 +2222,36 @@ hook_create_swapchain_khr (VkDevice                        device,
 	if (!dc || !dc->table.vkCreateSwapchainKHR)
 		return VK_ERROR_INITIALIZATION_FAILED;
 
+	if (atomic_load(&dc->inert) || !layer_enabled())
+		return dc->table.vkCreateSwapchainKHR(device, pCreateInfo, pAllocator, pSwapchain);
+
 	// Native HIP supports display-referred SDR, linear scRGB/BT.709 FP16, and PQ/BT.2020 HDR10. Other
 	// transfer/primary combinations need their own color conversion and remain pass-through.
 	VkFormat const format = pCreateInfo->imageFormat;
 	VkColorSpaceKHR const space = pCreateInfo->imageColorSpace;
+	uint32_t const width = pCreateInfo->imageExtent.width;
+	uint32_t const height = pCreateInfo->imageExtent.height;
 	uint32_t const hdr_kind = detect_hdr_kind(format, space);
-	bool const format_supported = supported_format(format);
-	bool const unsupported_hdr = !(space == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
-	                               || (format == VK_FORMAT_R16G16B16A16_SFLOAT
-	                                   && space == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT)
-	                               || hdr_kind == kHdrPq10);
-	bool const active = !atomic_load(&dc->inert) && layer_enabled();
-	bool const unsupported_transfer = active && !surface_transfers(dc, pCreateInfo->surface);
+	bool const supported_space = space == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+	                             || (format == VK_FORMAT_R16G16B16A16_SFLOAT
+	                                 && space == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT)
+	                             || hdr_kind == kHdrPq10;
+	// Why its frames present untouched, the first reason that holds; empty if they do not. A swapchain
+	// that the pass can compose asks for the transfers, whatever its size.
+	char const *pass_through = !supported_space ? " (unsupported color space for native HIP)"
+	                           : !surface_transfers(dc, pCreateInfo->surface) ? " (surface cannot transfer frames)"
+	                           : !supported_format(format) ? " (unsupported format)"
+	                           : "";
 	VkSwapchainCreateInfoKHR m = *pCreateInfo;
-	if (active && !unsupported_hdr && !unsupported_transfer && format_supported)
+	if (!*pass_through) {
 		m.imageUsage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+		pass_through = width < kMinW || height < kMinH ? " (too small)"
+		               : width > kMaxW || height > kMaxH ? " (too large)"
+		               : "";
+	}
 
 	VkResult const res = dc->table.vkCreateSwapchainKHR(device, &m, pAllocator, pSwapchain);
-	if (res != VK_SUCCESS || !active || atomic_load(&dc->inert))
+	if (res != VK_SUCCESS)
 		return res;
 	// A failed call leaves the count undefined, and a failed listing the images.
 	uint32_t count = 0;
@@ -2257,24 +2274,17 @@ hook_create_swapchain_khr (VkDevice                        device,
 		return VK_SUCCESS;
 	}
 
+	bool const passes_through = *pass_through;
 	sc->format = format;
 	sc->hdr_kind = hdr_kind;
-	sc->width = pCreateInfo->imageExtent.width;
-	sc->height = pCreateInfo->imageExtent.height;
-	// Why its frames present untouched, the first reason that holds; empty if they do not.
-	char const *const pass_through = unsupported_hdr ? " (unsupported color space for native HIP)"
-	                                 : unsupported_transfer ? " (surface cannot transfer frames)"
-	                                 : !format_supported ? " (unsupported format)"
-	                                 : sc->width < kMinW || sc->height < kMinH ? " (too small)"
-	                                 : sc->width > kMaxW || sc->height > kMaxH ? " (too large)"
-	                                 : "";
-	if (*pass_through)
-		sc->flags |= SWAPCHAIN_STATE_PASS_THROUGH;
+	sc->width = width;
+	sc->height = height;
+	sc->flags |= passes_through ? SWAPCHAIN_STATE_PASS_THROUGH : 0;
 
 	pthread_mutex_lock(&dc->lock);
 	log_printf("[layer] swapchain %#" PRIx64 " %ux%u fmt=%d hdr=%u passThrough=%d%s",
-	           (uint64_t)*pSwapchain, pCreateInfo->imageExtent.width, pCreateInfo->imageExtent.height,
-	           (int)format, sc->hdr_kind, (int)(*pass_through != '\0'), pass_through);
+	           (uint64_t)*pSwapchain, width, height, (int)format, hdr_kind, (int)passes_through,
+	           pass_through);
 	list_append(&dc->swapchains, &sc->node);
 	pthread_mutex_unlock(&dc->lock);
 	return VK_SUCCESS;
