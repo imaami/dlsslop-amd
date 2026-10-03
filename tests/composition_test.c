@@ -4,7 +4,8 @@
  * and what composition_fini() destroys, in each arrangement of surfaces and after a failure at each
  * fallible call; that every handle the composition holds is alive and every live object is held;
  * that no command or descriptor names a destroyed object; that a rebuild keeps a captured frame of
- * the same shape; what each leg dispatches and copies; the descriptors of the transport offer; and the
+ * the same shape; what each leg dispatches and copies; the descriptors of the transport offer; the
+ * builds for the in-layer network, without the pair, their handover barriers and generations; and the
  * swapchain formats that the composition cannot write. What the shaders compute is
  * composition-rebuild-test's and hdr-shader-test's, on a real device.
  */
@@ -59,15 +60,29 @@ enum kind {
 struct object {
 	void     *map;    //!< A memory's mapping, while it is mapped.
 	uint64_t  handle; //!< Its handle.
-	uint64_t  size;   //!< A buffer's or a memory's size.
+	uint64_t  size;   //!< A buffer's or a memory's size, or an image's usage.
 	uint64_t  pool;   //!< A set's pool.
 	enum kind kind;   //!< What it is.
 	uint32_t  live;   //!< Whether it is alive: 32 bits wide, which fills the padding.
 };
 
+/** @brief An image barrier that the fake device recorded. */
+struct image_barrier {
+	uint64_t             image;  //!< The image.
+	VkPipelineStageFlags from;   //!< The call's source stages.
+	VkPipelineStageFlags to;     //!< The call's destination stages.
+	VkAccessFlags        src;    //!< The image's source access.
+	VkAccessFlags        dst;    //!< The image's destination access.
+	VkImageLayout        old;    //!< The image's layout before.
+	VkImageLayout        layout; //!< The image's layout after.
+	uint32_t             call;   //!< The call that recorded it, as fake.calls counted it.
+	uint32_t             images; //!< The call's image barriers.
+};
+
 /** @brief The fake device's state. ownership is a size_t, which fills the padding. */
 static struct {
 	struct object        objects[16384]; //!< Every object handed out, in order.
+	struct image_barrier barriers[64];   //!< The first image barriers since the last mark.
 	VkFormatFeatureFlags features;       //!< What every format's optimal tiling supports.
 	VkFormat             no_storage[2];  //!< Formats that cannot be storage images.
 	int                  fds[4];         //!< The descriptors vkGetMemoryFdKHR() made, open or -1.
@@ -85,6 +100,7 @@ static struct {
 	uint32_t             uploads;        //!< Buffer-to-image copies recorded.
 	uint32_t             fills;          //!< Buffer fills recorded.
 	size_t               ownership;      //!< Barriers that move a buffer to or from another family.
+	size_t               barrier_count;  //!< Image barriers since the last mark.
 } fake = { .fds = { -1, -1, -1, -1 } };
 
 /** @brief Hands out an object of a kind. */
@@ -491,7 +507,7 @@ create_image (VkDevice                     d,
 {
 	require(i->extent.width && i->extent.height && i->extent.depth == 1, "an image of %ux%ux%u",
 	        i->extent.width, i->extent.height, i->extent.depth);
-	CREATE(VkImage, KIND_IMAGE, 0, out);
+	CREATE(VkImage, KIND_IMAGE, i->usage, out);
 }
 
 /** @brief The fake vkDestroyImage(). */
@@ -720,8 +736,22 @@ pipeline_barrier (VkCommandBuffer              cb,
 		live(VALUE(b[k].buffer), KIND_BUFFER);
 		fake.ownership += b[k].srcQueueFamilyIndex != b[k].dstQueueFamilyIndex;
 	}
-	for (uint32_t k = 0; k < images; ++k)
+	for (uint32_t k = 0; k < images; ++k) {
 		live_image(i[k].image);
+		if (fake.barrier_count < sizeof fake.barriers / sizeof *fake.barriers)
+			fake.barriers[fake.barrier_count] = (struct image_barrier){
+				.image  = VALUE(i[k].image),
+				.from   = src,
+				.to     = dst,
+				.src    = i[k].srcAccessMask,
+				.dst    = i[k].dstAccessMask,
+				.old    = i[k].oldLayout,
+				.layout = i[k].newLayout,
+				.call   = fake.calls,
+				.images = images
+			};
+		++fake.barrier_count;
+	}
 }
 
 /** @brief The fake vkGetMemoryFdKHR(): a new descriptor for a live memory. */
@@ -982,6 +1012,29 @@ require_held (struct composition const *c,
 	        live_objects());
 }
 
+/** @brief The usage that a live image was made with. */
+static VkImageUsageFlags
+usage_of (VkImage image)
+{
+	return (VkImageUsageFlags)live(VALUE(image), KIND_IMAGE)->size;
+}
+
+/** @brief Whether a recorded image barrier moves an image between layouts, from and to accesses and
+ *         stages. */
+static bool
+moves (struct image_barrier const *b,
+       VkImage                     image,
+       VkImageLayout               old,
+       VkImageLayout               layout,
+       VkAccessFlags               src,
+       VkAccessFlags               dst,
+       VkPipelineStageFlags        from,
+       VkPipelineStageFlags        to)
+{
+	return b->image == VALUE(image) && b->old == old && b->layout == layout && b->src == src && b->dst == dst
+	       && b->from == from && b->to == to;
+}
+
 #undef VALUE
 
 /** @brief An arrangement of the composition's surfaces. objects is a size_t, which fills the padding. */
@@ -1051,7 +1104,7 @@ prepare (struct composition       *c,
          struct arrangement const *a)
 {
 	struct composition_frame_settings const s = settings(a);
-	return composition_prepare(c, WIDTH, HEIGHT, a->format, &s, a->linear_hdr, a->hdr_proxy, 0);
+	return composition_prepare(c, WIDTH, HEIGHT, a->format, &s, a->linear_hdr, a->hdr_proxy, 0, false);
 }
 
 /** @brief Records both legs of a frame, which must succeed, and checks their dispatches and copies. */
@@ -1075,6 +1128,58 @@ record (struct composition       *c,
 	require(fake.image_copies - copies == 1 && fake.uploads == 1, "%s: leg 2 made %u image copies and %u"
 	        " uploads", a->name, fake.image_copies - copies, fake.uploads);
 	require(!composition_capture_recorded(c), "%s: a pair was recorded without a capture", a->name);
+}
+
+/** @brief Prepares a composition for an arrangement, for the in-layer network. */
+static bool
+prepare_network (struct composition       *c,
+                 struct arrangement const *a)
+{
+	struct composition_frame_settings const s = settings(a);
+	return composition_prepare(c, WIDTH, HEIGHT, a->format, &s, a->linear_hdr, a->hdr_proxy, 0, true);
+}
+
+/** @brief Records both legs of a frame for the in-layer network, which must succeed: leg 1 reads
+ *         nothing back and ends with one barrier that hands its input to compute reads in
+ *         SHADER_READ_ONLY_OPTIMAL and the model image to compute and transfer writes in GENERAL;
+ *         leg 2 uploads nothing, takes the model image back from both writers into compute reads
+ *         first, and copies one image into the swapchain image. */
+static void
+record_network (struct composition       *c,
+                struct arrangement const *a)
+{
+	struct composition_frame_settings const s = settings(a);
+	VkPipelineStageFlags const both = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
+	VkAccessFlags const writes = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT;
+	struct composition_image const *const input = composition_network_input(c);
+	VkImageLayout const model = c->model.layout;
+	uint32_t const dispatches = fake.dispatches;
+	uint32_t const readbacks = fake.readbacks;
+	uint32_t const uploads = fake.uploads;
+	fake.barrier_count = 0;
+	require(composition_record_capture(c, CMD, SWAPCHAIN, &s), "%s: leg 1 was not recorded", a->name);
+	size_t const n = fake.barrier_count;
+	require(n >= 2 && n <= sizeof fake.barriers / sizeof *fake.barriers, "%s: leg 1 recorded %zu image barriers",
+	        a->name, n);
+	struct image_barrier const *const handed = &fake.barriers[n - 2];
+	require(fake.dispatches - dispatches == a->leg1 && fake.readbacks == readbacks
+	        && handed[0].call == handed[1].call && handed[0].images == 2
+	        && moves(&handed[0], input->image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+	                 VK_ACCESS_SHADER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, both, both)
+	        && moves(&handed[1], c->model.image, model, VK_IMAGE_LAYOUT_GENERAL, 0, writes, both, both)
+	        && input->layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+	        && c->model.layout == VK_IMAGE_LAYOUT_GENERAL,
+	        "%s: leg 1 read back an image, or did not end handing its input and the model image over in one"
+	        " barrier", a->name);
+	uint32_t const copies = fake.image_copies;
+	fake.barrier_count = 0;
+	require(composition_record_compose(c, CMD, SWAPCHAIN, &s), "%s: leg 2 was not recorded", a->name);
+	require(fake.dispatches - dispatches - a->leg1 == a->leg2 && fake.uploads == uploads
+	        && fake.image_copies - copies == 1 && fake.barrier_count && fake.barriers[0].images == 1
+	        && moves(&fake.barriers[0], c->model.image, VK_IMAGE_LAYOUT_GENERAL,
+	                 VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, writes, VK_ACCESS_SHADER_READ_BIT, both,
+	                 VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT),
+	        "%s: leg 2 uploaded an answer, or did not take the model image back first", a->name);
 }
 
 /** @brief Builds, records and finishes each arrangement. */
@@ -1139,7 +1244,7 @@ check_build_failures (void)
 		require(!live_objects() && !fake.mapped, "with call %u failing, the build left %u objects", k,
 		        live_objects());
 		struct composition_frame_settings const s = composition_frame_settings();
-		require(!composition_prepare(&c, WIDTH, HEIGHT, VK_FORMAT_B8G8R8A8_UNORM, &s, false, false, 0)
+		require(!composition_prepare(&c, WIDTH, HEIGHT, VK_FORMAT_B8G8R8A8_UNORM, &s, false, false, 0, false)
 		        && !composition_record_capture(&c, CMD, SWAPCHAIN, &s)
 		        && !composition_record_compose(&c, CMD, SWAPCHAIN, &s), "an unbuilt composition ran");
 		composition_fini(&c);
@@ -1162,13 +1267,15 @@ check_build_failures (void)
 /** @brief Builds an arrangement with one fallible call failing, then again without one, and records
  *         and finishes it.
  *
- * @param a      The arrangement.
- * @param k      The fallible call that fails, from 1.
- * @param failed Counts the failed builds.
- * @return       The fallible calls that the failing build made: fewer than @a k when none failed.
+ * @param a       The arrangement.
+ * @param network Whether the build is for the in-layer network.
+ * @param k       The fallible call that fails, from 1.
+ * @param failed  Counts the failed builds.
+ * @return        The fallible calls that the failing build made: fewer than @a k when none failed.
  */
 static uint32_t
 prepare_failing (struct arrangement const *a,
+                 bool                      network,
                  uint32_t                  k,
                  uint32_t                 *failed)
 {
@@ -1178,7 +1285,7 @@ prepare_failing (struct arrangement const *a,
 		composition_enable_export(&c, 3);
 	fake.creates = 0;
 	fake.fail_at = k;
-	bool const ok = prepare(&c, a);
+	bool const ok = network ? prepare_network(&c, a) : prepare(&c, a);
 	uint32_t const steps = fake.creates;
 	fake.fail_at = 0;
 	char when[96];
@@ -1186,30 +1293,48 @@ prepare_failing (struct arrangement const *a,
 	require(length >= 0 && length < (int)sizeof when, "the case %s is too long to name", a->name);
 	require_held(&c, when);
 	*failed += !ok;
-	require(ok || (!c.frame.image && !c.download.buffer && !c.width && !c.model_w && composition_usable(&c)
+	require(ok || (!c.frame.image && !c.download.buffer && !c.width && !c.model_w && !c.generation
+	               && composition_usable(&c)
 	               && !strcmp(composition_reason(&c), "could not allocate the composition surfaces")),
 	        "%s: the failed build left surfaces, or the reason %s", when, composition_reason(&c));
 
 	// The next frame builds everything and composes.
-	require(prepare(&c, a), "%s: the next build failed: %s", when, composition_reason(&c));
-	require_held(&c, when);
-	record(&c, a);
+	if (network) {
+		require(prepare_network(&c, a), "%s: the next build failed: %s", when, composition_reason(&c));
+		require_held(&c, when);
+		record_network(&c, a);
+	} else {
+		require(prepare(&c, a), "%s: the next build failed: %s", when, composition_reason(&c));
+		require_held(&c, when);
+		record(&c, a);
+	}
 	composition_fini(&c);
 	require(!live_objects() && !fake.mapped && empty(&c), "%s: the fini left %u objects", when,
 	        live_objects());
 	return steps;
 }
 
+/** @brief Builds an arrangement with each fallible call failing in turn.
+ *
+ * @param a       The arrangement.
+ * @param network Whether the builds are for the in-layer network.
+ */
+static void
+prepare_failures (struct arrangement const *a,
+                  bool                      network)
+{
+	uint32_t failed = 0;
+	for (uint32_t k = 1; prepare_failing(a, network, k, &failed) >= k; ++k)
+		continue;
+	require(failed, "%s: no failure failed the build", a->name);
+}
+
 /** @brief Builds each arrangement with each fallible call failing in turn. */
 static void
 check_prepare_failures (void)
 {
-	for (size_t i = 0; i < sizeof ARRANGEMENTS / sizeof *ARRANGEMENTS; ++i) {
-		uint32_t failed = 0;
-		for (uint32_t k = 1; prepare_failing(&ARRANGEMENTS[i], k, &failed) >= k; ++k)
-			continue;
-		require(failed, "%s: no failure failed the build", ARRANGEMENTS[i].name);
-	}
+	for (size_t i = 0; i < sizeof ARRANGEMENTS / sizeof *ARRANGEMENTS; ++i)
+		prepare_failures(&ARRANGEMENTS[i], false);
 }
 
 /** @brief A rebuild keeps a captured frame of the same shape, and a held frame is not copied again. */
@@ -1453,6 +1578,104 @@ check_export (void)
 	require(!live_objects(), "the fini left %u objects", live_objects());
 }
 
+/** @brief The arrangements that the in-layer network takes: an 8-bit BGRA frame, an sRGB one below the
+ *         frame's raster, linear float16 and an 8-bit proxy of linear light, and the raw bypass. */
+static size_t const NETWORK_ARRANGEMENTS[] = { 0, 1, 3, 4, 6 };
+
+/** @brief Builds for the in-layer network: no transport pair, even with the export on or declined, a
+ *         model image that takes storage writes, both legs as record_network() says, after a failure
+ *         at any step too; a generation that only a rebuild changes, that no other build had, and that
+ *         is 0 without surfaces; and a held frame kept when a composition switches between dlsslopd and
+ *         the in-layer network. */
+static void
+check_network (void)
+{
+	for (size_t i = 0; i < sizeof NETWORK_ARRANGEMENTS / sizeof *NETWORK_ARRANGEMENTS; ++i) {
+		struct arrangement const *const a = &ARRANGEMENTS[NETWORK_ARRANGEMENTS[i]];
+		reset();
+		struct composition c = built();
+		composition_enable_export(&c, 3);
+		require(prepare_network(&c, a), "%s for the network: the build failed: %s", a->name,
+		        composition_reason(&c));
+		require_held(&c, a->name);
+		uint64_t const generation = composition_generation(&c);
+		require(generation && (c.flags & COMPOSITION_NETWORK) && !c.download.buffer && !c.upload.buffer
+		        && !composition_transport_pending(&c) && !composition_transport_exported(&c)
+		        && (usage_of(c.model.image) & VK_IMAGE_USAGE_STORAGE_BIT)
+		        && composition_network_answer(&c) == &c.model
+		        && composition_network_input(&c) == (c.work.image ? &c.work : &c.proxy),
+		        "%s for the network: a transport pair, no storage usage or no generation", a->name);
+		uint32_t const calls = fake.calls - fake.format_queries;
+		require(prepare_network(&c, a) && fake.calls - fake.format_queries == calls
+		        && composition_generation(&c) == generation, "%s for the network: a second build of the same"
+		        " frame called the device or took another generation", a->name);
+		record_network(&c, a);
+		record_network(&c, a);
+		composition_disable_export(&c);
+		require(!c.download.buffer && !c.upload.buffer && c.frame.image
+		        && composition_generation(&c) == generation, "%s for the network: a declined export made a"
+		        " pair or dropped the surfaces", a->name);
+		require_held(&c, a->name);
+		require(live_objects() == a->objects - 4, "%s for the network: %u live objects, not %zu", a->name,
+		        live_objects(), a->objects - 4);
+		composition_fini(&c);
+		require(!live_objects() && !fake.mapped && empty(&c) && !composition_generation(&c), "%s for the"
+		        " network: the fini left %u objects", a->name, live_objects());
+		prepare_failures(a, true);
+	}
+
+	// Every build has a generation of its own.
+	reset();
+	struct composition one = built();
+	struct composition two = built();
+	struct arrangement a = ARRANGEMENTS[0];
+	require(prepare_network(&one, &a) && prepare(&two, &a), "two compositions were not built");
+	uint64_t const first = composition_generation(&one);
+	uint64_t const second = composition_generation(&two);
+	a.working_scale = 0.5f;
+	require(prepare_network(&one, &a), "a rebuild for another model raster failed");
+	uint64_t const third = composition_generation(&one);
+	require(first && second && third && first != second && third != first && third != second,
+	        "generations %llu, %llu and %llu", (unsigned long long)first, (unsigned long long)second,
+	        (unsigned long long)third);
+	require(!composition_generation(nullptr) && !composition_network_input(nullptr)
+	        && !composition_network_answer(nullptr), "an absent composition has a generation or images");
+	// A rebuild that fails leaves no surfaces, and so no generation.
+	a.working_scale = 0.75f;
+	fake.creates = 0;
+	fake.fail_at = 1;
+	require(!prepare_network(&one, &a) && !one.frame.image && !composition_generation(&one), "a failed rebuild"
+	        " kept surfaces or a generation");
+	fake.fail_at = 0;
+	composition_fini(&one);
+	composition_fini(&two);
+	require(!live_objects() && !composition_generation(&one), "the fini left %u objects", live_objects());
+
+	// A switch to dlsslopd and back rebuilds every surface but the held frame.
+	reset();
+	struct composition c = built();
+	a = ARRANGEMENTS[0];
+	struct composition_frame_settings s = settings(&a);
+	s.hold_frame = 1;
+	require(prepare_network(&c, &a) && composition_record_capture(&c, CMD, SWAPCHAIN, &s)
+	        && (c.flags & COMPOSITION_HOLDING) && (c.flags & COMPOSITION_FRAME_CAPTURED), "no held frame");
+	VkImage const held_frame = c.frame.image;
+	uint64_t const network = composition_generation(&c);
+	require(prepare(&c, &a) && c.frame.image == held_frame && (c.flags & COMPOSITION_FRAME_CAPTURED)
+	        && !(c.flags & COMPOSITION_NETWORK) && c.download.buffer && c.upload.buffer
+	        && composition_generation(&c) != network, "a switch to dlsslopd did not rebuild, or lost the held"
+	        " frame");
+	uint64_t const daemon = composition_generation(&c);
+	require(prepare_network(&c, &a) && c.frame.image == held_frame && (c.flags & COMPOSITION_FRAME_CAPTURED)
+	        && (c.flags & COMPOSITION_NETWORK) && !c.download.buffer && !c.upload.buffer
+	        && composition_generation(&c) != daemon, "a switch to the network did not rebuild, or lost the"
+	        " held frame");
+	require_held(&c, "a switch to the network");
+	record_network(&c, &a);
+	composition_fini(&c);
+	require(!live_objects() && !fake.mapped, "the fini left %u objects", live_objects());
+}
+
 /** @brief Swapchain formats that the device cannot write. */
 static void
 check_formats (void)
@@ -1513,8 +1736,8 @@ check_empty (void)
 	composition_fini(nullptr);
 	require(!composition_usable(&c) && !composition_usable(nullptr) && !*composition_reason(&c)
 	        && !composition_reason(nullptr), "an empty composition is usable or has a reason");
-	require(!composition_prepare(&c, WIDTH, HEIGHT, VK_FORMAT_B8G8R8A8_UNORM, &s, false, false, 0)
-	        && !composition_prepare(nullptr, WIDTH, HEIGHT, VK_FORMAT_B8G8R8A8_UNORM, &s, false, false, 0)
+	require(!composition_prepare(&c, WIDTH, HEIGHT, VK_FORMAT_B8G8R8A8_UNORM, &s, false, false, 0, false)
+	        && !composition_prepare(nullptr, WIDTH, HEIGHT, VK_FORMAT_B8G8R8A8_UNORM, &s, false, false, 0, false)
 	        && !composition_record_capture(&c, CMD, SWAPCHAIN, &s)
 	        && !composition_record_capture(nullptr, CMD, SWAPCHAIN, &s)
 	        && !composition_record_compose(&c, CMD, SWAPCHAIN, &s)
@@ -1561,6 +1784,7 @@ main (void)
 	check_capture_pair();
 	check_offer();
 	check_export();
+	check_network();
 	check_formats();
 	reset();
 	puts("PASS: the composition builds, records and frees what it creates, after a failure at any step too");

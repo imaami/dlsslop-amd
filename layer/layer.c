@@ -3030,7 +3030,7 @@ process_present_ (struct device_chain    *dc,
 	uint32_t const hdr_transfer = linear_hdr && sc->hdr_kind == kHdrPq10 ? 1u : 0u;
 
 	if (!composition_prepare(&sc->comp, sc->width, sc->height, sc->format, &fs, linear_hdr, hdr_proxy,
-	                         hdr_transfer)) {
+	                         hdr_transfer, false)) {
 		log_printf("[layer] composition cannot run here: %s", composition_reason(&sc->comp));
 		return false;
 	}

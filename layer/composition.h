@@ -17,6 +17,10 @@
  * construction, so the helper never has to know what format the game presents in, and the working
  * scale reduces it quadratically.
  *
+ * The in-layer network runs the model on the game's device between the legs instead, in the same
+ * submission: it samples the proxy where leg 1 leaves it and answers into the model image, so nothing
+ * crosses and there is no host buffer.
+ *
  * The composition itself -- what the resolve does with the model's answer -- is entirely the vendored
  * shader's. Everything in this file is plumbing: which image is bound where, in what layout, and what
  * goes in the constant block.
@@ -133,7 +137,8 @@ enum composition_flags : COMPOSITION_STD(uint64_t) {
 	COMPOSITION_TRANSPORT_READY     = 1 << 5, //!< The daemon imported the exported pair.
 	COMPOSITION_CAPTURE_RECORDED    = 1 << 6, //!< This frame's compose recorded a capture pair.
 	COMPOSITION_HOLDING             = 1 << 7, //!< The frame is held.
-	COMPOSITION_FRAME_CAPTURED      = 1 << 8  //!< frame holds a frame that leg 1 copied.
+	COMPOSITION_FRAME_CAPTURED      = 1 << 8, //!< frame holds a frame that leg 1 copied.
+	COMPOSITION_NETWORK             = 1 << 9  //!< Built for the in-layer network: no transport pair.
 };
 
 /** @brief The composition of one swapchain: the pass, the surfaces sized to its frames, and the
@@ -145,7 +150,8 @@ enum composition_flags : COMPOSITION_STD(uint64_t) {
  * so a handle is stored only once the call that made it has succeeded. error is the build's
  * failure, or VK_ERROR_FORMAT_NOT_SUPPORTED once composition_prepare() finds that the device cannot
  * write the swapchain's format. The flags are 64 bits wide, which fills the padding that a narrower
- * member would leave.
+ * member would leave. generation tells the surfaces' builds apart where their handles cannot: a
+ * destroyed object's handle can come back for a new one.
  *
  * Supersampling: the model works above the frame, so the proxy is enlarged on the way in and the
  * answer averaged back on the way out. model_native holds that average; without it the resolve would
@@ -196,6 +202,7 @@ struct composition {
 	VkDescriptorSet                 meter_descriptor_set;    //!< Its set.
 	VkSampler                       meter_sampler;           //!< The sampler it reads the grid with.
 	COMPOSITION_STD(uint64_t)       flags;                   //!< enum composition_flags.
+	COMPOSITION_STD(uint64_t)       generation;              //!< The surfaces' build, unique; 0: none.
 	COMPOSITION_STD(uint32_t)       width;                   //!< The frame's width.
 	COMPOSITION_STD(uint32_t)       height;                  //!< The frame's height.
 	COMPOSITION_STD(uint32_t)       model_w;                 //!< The model's width.
@@ -363,6 +370,11 @@ composition_model_extent (COMPOSITION_STD(uint32_t)                width,
  * HIP is the exception: its network cannot consume the NGX linear-light float proxy, so the proxy
  * stays sRGB-encoded at either precision and @a hdr_transfer is honoured with an RGBA8 proxy too.
  *
+ * @a network builds the surfaces for the in-layer network, which samples the proxy and answers into
+ * the model image on the device: no transport pair, and a model image that takes storage writes. A
+ * build for the other kind rebuilds every surface, keeping a held frame. Each build takes a generation
+ * that no other build in the process had.
+ *
  * @param c                The composition, or nullptr.
  * @param width            The frame's width.
  * @param height           The frame's height.
@@ -371,6 +383,7 @@ composition_model_extent (COMPOSITION_STD(uint32_t)                width,
  * @param linear_hdr       Whether the frame holds linear light.
  * @param hdr_proxy        Whether the proxy is to be float16.
  * @param hdr_transfer     1 if the swapchain carries PQ, otherwise 0.
+ * @param network          Whether the in-layer network answers the frames.
  * @return                 true if the composition is built for the frame; otherwise its reason says
  *                         why not.
  */
@@ -382,7 +395,48 @@ composition_prepare (struct composition                      *c,
                      struct composition_frame_settings const *s,
                      bool                                     linear_hdr,
                      bool                                     hdr_proxy,
-                     COMPOSITION_STD(uint32_t)                hdr_transfer);
+                     COMPOSITION_STD(uint32_t)                hdr_transfer,
+                     bool                                     network);
+
+/** @brief The build of the composition's surfaces.
+ *
+ * @param c The composition, or nullptr.
+ * @return  A number that no other build in the process had, or 0 while there are no surfaces and for
+ *          nullptr.
+ */
+static inline COMPOSITION_STD(uint64_t)
+composition_generation (struct composition const *c)
+{
+	return c ? c->generation : 0;
+}
+
+/** @brief The image that the in-layer network samples: the proxy at the model's raster.
+ *
+ * After leg 1 of a network build, it is in SHADER_READ_ONLY_OPTIMAL, and compute shaders may read it.
+ *
+ * @param c The composition, or nullptr.
+ * @return  The work image, or the proxy when the model reads it whole; nullptr for nullptr.
+ */
+static inline struct composition_image const *
+composition_network_input (struct composition const *c)
+{
+	if (!c)
+		return nullptr;
+	return c->work.image ? &c->work : &c->proxy;
+}
+
+/** @brief The image that the in-layer network answers into, which leg 2 composes.
+ *
+ * After leg 1 of a network build, it is in GENERAL, and compute shaders and transfers may write it.
+ *
+ * @param c The composition, or nullptr.
+ * @return  The model image; nullptr for nullptr.
+ */
+static inline struct composition_image const *
+composition_network_answer (struct composition const *c)
+{
+	return c ? &c->model : nullptr;
+}
 
 /** @brief The model's width.
  *
@@ -539,7 +593,9 @@ composition_disable_export (struct composition *c);
 /** @brief Records leg 1.
  *
  * Leaves the proxy the model should see in the download buffer, and the swapchain image back in
- * PRESENT_SRC_KHR so a caller that gives up after this still presents something valid.
+ * PRESENT_SRC_KHR so a caller that gives up after this still presents something valid. For the
+ * in-layer network it leaves the proxy in its image instead, which it hands to the network together
+ * with the model image in one barrier (composition_network_input(), composition_network_answer()).
  *
  * @param c               The composition, or nullptr.
  * @param cb              The command buffer to record into.
@@ -616,7 +672,9 @@ composition_model_pixels (struct composition *c)
 
 /** @brief Records leg 2.
  *
- * Composes and leaves the swapchain image holding the result, in PRESENT_SRC_KHR.
+ * Composes and leaves the swapchain image holding the result, in PRESENT_SRC_KHR. It takes the answer
+ * from the upload buffer, or for the in-layer network from the model image, which one barrier takes
+ * back from the network.
  *
  * @param c               The composition, or nullptr.
  * @param cb              The command buffer to record into.

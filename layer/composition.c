@@ -5,6 +5,7 @@
  */
 #include <math.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -691,10 +692,11 @@ external_ownership (struct composition const             *c,
  *         export is on, private host-visible staging otherwise.
  *
  * Called from composition_prepare(), which knows the model size, and from
- * composition_disable_export(), after each has dropped the old pair. Does nothing without a frame.
+ * composition_disable_export(), after each has dropped the old pair. Does nothing without a frame,
+ * and makes no pair for the in-layer network.
  *
  * @param c The composition.
- * @return  true if both buffers exist, or there is no frame to build them for.
+ * @return  true if both buffers exist, or there is no frame or no pair to build them for.
  */
 static bool
 ensure_transport (struct composition *c)
@@ -702,9 +704,13 @@ ensure_transport (struct composition *c)
 	if (!c->frame.image)
 		return true;
 
-	size_t const bytes = composition_model_bytes(c);
 	c->flags &= ~COMPOSITION_TRANSPORT_READY;
 	composition_withdraw_offer(c); // New buffers: any offer was of the old ones.
+	// The in-layer network takes the proxy and gives the answer on the device: no pair.
+	if (c->flags & COMPOSITION_NETWORK)
+		return true;
+
+	size_t const bytes = composition_model_bytes(c);
 	if ((c->flags & COMPOSITION_EXPORT) && make_export_buffer(c, &c->download, bytes)
 	    && make_export_buffer(c, &c->upload, bytes))
 		return true;
@@ -980,8 +986,12 @@ make_meter_state (struct composition *c)
 // Lifetime
 // ---------------------------------------------------------------------------
 
+/** @brief The generation of the last build of a composition's surfaces in the process. */
+static _Atomic(uint64_t) generations;
+
 /** @brief Destroys every surface, the transport pair, the meter's state and the supersampling
- *         filters, closes the connection of an offer, and forgets the frame's shape.
+ *         filters, closes the connection of an offer, and forgets the frame's shape and the build's
+ *         generation.
  *
  * The meter's pass and the composition's pass stay.
  *
@@ -1005,6 +1015,7 @@ drop_all (struct composition *c)
 	scaler_vk_fini(&c->super_up);
 	scaler_vk_fini(&c->super_down);
 	c->flags &= ~(COMPOSITION_FRAME_CAPTURED | COMPOSITION_CAPTURE_RECORDED);
+	c->generation = 0;
 	c->width = c->height = c->model_w = c->model_h = 0;
 	c->measured_white_point = 0.0f;
 }
@@ -1303,6 +1314,30 @@ static struct proxy_kind const PROXY_KINDS[2] = {
 	}
 };
 
+/** @brief How the answer reaches the model image, as composition_prepare() builds for it. */
+struct answer_kind {
+	char const        *log;   //!< What the build's log line says of it.
+	VkImageUsageFlags  usage; //!< The model image's usage.
+	uint32_t           flag;  //!< Its flag in struct composition.
+};
+
+/** @brief How the answer reaches the model image, by whether the in-layer network gives it: copied
+ *         in from the transport pair, or stored or blitted into it by the network.
+ */
+static struct answer_kind const ANSWER_KINDS[2] = {
+	{
+		.log   = "",
+		.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT
+		         | VK_IMAGE_USAGE_TRANSFER_DST_BIT
+	},
+	{
+		.log   = ", in-layer network",
+		.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT
+		         | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+		.flag  = COMPOSITION_NETWORK
+	}
+};
+
 bool
 composition_prepare (struct composition                      *c,
                      uint32_t                                 width,
@@ -1311,7 +1346,8 @@ composition_prepare (struct composition                      *c,
                      struct composition_frame_settings const *s,
                      bool                                     linear_hdr,
                      bool                                     hdr_proxy,
-                     uint32_t                                 hdr_transfer)
+                     uint32_t                                 hdr_transfer,
+                     bool                                     network)
 {
 	if (!composition_usable(c))
 		return false;
@@ -1380,15 +1416,17 @@ composition_prepare (struct composition                      *c,
 
 	struct frame_domain const *const domain = &FRAME_DOMAINS[linear_hdr];
 	struct proxy_kind const *const proxy = &PROXY_KINDS[hdr_proxy];
-	uint64_t const shape = domain->flag | proxy->flag;
+	struct answer_kind const *const answer = &ANSWER_KINDS[network];
+	uint64_t const shape = domain->flag | proxy->flag | answer->flag;
 	if (c->width == width && c->height == height && c->swapchain_format == swapchain_format
 	    && c->model_w == model.width && c->model_h == model.height
-	    && (c->flags & (COMPOSITION_LINEAR_HDR | COMPOSITION_HDR_PROXY)) == shape
+	    && (c->flags & (COMPOSITION_LINEAR_HDR | COMPOSITION_HDR_PROXY | COMPOSITION_NETWORK)) == shape
 	    && c->hdr_transfer == hdr_transfer && c->scaler_filter == s->downscaler && c->frame.image)
 		return true;
 
-	log_printf("[comp] building %ux%u, model %ux%u, %s%s%s", width, height, model.width, model.height,
-	           domain->log, proxy->log[hdr_transfer != 0], super_sample ? " (supersampling)" : "");
+	log_printf("[comp] building %ux%u, model %ux%u, %s%s%s%s", width, height, model.width, model.height,
+	           domain->log, proxy->log[hdr_transfer != 0], answer->log,
+	           super_sample ? " (supersampling)" : "");
 
 	// Keep the captured frame across a rebuild that does not change its shape.
 	//
@@ -1422,7 +1460,7 @@ composition_prepare (struct composition                      *c,
 	c->swapchain_format = swapchain_format;
 	c->work_format = work;
 	c->flags = (c->flags & ~(COMPOSITION_BLIT_SWAPCHAIN | COMPOSITION_LINEAR_HDR
-	                         | COMPOSITION_HDR_PROXY))
+	                         | COMPOSITION_HDR_PROXY | COMPOSITION_NETWORK))
 	           | blit | shape;
 	c->hdr_transfer = hdr_transfer;
 
@@ -1435,8 +1473,7 @@ composition_prepare (struct composition                      *c,
 	                && (direct
 	                    || make_image(c, &c->proxy, width, height, proxy->format,
 	                                  sampled | storage | src))
-	                && make_image(c, &c->model, model.width, model.height, proxy->format,
-	                              sampled | src | dst)
+	                && make_image(c, &c->model, model.width, model.height, proxy->format, answer->usage)
 	                && make_image(c, &c->composed, width, height, work, storage | src);
 
 	// The transport pair is sized to the model raster: exported device-local memory while the
@@ -1476,6 +1513,7 @@ composition_prepare (struct composition                      *c,
 	c->model_w = model.width;
 	c->model_h = model.height;
 	c->scaler_filter = s->downscaler;
+	c->generation = atomic_fetch_add_explicit(&generations, 1, memory_order_relaxed) + 1;
 	c->reason = nullptr;
 	return true;
 }
@@ -1824,6 +1862,52 @@ record_work (struct composition             *c,
 	                             VK_NULL_HANDLE, COMPOSITION_READ_ONLY, COMPOSITION_READ_ONLY);
 }
 
+/** @brief Records the barrier that hands the proxy and the model image to the in-layer network: the
+ *         proxy from leg 1's writes into the network's reads, in SHADER_READ_ONLY_OPTIMAL, and the
+ *         model image from the last frame's reads into the network's writes, in GENERAL.
+ *
+ * The network writes the model image with compute shaders or with a blit. shader_vk_set_image_layout()
+ * would give a transition into GENERAL to compute writes only, so this barrier names both writers.
+ *
+ * @param c      The composition, built for the in-layer network.
+ * @param cb     The command buffer to record into.
+ * @param source The proxy, which leg 1 wrote with compute shaders.
+ */
+static void
+hand_to_network (struct composition       *c,
+                 VkCommandBuffer           cb,
+                 struct composition_image *source)
+{
+	VkPipelineStageFlags const stages = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+	                                    | VK_PIPELINE_STAGE_TRANSFER_BIT;
+	VkImageMemoryBarrier const barriers[2] = {
+		{
+			.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			.srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT,
+			.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT,
+			.oldLayout           = source->layout,
+			.newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image               = source->image,
+			.subresourceRange    = COMPOSITION_COLOR_RANGE
+		},
+		{
+			.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+			.dstAccessMask       = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+			.oldLayout           = c->model.layout,
+			.newLayout           = VK_IMAGE_LAYOUT_GENERAL,
+			.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+			.image               = c->model.image,
+			.subresourceRange    = COMPOSITION_COLOR_RANGE
+		}
+	};
+	c->vk->vkCmdPipelineBarrier(cb, stages, stages, 0, 0, nullptr, 0, nullptr, 2, barriers);
+	source->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	c->model.layout = VK_IMAGE_LAYOUT_GENERAL;
+}
+
 // ---------------------------------------------------------------------------
 // Leg 1: the frame the model is shown
 // ---------------------------------------------------------------------------
@@ -1906,6 +1990,11 @@ composition_record_capture (struct composition                      *c,
 		if (!record_work(c, cb, &base, source))
 			return false;
 		source = &c->work;
+	}
+
+	if (c->flags & COMPOSITION_NETWORK) {
+		hand_to_network(c, cb, source);
+		return true;
 	}
 
 	transition(c, cb, source, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
@@ -2046,6 +2135,58 @@ record_white_point_copy (struct composition const *c,
 	                            0, 0, nullptr, 1, &barrier, 0, nullptr);
 }
 
+/** @brief Records the barrier that takes the model image back from the in-layer network: from the
+ *         network's compute-shader and transfer writes into the composition's reads, in
+ *         SHADER_READ_ONLY_OPTIMAL.
+ *
+ * @param c  The composition, built for the in-layer network.
+ * @param cb The command buffer to record into.
+ */
+static void
+take_from_network (struct composition *c,
+                   VkCommandBuffer     cb)
+{
+	VkImageMemoryBarrier const barrier = {
+		.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+		.srcAccessMask       = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
+		.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT,
+		.oldLayout           = c->model.layout,
+		.newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+		.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+		.image               = c->model.image,
+		.subresourceRange    = COMPOSITION_COLOR_RANGE
+	};
+	VkPipelineStageFlags const writers = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+	                                     | VK_PIPELINE_STAGE_TRANSFER_BIT;
+	c->vk->vkCmdPipelineBarrier(cb, writers, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, 0, 0, nullptr, 0,
+	                            nullptr, 1, &barrier);
+	c->model.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+}
+
+/** @brief Records the upload of the model's answer from the transport pair into the model image.
+ *
+ * @param c  The composition.
+ * @param cb The command buffer to record into.
+ */
+static void
+record_upload (struct composition *c,
+               VkCommandBuffer     cb)
+{
+	transition(c, cb, &c->model, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+	VkBufferImageCopy const region = {
+		.imageSubresource = COMPOSITION_COLOR_LAYERS,
+		.imageExtent      = { c->model_w, c->model_h, 1 }
+	};
+	external_ownership(c, cb, &c->upload, VK_QUEUE_FAMILY_EXTERNAL, c->export_family,
+	                   VK_ACCESS_TRANSFER_READ_BIT);
+	c->vk->vkCmdCopyBufferToImage(cb, c->upload.buffer, c->model.image,
+	                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+	external_ownership(c, cb, &c->upload, c->export_family, VK_QUEUE_FAMILY_EXTERNAL,
+	                   VK_ACCESS_TRANSFER_READ_BIT);
+	transition(c, cb, &c->model, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+}
+
 /** @brief Records the resolve of the model's answer against the frame, and the copy of the composed
  *         frame into the swapchain image.
  *
@@ -2113,18 +2254,10 @@ composition_record_compose (struct composition                      *c,
 		return false;
 
 	c->flags &= ~COMPOSITION_CAPTURE_RECORDED;
-	transition(c, cb, &c->model, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-	VkBufferImageCopy const region = {
-		.imageSubresource = COMPOSITION_COLOR_LAYERS,
-		.imageExtent      = { c->model_w, c->model_h, 1 }
-	};
-	external_ownership(c, cb, &c->upload, VK_QUEUE_FAMILY_EXTERNAL, c->export_family,
-	                   VK_ACCESS_TRANSFER_READ_BIT);
-	c->vk->vkCmdCopyBufferToImage(cb, c->upload.buffer, c->model.image,
-	                              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-	external_ownership(c, cb, &c->upload, c->export_family, VK_QUEUE_FAMILY_EXTERNAL,
-	                   VK_ACCESS_TRANSFER_READ_BIT);
-	transition(c, cb, &c->model, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	if (c->flags & COMPOSITION_NETWORK)
+		take_from_network(c, cb);
+	else
+		record_upload(c, cb);
 
 	// A capture pair holds the composed frame, so a frame being captured is resolved even under a
 	// bypass.

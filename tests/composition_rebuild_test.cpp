@@ -263,7 +263,7 @@ struct Step {
 bool ComposeFrame(Context& context, struct composition& composition,
                   const struct composition_frame_settings& settings, uint32_t width, uint32_t height,
                   VkFormat format, bool linearHdr, bool refuseMemory = false) {
-    if (!composition_prepare(&composition, width, height, format, &settings, linearHdr, false, 0))
+    if (!composition_prepare(&composition, width, height, format, &settings, linearHdr, false, 0, false))
         Fail(std::string("prepare failed: ") + composition_reason(&composition));
     composition_record_capture(&composition, context.Begin(), context.swapchain, &settings);
     context.Submit();
