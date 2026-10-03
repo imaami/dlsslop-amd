@@ -2720,6 +2720,7 @@ open_network (struct device_chain          *dc,
 		return nullptr;
 	}
 	struct dlsslop_network_device device = {
+		.interface         = DLSSLOP_NETWORK_INTERFACE,
 		.instance          = dc->instance->self,
 		.physical          = dc->physical,
 		.device            = dc->self,

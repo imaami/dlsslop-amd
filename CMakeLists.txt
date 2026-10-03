@@ -224,11 +224,14 @@ if(BUILD_TESTING)
     add_executable(network-module-test tests/network_module_test.cpp)
     target_include_directories(network-module-test PRIVATE layer)
     target_link_libraries(network-module-test PRIVATE ${CMAKE_DL_LIBS})
-    # The module without dlsslop_network_close(), which the loader refuses.
+    # The module without dlsslop_network_close(), and one of another interface, which the loader
+    # refuses.
     add_library(network-module-incomplete MODULE tests/network_module_incomplete.c)
     target_include_directories(network-module-incomplete PRIVATE layer)
+    add_library(network-module-other MODULE tests/network_module_other.c)
+    target_include_directories(network-module-other PRIVATE layer)
     add_test(NAME network-module COMMAND network-module-test $<TARGET_FILE:dlsslop-network>
-        $<TARGET_FILE:network-module-incomplete>)
+        $<TARGET_FILE:network-module-incomplete> $<TARGET_FILE:network-module-other>)
     # The network's motion history across frames that are and are not
     # submitted, recorded on a fake device that the test defines in place of
     # the Vulkan loader.

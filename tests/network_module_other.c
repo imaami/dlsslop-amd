@@ -1,12 +1,13 @@
 /** @file
  *
- * A library with every function of the in-layer network's module but dlsslop_network_close(), for
- * network-module-test: the loader refuses it and keeps no pointer into it.
+ * A library with every function of the in-layer network's module and the interface after the
+ * layer's, for network-module-test: the loader refuses it, naming both interfaces, and keeps no
+ * pointer into it.
  */
 #include "network_module.h"
 
-/** @brief The layer's interface. */
-uint64_t const dlsslop_network_interface = DLSSLOP_NETWORK_INTERFACE;
+/** @brief The interface after the layer's. */
+uint64_t const dlsslop_network_interface = DLSSLOP_NETWORK_INTERFACE + 0x100;
 
 /** @brief Opens no network. */
 struct DlsslopNetwork *
@@ -39,5 +40,11 @@ dlsslop_network_submitted (struct DlsslopNetwork *)
 char const *
 dlsslop_network_error (struct DlsslopNetwork const *)
 {
-	return "incomplete module";
+	return "module of another interface";
+}
+
+/** @brief Frees nothing. */
+void
+dlsslop_network_close (struct DlsslopNetwork *)
+{
 }

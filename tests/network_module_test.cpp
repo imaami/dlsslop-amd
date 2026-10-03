@@ -1,19 +1,23 @@
 // SPDX-License-Identifier: MIT
 // The in-layer network's module through its C functions, as the layer loads
-// it, without a GPU: a missing module, or a library without the module's
-// functions, is refused, naming why, and the loader keeps no pointer into it;
-// a frame whose settings are out of range is rejected and says which, a
+// it, without a GPU: a missing module, a library without the module's
+// functions, or a module of another interface, is refused, naming why, and
+// the loader keeps no pointer into it; the module opens no network for a
+// device of another interface; a frame whose settings are out of range is
+// rejected and says which, a
 // missing model fails the network for good, naming the model's
 // path and how to get it, and a frame of an extent the network does not take,
 // by its working extent or by the device's storage buffers, is rejected,
 // naming it, without a build, and so is another shape of that extent, which
 // no network was built for to reshape. The model is the one dlsslopd's config
 // file names, and a config file dlsslopd refuses fails the network. Takes the
-// module's path and that of a library with all its functions but
-// dlsslop_network_close().
+// module's path, that of a library with all its functions but
+// dlsslop_network_close(), and that of a library with all of them and another
+// interface.
 #include "network_module.h"
 #include "shm_protocol.h"
 
+#include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -64,6 +68,7 @@ std::string failure_with(const network_module& module, const ShmHeader* header, 
     std::FILE* file = std::fopen(config.c_str(), "w");
     require(file && std::fputs(text.c_str(), file) >= 0 && !std::fclose(file), "cannot write the config file");
     dlsslop_network_device device{};
+    device.interface = DLSSLOP_NETWORK_INTERFACE;
     device.physical_dispatch = no_functions;
     DlsslopNetwork* network = module.open(&device);
     require(network, "the module did not open");
@@ -76,7 +81,7 @@ std::string failure_with(const network_module& module, const ShmHeader* header, 
 
 int main(int argc, char** argv)
 {
-    require(argc == 3, "usage: network-module-test MODULE INCOMPLETE");
+    require(argc == 4, "usage: network-module-test MODULE INCOMPLETE OTHER");
     // A module that is not there, and a library without the module's functions, load nothing and say
     // why; the latter is unloaded again.
     network_module absent{};
@@ -93,6 +98,16 @@ int main(int argc, char** argv)
                 std::strstr(incomplete.failure, "dlsslop_network_close") && !incomplete.open && !incomplete.prepare &&
                 !incomplete.record && !incomplete.submitted && !incomplete.error && !incomplete.close,
             "a library without one of the module's functions was kept, or pointers into it were");
+    // A module of another interface is unloaded before any of its functions is looked up, and its
+    // failure names both interfaces.
+    network_module other{};
+    char interfaces[128];
+    std::snprintf(interfaces, sizeof interfaces, ": interface %#" PRIx64 ", the layer's is %#" PRIx64,
+                  DLSSLOP_NETWORK_INTERFACE + 0x100, DLSSLOP_NETWORK_INTERFACE);
+    require(!network_module_load(&other, argv[3]) && !other.library && std::strstr(other.failure, argv[3]) &&
+                std::strstr(other.failure, interfaces) && !other.open && !other.prepare && !other.record &&
+                !other.submitted && !other.error && !other.close,
+            "a module of another interface was kept, or its failure does not name both interfaces");
     require(!network_module_load(nullptr, argv[1]), "a module was loaded into no loader");
     network_module module{};
     const bool loaded = network_module_load(&module, argv[1]);
@@ -102,9 +117,12 @@ int main(int argc, char** argv)
     setenv("XDG_DATA_HOME", directory, 1);
     setenv("XDG_CACHE_HOME", directory, 1);
     setenv("XDG_CONFIG_HOME", directory, 1);
-    // No device: nothing here reaches Vulkan.
+    // A device of another interface opens no network: an older layer's begins with its VkInstance.
     dlsslop_network_device device{};
     device.physical_dispatch = no_functions;
+    require(!module.open(&device), "the module opened a network for a device of another interface");
+    // No device: nothing here reaches Vulkan.
+    device.interface = DLSSLOP_NETWORK_INTERFACE;
     DlsslopNetwork* network = module.open(&device);
     require(network, "the module did not open");
     void* memory = mmap(nullptr, kHeaderBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
@@ -157,7 +175,8 @@ int main(int argc, char** argv)
     require(failure_with(module, header, config, "vulkan-model = relative.bin\n").find(config) != std::string::npos,
             "a config file dlsslopd refuses did not fail the network, naming it");
     munmap(memory, kHeaderBytes);
-    std::puts("network module: a missing module or one without the functions is refused, naming why; out-of-range "
+    std::puts("network module: a missing module, one without the functions or one of another interface is "
+              "refused, naming why, and so is a device of another interface; out-of-range "
               "settings rejected, a missing model fails for good, extents the network or the device's storage "
               "buffers do not take rejected in any shape, and the model is the one dlsslopd's config file names");
 }

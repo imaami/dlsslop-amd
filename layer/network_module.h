@@ -6,7 +6,10 @@
  *
  * The functions' names, network_module.map, the layout of struct dlsslop_network_device and the
  * values of enum dlsslop_network_state are the contract between the layer and the module. Each
- * function has a function type, which declares it and types the loader's pointer to it.
+ * function has a function type, which declares it and types the loader's pointer to it. The module
+ * exports DLSSLOP_NETWORK_INTERFACE as dlsslop_network_interface, and the layer puts it first in
+ * struct dlsslop_network_device: each side refuses the other's of another interface, and a change to
+ * any part of the contract takes a new DLSSLOP_NETWORK_INTERFACE.
  *
  * Plain C API, consumable from C++.
  */
@@ -15,10 +18,12 @@
 #define DLSSLOP_AMD_LAYER_NETWORK_MODULE_H_
 
 #ifdef __cplusplus
+# include <cinttypes>
 # include <cstdint>
 # include <cstdio>
 # define NETWORK_MODULE_STD(x) std::x
 #else
+# include <inttypes.h>
 # include <stdint.h>
 # include <stdio.h>
 # define NETWORK_MODULE_STD(x) x
@@ -33,6 +38,18 @@ extern "C" {
 
 struct DlsslopNetwork;
 struct ShmHeader;
+
+/** @brief The interface that the layer and the module share.
+ *
+ * It is odd and has its top bit set, so no pointer equals it: an older layer's struct
+ * dlsslop_network_device begins with an aligned VkInstance where this one begins with this number.
+ * Bits 8-31 count the versions: 1 with buffers.
+ */
+#define DLSSLOP_NETWORK_INTERFACE UINT64_C(0xd155100000000101)
+
+/** @brief The module's DLSSLOP_NETWORK_INTERFACE, which network_module_load() requires to equal the
+ *         layer's. */
+extern NETWORK_MODULE_STD(uint64_t) const dlsslop_network_interface;
 
 /** @brief A function that the module calls with the device's context around a submit.
  *
@@ -56,6 +73,7 @@ dlsslop_network_log_fn (char const *line);
  * and the module looks up its functions only in dlsslop_network_open().
  */
 struct dlsslop_network_device {
+	NETWORK_MODULE_STD(uint64_t)     interface;         //!< DLSSLOP_NETWORK_INTERFACE.
 	VkInstance                       instance;          //!< The game's instance.
 	VkPhysicalDevice                 physical;          //!< The device's physical device.
 	VkDevice                         device;            //!< The device.
@@ -80,7 +98,7 @@ enum dlsslop_network_state {
 /** @brief The network on a device, not yet built.
  *
  * @param device The device.
- * @return       The network, or nullptr without memory.
+ * @return       The network, or nullptr without memory or for a device of another interface.
  */
 typedef struct DlsslopNetwork *
 dlsslop_network_open_fn (struct dlsslop_network_device const *device);
@@ -190,9 +208,28 @@ network_module_refuse (struct network_module *m,
 	return false;
 }
 
+/** @brief Records why network_module_load() failed, as network_module_refuse() does, and closes the
+ *         library it opened.
+ *
+ * @param m       The module.
+ * @param library The library.
+ * @param path    The library's path.
+ * @return        false.
+ */
+static inline bool
+network_module_drop (struct network_module *m,
+                     void                  *library,
+                     char const            *path)
+{
+	network_module_refuse(m, path);
+	dlclose(library);
+	return false;
+}
+
 /** @brief Loads the module at a path.
  *
- * A module without the functions stays out of the game's process.
+ * A module of another interface, or without the functions, stays out of the game's process: its
+ * interface is read first, and none of its functions is called.
  *
  * @param m    An empty module, or nullptr.
  * @param path The module's path.
@@ -209,6 +246,17 @@ network_module_load (struct network_module *m,
 	struct network_module found = {.library = dlopen(path, RTLD_NOW | RTLD_LOCAL)};
 	if (!found.library)
 		return network_module_refuse(m, path);
+	void const *const exported = dlsym(found.library, "dlsslop_network_interface");
+	if (!exported)
+		return network_module_drop(m, found.library, path);
+	NETWORK_MODULE_STD(uint64_t) const interface = *(NETWORK_MODULE_STD(uint64_t) const *)exported;
+	if (interface != DLSSLOP_NETWORK_INTERFACE) {
+		NETWORK_MODULE_STD(snprintf)(m->failure, sizeof m->failure,
+		                             "%s: interface %#" PRIx64 ", the layer's is %#" PRIx64, path,
+		                             interface, DLSSLOP_NETWORK_INTERFACE);
+		dlclose(found.library);
+		return false;
+	}
 	// The lookups stop at the first that fails, whose dlerror() a later lookup that succeeds would
 	// clear.
 #define NETWORK_MODULE_FIND(name) \
@@ -219,9 +267,7 @@ network_module_load (struct network_module *m,
 		return true;
 	}
 #undef NETWORK_MODULE_FIND
-	network_module_refuse(m, path);
-	dlclose(found.library);
-	return false;
+	return network_module_drop(m, found.library, path);
 }
 
 #ifdef __cplusplus

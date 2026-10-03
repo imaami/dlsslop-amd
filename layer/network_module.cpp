@@ -96,8 +96,13 @@ struct DlsslopNetwork {
 
 extern "C" {
 
+const uint64_t dlsslop_network_interface = DLSSLOP_NETWORK_INTERFACE;
+
 DlsslopNetwork* dlsslop_network_open(const dlsslop_network_device* device)
 {
+    // A layer of another interface describes its device otherwise: an older one's begins with its
+    // VkInstance, which never equals the interface.
+    if (device->interface != DLSSLOP_NETWORK_INTERFACE) return nullptr;
     return new (std::nothrow) DlsslopNetwork(*device);
 }
 
