@@ -29,7 +29,7 @@ jobs:
       - name: Compile the gfx1201 HIP modules including color preservation
         run: python3 scripts/build-kernels.py --compiler clang++-22 --linker /usr/bin/ld.lld-22
       - name: Configure worker, layer, CLI, Qt Widgets GUI and tests
-        run: cmake -S . -B build -G Ninja -DPython3_EXECUTABLE=/usr/bin/python3
+        run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DPython3_EXECUTABLE=/usr/bin/python3
       - name: Compile all native targets
         run: cmake --build build --parallel 2
       - name: Run host and software Vulkan tests

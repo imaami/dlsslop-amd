@@ -1,26 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-# The project's C and C++ objects meet in one link-time optimized link, so
-# both languages need the same compiler. When only the C++ compiler is named,
-# C takes its C driver: clang++-23 gives clang-23, g++ gives gcc.
-if(DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED CMAKE_C_COMPILER AND NOT DEFINED ENV{CC}
-        AND CMAKE_CXX_COMPILER MATCHES "\\+\\+[^/]*$")
-    get_filename_component(cxx_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    get_filename_component(c_name "${CMAKE_CXX_COMPILER}" NAME)
-    string(REGEX REPLACE "clang\\+\\+" "clang" c_name "${c_name}")
-    string(REGEX REPLACE "g\\+\\+" "gcc" c_name "${c_name}")
-    string(REGEX REPLACE "c\\+\\+" "cc" c_name "${c_name}")
-    find_program(DLSSLOP_C_DRIVER "${c_name}" HINTS "${cxx_dir}")
-    if(DLSSLOP_C_DRIVER)
-        set(CMAKE_C_COMPILER "${DLSSLOP_C_DRIVER}")
-    endif()
-endif()
 project(dlsslop_amd VERSION 0.1.0 LANGUAGES C CXX)
-if(NOT (CMAKE_C_COMPILER_ID STREQUAL CMAKE_CXX_COMPILER_ID AND
-        CMAKE_C_COMPILER_VERSION VERSION_EQUAL CMAKE_CXX_COMPILER_VERSION))
-    message(FATAL_ERROR "The C compiler (${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}) differs from "
-        "the C++ compiler (${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}). Configure a new build "
-        "directory with CMAKE_C_COMPILER set to the C++ compiler's C driver.")
-endif()
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
@@ -49,6 +28,17 @@ add_link_options(-Wl,--gc-sections $<$<CONFIG:Release>:-s>)
 # Link-time optimization shrinks the daemon's code by 7% and the GUI's
 # too: the compiler inlines and drops code across files.
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON CACHE BOOL "Link-time optimization")
+# The tests link the layer's C objects into C++ programs, and as parts of the
+# daemon become C, it will too. Under link-time optimization the objects hold
+# the compiler's intermediate code, which only the same compiler of the same
+# version can read.
+if(CMAKE_INTERPROCEDURAL_OPTIMIZATION AND NOT (CMAKE_C_COMPILER_ID STREQUAL CMAKE_CXX_COMPILER_ID AND
+        CMAKE_C_COMPILER_VERSION VERSION_EQUAL CMAKE_CXX_COMPILER_VERSION))
+    message(FATAL_ERROR "Link-time optimization (CMAKE_INTERPROCEDURAL_OPTIMIZATION) cannot link the C "
+        "compiler's (${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}) objects with the C++ compiler's "
+        "(${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}). Configure a new build directory with "
+        "CMAKE_C_COMPILER and CMAKE_CXX_COMPILER (or CC and CXX) set to one toolchain's C and C++ compilers.")
+endif()
 # Project headers shared by the daemon and its tests.
 include_directories(common)
 find_package(Threads REQUIRED)

@@ -80,12 +80,17 @@ sudo apt-get install --no-install-recommends \
 
 The project is written in C23 and C++23, and GCC 16.2 and Clang 23.1 build it.
 The oldest compilers that build the layer, which is C, are GCC 13 and Clang 19.
+Name both compilers when configuring: `CMAKE_C_COMPILER` the C compiler, such
+as `gcc` or `clang-23`, and `CMAKE_CXX_COMPILER` the C++ compiler, such as
+`g++` or `clang++-23` (or `CC` and `CXX`). Link-time optimization is on by
+default and needs both from one toolchain of one version.
 
 Then build from the fetched checkout:
 
 ```bash
 python3 scripts/build-kernels.py --compiler clang++-22 --linker /usr/bin/ld.lld-22
-cmake -S . -B build -G Ninja -DPython3_EXECUTABLE=/usr/bin/python3
+cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+    -DPython3_EXECUTABLE=/usr/bin/python3
 cmake --build build --parallel 2
 ctest --test-dir build --output-on-failure
 ```
