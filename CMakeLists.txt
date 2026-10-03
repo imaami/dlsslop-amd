@@ -210,7 +210,7 @@ if(BUILD_TESTING)
     add_test(NAME worker-channel COMMAND worker-channel-test $<TARGET_FILE:dlsslopd>)
     add_test(NAME packaging COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging_test.py)
-    add_executable(vulkan-storage-test tests/vulkan_storage_test.cpp)
+    add_executable(vulkan-storage-test tests/vulkan_storage_test.c)
     add_dependencies(vulkan-storage-test layer-shaders)
     target_include_directories(vulkan-storage-test PRIVATE ${SHADER_DIR} layer)
     add_test(NAME vulkan-storage COMMAND vulkan-storage-test)
