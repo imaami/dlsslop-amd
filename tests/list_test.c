@@ -12,11 +12,11 @@
 
 #include "list.h"
 
-/** @brief An entry whose hook is not at offset 0. */
+/** @brief An entry whose hook is not at offset 0. value is 64 bits wide, which fills the padding. */
 struct item {
 	double      weight; //!< Something before the hook.
 	struct list node;   //!< In a test's list.
-	uint32_t    value;  //!< What the walks report.
+	uint64_t    value;  //!< What the walks report.
 };
 
 /** @brief Ends the test with a message unless a condition holds. */

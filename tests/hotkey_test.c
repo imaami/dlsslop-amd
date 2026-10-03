@@ -114,12 +114,12 @@ enum fake_kind {
 	FAKE_MUTE          //!< Keys, but EVIOCGBIT(EV_KEY) fails.
 };
 
-/** @brief What a kind of fake device answers. */
+/** @brief What a kind of fake device answers. mute is 16 bits wide, which fills the padding. */
 struct fake_answers {
 	uint16_t type;    //!< Its event type, EV_KEY or EV_REL.
 	uint16_t only;    //!< Its only key code, if not 0.
 	uint16_t without; //!< The one key code it lacks, if not 0.
-	bool     mute;    //!< EVIOCGBIT(EV_KEY) fails.
+	uint16_t mute;    //!< Whether EVIOCGBIT(EV_KEY) fails.
 };
 
 /** @brief What each kind of fake device answers. */
@@ -132,13 +132,15 @@ static struct fake_answers const FAKE_KINDS[] = {
 	[FAKE_MUTE]         = { .type = EV_KEY, .mute = true }
 };
 
-/** @brief A file that answers evdev's ioctls as a device does. */
+/** @brief A file that answers evdev's ioctls as a device does. dead is 64 bits wide, which fills
+ *         the padding.
+ */
 struct fake_device {
 	dev_t          dev;    //!< The file's device.
 	ino_t          ino;    //!< The file's inode.
 	uint32_t       probes; //!< How many times its event types were asked for.
 	enum fake_kind kind;   //!< What it claims to be.
-	bool           dead;   //!< Unplugged: every ioctl fails, as on the plain file it is.
+	uint64_t       dead;   //!< Whether it is unplugged: every ioctl fails, as on the plain file it is.
 };
 
 /** @brief The fake devices. */
@@ -945,9 +947,10 @@ check_x11 (char const *dir)
 	require(arrives(&h, KEY_F10), "the press of F10 did not arrive");
 
 	// Then its release, two presses of A and one of F10, with their releases, which do not count.
+	// down is 16 bits wide, which fills the padding.
 	static struct {
 		uint16_t key;  // the key's evdev code
-		bool     down; // whether the key goes down or comes up
+		uint16_t down; // whether the key goes down or comes up
 	} const SENT[] = {
 		{ KEY_F10, false }, { KEY_A, true }, { KEY_A, false }, { KEY_A, true }, { KEY_A, false },
 		{ KEY_F10, true }, { KEY_F10, false }
