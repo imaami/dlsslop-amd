@@ -1,16 +1,24 @@
 /** @file
  *
- * The channel's text fields and 64-bit counts, in C. A store to a text field bumps that field's
+ * The channel's text fields and frame counts, in C. A store to a text field bumps that field's
  * sequence number alone, and a load takes the string: cut to the field's size or to the reader's
- * buffer, or an empty one for a null string. A count is stored in its own two words and read back.
+ * buffer, or an empty one for a null string. A frame count is read whole: while a child process adds
+ * to one count and stores the other in a shared mapping, this process never reads either torn.
  */
 // SPDX-License-Identifier: MIT
+#include <errno.h>
+#include <inttypes.h>
+#include <signal.h>
 #include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/prctl.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "shm_protocol.h"
 
@@ -22,12 +30,15 @@ struct text_field {
 	enum shm_text            field; //!< The field.
 };
 
-/** @brief A 64-bit count of the header and the words that hold it. */
-struct count_words {
-	_Atomic(uint32_t) const *lo;    //!< The low word.
-	_Atomic(uint32_t) const *hi;    //!< The high word.
-	enum shm_count           count; //!< The count.
-};
+/** @brief What the writer adds to a count: one to each half, so a count written whole has equal
+ *         halves, and one read in halves of different writes does not.
+ */
+static constexpr uint64_t COUNT_STEP = UINT64_C(0x100000001);
+
+/** @brief The fewest steps the writer takes, and the fewest times the reader reads each count,
+ *         before the reader stops the writer.
+ */
+static constexpr uint64_t COUNT_STEPS = UINT64_C(1) << 20;
 
 /** @brief Ends the test with a message unless a condition holds.
  *
@@ -42,6 +53,98 @@ require (bool        condition,
 		return;
 	fprintf(stderr, "shm-protocol-test: %s\n", message);
 	exit(1);
+}
+
+/** @brief Steps the frame counts until the reader stores quit: adds COUNT_STEP to helperFrames, as
+ *         a counter does, and stores the same multiple of COUNT_STEP in layerFrames, as the layer
+ *         and dlsslopd do. The kernel kills the writer when the reader ends, also by a failed
+ *         require(), which stores no quit.
+ *
+ * @param h      The header, in a mapping shared with the reader.
+ * @param reader The reader's process.
+ */
+[[noreturn]] static void
+write_counts (struct ShmHeader *h,
+              pid_t             reader)
+{
+	if (prctl(PR_SET_PDEATHSIG, SIGKILL) || getppid() != reader)
+		_exit(1);
+	for (uint64_t v = COUNT_STEP; !atomic_load(&h->quit); v += COUNT_STEP) {
+		atomic_fetch_add(&h->helperFrames, COUNT_STEP);
+		atomic_store(&h->layerFrames, v);
+	}
+	_exit(0);
+}
+
+/** @brief Reads a count that write_counts() writes, and ends the test if it is torn or went back.
+ *
+ * @param count The count.
+ * @param last  The value read last; receives this one.
+ * @return      Whether the value changed.
+ */
+static bool
+read_count (_Atomic(uint64_t) const *count,
+            uint64_t                *last)
+{
+	uint64_t const v = atomic_load(count);
+	require((uint32_t)(v >> 32) == (uint32_t)v, "a frame count was read torn");
+	require(v >= *last, "a frame count went back");
+	bool const changed = v != *last;
+	*last = v;
+	return changed;
+}
+
+/** @brief Waits for a child, or checks on it.
+ *
+ * @param child   The child.
+ * @param status  Receives its status, as waitpid() reports it.
+ * @param options WNOHANG to only check on it, or 0.
+ * @return        The child, or 0 if WNOHANG is set and the child is still running.
+ */
+static pid_t
+reap (pid_t  child,
+      int   *status,
+      int    options)
+{
+	pid_t done;
+	while ((done = waitpid(child, status, options)) < 0)
+		require(errno == EINTR, "waitpid failed");
+	return done;
+}
+
+/** @brief Reads the frame counts while a child process writes them, and ends the test if any value
+ *         read is torn.
+ */
+static void
+check_counts (void)
+{
+	struct ShmHeader *const h = mmap(nullptr, sizeof *h, PROT_READ | PROT_WRITE,
+	                                 MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	require(h != MAP_FAILED, "mmap failed");
+	require(!fflush(nullptr), "fflush failed");
+	pid_t const reader = getpid();
+	pid_t const child = fork();
+	require(child >= 0, "fork failed");
+	if (!child)
+		write_counts(h, reader);
+
+	int status = 0;
+	pid_t done = 0;
+	uint64_t helper = 0, layer = 0, reads = 0, changes = 0;
+	while (!done && (reads < COUNT_STEPS || helper < COUNT_STEPS * COUNT_STEP)) {
+		changes += read_count(&h->helperFrames, &helper);
+		changes += read_count(&h->layerFrames, &layer);
+		if (++reads % 65536 == 0)
+			done = reap(child, &status, WNOHANG);
+	}
+	atomic_store(&h->quit, 1);
+	if (!done)
+		reap(child, &status, 0);
+	require(WIFEXITED(status) && !WEXITSTATUS(status), "the writer failed");
+	require(!munmap(h, sizeof *h), "munmap failed");
+	require(printf("shm protocol: %" PRIu64 " reads of each frame count while another process wrote "
+	               "them, %" PRIu64 " changes seen, none torn\n", reads, changes) > 0,
+	        "printf failed");
 }
 
 /** @brief The sum of the text fields' sequence numbers.
@@ -96,22 +199,8 @@ main (void)
 		        "a null string did not empty a text field");
 	}
 
-	struct count_words const counts[] = {
-		{&header.helperFramesLo, &header.helperFramesHi, SHM_COUNT_HELPER_FRAMES},
-		{&header.layerFramesLo,  &header.layerFramesHi,  SHM_COUNT_LAYER_FRAMES},
-	};
-	for (uint32_t i = 0; i < sizeof counts / sizeof *counts; ++i) {
-		struct count_words const *const c = &counts[i];
-		ShmStore64(&header, c->count, UINT64_C(0x123456789) + i);
-		require(atomic_load(c->hi) == 1 && atomic_load(c->lo) == 0x23456789 + i
-		        && ShmLoad64(&header, c->count) == UINT64_C(0x123456789) + i,
-		        "a 64-bit count did not survive its two words");
-	}
-	for (uint32_t i = 0; i < sizeof counts / sizeof *counts; ++i)
-		require(ShmLoad64(&header, counts[i].count) == UINT64_C(0x123456789) + i,
-		        "a 64-bit count was stored in another count's words");
-
-	if (puts("shm protocol: text fields and 64-bit counts in C") == EOF)
+	check_counts();
+	if (puts("shm protocol: text fields and frame counts in C") == EOF)
 		return 1;
 	return 0;
 }

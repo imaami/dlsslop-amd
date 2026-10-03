@@ -2560,7 +2560,7 @@ publish_frame (struct device_chain          *dc,
 	if (!hdr)
 		return;
 
-	ShmStore64(hdr, SHM_COUNT_LAYER_FRAMES, ++dc->frames_composed);
+	atomic_store(&hdr->layerFrames, ++dc->frames_composed);
 	atomic_store(&hdr->layerWidth, sc->width);
 	atomic_store(&hdr->layerHeight, sc->height);
 	atomic_store(&hdr->layerFormat, (uint32_t)sc->format);

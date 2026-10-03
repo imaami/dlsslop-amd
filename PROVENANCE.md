@@ -114,9 +114,14 @@ These upstream names do not follow the rule:
 
 `common/shm_protocol.h` declares the channel for C and C++, and
 `common/shm_protocol.c` defines its functions, which both languages call.
-`ShmStoreString`, `ShmLoadString`, `ShmStore64` and `ShmLoad64` take the header
-and an `enum shm_text` or `enum shm_count` instead of the field's words, because
-a word is a `std::atomic<uint32_t>` in C++ and an `_Atomic(uint32_t)` in C.
+`ShmStoreString` and `ShmLoadString` take the header and an `enum shm_text`
+instead of the field's words, because a word is a `std::atomic<uint32_t>` in C++
+and an `_Atomic(uint32_t)` in C. Upstream keeps each frame count in two words,
+`helperFramesLo` and `helperFramesHi` or `layerFramesLo` and `layerFramesHi`,
+which `ShmStore64` and `ShmLoad64` write and read one word at a time, so a
+reader can take halves of two different counts. Here each count is one 64-bit
+atomic, `helperFrames` or `layerFrames`, and `layerFrames` is at the end of the
+header, because its words do not start at a multiple of eight bytes.
 `common/shm_protocol.hpp` holds overloads that return a `std::string` of the
 functions that write a string into the caller's buffer and that C++ calls:
 `ShmNativeDefaultPath`, `ShmNativeChannelPath`, `ShmTransportPath` and

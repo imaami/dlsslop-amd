@@ -22,11 +22,12 @@
  * compatibility.
  *
  * C and C++ share this header, which declares the channel; shm_protocol.c defines its functions
- * and kNativeTiers, and both languages call them. A word of the channel is an _Atomic(uint32_t),
- * which <stdatomic.h> makes a std::atomic<uint32_t> in C++, so C++ code reads and writes the words
- * with their load() and store() members. C code uses the atomic_* functions of <stdatomic.h>, which
- * have the same orders. The functions name a text field or a count by the header and an enum
- * shm_text or shm_count, not by its words, as a C++ word is another type than a C one.
+ * and kNativeTiers, and both languages call them. A word of the channel is an _Atomic(uint32_t) and
+ * a frame count an _Atomic(uint64_t), which <stdatomic.h> makes a std::atomic<uint32_t> and a
+ * std::atomic<uint64_t> in C++, so C++ code reads and writes them with their load() and store()
+ * members. C code uses the atomic_* functions of <stdatomic.h>, which have the same orders. The
+ * functions name a text field by the header and an enum shm_text, not by its words, as a C++ word
+ * is another type than a C one.
  * shm_protocol.hpp has versions that return a std::string of those that write a string into the
  * caller's buffer.
  */
@@ -73,8 +74,9 @@ enum : STD(uint32_t) {
 	 * v26: offers are answered on their own connection; transportAck is retired.
 	 * v27: offers carry their buffers' sizes.
 	 * v28: offers name the exporting device and driver.
+	 * v29: each frame count is one 64-bit atomic, and layerFrames moved to the end.
 	 */
-	kShmVersion = 28,
+	kShmVersion = 29,
 };
 
 /** @brief The frames that the channel carries. */
@@ -515,8 +517,7 @@ struct ShmHeader {
 	// --- status, written by the helper --------------------------------------------------------
 	_Atomic(STD(uint32_t)) helperState;
 	_Atomic(STD(uint32_t)) modelUp;
-	_Atomic(STD(uint32_t)) helperFramesLo;
-	_Atomic(STD(uint32_t)) helperFramesHi;
+	_Atomic(STD(uint64_t)) helperFrames;      //!< the frames answered
 	_Atomic(STD(uint32_t)) helperEvalMsBits;
 	_Atomic(STD(uint32_t)) helperUploadMsBits;
 	_Atomic(STD(uint32_t)) helperReadbackMsBits;
@@ -538,8 +539,10 @@ struct ShmHeader {
 	// value. Same width as the flag it replaces, so the layout and the protocol version are
 	// unchanged; an older layer simply leaves it zero, which reads as "no layer" exactly as before.
 	_Atomic(STD(uint32_t)) layerPid;
-	_Atomic(STD(uint32_t)) layerFramesLo;
-	_Atomic(STD(uint32_t)) layerFramesHi;
+	// Protocols up to 28 kept the layer's frame count here, in two words. A 64-bit atomic has to start
+	// at a multiple of eight bytes, which this slot does not, so the count is layerFrames at the end,
+	// and the slot keeps the fields after it where they were.
+	_Atomic(STD(uint32_t)) retiredLayerFrames[2];
 	_Atomic(STD(uint32_t)) layerWidth;
 	_Atomic(STD(uint32_t)) layerHeight;
 	_Atomic(STD(uint32_t)) layerFormat;
@@ -675,6 +678,10 @@ struct ShmHeader {
 	// meanwhile) and publishes the new raster in nativeModelMaxWidth/Height. A value it cannot use
 	// is overwritten with the active tier. Storing the active tier again changes nothing.
 	_Atomic(STD(uint32_t)) nativeTier;
+
+	// The frames the layer composed. layerFramesPad starts the count at a multiple of eight bytes.
+	_Atomic(STD(uint32_t)) layerFramesPad;
+	_Atomic(STD(uint64_t)) layerFrames;
 };
 
 /** @brief One device-local transport offer.
@@ -805,12 +812,6 @@ enum shm_text : STD(uint32_t) {
 	SHM_TEXT_GAME_NAME,     //!< gameName, guarded by gameNameSeq.
 };
 
-/** @brief The header's 64-bit counts, each held in a low and a high word. */
-enum shm_count : STD(uint32_t) {
-	SHM_COUNT_HELPER_FRAMES, //!< helperFramesLo and helperFramesHi.
-	SHM_COUNT_LAYER_FRAMES,  //!< layerFramesLo and layerFramesHi.
-};
-
 /** @brief Publishes a string in one of the header's text fields.
  *
  * Writes the string, cut to the field's size less one byte and padded with zeros, then bumps the
@@ -844,30 +845,6 @@ ShmLoadString (struct ShmHeader const *h,
                enum shm_text           field,
                char                   *out,
                STD(size_t)             size);
-
-/** @brief Reads one of the header's 64-bit counts.
- *
- * Read while ShmStore64() carries the low word into the high one, the count can be 2^32 off: the
- * counts are only shown, and that happens once in 2^32 counts.
- *
- * @param h     The header.
- * @param count The count.
- * @return      Its value.
- */
-extern STD(uint64_t)
-ShmLoad64 (struct ShmHeader const *h,
-           enum shm_count          count);
-
-/** @brief Stores one of the header's 64-bit counts, the high word first.
- *
- * @param h     The header.
- * @param count The count.
- * @param v     Its value.
- */
-extern void
-ShmStore64 (struct ShmHeader *h,
-            enum shm_count    count,
-            STD(uint64_t)     v);
 
 #undef STD
 

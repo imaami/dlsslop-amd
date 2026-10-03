@@ -204,16 +204,9 @@ static void OpenChannel(Context& c, const Options& o) {
     h->captureRequest.store(o.noWorker || o.mode != kFrameMode ? 0 : 4);
     // Each smoke invocation starts a new layer process, whose frame counter
     // starts at zero even when the worker channel is reused between modes.
-    h->layerFramesLo.store(0);
-    h->layerFramesHi.store(0);
+    h->layerFrames.store(0);
     h->layerMsBits.store(0);
     h->controlSeq.fetch_add(1);
-}
-
-// The layer counts the frames it composed on each device and publishes the count of the device
-// that composed last.
-static uint64_t LayerFrames(const ShmHeader* h) {
-    return uint64_t(h->layerFramesLo.load()) | (uint64_t(h->layerFramesHi.load()) << 32);
 }
 
 // An instance that presents through X11 or a headless surface, with the Khronos validation layer
@@ -342,7 +335,8 @@ struct Device {
     // An acquire for each swapchain a present names, and the submit's signal the present waits on.
     VkSemaphore acquired[kPresentMax] = {};
     VkSemaphore rendered = VK_NULL_HANDLE;
-    // The frames presented, and those the layer composed, which it publishes as layerFrames.
+    // The frames presented, and those the layer composed. The layer counts each device's composed
+    // frames and publishes the count of the device that composed last as layerFrames.
     uint32_t presented = 0;
     uint64_t composed = 0;
 };
@@ -638,18 +632,18 @@ static void CheckAnswer(const Context& c, uint32_t request, uint32_t width, uint
 static void Present(const Context& c, Device& d, std::initializer_list<const Swapchain*> swapchains,
                     const Swapchain* composes) {
     const uint32_t previous = c.h->seq_req.load();
-    const uint64_t frames = LayerFrames(c.h);
+    const uint64_t frames = c.h->layerFrames.load();
     const VkClearColorValue color = FrameColour(d.presented);
     Draw(d, swapchains, color, VK_NULL_HANDLE);
     const uint32_t request = c.h->seq_req.load();
     if (!composes) {
-        require(request == previous && LayerFrames(c.h) == frames,
+        require(request == previous && c.h->layerFrames.load() == frames,
                 "the layer composed a present that holds no primary swapchain");
         return;
     }
     require(request == previous + 1, "the layer did not publish exactly one request for the present");
     CheckAnswer(c, request, composes->extent.width, composes->extent.height, &color, false);
-    require(LayerFrames(c.h) == ++d.composed, "the layer's frame count did not grow by one");
+    require(c.h->layerFrames.load() == ++d.composed, "the layer's frame count did not grow by one");
 }
 
 static int smoke(Context& c, const Options& o) {
@@ -708,7 +702,7 @@ static int smoke(Context& c, const Options& o) {
     }
 
     ShmHeader* h = c.h;
-    const uint64_t initialFrames = LayerFrames(h);
+    const uint64_t initialFrames = h->layerFrames.load();
     ContendingProducer contender(c.path, o.contention);
     for (uint32_t frame = 0; frame < kFrames + unsigned(o.contention); ++frame) {
         const uint32_t previous = h->seq_req.load();
@@ -730,7 +724,7 @@ static int smoke(Context& c, const Options& o) {
         }
         if (o.contention && !frame) {
             require(request == previous, "contending layer overwrote another producer's slot");
-            require(h->layerFramesLo.load() == uint32_t(initialFrames),
+            require(h->layerFrames.load() == initialFrames,
                     "contending layer composed without owning slot");
             contender.finish();
             continue;
@@ -741,7 +735,7 @@ static int smoke(Context& c, const Options& o) {
         CheckAnswer(c, request, o.reduced ? 160 : s.extent.width, o.reduced ? 96 : s.extent.height,
                     o.reduced || o.linear ? nullptr : &color, o.proxy16);
     }
-    const uint64_t composed = LayerFrames(h);
+    const uint64_t composed = h->layerFrames.load();
     DestroySwapchain(d, s);
     if (pattern) vkDestroyBuffer(d.device, pattern, nullptr);
     if (patternMemory) vkFreeMemory(d.device, patternMemory, nullptr);

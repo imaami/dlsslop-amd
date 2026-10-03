@@ -595,14 +595,14 @@ print_status (struct ShmHeader const *h)
 	printf("quit=%u\nheartbeat=%u\ncontrol_seq=%u\ntuning_seq=%u\n", atomic_load(&h->quit),
 	       atomic_load(&h->heartbeat), atomic_load(&h->controlSeq), atomic_load(&h->tuningSeq));
 	printf("helper_state=%u\nmodel_up=%u\nhelper_frames=%" PRIu64 "\n", atomic_load(&h->helperState),
-	       atomic_load(&h->modelUp), ShmLoad64(h, SHM_COUNT_HELPER_FRAMES));
+	       atomic_load(&h->modelUp), atomic_load(&h->helperFrames));
 	printf("upload_ms=%.3f\nnetwork_ms=%.3f\nreadback_ms=%.3f\n",
 	       BitsToFloat(atomic_load(&h->helperUploadMsBits)),
 	       BitsToFloat(atomic_load(&h->helperEvalMsBits)),
 	       BitsToFloat(atomic_load(&h->helperReadbackMsBits)));
 	printf("layer_pid=%u\nlayer_composition_up=%u\nlayer_frames=%" PRIu64 "\nlayer_ms=%.2f\n",
 	       atomic_load(&h->layerPid), atomic_load(&h->layerCompositionUp),
-	       ShmLoad64(h, SHM_COUNT_LAYER_FRAMES), BitsToFloat(atomic_load(&h->layerMsBits)));
+	       atomic_load(&h->layerFrames), BitsToFloat(atomic_load(&h->layerMsBits)));
 	printf("measured_white_point=%g\n", BitsToFloat(atomic_load(&h->layerMeasuredWhiteBits)));
 	printf("hdr_mode=%u\nhdr_detected=%u\nhdr_active=%u\nproxy_format=%u\nhdr_encode=%u\n",
 	       atomic_load(&h->hdrMode), atomic_load(&h->hdrDetected), atomic_load(&h->hdrActive),

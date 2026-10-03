@@ -26,6 +26,15 @@ static_assert(alignof (_Atomic(uint32_t)) == 4, "a word of the channel is not al
 static_assert(sizeof (uint32_t) == sizeof (unsigned) && ATOMIC_INT_LOCK_FREE == 2,
               "a word of the channel is not lock-free");
 
+// The frame counts, pinned likewise. A count is one 64-bit atomic, so a reader takes it whole. Its
+// alignment of eight bytes starts it at a multiple of eight in the header (184 and 2000 below), as an
+// atomic access of eight bytes needs, and it must be lock-free for the reason a word must. uint64_t
+// has the size of unsigned long long, for which ATOMIC_LLONG_LOCK_FREE answers.
+static_assert(sizeof (_Atomic(uint64_t)) == 8, "a count of the channel is not eight bytes");
+static_assert(alignof (_Atomic(uint64_t)) == 8, "a count of the channel is not aligned to eight bytes");
+static_assert(sizeof (uint64_t) == sizeof (unsigned long long) && ATOMIC_LLONG_LOCK_FREE == 2,
+              "a count of the channel is not lock-free");
+
 // The layout, pinned.
 //
 // Every process that maps this file agrees on where each field is only because they were compiled
@@ -38,15 +47,17 @@ static_assert(sizeof (uint32_t) == sizeof (unsigned) && ATOMIC_INT_LOCK_FREE == 
 // someone remember to use it. If these fire, the layout changed: bump kShmVersion in the same commit,
 // then update these numbers.
 //
-// Every member is a word, a char array of a multiple of four bytes, or the pass array, so there is
-// no padding: with the words pinned above, these hold in C and C++ alike.
-static_assert(sizeof (struct ShmHeader) == 1996, "the header layout changed -- bump kShmVersion");
-static_assert(alignof (struct ShmHeader) == 4, "layout changed -- bump kShmVersion");
+// Every member is a word, a count, a char array of a multiple of four bytes, or the pass array, and
+// the counts start at multiples of eight bytes, so there is no padding: with the words and the
+// counts pinned above, these hold in C and C++ alike.
+static_assert(sizeof (struct ShmHeader) == 2008, "the header layout changed -- bump kShmVersion");
+static_assert(alignof (struct ShmHeader) == 8, "layout changed -- bump kShmVersion");
 static_assert(sizeof (struct PassControl) == 36, "layout changed -- bump kShmVersion");
 
 static_assert(offsetof(struct ShmHeader, enabled) == 44, "layout changed -- bump kShmVersion");
 static_assert(offsetof(struct ShmHeader, transferStrengthBits) == 88, "layout changed -- bump kShmVersion");
 static_assert(offsetof(struct ShmHeader, helperState) == 176, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, helperFrames) == 184, "layout changed -- bump kShmVersion");
 static_assert(offsetof(struct ShmHeader, helperReason) == 260, "layout changed -- bump kShmVersion");
 static_assert(offsetof(struct ShmHeader, layerReason) == 456, "layout changed -- bump kShmVersion");
 static_assert(offsetof(struct ShmHeader, gameName) == 652, "layout changed -- bump kShmVersion");
@@ -56,6 +67,7 @@ static_assert(offsetof(struct ShmHeader, seq_ok) == 1872, "layout changed -- bum
 static_assert(offsetof(struct ShmHeader, hdrEncode) == 1948, "layout changed -- bump kShmVersion");
 static_assert(offsetof(struct ShmHeader, transportGen) == 1980, "layout changed -- bump kShmVersion");
 static_assert(offsetof(struct ShmHeader, nativeTier) == 1992, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, layerFrames) == 2000, "layout changed -- bump kShmVersion");
 
 static_assert(sizeof (struct ShmTransportOffer) == 72, "the transport offer's layout changed");
 
@@ -160,20 +172,6 @@ static struct shm_text_field const shm_text_fields[] = {
 	[SHM_TEXT_LAYER_REASON]  = SHM_TEXT_FIELD(layerReason),
 	[SHM_TEXT_GAME_NAME]     = SHM_TEXT_FIELD(gameName),
 #undef SHM_TEXT_FIELD
-};
-
-/** @brief Where a 64-bit count of the header is. */
-struct shm_count_words {
-	uint32_t lo; //!< The low word's offset.
-	uint32_t hi; //!< The high word's offset.
-};
-
-/** @brief The counts of enum shm_count. */
-static struct shm_count_words const shm_counts[] = {
-#define SHM_COUNT_WORDS(name) {offsetof(struct ShmHeader, name##Lo), offsetof(struct ShmHeader, name##Hi)}
-	[SHM_COUNT_HELPER_FRAMES] = SHM_COUNT_WORDS(helperFrames),
-	[SHM_COUNT_LAYER_FRAMES]  = SHM_COUNT_WORDS(layerFrames),
-#undef SHM_COUNT_WORDS
 };
 
 void
@@ -322,28 +320,6 @@ bool
 ShmNeuralEnabled (struct ShmHeader const *h)
 {
 	return atomic_load(&h->enabled) != 0;
-}
-
-uint64_t
-ShmLoad64 (struct ShmHeader const *h,
-           enum shm_count          count)
-{
-	struct shm_count_words const *const c = &shm_counts[count];
-	char const *const base = (char const *)h;
-	uint64_t const hi = atomic_load((_Atomic(uint32_t) const *)(void const *)(base + c->hi));
-	uint64_t const lo = atomic_load((_Atomic(uint32_t) const *)(void const *)(base + c->lo));
-	return (hi << 32) | lo;
-}
-
-void
-ShmStore64 (struct ShmHeader *h,
-            enum shm_count    count,
-            uint64_t          v)
-{
-	struct shm_count_words const *const c = &shm_counts[count];
-	char *const base = (char *)h;
-	atomic_store((_Atomic(uint32_t) *)(void *)(base + c->hi), (uint32_t)(v >> 32));
-	atomic_store((_Atomic(uint32_t) *)(void *)(base + c->lo), (uint32_t)v);
 }
 
 uint32_t

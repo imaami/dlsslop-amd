@@ -10,19 +10,24 @@
 #include <cstdlib>
 #include <string>
 
-// The channel's words and layout as C++ sees them; shm_protocol.c pins them in C. A word is a
-// lock-free std::atomic<uint32_t> of four bytes here, as it is a lock-free _Atomic(uint32_t) there.
+// The channel's words, counts and layout as C++ sees them; shm_protocol.c pins them in C. A word is
+// a lock-free std::atomic<uint32_t> of four bytes here, as it is a lock-free _Atomic(uint32_t) there,
+// and a frame count a lock-free std::atomic<uint64_t> of eight bytes aligned to eight.
 static_assert(sizeof(std::atomic<std::uint32_t>) == 4 && alignof(std::atomic<std::uint32_t>) == 4,
               "a word of the channel is not four bytes aligned to four");
 static_assert(std::atomic<std::uint32_t>::is_always_lock_free, "a word of the channel is not lock-free");
-static_assert(sizeof(ShmHeader) == 1996 && alignof(ShmHeader) == 4 && sizeof(PassControl) == 36,
+static_assert(sizeof(std::atomic<std::uint64_t>) == 8 && alignof(std::atomic<std::uint64_t>) == 8,
+              "a count of the channel is not eight bytes aligned to eight");
+static_assert(std::atomic<std::uint64_t>::is_always_lock_free, "a count of the channel is not lock-free");
+static_assert(sizeof(ShmHeader) == 2008 && alignof(ShmHeader) == 8 && sizeof(PassControl) == 36,
               "the header's layout differs from shm_protocol.c's");
 static_assert(offsetof(ShmHeader, enabled) == 44 && offsetof(ShmHeader, transferStrengthBits) == 88 &&
-                  offsetof(ShmHeader, helperState) == 176 && offsetof(ShmHeader, helperReason) == 260 &&
-                  offsetof(ShmHeader, layerReason) == 456 && offsetof(ShmHeader, gameName) == 652 &&
-                  offsetof(ShmHeader, pass) == 780 && offsetof(ShmHeader, mvecEnabled) == 1860 &&
-                  offsetof(ShmHeader, seq_ok) == 1872 && offsetof(ShmHeader, hdrEncode) == 1948 &&
-                  offsetof(ShmHeader, transportGen) == 1980 && offsetof(ShmHeader, nativeTier) == 1992,
+                  offsetof(ShmHeader, helperState) == 176 && offsetof(ShmHeader, helperFrames) == 184 &&
+                  offsetof(ShmHeader, helperReason) == 260 && offsetof(ShmHeader, layerReason) == 456 &&
+                  offsetof(ShmHeader, gameName) == 652 && offsetof(ShmHeader, pass) == 780 &&
+                  offsetof(ShmHeader, mvecEnabled) == 1860 && offsetof(ShmHeader, seq_ok) == 1872 &&
+                  offsetof(ShmHeader, hdrEncode) == 1948 && offsetof(ShmHeader, transportGen) == 1980 &&
+                  offsetof(ShmHeader, nativeTier) == 1992 && offsetof(ShmHeader, layerFrames) == 2000,
               "the header's layout differs from shm_protocol.c's");
 static_assert(sizeof(ShmTransportOffer) == 72, "the transport offer's layout differs from shm_protocol.c's");
 
