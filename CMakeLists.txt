@@ -99,10 +99,11 @@ embed_shader(common/network_fallback.comp network/network_fallback.hpp kNetworkF
 add_custom_target(network-shaders DEPENDS ${SHADER_DIR}/network/network_verdict.hpp
     ${SHADER_DIR}/network/network_fallback.hpp)
 
-# The C functions that common/'s headers declare for C and C++: the channel's
-# and the settings'. The layers, the network module, the programs and the tests
-# link them.
-add_library(dlsslop-common-c OBJECT common/shm_protocol.c common/control_settings.c)
+# The C functions that common/'s headers declare for C and C++: the channel's,
+# the settings' and the Vulkan network's requirements. The layers, the network
+# module, the programs and the tests link them.
+add_library(dlsslop-common-c OBJECT common/shm_protocol.c common/control_settings.c
+    common/network_requirements.c)
 set_target_properties(dlsslop-common-c PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # control_settings.c calls trunc().
 target_link_libraries(dlsslop-common-c PUBLIC m)
