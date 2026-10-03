@@ -385,8 +385,9 @@ if(BUILD_TESTING)
     add_executable(hdr-shader-test tests/hdr_shader_test.cpp)
     target_link_libraries(hdr-shader-test PRIVATE dlsslop-layer-objects dlsslop-common-c ${VULKAN_LOADER})
     add_test(NAME hdr-shader COMMAND hdr-shader-test)
-    add_executable(composition-rebuild-test tests/composition_rebuild_test.cpp)
-    target_link_libraries(composition-rebuild-test PRIVATE dlsslop-layer-objects dlsslop-common-c ${VULKAN_LOADER})
+    add_executable(composition-rebuild-test tests/composition_rebuild_test.c)
+    target_link_libraries(composition-rebuild-test PRIVATE dlsslop-layer-objects dlsslop-common-c test-support
+        ${VULKAN_LOADER})
     add_test(NAME composition-rebuild COMMAND composition-rebuild-test)
     add_test(NAME vulkan-smoke COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/run-smoke.py
         --build-dir ${CMAKE_CURRENT_BINARY_DIR} --headless)
