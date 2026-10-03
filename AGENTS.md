@@ -99,7 +99,11 @@ share.
   based on that.
 - Always check the return value of libc calls when they're not completely
   inconsequential.
-- Do not assign to `errno`.
+- Do not assign to `errno` as a way to pass error information forward.
+- In some cases `errno` must be cleared of stale values to guarantee its
+  usefulness, e.g. before calling `strtoul()` and related functions. These are
+  documented workarounds for known gotchas, not a suggestion to adopt `errno`
+  as your error propagation channel.
 
 ## C coding style
 
