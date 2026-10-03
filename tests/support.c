@@ -2,21 +2,23 @@
  *
  * What several of the C tests need: support.h.
  */
+#include <ftw.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
 #include "support.h"
 
 char *
-support_format (size_t     *length,
-                char const *fmt,
-                ...)
+support_vformat (size_t     *length,
+                 char const *fmt,
+                 va_list     args)
 {
-	va_list args;
-	va_start(args, fmt);
-	int const n = vsnprintf(nullptr, 0, fmt, args);
-	va_end(args);
+	va_list measured;
+	va_copy(measured, args);
+	int const n = vsnprintf(nullptr, 0, fmt, measured);
+	va_end(measured);
 	if (n < 0)
 		return nullptr;
 
@@ -25,15 +27,24 @@ support_format (size_t     *length,
 	if (!text)
 		return nullptr;
 
-	va_start(args, fmt);
-	int const written = vsnprintf(text, size, fmt, args);
-	va_end(args);
-	if (written != n) {
+	if (vsnprintf(text, size, fmt, args) != n) {
 		free(text);
 		text = nullptr;
 	} else if (length) {
 		*length = size - 1;
 	}
+	return text;
+}
+
+char *
+support_format (size_t     *length,
+                char const *fmt,
+                ...)
+{
+	va_list args;
+	va_start(args, fmt);
+	char *const text = support_vformat(length, fmt, args);
+	va_end(args);
 	return text;
 }
 
@@ -47,6 +58,29 @@ support_temp_dir (char const *parent,
 		path = nullptr;
 	}
 	return path;
+}
+
+/** @brief Removes what nftw() reports, a directory after what it holds.
+ *
+ * @param path The entry.
+ * @param st   Its status; unused.
+ * @param type What nftw() found; unused.
+ * @param ftw  Where it is; unused.
+ * @return     0 to go on, -1 to stop the walk.
+ */
+static int
+remove_entry (char const        *path,
+              struct stat const *st,
+              int                type,
+              struct FTW        *ftw)
+{
+	return remove(path) ? -1 : 0;
+}
+
+bool
+support_remove_tree (char const *path)
+{
+	return !nftw(path, remove_entry, 16, FTW_DEPTH | FTW_PHYS);
 }
 
 char *

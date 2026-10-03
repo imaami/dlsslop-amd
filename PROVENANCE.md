@@ -121,8 +121,9 @@ functions, which both languages call. `ShmStoreString`, `ShmLoadString`,
 `enum shm_count` instead of the field's words, because a word is a
 `std::atomic<uint32_t>` in C++ and an `_Atomic(uint32_t)` in C.
 `common/shm_protocol.hpp` holds overloads that return a `std::string` of the
-functions that write a string into the caller's buffer, but `ShmRuntimeDir`,
-which only a test calls.
+functions that write a string into the caller's buffer and that C++ calls:
+`ShmNativeDefaultPath`, `ShmNativeChannelPath`, `ShmTransportPath` and
+`ShmLoadString`.
 
 The layer's composition shader `layer/dlssnr/dlssnr.comp` is a GLSL port of the
 layer fork's `layer_linux/src/dlssnr/dlssnr.hlsl` (AGPL-3.0). Its RenoDX-derived

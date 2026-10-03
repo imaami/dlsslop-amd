@@ -26,17 +26,6 @@ static_assert(offsetof(ShmHeader, enabled) == 44 && offsetof(ShmHeader, transfer
               "the header's layout differs from shm_protocol.c's");
 static_assert(sizeof(ShmTransportOffer) == 72, "the transport offer's layout differs from shm_protocol.c's");
 
-// ShmDefaultPath(), or an empty string if it cannot be formatted.
-inline std::string ShmDefaultPath()
-{
-    const char* uid = std::getenv("DLSSNR_UID");
-    const int length = shm_runtime_path(nullptr, 0, uid, "/shm.bin");
-    if (length < 0) return {};
-    std::string path(static_cast<std::size_t>(length), '\0');
-    shm_runtime_path(path.data(), path.size() + 1, uid, "/shm.bin");
-    return path;
-}
-
 // ShmNativeDefaultPath(), or an empty string if it cannot be formatted.
 inline std::string ShmNativeDefaultPath()
 {

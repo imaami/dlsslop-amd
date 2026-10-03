@@ -321,10 +321,10 @@ if(BUILD_TESTING)
     add_executable(files-test tests/files_test.cpp backend/files.cpp)
     target_link_libraries(files-test PRIVATE Threads::Threads)
     add_test(NAME files COMMAND files-test)
-    add_executable(capture-writer-test tests/capture_writer_test.cpp)
+    add_executable(capture-writer-test tests/capture_writer_test.c)
     # stb_image.h is a system header here: its unused helpers do not warn.
     target_include_directories(capture-writer-test SYSTEM PRIVATE third_party/stb)
-    target_link_libraries(capture-writer-test PRIVATE dlsslop-layer-objects dlsslop-common-c)
+    target_link_libraries(capture-writer-test PRIVATE dlsslop-layer-objects dlsslop-common-c test-support)
     add_test(NAME capture-writer COMMAND capture-writer-test)
     # The layer's settings snapshot, model raster, format table, scaler names and key names, on
     # the host.
