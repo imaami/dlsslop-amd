@@ -178,7 +178,7 @@ void apply(ShmHeader* h, const std::vector<Change>& changes, size_t frame)
     bool any = false, tuning = false;
     for (const Change& c : changes)
         if (c.frame == frame) {
-            control_setting_word(h, c.setting)->store(c.value);
+            control_setting_store(h, c.setting, c.value);
             std::printf("%s%s=%g", any ? " " : "settings: ", c.setting->name,
                         control_setting_value(c.setting, c.value));
             any = true;

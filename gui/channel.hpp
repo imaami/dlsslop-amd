@@ -64,8 +64,8 @@ public:
         for (const auto& [index, number] : changes) {
             const auto& s = CONTROL_SETTINGS[index];
             // + 0.0f stores -0 as 0.
-            control_setting_word(header_, &s)->store(s.is_float ? FloatToBits(static_cast<float>(number) + 0.0f) :
-                                                                  static_cast<uint32_t>(number));
+            control_setting_store(header_, &s, s.is_float ? FloatToBits(static_cast<float>(number) + 0.0f) :
+                                                            static_cast<uint32_t>(number));
             tuningChanged |= s.tuning;
         }
         if (changes.empty()) return {};
@@ -78,7 +78,7 @@ public:
         ShmHeader defaults{};
         ShmInitNativeDefaults(&defaults, control_settings_worker_bypass(header_));
         for (const auto& s : CONTROL_SETTINGS)
-            control_setting_word(header_, &s)->store(control_setting_load(&defaults, &s));
+            control_setting_store(header_, &s, control_setting_load(&defaults, &s));
         header_->tuningSeq.fetch_add(1);
         header_->controlSeq.fetch_add(1);
     }

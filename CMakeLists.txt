@@ -97,10 +97,13 @@ embed_shader(common/network_fallback.comp network/network_fallback.hpp kNetworkF
 add_custom_target(network-shaders DEPENDS ${SHADER_DIR}/network/network_verdict.hpp
     ${SHADER_DIR}/network/network_fallback.hpp)
 
-# The C functions that common/'s headers declare for C and C++: the channel's.
-# The layers, the network module, the programs and the tests link them.
-add_library(dlsslop-common-c OBJECT common/shm_protocol.c)
+# The C functions that common/'s headers declare for C and C++: the channel's
+# and the settings'. The layers, the network module, the programs and the tests
+# link them.
+add_library(dlsslop-common-c OBJECT common/shm_protocol.c common/control_settings.c)
 set_target_properties(dlsslop-common-c PROPERTIES POSITION_INDEPENDENT_CODE ON)
+# control_settings.c calls trunc().
+target_link_libraries(dlsslop-common-c PUBLIC m)
 
 # Only layer.c differs between the layers; both and the layer tests link the
 # other translation units compiled once.
@@ -121,7 +124,7 @@ endfunction()
 
 add_neural_layer(VkLayer_DLSSLOP_amd)
 add_executable(dlssnr-shmctl layer/shmctl.c)
-target_link_libraries(dlssnr-shmctl PRIVATE dlsslop-common-c m)
+target_link_libraries(dlssnr-shmctl PRIVATE dlsslop-common-c)
 target_link_options(dlssnr-shmctl PRIVATE -static-libgcc)
 # A command that runs once: its code is built for size.
 target_compile_options(dlssnr-shmctl PRIVATE -Os)
@@ -340,6 +343,11 @@ if(BUILD_TESTING)
     # The layer's intrusive list: linking, walking, unlinking and freeing during a walk.
     add_executable(list-test tests/list_test.c)
     add_test(NAME list COMMAND list-test)
+    # The tier setting's labels against kNativeTiers, in C: control_settings.c pins the constants
+    # that give the heights, but a static assertion cannot read the labels.
+    add_executable(control-settings-test tests/control_settings_test.c)
+    target_link_libraries(control-settings-test PRIVATE dlsslop-common-c)
+    add_test(NAME control-settings COMMAND control-settings-test)
     add_test(NAME color-metrics COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_metrics_test.py)
     add_test(NAME color-orchestrator COMMAND ${Python3_EXECUTABLE}

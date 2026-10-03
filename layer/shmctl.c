@@ -654,16 +654,14 @@ run (struct options const *options,
 		uint64_t const bit = UINT64_C(1) << i;
 		bool const flip = options->toggled & bit;
 		struct control_setting const *const s = &CONTROL_SETTINGS[i];
-		_Atomic(uint32_t) *const word = control_setting_word(h, s);
 		if (options->assigned & bit) {
 			// Never also toggled.
-			atomic_store(word, options->values[i]);
+			control_setting_store(h, s, options->values[i]);
 			tuning_changed |= s->tuning;
 		} else if (reset) {
-			atomic_store(word, control_setting_load(&defaults, s) ^ flip);
+			control_setting_store(h, s, control_setting_load(&defaults, s) ^ flip);
 		} else if (flip) {
-			uint32_t value = atomic_load(word);
-			while (!atomic_compare_exchange_weak(word, &value, !value)) {}
+			control_setting_toggle(h, s);
 		}
 	}
 	if (tuning_changed)

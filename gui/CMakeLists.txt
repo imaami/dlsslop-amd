@@ -19,9 +19,12 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON CACHE BOOL "Link-time optimization")
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/lto-compilers.cmake)
 # Uses the installed Qt 6 version; no vendored or pinned legacy Qt release.
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
-# The channel's C functions: the full project's library, or the GUI's own.
+# The channel's and the settings' C functions: the full project's library, or
+# the GUI's own.
 if(NOT TARGET dlsslop-common-c)
-    add_library(dlsslop-common-c OBJECT ../common/shm_protocol.c)
+    add_library(dlsslop-common-c OBJECT ../common/shm_protocol.c ../common/control_settings.c)
+    # control_settings.c calls trunc().
+    target_link_libraries(dlsslop-common-c PUBLIC m)
 endif()
 add_executable(dlsslop-gui main.cpp)
 # Event-driven: its code is built for size.
