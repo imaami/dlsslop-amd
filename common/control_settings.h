@@ -18,7 +18,7 @@
 # include <stdatomic.h>
 # define CONTROL_STD(x) std::x
 // Inline, so that every translation unit shares one table and one definition of each function:
-// inline C++ code in other headers, such as gui/channel.h's, uses them, and the one-definition rule
+// inline C++ code in other headers, such as gui/channel.hpp's, uses them, and the one-definition rule
 // asks for that.
 # define CONTROL_CONST inline constexpr
 # define CONTROL_INLINE inline

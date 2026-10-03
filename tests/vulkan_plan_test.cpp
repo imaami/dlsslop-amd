@@ -13,9 +13,9 @@
 // persistent runs that upstream gives no record share one more, after the
 // others: the goldens are checked with upstream's words put back and that
 // record taken out. The frames the network cannot take are rejected.
-#include "vulkan_pack.h"
-#include "vulkan_plan.h"
-#include "vulkan_weights.h"
+#include "vulkan_pack.hpp"
+#include "vulkan_plan.hpp"
+#include "vulkan_weights.hpp"
 
 #include <getopt.h>
 #include <algorithm>

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-#include "hip_engine.h"
-#include "codec.h"
-#include "control_selftest.h"
+#include "hip_engine.hpp"
+#include "codec.hpp"
+#include "control_selftest.hpp"
 
 #include <algorithm>
 #include <cstdio>

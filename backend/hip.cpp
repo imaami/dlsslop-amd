@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-#include "hip.h"
-#include "files.h"
+#include "hip.hpp"
+#include "files.hpp"
 
 #include <cstddef>
 #include <cstdint>

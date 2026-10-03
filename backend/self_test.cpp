@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
-#include "engine.h"
-#include "files.h"
-#include "hip_engine.h"
-#include "vulkan_engine.h"
+#include "engine.hpp"
+#include "files.hpp"
+#include "hip_engine.hpp"
+#include "vulkan_engine.hpp"
 
 #include <cmath>
 #include <cstdio>

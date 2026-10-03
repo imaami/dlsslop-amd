@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
-#include "channel.h"
-#include "absolute_slider.h"
-#include "slider_scale.h"
-#include "theme.h"
+#include "channel.hpp"
+#include "absolute_slider.hpp"
+#include "slider_scale.hpp"
+#include "theme.hpp"
 #include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>

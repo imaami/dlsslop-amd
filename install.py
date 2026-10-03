@@ -132,8 +132,8 @@ def vulkan_shader_names(root):
         if not found:
             raise ValueError(f"no {name} table in {root / path}")
         return found
-    return ([f"g_{stem}.spv" for stem in table("common/vulkan_plan.h", "kKernels", r'\{"(\w+)",')] +
-            table("common/vulkan_plan.h", "kMarkers", r'\{"([\w.-]+)",') +
+    return ([f"g_{stem}.spv" for stem in table("common/vulkan_plan.hpp", "kKernels", r'\{"(\w+)",')] +
+            table("common/vulkan_plan.hpp", "kMarkers", r'\{"([\w.-]+)",') +
             table("common/vulkan_runtime.cpp", "kAdapterBindings", r'"(\w+/\w+\.spv)"') +
             ["shader-constants.txt", "temporal/shader-constants.txt"])
 

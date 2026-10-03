@@ -7,8 +7,8 @@
 // weights and the gather maps each launch reads. tests/hiptrace/plan_hashes.py
 // prints these values from a trace. --modules checks the launches against the
 // built kernels' metadata instead.
-#include "../backend/files.h"
-#include "../backend/hip_plan.h"
+#include "../backend/files.hpp"
+#include "../backend/hip_plan.hpp"
 #include "../common/shm_protocol.h"
 
 #include <elf.h>

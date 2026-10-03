@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Write vktrace's name tables, a C++ include, from the Vulkan registry.
+"""Write vktrace's name tables, a C++ header, from the Vulkan registry.
 
 For the enums the trace prints (formats, image layouts, descriptor types,
 structure types, ...) a switch from value to name; the block size of every
@@ -17,7 +17,7 @@ parser = argparse.ArgumentParser(description=__doc__, add_help=False, allow_abbr
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
 parser.add_argument("registry", metavar="VK_XML", help="the registry, vk.xml (required; no default)")
 parser.add_argument("header", metavar="VULKAN_CORE_H", help="the header the layer compiles with (required; no default)")
-parser.add_argument("output", metavar="OUTPUT", help="the include to write (required; no default)")
+parser.add_argument("output", metavar="OUTPUT", help="the header to write (required; no default)")
 parser.add_argument("-h", "--help", action="help", help="show this help and exit (default: off)")
 args = parser.parse_args()
 root = ET.parse(args.registry).getroot()

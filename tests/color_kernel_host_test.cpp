@@ -1,5 +1,5 @@
 // Exercises the actual kernel entry point on the host. Not a HIP execution test.
-#include "../backend/color_preserve.h"
+#include "../backend/color_preserve.hpp"
 #include <cstdio>
 static unsigned group_id, item_id;
 static unsigned __builtin_amdgcn_workgroup_id_x() { return group_id; }

@@ -179,11 +179,11 @@ c512 blocks read. The port reads a weight's `.f16` file only when there is no
 `.f32` file, and only files of the exact size that `dlsslop-setup` imports.
 Upstream reads the `.f16` file whenever the `.f32` file does not open, and it
 accepts any downsample or decoder file that holds at least the weight matrix.
-`backend/hip.h` declares the HIP runtime entry points dlsslopd calls and the
+`backend/hip.hpp` declares the HIP runtime entry points dlsslopd calls and the
 layouts of the types it passes to them. It takes those layouts from ROCm's
 `include/hip/hip_runtime_api.h` as the fork's `hip_api.h` and
 `hip_device_properties.h` copy them from rocm-7.1.1 (MIT, Copyright (c)
-2015 - 2023 Advanced Micro Devices, Inc.; `backend/hip.h` carries the notice,
+2015 - 2023 Advanced Micro Devices, Inc.; `backend/hip.hpp` carries the notice,
 and `packaging/THIRD-PARTY.txt` repeats it for binary releases). `backend/hip.cpp` loads the runtime
 (`libamdhip64.so.7`, `.so.6` or the unversioned soname, also from
 `/opt/rocm/lib` or an explicit `DLSSLOP_HIP_LIBRARY` path) with
@@ -247,7 +247,7 @@ does so for one pass with motion history only and makes views and sets for each
 recording in a ring, it does so for every shape, blitting an RGBA32F answer into
 the model image, and writes its sets only between frames, when the composition's
 generation changes. `vulkan-plan-abi` and `vulkan-constants` check the fetched
-shaders and the model tools' entry list against the port. `common/vulkan_plan.h`
+shaders and the model tools' entry list against the port. `common/vulkan_plan.hpp`
 holds the constants that the plan takes from `linux/build/arch/rdna4.sh` and
 from `nr_graph.cpp`'s defaults at `a75ac49`; `vulkan-constants` checks those
 that the markers in `pipelines.json` record and the tile of `gemmvqkvnorms` that

@@ -1,4 +1,4 @@
-#include "../backend/color_preserve.h"
+#include "../backend/color_preserve.hpp"
 #include <array>
 #include <cstdio>
 #include <cstdlib>

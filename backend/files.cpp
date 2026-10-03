@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "files.h"
+#include "files.hpp"
 
 #include <climits>
 #include <cstdio>

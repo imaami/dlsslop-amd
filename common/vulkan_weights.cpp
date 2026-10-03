@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "vulkan_weights.h"
+#include "vulkan_weights.hpp"
 
 #include <algorithm>
 #include <bit>

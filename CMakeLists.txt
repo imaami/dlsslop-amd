@@ -75,21 +75,24 @@ foreach(name bcus bcds_bicubic bcds_catmull bcds_lanczos2 bcds_lanczos3 bcds_kai
     add_layer_shader(layer/scaling/${name}.comp scaling/${name}_Shader_Vk ${name}_spv)
 endforeach()
 # Project GLSL that a program embeds: SOURCE's SPIR-V for the target
-# environment ENV, validated, as the uint32_t array SYMBOL in OUTPUT.h below
-# the shader directory. No file of its own is loaded at run time.
-function(embed_shader source output symbol env)
-    set(output ${SHADER_DIR}/${output})
+# environment ENV, validated, as the uint32_t array SYMBOL in HEADER below the
+# shader directory. No file of its own is loaded at run time. The header
+# defines the array: HEADER ends in .hpp where C++ includes it and in .h where
+# one C file does.
+function(embed_shader source header symbol env)
+    set(header ${SHADER_DIR}/${header})
+    cmake_path(REPLACE_EXTENSION header LAST_ONLY .spv OUTPUT_VARIABLE spirv)
     set(source ${CMAKE_CURRENT_SOURCE_DIR}/${source})
-    get_filename_component(directory ${output} DIRECTORY)
+    get_filename_component(directory ${header} DIRECTORY)
     file(MAKE_DIRECTORY ${directory})
-    add_custom_command(OUTPUT ${output}.h ${output}.spv
-        COMMAND ${GLSLANG_VALIDATOR} --quiet -V --target-env ${env} -o ${output}.spv ${source}
-        COMMAND ${SPIRV_VAL} --target-env ${env} ${output}.spv
-        COMMAND ${GLSLANG_VALIDATOR} --quiet -V --target-env ${env} --vn ${symbol} -o ${output}.h ${source}
+    add_custom_command(OUTPUT ${header} ${spirv}
+        COMMAND ${GLSLANG_VALIDATOR} --quiet -V --target-env ${env} -o ${spirv} ${source}
+        COMMAND ${SPIRV_VAL} --target-env ${env} ${spirv}
+        COMMAND ${GLSLANG_VALIDATOR} --quiet -V --target-env ${env} --vn ${symbol} -o ${header} ${source}
         DEPENDS ${source} VERBATIM)
 endfunction()
 set(METER ${SHADER_DIR}/shaders/meter_reduce)
-embed_shader(layer/meter_reduce.comp shaders/meter_reduce kMeterReduceSpv vulkan1.0)
+embed_shader(layer/meter_reduce.comp shaders/meter_reduce.h kMeterReduceSpv vulkan1.0)
 # Keep upstream's kMeterReduceSpv/kMeterReduceSpvLen header contract.
 file(CONFIGURE OUTPUT ${METER}_spv.h CONTENT [[#pragma once
 #include <stddef.h>
@@ -99,10 +102,10 @@ static const size_t kMeterReduceSpvLen = sizeof(kMeterReduceSpv) / sizeof(kMeter
 ]])
 add_custom_target(layer-shaders DEPENDS ${LAYER_SHADERS} ${METER}.h)
 # The Vulkan network's verdict and fallback after its last dispatch.
-embed_shader(common/network_verdict.comp network/network_verdict kNetworkVerdictSpv vulkan1.3)
-embed_shader(common/network_fallback.comp network/network_fallback kNetworkFallbackSpv vulkan1.3)
-add_custom_target(network-shaders DEPENDS ${SHADER_DIR}/network/network_verdict.h
-    ${SHADER_DIR}/network/network_fallback.h)
+embed_shader(common/network_verdict.comp network/network_verdict.hpp kNetworkVerdictSpv vulkan1.3)
+embed_shader(common/network_fallback.comp network/network_fallback.hpp kNetworkFallbackSpv vulkan1.3)
+add_custom_target(network-shaders DEPENDS ${SHADER_DIR}/network/network_verdict.hpp
+    ${SHADER_DIR}/network/network_fallback.hpp)
 
 # Only layer.c differs between the layers; both and the layer tests link the
 # other translation units compiled once.
@@ -130,7 +133,7 @@ target_compile_options(dlssnr-shmctl PRIVATE -Os)
 
 # The Vulkan network's SPIR-V from DLSSNR-AMD's linux/ tree, and the project's
 # own host code that runs it. The host knows the constants the SPIR-V is built
-# with (common/vulkan_plan.h) and refuses SPIR-V whose markers disagree.
+# with (common/vulkan_plan.hpp) and refuses SPIR-V whose markers disagree.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 set(VKNR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/vulkan/linux")
 set(VKNR_SHADERS "${CMAKE_CURRENT_BINARY_DIR}/vulkan-nr/network")
@@ -370,8 +373,8 @@ if(BUILD_TESTING)
     # A bounded compute load from a process of its own, for the hardware check
     # of the Vulkan network's waits (VALIDATION.md); its options are checked
     # without a GPU.
-    embed_shader(tests/vulkan_contention.comp tests/vulkan_contention kContentionSpv vulkan1.3)
-    add_executable(vulkan-contention tests/vulkan_contention.cpp ${SHADER_DIR}/tests/vulkan_contention.h)
+    embed_shader(tests/vulkan_contention.comp tests/vulkan_contention.hpp kContentionSpv vulkan1.3)
+    add_executable(vulkan-contention tests/vulkan_contention.cpp ${SHADER_DIR}/tests/vulkan_contention.hpp)
     target_include_directories(vulkan-contention PRIVATE ${SHADER_DIR})
     target_link_libraries(vulkan-contention PRIVATE ${VULKAN_LOADER})
     add_test(NAME contention-cli COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/contention-cli.py
@@ -394,11 +397,11 @@ if(BUILD_TESTING)
     endif()
     set(VKTRACE_VERSION ${CMAKE_MATCH_2}.${CMAKE_MATCH_3}.${CMAKE_MATCH_1})
     set(VKTRACE_DIR ${CMAKE_CURRENT_BINARY_DIR}/vktrace)
-    add_custom_command(OUTPUT ${VKTRACE_DIR}/vkt_names.inc
+    add_custom_command(OUTPUT ${VKTRACE_DIR}/vkt_names.hpp
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/vktrace/gen_names.py ${VULKAN_REGISTRY}
-            ${VULKAN_CORE_HEADER} ${VKTRACE_DIR}/vkt_names.inc
+            ${VULKAN_CORE_HEADER} ${VKTRACE_DIR}/vkt_names.hpp
         DEPENDS tests/vktrace/gen_names.py ${VULKAN_REGISTRY} ${VULKAN_CORE_HEADER} VERBATIM)
-    add_library(vktrace MODULE tests/vktrace/vktrace.cpp ${VKTRACE_DIR}/vkt_names.inc)
+    add_library(vktrace MODULE tests/vktrace/vktrace.cpp ${VKTRACE_DIR}/vkt_names.hpp)
     set_target_properties(vktrace PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
     target_include_directories(vktrace PRIVATE ${VKTRACE_DIR})
     file(GENERATE OUTPUT ${VKTRACE_DIR}/VkLayer_LOCAL_vktrace.json CONTENT "{

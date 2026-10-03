@@ -71,7 +71,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#include "vkt_names.inc"
+#include "vkt_names.hpp"
 
 namespace {
 

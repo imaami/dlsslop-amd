@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-#include "hip_weights.h"
-#include "files.h"
+#include "hip_weights.hpp"
+#include "files.hpp"
 
 #include <algorithm>
 #include <array>

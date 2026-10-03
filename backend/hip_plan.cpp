@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "hip_plan.h"
+#include "hip_plan.hpp"
 
 #include <bit>
 #include <cstdio>

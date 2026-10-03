@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-#include "kernel.h"
-#include "color_preserve_math.h"
+#include "kernel.hpp"
+#include "color_preserve_math.hpp"
 
 KERNEL void dlsslop_preserve_color(const float* __restrict__ original_rgba, const float* __restrict__ model_rgb,
                           float* __restrict__ output_rgb, dlsslop::Geometry g, float strength)

@@ -5,8 +5,8 @@
 // against digests of what upstream's NrSession::build packed from a synthetic
 // model pack. The model reader is checked on packs in memory, good and
 // damaged, and pack() on segments that do not fit.
-#include "vulkan_pack.h"
-#include "vulkan_weights.h"
+#include "vulkan_pack.hpp"
+#include "vulkan_weights.hpp"
 
 #include <getopt.h>
 #include <algorithm>

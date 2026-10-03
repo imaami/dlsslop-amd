@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Independent HIP test: no model weights, game or worker required.
-#include "../backend/color_preserve.h"
-#include "../backend/native_kernels.h"
+#include "../backend/color_preserve.hpp"
+#include "../backend/native_kernels.hpp"
 #include <getopt.h>
 #include <unistd.h>
 #include <algorithm>

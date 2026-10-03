@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "vulkan_schedule.h"
+#include "vulkan_schedule.hpp"
 
 #include <algorithm>
 #include <iterator>

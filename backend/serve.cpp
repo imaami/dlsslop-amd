@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
-#include "serve.h"
-#include "channel.h"
-#include "open.h"
-#include "transport.h"
+#include "serve.hpp"
+#include "channel.hpp"
+#include "open.hpp"
+#include "transport.hpp"
 
 #include <chrono>
 #include <csignal>

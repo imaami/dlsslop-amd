@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-#include "kernel.h"
-#include "temporal_math.h"
+#include "kernel.hpp"
+#include "temporal_math.hpp"
 KERNEL void dlsslop_temporal_luma(const float* rgba, float* luma, unsigned count)
 {
     const unsigned i = thread_index();

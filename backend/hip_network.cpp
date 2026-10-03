@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-#include "hip_network.h"
-#include "files.h"
+#include "hip_network.hpp"
+#include "files.hpp"
 
 #include <bit>
 #include <cstdio>

@@ -4,7 +4,7 @@
 // once while a reader reads it: every read must find the file, holding one
 // writer's data whole, and no temporary file may stay behind. A replacement
 // that fails must leave the file and its directory as they were.
-#include "../backend/files.h"
+#include "../backend/files.hpp"
 
 #include <dirent.h>
 #include <ftw.h>

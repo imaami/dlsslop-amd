@@ -5,8 +5,8 @@
 // weight loaders of hip_reference_network.h at c190831) gave for the same
 // inputs. --model packs a real model instead, for comparison with the uploads
 // a trace of upstream's network records.
-#include "../backend/files.h"
-#include "../backend/hip_plan.h"
+#include "../backend/files.hpp"
+#include "../backend/hip_plan.hpp"
 #include "../common/shm_protocol.h"
 
 #include <getopt.h>

@@ -31,8 +31,8 @@
 // pre block is not, so that tests/vulkan-files.py can see the files that a
 // build opens; with --unclamped too, from a synthetic model whose weights
 // free every Swin layer of the exponent's upper clamp.
-#include "network_recorder.h"
-#include "vulkan_pack.h"
+#include "network_recorder.hpp"
+#include "vulkan_pack.hpp"
 
 #include <getopt.h>
 #include <algorithm>
@@ -50,8 +50,8 @@
 #include <string_view>
 #include <vector>
 // After <cstdint>: the runtime's SPIR-V, as it embeds it.
-#include "network/network_fallback.h"
-#include "network/network_verdict.h"
+#include "network/network_fallback.hpp"
+#include "network/network_verdict.hpp"
 
 namespace {
 namespace vulkan = dlsslop::vulkan;

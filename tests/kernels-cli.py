@@ -93,25 +93,27 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
     # including one only another header includes.
     backend = script.parents[1] / 'backend'
     native_sources = ('codec_gpu.hip', 'tuning_gpu.hip', 'color_gpu.hip', 'temporal_gpu.hip')
-    assert not any(b'geometry.h' in (backend / name).read_bytes() for name in native_sources), \
-        'geometry.h is included directly'
+    assert not any(b'geometry.hpp' in (backend / name).read_bytes() for name in native_sources), \
+        'geometry.hpp is included directly'
     native = json.loads((root / 'mixed-out/modules.json').read_text())[0]
     assert native['sources'] == {name: hashlib.sha256((backend / name).read_bytes()).hexdigest()
-                                 for name in (*native_sources, 'kernel.h', 'geometry.h', 'codec_math.h',
-                                              'tuning_math.h', 'color_preserve_math.h', 'temporal_math.h')}, native
+                                 for name in (*native_sources, 'kernel.hpp', 'geometry.hpp', 'codec_math.hpp',
+                                              'tuning_math.hpp', 'color_preserve_math.hpp',
+                                              'temporal_math.hpp')}, native
     # The compile finds an upstream source's quoted includes through -I backend, and a header's own
     # includes beside it: decoys beside the source must not be recorded.
     kernels = root / 'kernels'
     kernels.mkdir()
-    (kernels / 'deep_reference.hip').write_text('#include "color_preserve_math.h"\n')
-    for name in ('color_preserve_math.h', 'tuning_math.h'):
+    (kernels / 'deep_reference.hip').write_text('#include "color_preserve_math.hpp"\n')
+    for name in ('color_preserve_math.hpp', 'tuning_math.hpp'):
         (kernels / name).write_text('decoy the compiler never sees\n')
     build(mixed, '--only', 'deep_reference', '--source', str(kernels))
     module = next(row for row in json.loads((root / 'mixed-out/modules.json').read_text())
                   if row['module'] == 'deep_reference')
     assert module['sources'] == {
         'deep_reference.hip': hashlib.sha256((kernels / 'deep_reference.hip').read_bytes()).hexdigest(),
-        **{name: native['sources'][name] for name in ('color_preserve_math.h', 'tuning_math.h', 'geometry.h')}}, module
+        **{name: native['sources'][name]
+           for name in ('color_preserve_math.hpp', 'tuning_math.hpp', 'geometry.hpp')}}, module
 
     newer = compilers('newer', {'amdclang++': 'AMD clang version 22.0.0git',
                                 'clang++-22': 'Debian clang version 22.1.8'})

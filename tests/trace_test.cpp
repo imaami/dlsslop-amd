@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "../backend/trace.h"
+#include "../backend/trace.hpp"
 #include <array>
 #include <cstdio>
 #include <memory>

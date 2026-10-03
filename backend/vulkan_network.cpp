@@ -1,6 +1,6 @@
 // The network on Vulkan: DLSSNR-AMD's network (external/vulkan/linux/) on a device of the daemon's own.
 // SPDX-License-Identifier: MIT
-#include "vulkan_network.h"
+#include "vulkan_network.hpp"
 #include "network_requirements.h"
 
 #include <array>

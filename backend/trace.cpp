@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "trace.h"
+#include "trace.hpp"
 
 #include <bit>
 #include <cerrno>

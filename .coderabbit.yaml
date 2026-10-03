@@ -21,7 +21,7 @@ reviews:
         --help generated from the definitions used at
         initialization; no `using namespace`; "\n" rather than
         std::endl.
-    - path: "{backend,common,layer}/**/*.{c,cpp,h,hip}"
+    - path: "{backend,common,layer}/**/*.{c,cpp,h,hpp,hip}"
       instructions: >-
         C++23 daemon and project headers, and the layer's C23 port. The
         C++ is built without exceptions or RTTI: errors are

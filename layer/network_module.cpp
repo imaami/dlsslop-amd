@@ -1,11 +1,11 @@
 // libdlsslop-network.so: the in-layer network (network_module.h).
 // SPDX-License-Identifier: MIT
 #include "network_module.h"
-#include "files.h"
-#include "network_recorder.h"
-#include "options.h"
-#include "paths.h"
-#include "processing.h"
+#include "files.hpp"
+#include "network_recorder.hpp"
+#include "options.hpp"
+#include "paths.hpp"
+#include "processing.hpp"
 
 #include <algorithm>
 #include <atomic>

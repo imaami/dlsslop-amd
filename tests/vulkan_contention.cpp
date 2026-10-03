@@ -18,7 +18,7 @@
 #include <vector>
 #include <vulkan/vulkan.h>
 // After <cstdint>: the load's SPIR-V, embedded.
-#include "tests/vulkan_contention.h"
+#include "tests/vulkan_contention.hpp"
 
 namespace {
 

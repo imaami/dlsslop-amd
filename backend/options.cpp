@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
-#include "options.h"
-#include "files.h"
-#include "paths.h"
+#include "options.hpp"
+#include "files.hpp"
+#include "paths.hpp"
 #include "shm_protocol.h"
-#include "vulkan_network.h"
+#include "vulkan_network.hpp"
 
 #include <algorithm>
 #include <cerrno>

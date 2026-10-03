@@ -21,8 +21,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "codec.h"
-#include "codec_math.h"
+#include "codec.hpp"
+#include "codec_math.hpp"
 #include "shm_protocol.h"
 
 #include <algorithm>

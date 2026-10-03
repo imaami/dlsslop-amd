@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "channel.h"
+#include "channel.hpp"
 
 #include <fcntl.h>
 #include <linux/futex.h>

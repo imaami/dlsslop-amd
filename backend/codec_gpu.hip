@@ -2,8 +2,8 @@
 // SDR GPU boundary port of lmxxf's native_codec_encode/decode shaders.
 // See codec.cpp for the retained upstream copyright and MIT permission notice.
 // The complete CPU reference remains in codec.cpp.
-#include "kernel.h"
-#include "codec_math.h"
+#include "kernel.hpp"
+#include "codec_math.hpp"
 
 typedef unsigned uint;
 typedef unsigned char byte;

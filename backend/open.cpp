@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-#include "open.h"
-#include "paths.h"
+#include "open.hpp"
+#include "paths.hpp"
 
 #include <cstdio>
 

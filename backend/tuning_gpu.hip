@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Native residual controls, not NGX neural conditioning parameters.
-#include "kernel.h"
-#include "tuning_math.h"
+#include "kernel.hpp"
+#include "tuning_math.hpp"
 
 KERNEL void dlsslop_tune_rgb(const float* __restrict__ input_rgba, const float* __restrict__ raw_rgb,
                     float* __restrict__ output_rgb, dlsslop::Geometry g, dlsslop::NativeTuning tuning)

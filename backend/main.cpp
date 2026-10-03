@@ -1,9 +1,9 @@
 // Native Linux worker for DLSS5VKLayer's shared-memory transport.
 // SPDX-License-Identifier: MIT
-#include "offline.h"
-#include "open.h"
-#include "options.h"
-#include "serve.h"
+#include "offline.hpp"
+#include "open.hpp"
+#include "options.hpp"
+#include "serve.hpp"
 
 #include <cstdio>
 

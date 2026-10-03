@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-#include "processing.h"
-#include "tuning.h"
+#include "processing.hpp"
+#include "tuning.hpp"
 
 namespace dlsslop {
 

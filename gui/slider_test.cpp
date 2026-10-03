@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
-#include "absolute_slider.h"
-#include "slider_scale.h"
-#include "theme.h"
+#include "absolute_slider.hpp"
+#include "slider_scale.hpp"
+#include "theme.hpp"
 #include <QApplication>
 #include <QFrame>
 #include <QSignalSpy>

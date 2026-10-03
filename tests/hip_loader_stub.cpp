@@ -7,7 +7,7 @@
 #if defined(HIP_LOADER_STUB_DEPENDENCY)
 int hip_loader_stub_dependency() { return 0; }
 #elif defined(HIP_FAKE_RUNTIME)
-#include "../backend/hip.h"
+#include "../backend/hip.hpp"
 
 #include <cstdio>
 #include <cstdlib>

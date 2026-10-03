@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "temporal_math.h"
+#include "temporal_math.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>

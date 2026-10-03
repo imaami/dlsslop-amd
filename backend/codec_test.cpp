@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "codec.h"
+#include "codec.hpp"
 
 #include <algorithm>
 #include <cmath>

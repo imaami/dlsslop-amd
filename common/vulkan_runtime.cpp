@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
-#include "vulkan_runtime.h"
-#include "files.h"
-#include "network/network_fallback.h"
-#include "network/network_verdict.h"
-#include "vulkan_weights.h"
+#include "vulkan_runtime.hpp"
+#include "files.hpp"
+#include "network/network_fallback.hpp"
+#include "network/network_verdict.hpp"
+#include "vulkan_weights.hpp"
 
 #include <algorithm>
 #include <atomic>

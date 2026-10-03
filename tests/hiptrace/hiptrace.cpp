@@ -2,7 +2,7 @@
 // A tracing HIP runtime for dlsslopd: DLSSLOP_HIP_LIBRARY=libhiptrace.so
 // (tests/hiptrace/trace.sh; VALIDATION.md describes the procedure).
 //
-// Exports every entry point dlsslopd's loader (backend/hip.h) resolves, and
+// Exports every entry point dlsslopd's loader (backend/hip.hpp) resolves, and
 // those upstream's host code resolved, so that builds from before the port
 // trace too. Forwards each call to the real runtime and logs it to
 // HIPTRACE_FILE (no file: forward only). Device and host pointers are logged
@@ -27,7 +27,7 @@
 //                          deep=invalid in the log
 //   HIPTRACE_DEEP_KERNELS  comma-separated kernel names deep-hashed always;
 //                          unset or empty: none
-#include "../../backend/hip.h"
+#include "../../backend/hip.hpp"
 
 #include <dirent.h>
 #include <dlfcn.h>

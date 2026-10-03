@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-#include "channel.h"
+#include "channel.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
