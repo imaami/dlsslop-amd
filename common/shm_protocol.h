@@ -1058,38 +1058,47 @@ ShmMVecPixelSize (struct ShmHeader const *h)
 
 /** @brief ShmDefaultPath() as a string.
  *
- * @return The path.
+ * @return The path, or an empty string if it cannot be formatted.
  */
 inline std::string
 ShmDefaultPath ()
 {
 	char const *uid = std::getenv("DLSSNR_UID");
-	std::string path(static_cast<std::size_t>(shm_runtime_path(nullptr, 0, uid, "/shm.bin")), '\0');
+	int const length = shm_runtime_path(nullptr, 0, uid, "/shm.bin");
+	if (length < 0)
+		return {};
+	std::string path(static_cast<std::size_t>(length), '\0');
 	shm_runtime_path(path.data(), path.size() + 1, uid, "/shm.bin");
 	return path;
 }
 
 /** @brief ShmNativeDefaultPath() as a string.
  *
- * @return The path.
+ * @return The path, or an empty string if it cannot be formatted.
  */
 inline std::string
 ShmNativeDefaultPath ()
 {
-	std::string path(static_cast<std::size_t>(ShmNativeDefaultPath(nullptr, 0)), '\0');
+	int const length = ShmNativeDefaultPath(nullptr, 0);
+	if (length < 0)
+		return {};
+	std::string path(static_cast<std::size_t>(length), '\0');
 	ShmNativeDefaultPath(path.data(), path.size() + 1);
 	return path;
 }
 
 /** @brief ShmNativeChannelPath() as a string.
  *
- * @return The path.
+ * @return The path, or an empty string if it cannot be formatted.
  */
 inline std::string
 ShmNativeChannelPath ()
 {
 	char const *channel = std::getenv("DLSSNR_SHM");
-	std::string path(static_cast<std::size_t>(shm_native_channel_path(nullptr, 0, channel)), '\0');
+	int const length = shm_native_channel_path(nullptr, 0, channel);
+	if (length < 0)
+		return {};
+	std::string path(static_cast<std::size_t>(length), '\0');
 	shm_native_channel_path(path.data(), path.size() + 1, channel);
 	return path;
 }
@@ -1097,12 +1106,15 @@ ShmNativeChannelPath ()
 /** @brief ShmTransportPath() as a string.
  *
  * @param channel The channel's path.
- * @return        The path.
+ * @return        The path, or an empty string if it cannot be formatted.
  */
 inline std::string
 ShmTransportPath (std::string const &channel)
 {
-	std::string path(static_cast<std::size_t>(ShmTransportPath(nullptr, 0, channel.c_str())), '\0');
+	int const length = ShmTransportPath(nullptr, 0, channel.c_str());
+	if (length < 0)
+		return {};
+	std::string path(static_cast<std::size_t>(length), '\0');
 	ShmTransportPath(path.data(), path.size() + 1, channel.c_str());
 	return path;
 }
