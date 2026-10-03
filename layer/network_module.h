@@ -10,6 +10,7 @@
  * pointer to it. The module exports DLSSLOP_NETWORK_INTERFACE as dlsslop_network_interface, and the
  * layer puts it first in struct dlsslop_network_device: each side refuses the other's of another
  * interface, and a change to any part of the contract takes a new DLSSLOP_NETWORK_INTERFACE.
+ * dlsslop_network.cpp is the module's source, and network_module.c is the layer's loader of it.
  *
  * Plain C API, consumable from C++.
  */
@@ -18,22 +19,18 @@
 #define DLSSLOP_AMD_LAYER_NETWORK_MODULE_H_
 
 #ifdef __cplusplus
-# include <cinttypes>
 # include <cstdint>
-# include <cstdio>
-# define NETWORK_MODULE_STD(x) std::x
 #else
-# include <inttypes.h>
 # include <stdint.h>
-# include <stdio.h>
-# define NETWORK_MODULE_STD(x) x
 #endif
 
-#include <dlfcn.h>
 #include <vulkan/vulkan.h>
 
 #ifdef __cplusplus
+# define STD(x) std::x
 extern "C" {
+#else
+# define STD(x) x
 #endif
 
 struct DlsslopNetwork;
@@ -49,7 +46,7 @@ struct ShmHeader;
 
 /** @brief The module's DLSSLOP_NETWORK_INTERFACE, which network_module_load() requires to equal the
  *         layer's. */
-extern NETWORK_MODULE_STD(uint64_t) const dlsslop_network_interface;
+extern STD(uint64_t) const dlsslop_network_interface;
 
 /** @brief A function that the module calls with the device's context around a submit.
  *
@@ -73,18 +70,18 @@ dlsslop_network_log_fn (char const *line);
  * and the module looks up its functions only in dlsslop_network_open().
  */
 struct dlsslop_network_device {
-	NETWORK_MODULE_STD(uint64_t)     interface;         //!< DLSSLOP_NETWORK_INTERFACE.
-	VkInstance                       instance;          //!< The game's instance.
-	VkPhysicalDevice                 physical;          //!< The device's physical device.
-	VkDevice                         device;            //!< The device.
-	VkQueue                          queue;             //!< The queue that takes the build's uploads.
-	NETWORK_MODULE_STD(uint32_t)     family;            //!< The queue's family.
-	dlsslop_network_queue_fn        *lock_queue;        //!< Called before each submit of the build.
-	dlsslop_network_queue_fn        *unlock_queue;      //!< Called after each submit of the build.
-	void                            *context;           //!< What lock_queue and unlock_queue take.
-	PFN_vkGetInstanceProcAddr        physical_dispatch; //!< The next layer's vkGetInstanceProcAddr.
-	VkPhysicalDeviceMemoryProperties memory;            //!< The physical device's memory.
-	dlsslop_network_log_fn          *log;               //!< Where the network's log lines go.
+	STD(uint64_t)                     interface;         //!< DLSSLOP_NETWORK_INTERFACE.
+	VkInstance                        instance;          //!< The game's instance.
+	VkPhysicalDevice                  physical;          //!< The device's physical device.
+	VkDevice                          device;            //!< The device.
+	VkQueue                           queue;             //!< The queue that takes the build's uploads.
+	STD(uint32_t)                     family;            //!< The queue's family.
+	dlsslop_network_queue_fn         *lock_queue;        //!< Called before each submit of the build.
+	dlsslop_network_queue_fn         *unlock_queue;      //!< Called after each submit of the build.
+	void                             *context;           //!< What lock_queue and unlock_queue take.
+	PFN_vkGetInstanceProcAddr         physical_dispatch; //!< The next layer's vkGetInstanceProcAddr.
+	VkPhysicalDeviceMemoryProperties  memory;            //!< The physical device's memory.
+	dlsslop_network_log_fn           *log;               //!< Where the network's log lines go.
 };
 
 /** @brief The composition's images that a frame goes through.
@@ -95,14 +92,16 @@ struct dlsslop_network_device {
  * 64-bit height would only fill with casts.
  */
 struct dlsslop_network_images {
-	NETWORK_MODULE_STD(uint64_t) generation;  //!< The composition's build of these images.
-	VkImageView                  input_view;  //!< The frame that the network samples.
-	VkImage                      answer;      //!< Takes the answer; storage and transfer-target usage.
-	VkImageView                  answer_view; //!< The answer's view.
-	VkFormat                     format;      //!< Both images' format.
-	NETWORK_MODULE_STD(uint32_t) width;       //!< Both images' width.
-	NETWORK_MODULE_STD(uint32_t) height;      //!< Both images' height.
+	STD(uint64_t) generation;  //!< The composition's build of these images.
+	VkImageView   input_view;  //!< The frame that the network samples.
+	VkImage       answer;      //!< Takes the answer; storage and transfer-target usage.
+	VkImageView   answer_view; //!< The answer's view.
+	VkFormat      format;      //!< Both images' format.
+	STD(uint32_t) width;       //!< Both images' width.
+	STD(uint32_t) height;      //!< Both images' height.
 };
+
+#undef STD
 
 /** @brief What dlsslop_network_prepare() says of the next frame. */
 enum dlsslop_network_state {
@@ -203,39 +202,6 @@ struct network_module {
 	char                          failure[2048];  //!< Why network_module_load() failed.
 };
 
-/** @brief Records why network_module_load() failed, before anything else can reset dlerror().
- *
- * @param m    The module.
- * @param path The module's path, the reason when dlerror() has none.
- * @return     false.
- */
-static inline bool
-network_module_refuse (struct network_module *m,
-                       char const            *path)
-{
-	char const *const why = dlerror();
-	NETWORK_MODULE_STD(snprintf)(m->failure, sizeof m->failure, "%s", why ? why : path);
-	return false;
-}
-
-/** @brief Records why network_module_load() failed, as network_module_refuse() does, and closes the
- *         library it opened.
- *
- * @param m       The module.
- * @param library The library.
- * @param path    The library's path.
- * @return        false.
- */
-static inline bool
-network_module_drop (struct network_module *m,
-                     void                  *library,
-                     char const            *path)
-{
-	network_module_refuse(m, path);
-	dlclose(library);
-	return false;
-}
-
 /** @brief Loads the module at a path.
  *
  * A module of another interface, or without the functions, stays out of the game's process: its
@@ -246,44 +212,12 @@ network_module_drop (struct network_module *m,
  * @return     true if @a m holds the module's functions; otherwise it holds no module, and its
  *             failure says why.
  */
-static inline bool
+extern bool
 network_module_load (struct network_module *m,
-                     char const            *path)
-{
-	if (!m)
-		return false;
-	// Looked up in a local first: a refused module leaves no pointer into it in m.
-	struct network_module found = {.library = dlopen(path, RTLD_NOW | RTLD_LOCAL)};
-	if (!found.library)
-		return network_module_refuse(m, path);
-	void const *const exported = dlsym(found.library, "dlsslop_network_interface");
-	if (!exported)
-		return network_module_drop(m, found.library, path);
-	NETWORK_MODULE_STD(uint64_t) const interface = *(NETWORK_MODULE_STD(uint64_t) const *)exported;
-	if (interface != DLSSLOP_NETWORK_INTERFACE) {
-		NETWORK_MODULE_STD(snprintf)(m->failure, sizeof m->failure,
-		                             "%s: interface %#" PRIx64 ", the layer's is %#" PRIx64, path,
-		                             interface, DLSSLOP_NETWORK_INTERFACE);
-		dlclose(found.library);
-		return false;
-	}
-	// The lookups stop at the first that fails, whose dlerror() a later lookup that succeeds would
-	// clear.
-#define NETWORK_MODULE_FIND(name) \
-	(found.name = (dlsslop_network_##name##_fn *)dlsym(found.library, "dlsslop_network_" #name))
-	if (NETWORK_MODULE_FIND(open) && NETWORK_MODULE_FIND(prepare) && NETWORK_MODULE_FIND(record)
-	    && NETWORK_MODULE_FIND(submitted) && NETWORK_MODULE_FIND(error) && NETWORK_MODULE_FIND(close)) {
-		*m = found;
-		return true;
-	}
-#undef NETWORK_MODULE_FIND
-	return network_module_drop(m, found.library, path);
-}
+                     char const            *path);
 
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
-
-#undef NETWORK_MODULE_STD
 
 #endif /* DLSSLOP_AMD_LAYER_NETWORK_MODULE_H_ */

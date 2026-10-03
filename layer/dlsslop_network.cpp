@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <dlfcn.h>
 #include <new>
 #include <pthread.h>
 #include <string>

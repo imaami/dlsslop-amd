@@ -111,7 +111,8 @@ target_link_libraries(dlsslop-common-c PUBLIC m)
 # Only layer.c differs between the layers; both and the layer tests link the
 # other translation units compiled once.
 add_library(dlsslop-layer-objects OBJECT layer/shader_vk.c layer/dlssnr_pass.c layer/composition.c
-    layer/capture.c layer/scaler_vk.c layer/hotkey.c layer/log.c ${LAYER_SHADER_SOURCES})
+    layer/capture.c layer/scaler_vk.c layer/hotkey.c layer/log.c layer/network_module.c
+    ${LAYER_SHADER_SOURCES})
 set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_dependencies(dlsslop-layer-objects layer-shaders)
 target_include_directories(dlsslop-layer-objects PRIVATE ${SHADER_DIR} PUBLIC layer ${X11_HEADERS} ${XINPUT_HEADERS})
@@ -162,7 +163,7 @@ target_link_libraries(dlsslop-hip PUBLIC ${CMAKE_DL_LIBS})
 # The in-layer network, in a module beside the layer that loads it on demand
 # (layer/network_module.h): the network and the libstdc++ it needs stay out of
 # the layer, which every game loads. It exports its C functions only.
-add_library(dlsslop-network MODULE layer/network_module.cpp backend/processing.cpp backend/options.cpp
+add_library(dlsslop-network MODULE layer/dlsslop_network.cpp backend/processing.cpp backend/options.cpp
     backend/paths.cpp backend/files.cpp)
 target_include_directories(dlsslop-network PRIVATE backend)
 target_link_libraries(dlsslop-network PRIVATE dlsslop-vulkan dlsslop-common-c ${CMAKE_DL_LIBS})
@@ -220,7 +221,7 @@ if(BUILD_TESTING)
     add_test(NAME vulkan-storage COMMAND vulkan-storage-test)
     add_executable(network-module-test tests/network_module_test.cpp)
     target_include_directories(network-module-test PRIVATE layer)
-    target_link_libraries(network-module-test PRIVATE dlsslop-common-c ${CMAKE_DL_LIBS})
+    target_link_libraries(network-module-test PRIVATE dlsslop-layer-objects dlsslop-common-c ${CMAKE_DL_LIBS})
     # The module without dlsslop_network_close(), and one of another interface, which the loader
     # refuses.
     add_library(network-module-incomplete MODULE tests/network_module_incomplete.c)
