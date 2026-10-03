@@ -16,19 +16,17 @@
 
 namespace {
 
-using dlsslop_control::Setting;
-using dlsslop_control::kSettings;
-
 // --capture parses like an integer setting.
-constexpr Setting kCapture{"capture", &ShmHeader::captureRequest, 0, 64};
+constexpr control_setting kCapture = {.minimum = 0, .maximum = 64, .step = 1, .name = "capture",
+                                      .offset = offsetof(ShmHeader, captureRequest)};
 
-constexpr std::size_t kCount = std::size(kSettings);
+constexpr std::size_t kCount = CONTROL_SETTING_COUNT;
 static_assert(kCount <= 64, "Options keeps one mask bit per setting");
 
-uint64_t Bit(const Setting* setting) { return uint64_t(1) << (setting - kSettings); }
+uint64_t Bit(const control_setting* setting) { return uint64_t(1) << (setting - CONTROL_SETTINGS); }
 
 // "; steps of N" for a setting whose values skip, as help and errors print it.
-std::string Steps(const Setting& s) {
+std::string Steps(const control_setting& s) {
     char text[32] = "";
     if (s.step != 1) std::snprintf(text, sizeof text, "; steps of %g", s.step);
     return text;
@@ -78,11 +76,11 @@ void Usage() {
         "                         repeat for different settings (default: none)\n"
         "  -h, --help              Print help without accessing the channel (default: off)\n"
         "\nSettings (all require a value):\n", ShmNativeChannelPath().c_str(), kCapture.minimum, kCapture.maximum);
-    for (const auto& s : kSettings)
+    for (const auto& s : CONTROL_SETTINGS)
         std::printf("  -%c, --%-18s VALUE  %s\n"
                     "                                Range: %g..%g; default: %g%s\n",
-                    s.shortName, s.name, s.help, s.minimum, s.maximum,
-                    dlsslop_control::value(s, (defaults.*s.field).load()), Steps(s).c_str());
+                    s.short_name, s.name, s.help, s.minimum, s.maximum,
+                    control_setting_value(&s, control_setting_load(&defaults, &s)), Steps(s).c_str());
     std::printf(
         "\n"
         "Actions run after parsing: reset, explicit settings, toggle, stop/resume, capture;\n"
@@ -121,25 +119,25 @@ void Usage() {
 // strtod/strtoull skip leading whitespace, strtoull accepts signs and strtod
 // parses nothing from an empty string. Reject all of them rather than silently
 // coercing malformed arguments.
-bool ParseValue(const char* text, const Setting& setting, uint32_t& result) {
+bool ParseValue(const char* text, const control_setting& setting, uint32_t& result) {
     char* end = nullptr;
     errno = 0;
-    if (setting.isFloat) {
+    if (setting.is_float) {
         if (!*text || std::isspace(static_cast<unsigned char>(*text))) return false;
         const double value = std::strtod(text, &end);
-        if (errno || *end || !dlsslop_control::inRange(setting, value)) return false;
+        if (errno || *end || !control_setting_in_range(&setting, value)) return false;
         result = FloatToBits(static_cast<float>(value) + 0.0f);  // + 0.0f stores -0 as 0
     } else {
         if (*text < '0' || *text > '9') return false;
         const unsigned long long value = std::strtoull(text, &end, 10);
-        if (errno || *end || !dlsslop_control::inRange(setting, value)) return false;
+        if (errno || *end || !control_setting_in_range(&setting, value)) return false;
         result = static_cast<uint32_t>(value);
     }
     return true;
 }
 
-const Setting* FindSetting(const char* name) {
-    for (const auto& setting : kSettings)
+const control_setting* FindSetting(const char* name) {
+    for (const auto& setting : CONTROL_SETTINGS)
         if (!std::strcmp(name, setting.name)) return &setting;
     return nullptr;
 }
@@ -158,9 +156,9 @@ bool ParseOptions(int argc, char** argv, Options& options) {
         {"help", no_argument, nullptr, 'h'},
     };
     std::string shortOptions = "+s:SlrqRc:A:h";
-    for (const auto& s : kSettings) {
-        longOptions.push_back({s.name, required_argument, nullptr, s.shortName});
-        shortOptions += s.shortName;
+    for (const auto& s : CONTROL_SETTINGS) {
+        longOptions.push_back({s.name, required_argument, nullptr, s.short_name});
+        shortOptions += s.short_name;
         shortOptions += ':';
     }
     longOptions.push_back({nullptr, 0, nullptr, 0});
@@ -181,8 +179,8 @@ bool ParseOptions(int argc, char** argv, Options& options) {
         case 'R': options.resume = true; break;
         // Repeating a toggle names the same action; it does not cancel itself out.
         case 'A': {
-            const Setting* setting = FindSetting(optarg);
-            if (!setting || setting->isFloat || setting->minimum != 0 || setting->maximum != 1) {
+            const control_setting* setting = FindSetting(optarg);
+            if (!setting || setting->is_float || setting->minimum != 0 || setting->maximum != 1) {
                 std::fprintf(stderr, "--toggle requires a boolean setting name, got '%s'\n", optarg);
                 return false;
             }
@@ -200,12 +198,12 @@ bool ParseOptions(int argc, char** argv, Options& options) {
             break;
         case '?': return false;  // getopt has named the bad argument
         default: {  // any other code getopt returns is a setting's short name
-            const Setting* setting = kSettings;
-            while (setting->shortName != code) ++setting;
-            uint32_t& value = options.values[setting - kSettings];
+            const control_setting* setting = CONTROL_SETTINGS;
+            while (setting->short_name != code) ++setting;
+            uint32_t& value = options.values[setting - CONTROL_SETTINGS];
             if (!ParseValue(optarg, *setting, value)) {
                 std::fprintf(stderr, "--%s: expected a finite %s in [%g, %g]%s, got '%s'\n",
-                             setting->name, setting->isFloat ? "number" : "integer",
+                             setting->name, setting->is_float ? "number" : "integer",
                              setting->minimum, setting->maximum, Steps(*setting).c_str(), optarg);
                 return false;
             }
@@ -224,7 +222,7 @@ bool ParseOptions(int argc, char** argv, Options& options) {
         return false;
     }
     if (const uint64_t both = options.assigned & options.toggled) {
-        const char* name = kSettings[__builtin_ctzll(both)].name;
+        const char* name = CONTROL_SETTINGS[__builtin_ctzll(both)].name;
         std::fprintf(stderr, "--toggle %s and --%s cannot be combined\n", name, name);
         return false;
     }
@@ -302,13 +300,13 @@ bool Attach(ShmHeader* h, bool create, const char* path) {
 
 void PrintSettings(const ShmHeader* h) {
     ShmHeader defaults{};
-    ShmInitNativeDefaults(&defaults, dlsslop_control::workerBypass(h));
+    ShmInitNativeDefaults(&defaults, control_settings_worker_bypass(h));
     std::printf("# Live values; defaults are the initial/reset values for this worker mode.\n");
     // Nine digits round-trip every binary32 and ten print every uint32 exactly.
-    for (const auto& s : kSettings) {
-        const int digits = s.isFloat ? 9 : 10;
-        std::printf("%s=%.*g default=%.*g\n", s.name, digits, dlsslop_control::value(s, (h->*s.field).load()),
-                    digits, dlsslop_control::value(s, (defaults.*s.field).load()));
+    for (const auto& s : CONTROL_SETTINGS) {
+        const int digits = s.is_float ? 9 : 10;
+        std::printf("%s=%.*g default=%.*g\n", s.name, digits, control_setting_value(&s, control_setting_load(h, &s)),
+                    digits, control_setting_value(&s, control_setting_load(&defaults, &s)));
     }
 }
 
@@ -378,17 +376,17 @@ int main(int argc, char** argv) {
     // store would show them a value nobody asked for. Reset copies controls
     // only and never memsets a live transport header.
     ShmHeader defaults{};
-    if (options.reset) ShmInitNativeDefaults(&defaults, dlsslop_control::workerBypass(h));
+    if (options.reset) ShmInitNativeDefaults(&defaults, control_settings_worker_bypass(h));
     bool tuningChanged = options.reset;
     for (std::size_t i = 0; i < kCount; ++i) {
         const uint64_t bit = uint64_t(1) << i;
         const uint32_t flip = (options.toggled & bit) != 0;
-        const Setting& s = kSettings[i];
-        auto& field = h->*s.field;
+        const control_setting& s = CONTROL_SETTINGS[i];
+        auto& field = *control_setting_word(h, &s);
         if (options.assigned & bit) {  // never also toggled
             field.store(options.values[i]);
             tuningChanged |= s.tuning;
-        } else if (options.reset) field.store((defaults.*s.field).load() ^ flip);
+        } else if (options.reset) field.store(control_setting_load(&defaults, &s) ^ flip);
         else if (flip) for (uint32_t value = field.load(); !field.compare_exchange_weak(value, !value);) {}
     }
     if (tuningChanged) h->tuningSeq.fetch_add(1);

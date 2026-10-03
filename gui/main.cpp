@@ -32,7 +32,6 @@
 #include <vector>
 
 namespace {
-using dlsslop_control::kSettings;
 using dlsslop_gui::Channel;
 
 constexpr double kArrowSteps[] = {0.001, 0.01, 0.1};
@@ -60,7 +59,7 @@ class Window final : public QWidget {
     QWidget* controls_{};
     QPlainTextEdit* status_{};
     QTimer throttle_;
-    std::array<Editor, std::size(kSettings)> editors_;
+    std::array<Editor, CONTROL_SETTING_COUNT> editors_;
     std::map<std::size_t, double> pending_;
     dev_t device_{};
     ino_t inode_{};
@@ -145,7 +144,7 @@ class Window final : public QWidget {
     {
         auto& e = editors_[index];
         if (e.number) { const QSignalBlocker blocked(e.number); e.number->setValue(value); }
-        if (e.slider) { const QSignalBlocker blocked(e.slider); e.slider->setValue(dlsslop_gui::sliderPosition(kSettings[index], value)); }
+        if (e.slider) { const QSignalBlocker blocked(e.slider); e.slider->setValue(dlsslop_gui::sliderPosition(CONTROL_SETTINGS[index], value)); }
         if (e.checkbox) { const QSignalBlocker blocked(e.checkbox); e.checkbox->setChecked(value != 0); }
         if (e.combo) { const QSignalBlocker blocked(e.combo); e.combo->setCurrentIndex(e.combo->findData(static_cast<int>(value))); }
     }
@@ -164,17 +163,18 @@ class Window final : public QWidget {
         if (!channel) return failed(QString::fromStdString(channel.error().what));
         auto* h = channel->header();
         ShmHeader defaults{};
-        ShmInitNativeDefaults(&defaults, dlsslop_control::workerBypass(h));
+        ShmInitNativeDefaults(&defaults, control_settings_worker_bypass(h));
         // Reject invalid live values rather than displaying a silently clamped setting.
-        std::array<double, std::size(kSettings)> values;
+        std::array<double, CONTROL_SETTING_COUNT> values;
         for (std::size_t i = 0; i < values.size(); ++i) {
-            const auto& s = kSettings[i];
-            values[i] = dlsslop_control::value(s, (h->*s.field).load());
-            if (!dlsslop_control::inRange(s, values[i])) return failed(QString("Invalid live setting: ") + s.name);
+            const auto& s = CONTROL_SETTINGS[i];
+            values[i] = control_setting_value(&s, control_setting_load(h, &s));
+            if (!control_setting_in_range(&s, values[i])) return failed(QString("Invalid live setting: ") + s.name);
         }
         for (std::size_t i = 0; i < editors_.size(); ++i) {
             auto& e = editors_[i];
-            e.defaultValue = dlsslop_control::value(kSettings[i], (defaults.*kSettings[i].field).load());
+            const auto& s = CONTROL_SETTINGS[i];
+            e.defaultValue = control_setting_value(&s, control_setting_load(&defaults, &s));
             e.reset->setToolTip(QString("Reset to %1").arg(e.defaultValue, 0, 'g', 9));
             display(i, values[i]);
         }
@@ -206,12 +206,12 @@ class Window final : public QWidget {
 
     QWidget* makeEditor(std::size_t index)
     {
-        const auto& s = kSettings[index];
+        const auto& s = CONTROL_SETTINGS[index];
         auto& e = editors_[index];
         auto* card = new QFrame;
         card->setObjectName("card");
         card->setToolTip(QString("-%1 / --%2\n%3\nRange: %4…%5")
-            .arg(QChar(s.shortName)).arg(s.name).arg(s.help).arg(s.minimum).arg(s.maximum));
+            .arg(QChar(s.short_name)).arg(s.name).arg(s.help).arg(s.minimum).arg(s.maximum));
         auto* layout = new QVBoxLayout(card);
         layout->setContentsMargins(18, 14, 18, 14);
         layout->setSpacing(9);
@@ -231,14 +231,14 @@ class Window final : public QWidget {
             connect(e.combo, &QComboBox::currentIndexChanged, this, [this, index](int) {
                 queue(index, editors_[index].combo->currentData().toInt());
             });
-        } else if (!s.isFloat && s.maximum == 1) {
+        } else if (!s.is_float && s.maximum == 1) {
             e.checkbox = new QCheckBox("On");
             e.checkbox->setAccessibleName(title(s.name));
             row->addWidget(e.checkbox);
             connect(e.checkbox, &QCheckBox::toggled, this, [this, index](bool checked) { queue(index, checked ? 1 : 0); });
         } else {
             e.number = new QDoubleSpinBox;
-            e.number->setDecimals(s.isFloat ? 6 : 0);
+            e.number->setDecimals(s.is_float ? 6 : 0);
             e.number->setRange(s.minimum, s.maximum);
             e.number->setKeyboardTracking(false);
             e.number->setAccessibleName(title(s.name));
@@ -255,14 +255,14 @@ class Window final : public QWidget {
         help->setWordWrap(true);
         help->setObjectName("description");
         layout->addWidget(help);
-        if (dlsslop_control::fixed(s)) {
+        if (control_setting_fixed(&s)) {
             card->setEnabled(false);
             help->setText(QString(s.help) + ". Read-only: alternate captured configurations are unavailable.");
             return card;
         }
         if (!e.number) return card;
         e.slider = new dlsslop_gui::AbsoluteSlider(Qt::Horizontal);
-        if (s.isFloat) e.slider->setRange(0, 10000);
+        if (s.is_float) e.slider->setRange(0, 10000);
         else e.slider->setRange(static_cast<int>(s.minimum), static_cast<int>(s.maximum));
         e.slider->setAccessibleName(title(s.name) + " slider");
         wheelNeedsFocus(e.slider);
@@ -272,7 +272,7 @@ class Window final : public QWidget {
         connect(e.slider, &QSlider::valueChanged, this, [this, index](int position) {
             auto* number = editors_[index].number;
             const QSignalBlocker blocked(number);
-            number->setValue(dlsslop_gui::sliderValue(kSettings[index], position));
+            number->setValue(dlsslop_gui::sliderValue(CONTROL_SETTINGS[index], position));
             queue(index, number->value());
         });
         connect(e.slider, &QSlider::sliderReleased, this, [this] { flush(); });
@@ -352,7 +352,7 @@ public:
             stack->addWidget(scroll);
             pages.push_back(layout);
         }
-        for (std::size_t i = 0; i < editors_.size(); ++i) pages[kSettings[i].section]->addWidget(makeEditor(i));
+        for (std::size_t i = 0; i < editors_.size(); ++i) pages[CONTROL_SETTINGS[i].section]->addWidget(makeEditor(i));
         auto* precisionRow = new QHBoxLayout;
         precisionRow->addWidget(new QLabel("Numeric arrow step"));
         auto* step = new QComboBox;
@@ -360,7 +360,7 @@ public:
         connect(step, &QComboBox::currentIndexChanged, this, [this, step](int) {
             const double value = step->currentData().toDouble();
             for (std::size_t i = 0; i < editors_.size(); ++i)
-                if (editors_[i].number && kSettings[i].isFloat) editors_[i].number->setSingleStep(value);
+                if (editors_[i].number && CONTROL_SETTINGS[i].is_float) editors_[i].number->setSingleStep(value);
         });
         for (double value : kArrowSteps) step->addItem(QString::number(value), value);
         step->setCurrentIndex(kDefaultArrowStep);

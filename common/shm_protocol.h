@@ -108,10 +108,20 @@ struct NativeTier {
 	SHM_STD(uint32_t) networkHeight;
 };
 
-/** @brief The native neural rasters, smallest first. */
+/** @brief The height of the smallest native neural raster. */
+static constexpr SHM_STD(uint32_t) kNativeTierMin = 720;
+static constexpr SHM_STD(uint32_t) kNativeTierStep = 180; //!< From one raster's height to the next.
+
+/** @brief The native neural rasters, smallest first, every kNativeTierStep rows from kNativeTierMin. */
 SHM_CONSTEXPR struct NativeTier kNativeTiers[] = {
-	{720, 1280, 768}, {900, 1600, 960}, {1080, 1920, 1152}
+	{kNativeTierMin, 1280, 768},
+	{kNativeTierMin + kNativeTierStep, 1600, 960},
+	{kNativeTierMin + 2 * kNativeTierStep, 1920, 1152}
 };
+
+/** @brief The height of the largest native neural raster. */
+static constexpr SHM_STD(uint32_t) kNativeTierMax =
+	kNativeTierMin + (sizeof kNativeTiers / sizeof *kNativeTiers - 1) * kNativeTierStep;
 
 static constexpr SHM_STD(uint32_t) kNativeDefaultTier = 720; //!< The height of the default tier.
 static constexpr SHM_STD(uint32_t) kNativeDefaultPasses = 1; //!< The default pass count.

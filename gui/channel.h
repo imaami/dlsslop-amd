@@ -6,7 +6,6 @@
 #include <cstring>
 #include <fcntl.h>
 #include <map>
-#include <iterator>
 #include <string>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -57,16 +56,16 @@ public:
     Result<void> write(const std::map<std::size_t, double>& changes)
     {
         for (const auto& [index, number] : changes) {
-            if (index >= std::size(dlsslop_control::kSettings)) return dlsslop::fail("Unknown setting");
-            const auto& s = dlsslop_control::kSettings[index];
-            if (!dlsslop_control::inRange(s, number)) return dlsslop::fail("Setting outside supported range");
+            if (index >= CONTROL_SETTING_COUNT) return dlsslop::fail("Unknown setting");
+            const auto& s = CONTROL_SETTINGS[index];
+            if (!control_setting_in_range(&s, number)) return dlsslop::fail("Setting outside supported range");
         }
         bool tuningChanged = false;
         for (const auto& [index, number] : changes) {
-            const auto& s = dlsslop_control::kSettings[index];
+            const auto& s = CONTROL_SETTINGS[index];
             // + 0.0f stores -0 as 0.
-            (header_->*s.field).store(s.isFloat ? FloatToBits(static_cast<float>(number) + 0.0f) :
-                                               static_cast<uint32_t>(number));
+            control_setting_word(header_, &s)->store(s.is_float ? FloatToBits(static_cast<float>(number) + 0.0f) :
+                                                                  static_cast<uint32_t>(number));
             tuningChanged |= s.tuning;
         }
         if (changes.empty()) return {};
@@ -77,9 +76,9 @@ public:
     void reset()
     {
         ShmHeader defaults{};
-        ShmInitNativeDefaults(&defaults, dlsslop_control::workerBypass(header_));
-        for (const auto& s : dlsslop_control::kSettings)
-            (header_->*s.field).store((defaults.*s.field).load());
+        ShmInitNativeDefaults(&defaults, control_settings_worker_bypass(header_));
+        for (const auto& s : CONTROL_SETTINGS)
+            control_setting_word(header_, &s)->store(control_setting_load(&defaults, &s));
         header_->tuningSeq.fetch_add(1);
         header_->controlSeq.fetch_add(1);
     }

@@ -46,9 +46,9 @@ void moveHeld(Slider& slider, const QPoint& point)
     QApplication::sendEvent(&slider, &move);
 }
 
-const dlsslop_control::Setting& setting(std::string_view name)
+const control_setting& setting(std::string_view name)
 {
-    for (const auto& value : dlsslop_control::kSettings)
+    for (const auto& value : CONTROL_SETTINGS)
         if (value.name == name) return value;
     failed("missing test setting");
 }

@@ -27,8 +27,6 @@
 
 namespace {
 using Clock = std::chrono::steady_clock;
-using dlsslop_control::kSettings;
-using dlsslop_control::Setting;
 
 uint64_t fnv(const uint8_t* p, size_t n)
 {
@@ -71,7 +69,7 @@ void widen(uint8_t* out, const uint8_t* rgba, size_t values)
 // A setting's new value, stored before frame FRAME is sent (0: before the daemon starts).
 struct Change {
     size_t frame;
-    const Setting* setting;
+    const control_setting* setting;
     uint32_t value;
 };
 
@@ -125,11 +123,11 @@ void help()
         "before it sends that frame; a daemon that publishes none (--test-identity,\n"
         "--cpu-compose) is refused as a usage error.\n",
         kMaxW, kMaxH, kFlat[0], kFlat[1], kFlat[2], kFlat[3], kDefaultFrames, kDefaultLog);
-    for (const Setting& s : kSettings)
+    for (const control_setting& s : CONTROL_SETTINGS)
         std::printf("      --%s [FRAME:]VALUE\n"
                     "                       %s\n"
                     "                       Range: %g..%g; default: %g\n",
-                    s.name, s.help, s.minimum, s.maximum, dlsslop_control::value(s, (defaults.*s.field).load()));
+                    s.name, s.help, s.minimum, s.maximum, control_setting_value(&s, control_setting_load(&defaults, &s)));
 }
 
 // The exit status a shell reports for the wait status STATUS.
@@ -144,7 +142,7 @@ unsigned number(const char* text, unsigned limit)
 }
 
 // [FRAME:]VALUE of SETTING, parsed as dlsslopctl parses VALUE.
-bool change(const char* text, const Setting& setting, Change& out)
+bool change(const char* text, const control_setting& setting, Change& out)
 {
     char* end = nullptr;
     out = {0, &setting, 0};
@@ -156,17 +154,17 @@ bool change(const char* text, const Setting& setting, Change& out)
         }
     }
     errno = 0;
-    if (setting.isFloat) {
+    if (setting.is_float) {
         if (!*text || std::isspace(static_cast<unsigned char>(*text))) return false;
         const double value = std::strtod(text, &end);
-        if (errno || *end || !dlsslop_control::inRange(setting, value)) return false;
+        if (errno || *end || !control_setting_in_range(&setting, value)) return false;
         out.value = FloatToBits(float(value) + 0.0f);
         return true;
     }
     if (*text < '0' || *text > '9') return false;
     const unsigned long long value = std::strtoull(text, &end, 10);
     out.value = uint32_t(value);
-    return !errno && !*end && dlsslop_control::inRange(setting, double(value));
+    return !errno && !*end && control_setting_in_range(&setting, double(value));
 }
 
 // Stores the changes for frame FRAME, publishes them as dlsslopctl does and
@@ -176,9 +174,9 @@ void apply(ShmHeader* h, const std::vector<Change>& changes, size_t frame)
     bool any = false, tuning = false;
     for (const Change& c : changes)
         if (c.frame == frame) {
-            (h->*c.setting->field).store(c.value);
+            control_setting_word(h, c.setting)->store(c.value);
             std::printf("%s%s=%g", any ? " " : "settings: ", c.setting->name,
-                        dlsslop_control::value(*c.setting, c.value));
+                        control_setting_value(c.setting, c.value));
             any = true;
             tuning |= c.setting->tuning;
         }
@@ -193,7 +191,7 @@ uint32_t tier_at(const std::vector<Change>& changes, size_t frame)
 {
     uint32_t tier = 0;
     for (const Change& c : changes)
-        if (c.frame == frame && c.setting->field == &ShmHeader::nativeTier) tier = c.value;
+        if (c.frame == frame && c.setting->offset == offsetof(ShmHeader, nativeTier)) tier = c.value;
     return tier;
 }
 } // namespace
@@ -205,7 +203,7 @@ int main(int argc, char** argv)
     bool fp16 = false;
     std::vector<Change> changes;
     // The client's own options, then one long option per setting, whose
-    // getopt code is 256 plus its index in kSettings.
+    // getopt code is 256 plus its index in CONTROL_SETTINGS.
     std::vector<option> options = {{"shm", required_argument, nullptr, 's'},
                                    {"width", required_argument, nullptr, 'W'},
                                    {"height", required_argument, nullptr, 'H'},
@@ -214,8 +212,8 @@ int main(int argc, char** argv)
                                    {"dump", required_argument, nullptr, 'd'},
                                    {"log", required_argument, nullptr, 'l'},
                                    {"help", no_argument, nullptr, 'h'}};
-    for (const Setting& s : kSettings)
-        options.push_back({s.name, required_argument, nullptr, int(256 + (&s - kSettings))});
+    for (const control_setting& s : CONTROL_SETTINGS)
+        options.push_back({s.name, required_argument, nullptr, int(256 + (&s - CONTROL_SETTINGS))});
     options.push_back({nullptr, 0, nullptr, 0});
     for (int c; (c = getopt_long(argc, argv, "+s:W:H:f:Fd:l:h", options.data(), nullptr)) != -1;) {
         switch (c) {
@@ -229,8 +227,8 @@ int main(int argc, char** argv)
         case 'h': help(); return 0;
         default: {
             const size_t index = size_t(c) - 256;
-            if (index >= std::size(kSettings)) return usage("unknown option or missing value");
-            const Setting& s = kSettings[index];
+            if (index >= CONTROL_SETTING_COUNT) return usage("unknown option or missing value");
+            const control_setting& s = CONTROL_SETTINGS[index];
             Change parsed;
             if (!change(optarg, s, parsed)) {
                 std::fprintf(stderr, "shmclient: --%s: expected [FRAME:]VALUE with VALUE in [%g, %g], got '%s'\n",

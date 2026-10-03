@@ -61,23 +61,23 @@ int main()
     ShmInitNativeDefaults(header, false);
     // Fixed settings admit only their reset default, only the native tuning
     // values are marked as such, and each label list names its range once.
-    for (const auto& s : dlsslop_control::kSettings) {
+    for (const auto& s : CONTROL_SETTINGS) {
         const std::string name = s.name;
-        const double initial = dlsslop_control::value(s, (header->*s.field).load());
-        require(dlsslop_control::inRange(s, initial), "a default is outside its range");
-        require(dlsslop_control::fixed(s) == (name == "preset"), "wrong fixed settings");
-        require(!dlsslop_control::fixed(s) || (s.minimum == initial && s.maximum == initial),
+        const double initial = control_setting_value(&s, control_setting_load(header, &s));
+        require(control_setting_in_range(&s, initial), "a default is outside its range");
+        require(control_setting_fixed(&s) == (name == "preset"), "wrong fixed settings");
+        require(!control_setting_fixed(&s) || (s.minimum == initial && s.maximum == initial),
                 "a fixed setting admits another value");
-        require(dlsslop_control::fixed(s) == (s.minimum == s.maximum), "a one-value range is not fixed");
+        require(control_setting_fixed(&s) == (s.minimum == s.maximum), "a one-value range is not fixed");
         require(s.tuning == (name == "intensity" || name == "local-tone" || name == "local-structure" ||
                              name == "sharpness"), "wrong native tuning settings");
         if (!s.choices) continue;
         const auto labels = 1 + std::count(s.choices, s.choices + std::strlen(s.choices), '|');
-        require(!s.isFloat && labels == (s.maximum - s.minimum) / s.step + 1, "choice labels do not match the range");
+        require(!s.is_float && labels == (s.maximum - s.minimum) / s.step + 1, "choice labels do not match the range");
     }
     std::size_t intensity = 0, color = 0, preset = 0, colorPreserve = 0;
-    for (std::size_t i = 0; i < std::size(dlsslop_control::kSettings); ++i) {
-        const std::string name = dlsslop_control::kSettings[i].name;
+    for (std::size_t i = 0; i < CONTROL_SETTING_COUNT; ++i) {
+        const std::string name = CONTROL_SETTINGS[i].name;
         if (name == "intensity") intensity = i;
         if (name == "color") color = i;
         if (name == "preset") preset = i;
@@ -106,15 +106,15 @@ int main()
         require(header->intensityBits.load() == 0, "negative zero stored");
         // Every advertised bound is accepted and reads back in range, although
         // binary32 stores some float minimums below themselves.
-        for (std::size_t i = 0; i < std::size(dlsslop_control::kSettings); ++i) {
-            const auto& s = dlsslop_control::kSettings[i];
+        for (std::size_t i = 0; i < CONTROL_SETTING_COUNT; ++i) {
+            const auto& s = CONTROL_SETTINGS[i];
             const double below = std::nextafter(static_cast<double>(static_cast<float>(s.minimum)), -HUGE_VAL);
             const double above = std::nextafter(static_cast<double>(static_cast<float>(s.maximum)), HUGE_VAL);
-            require(!dlsslop_control::inRange(s, below) && !dlsslop_control::inRange(s, above) &&
-                    !dlsslop_control::inRange(s, std::nan("")), "range admits an outside value");
+            require(!control_setting_in_range(&s, below) && !control_setting_in_range(&s, above) &&
+                    !control_setting_in_range(&s, std::nan("")), "range admits an outside value");
             for (const double bound : {s.minimum, s.maximum}) {
                 accepted(channel.write({{i, bound}}));
-                require(dlsslop_control::inRange(s, dlsslop_control::value(s, (header->*s.field).load())),
+                require(control_setting_in_range(&s, control_setting_value(&s, control_setting_load(header, &s))),
                         "a written bound reads back out of range");
             }
         }

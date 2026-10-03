@@ -2,6 +2,7 @@
  *
  * Compiles as C the headers that C and C++ share.
  */
+#include "control_settings.h"
 #include "device_features.h"
 #include "dlssnr/DlssNr_Layout.h"
 #include "list.h"

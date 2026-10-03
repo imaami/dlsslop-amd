@@ -177,17 +177,17 @@ void editorsFollowTheirSettings(QWidget& window)
     require(step->currentIndex() == kDefaultArrowStep, "the default arrow step is not selected");
     for (int choice : {kDefaultArrowStep, 2, 0, kDefaultArrowStep}) {
         step->setCurrentIndex(choice);
-        for (const auto& s : kSettings)
+        for (const auto& s : CONTROL_SETTINGS)
             if (auto* number = find<QDoubleSpinBox>(window, title(s.name)))
-                require(number->singleStep() == (s.isFloat ? kArrowSteps[choice] : 1), "a numeric field has the wrong arrow step");
+                require(number->singleStep() == (s.is_float ? kArrowSteps[choice] : 1), "a numeric field has the wrong arrow step");
     }
     int readOnly = 0, sliders = 0;
-    for (const auto& s : kSettings) {
+    for (const auto& s : CONTROL_SETTINGS) {
         const QString name = title(s.name);
         auto* editor = find<QWidget>(window, name);
         auto* slider = find<QSlider>(window, name + " slider");
         require(editor, "a setting has no editor");
-        const bool writable = !dlsslop_control::fixed(s);
+        const bool writable = !control_setting_fixed(&s);
         require(editor->isEnabled() == writable && named<QPushButton>(window, "Reset " + name)->isEnabled() == writable,
                 "a setting's editor and reset button disagree with its read-only state");
         readOnly += !writable;
@@ -195,8 +195,8 @@ void editorsFollowTheirSettings(QWidget& window)
         require(!slider == (!writable || !number), "a slider is missing or on a read-only or non-numeric setting");
         if (!slider) continue;
         ++sliders;
-        require(slider->minimum() == (s.isFloat ? 0 : static_cast<int>(s.minimum)) &&
-                slider->maximum() == (s.isFloat ? 10000 : static_cast<int>(s.maximum)), "a slider has the wrong range");
+        require(slider->minimum() == (s.is_float ? 0 : static_cast<int>(s.minimum)) &&
+                slider->maximum() == (s.is_float ? 10000 : static_cast<int>(s.maximum)), "a slider has the wrong range");
     }
     require(readOnly == 1 && sliders >= 21, "the editor test reached too few settings");
 }
