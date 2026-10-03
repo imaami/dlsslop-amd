@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "transport.hpp"
+#include "shm_protocol.hpp"
 
 #include <algorithm>
 #include <cerrno>

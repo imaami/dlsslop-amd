@@ -2038,7 +2038,7 @@ hook_destroy_device (VkDevice                     device,
 		atomic_store(&dc->shm.hdr->layerCompositionUp, 0);
 		// The in-layer network's state goes with it.
 		if (dc->network_reason[0])
-			ShmStoreString(&dc->shm.hdr->layerReasonSeq, dc->shm.hdr->layerReason, kReasonBytes, "");
+			ShmStoreString(dc->shm.hdr, SHM_TEXT_LAYER_REASON, "");
 	}
 	wait_device_idle(dc);
 	// While the device is still found by its queues: the network's build submits through them.
@@ -2560,7 +2560,7 @@ publish_frame (struct device_chain          *dc,
 	if (!hdr)
 		return;
 
-	ShmStore64(&hdr->layerFramesLo, &hdr->layerFramesHi, ++dc->frames_composed);
+	ShmStore64(hdr, SHM_COUNT_LAYER_FRAMES, ++dc->frames_composed);
 	atomic_store(&hdr->layerWidth, sc->width);
 	atomic_store(&hdr->layerHeight, sc->height);
 	atomic_store(&hdr->layerFormat, (uint32_t)sc->format);
@@ -2647,7 +2647,7 @@ network_reason (struct device_chain *dc,
 	snprintf(reason, sizeof dc->network_reason, "%s%s%s", what, detail, after);
 	log_printf("[layer] %s", reason);
 	if (dc->shm.hdr)
-		ShmStoreString(&dc->shm.hdr->layerReasonSeq, dc->shm.hdr->layerReason, kReasonBytes, reason);
+		ShmStoreString(dc->shm.hdr, SHM_TEXT_LAYER_REASON, reason);
 }
 
 /** @brief Turns the in-layer network off after it failed: frames go to dlsslopd from now on.

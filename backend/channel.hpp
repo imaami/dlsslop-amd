@@ -3,7 +3,7 @@
 #pragma once
 #include "files.hpp"
 #include "result.hpp"
-#include "shm_protocol.h"
+#include "shm_protocol.hpp"
 
 #include <string>
 
@@ -23,7 +23,7 @@ public:
     ~Mapping();
     void reason(const std::string& text)
     {
-        ShmStoreString(&h->helperReasonSeq, h->helperReason, kReasonBytes, text.c_str());
+        ShmStoreString(h, SHM_TEXT_HELPER_REASON, text.c_str());
     }
 };
 } // namespace dlsslop

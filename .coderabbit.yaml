@@ -56,7 +56,7 @@ reviews:
         otherwise or a significant performance gain; upstream names and
         contracts are preserved. Never suggest restyling upstream or
         vendored code.
-    - path: "{common/shm_protocol.h,layer/{capture.{c,h},composition.{c,h},dlssnr_pass.{c,h},hotkey.{c,h},hotkey_priv.h,layer.c,log.{c,h},scaler_vk.{c,h},shader_vk.{c,h},shader_vk_priv.h,shmctl.c,vk_table.h,dlssnr/*.h}}"
+    - path: "{common/shm_protocol.{c,h},layer/{capture.{c,h},composition.{c,h},dlssnr_pass.{c,h},hotkey.{c,h},hotkey_priv.h,layer.c,log.{c,h},scaler_vk.{c,h},shader_vk.{c,h},shader_vk_priv.h,shmctl.c,vk_table.h,dlssnr/*.h}}"
       instructions: >-
         The C23 port of the layer's sources imported from dlsslop-amd's
         fork of the layer (PROVENANCE.md). AGENTS.md's C sections are

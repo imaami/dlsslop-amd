@@ -1,0 +1,78 @@
+// The channel for C++ (shm_protocol.h): its words and layout as C++ sees them,
+// pinned, and the functions that write a string into the caller's buffer as
+// functions that return a std::string.
+#pragma once
+#include "shm_protocol.h"
+
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <string>
+
+// The channel's words and layout as C++ sees them; shm_protocol.c pins them in C. A word is a
+// lock-free std::atomic<uint32_t> of four bytes here, as it is a lock-free _Atomic(uint32_t) there.
+static_assert(sizeof(std::atomic<std::uint32_t>) == 4 && alignof(std::atomic<std::uint32_t>) == 4,
+              "a word of the channel is not four bytes aligned to four");
+static_assert(std::atomic<std::uint32_t>::is_always_lock_free, "a word of the channel is not lock-free");
+static_assert(sizeof(ShmHeader) == 1996 && alignof(ShmHeader) == 4 && sizeof(PassControl) == 36,
+              "the header's layout differs from shm_protocol.c's");
+static_assert(offsetof(ShmHeader, enabled) == 44 && offsetof(ShmHeader, transferStrengthBits) == 88 &&
+                  offsetof(ShmHeader, helperState) == 176 && offsetof(ShmHeader, helperReason) == 260 &&
+                  offsetof(ShmHeader, layerReason) == 456 && offsetof(ShmHeader, gameName) == 652 &&
+                  offsetof(ShmHeader, pass) == 780 && offsetof(ShmHeader, mvecEnabled) == 1860 &&
+                  offsetof(ShmHeader, seq_ok) == 1872 && offsetof(ShmHeader, hdrEncode) == 1948 &&
+                  offsetof(ShmHeader, transportGen) == 1980 && offsetof(ShmHeader, nativeTier) == 1992,
+              "the header's layout differs from shm_protocol.c's");
+static_assert(sizeof(ShmTransportOffer) == 72, "the transport offer's layout differs from shm_protocol.c's");
+
+// ShmDefaultPath(), or an empty string if it cannot be formatted.
+inline std::string ShmDefaultPath()
+{
+    const char* uid = std::getenv("DLSSNR_UID");
+    const int length = shm_runtime_path(nullptr, 0, uid, "/shm.bin");
+    if (length < 0) return {};
+    std::string path(static_cast<std::size_t>(length), '\0');
+    shm_runtime_path(path.data(), path.size() + 1, uid, "/shm.bin");
+    return path;
+}
+
+// ShmNativeDefaultPath(), or an empty string if it cannot be formatted.
+inline std::string ShmNativeDefaultPath()
+{
+    const int length = ShmNativeDefaultPath(nullptr, 0);
+    if (length < 0) return {};
+    std::string path(static_cast<std::size_t>(length), '\0');
+    ShmNativeDefaultPath(path.data(), path.size() + 1);
+    return path;
+}
+
+// ShmNativeChannelPath(), or an empty string if it cannot be formatted.
+inline std::string ShmNativeChannelPath()
+{
+    const char* channel = std::getenv("DLSSNR_SHM");
+    const int length = shm_native_channel_path(nullptr, 0, channel);
+    if (length < 0) return {};
+    std::string path(static_cast<std::size_t>(length), '\0');
+    shm_native_channel_path(path.data(), path.size() + 1, channel);
+    return path;
+}
+
+// ShmTransportPath() of CHANNEL, or an empty string if it cannot be formatted.
+inline std::string ShmTransportPath(const std::string& channel)
+{
+    const int length = ShmTransportPath(nullptr, 0, channel.c_str());
+    if (length < 0) return {};
+    std::string path(static_cast<std::size_t>(length), '\0');
+    ShmTransportPath(path.data(), path.size() + 1, channel.c_str());
+    return path;
+}
+
+// ShmLoadString() of the text field FIELD of H, or an empty string if the
+// field changed during every copy.
+inline std::string ShmLoadString(const ShmHeader* h, shm_text field)
+{
+    char text[kReasonBytes > kNameBytes ? kReasonBytes : kNameBytes];
+    ShmLoadString(h, field, text, sizeof text);
+    return text;
+}

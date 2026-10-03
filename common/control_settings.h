@@ -322,25 +322,22 @@ control_settings_worker_bypass (struct ShmHeader const *h)
 #ifdef __cplusplus
 } /* extern "C" */
 
-/** @brief Whether the tier setting follows kNativeTiers.
- *
- * The heights must step evenly from kNativeTierMin by kNativeTierStep, as the tier setting's values
- * minimum + k * step assume, and @a labels must spell them in order.
+/** @brief Whether the tier setting's labels spell the heights of kNativeTiers in order: the
+ *         kNativeTierCount heights from kNativeTierMin by kNativeTierStep, which shm_protocol.c gives
+ *         the tiers.
  *
  * @param labels The tier setting's labels.
- * @return       true if they all do.
+ * @return       true if they do.
  */
 constexpr bool
 control_settings_tiers_match (char const *labels)
 {
-	std::uint32_t const count = sizeof kNativeTiers / sizeof *kNativeTiers;
-	for (std::uint32_t i = 0; i < count; ++i) {
+	for (std::uint32_t i = 0; i < kNativeTierCount; ++i) {
 		std::uint32_t const height = kNativeTierMin + i * kNativeTierStep;
 		std::uint32_t label = 0;
 		while (*labels >= '0' && *labels <= '9')
 			label = label * 10 + static_cast<std::uint32_t>(*labels++ - '0');
-		if (kNativeTiers[i].height != height || label != height ||
-		    *labels++ != (i + 1 < count ? '|' : '\0'))
+		if (label != height || *labels++ != (i + 1 < kNativeTierCount ? '|' : '\0'))
 			return false;
 	}
 	return true;

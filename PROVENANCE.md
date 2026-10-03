@@ -49,7 +49,7 @@ the include paths that the move broke: one line each in `layer/capture.cpp`
 | `layer_linux/src/shaders/meter_reduce.comp` | `layer/meter_reduce.comp` |
 | `layer_linux/dlssnr.map` | `layer/dlssnr.map` |
 | `tools/shmctl.cpp` | `layer/shmctl.cpp` (now `shmctl.c`) |
-| `common/shm_protocol.h` | `common/shm_protocol.h` |
+| `common/shm_protocol.h` | `common/shm_protocol.h` (its functions now in `shm_protocol.c` and `shm_protocol.hpp`) |
 | `ATTRIBUTION.md` | `layer/ATTRIBUTION.md` |
 | `core/stb_image_write.h`, `standalone_runner/third_party/stb_image.h` | `third_party/stb/` |
 | `third_party/optiscaler/LICENSE`, `RenoDX_ATTRIBUTION.txt` | `third_party/optiscaler/` |
@@ -115,9 +115,14 @@ These upstream names do not follow the rule:
 The headers that C and C++ share stay valid C++23. `common/shm_protocol.h`
 declares the channel for both languages, `layer/vk_table.h` the dispatch tables,
 and `layer/dlssnr/DlssNr_Common.h` and `DlssNr_Layout.h` the composition
-shader's constant block. The channel header's functions that return a
-`std::string` in C++ write into the caller's buffer in C; C++ keeps the string
-versions as overloads, except for `ShmRuntimeDir`, which only a test calls.
+shader's constant block. `common/shm_protocol.c` defines the channel header's
+functions, which both languages call. `ShmStoreString`, `ShmLoadString`,
+`ShmStore64` and `ShmLoad64` take the header and an `enum shm_text` or
+`enum shm_count` instead of the field's words, because a word is a
+`std::atomic<uint32_t>` in C++ and an `_Atomic(uint32_t)` in C.
+`common/shm_protocol.hpp` holds overloads that return a `std::string` of the
+functions that write a string into the caller's buffer, but `ShmRuntimeDir`,
+which only a test calls.
 
 The layer's composition shader `layer/dlssnr/dlssnr.comp` is a GLSL port of the
 layer fork's `layer_linux/src/dlssnr/dlssnr.hlsl` (AGPL-3.0). Its RenoDX-derived

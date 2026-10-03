@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 // Drives `dlsslopd --test-identity` over its shared-memory channel the way the
 // layer's ShmProcessFrame does. Needs neither HIP nor model weights.
-#include "shm_protocol.h"
+#include "shm_protocol.hpp"
 
+#include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -113,7 +115,7 @@ public:
         require(!std::memcmp(input, output, bytes(fp16)), "identity answer differs from its request");
         return true;
     }
-    std::string reason() const { return ShmLoadString(h->helperReasonSeq, h->helperReason, kReasonBytes); }
+    std::string reason() const { return ShmLoadString(h, SHM_TEXT_HELPER_REASON); }
 };
 
 class Worker {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "result.hpp"
-#include "shm_protocol.h"
+#include "shm_protocol.hpp"
 
 #include <cstdio>
 #include <optional>

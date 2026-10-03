@@ -28,17 +28,7 @@ add_link_options(-Wl,--gc-sections $<$<CONFIG:Release>:-s>)
 # Link-time optimization shrinks the daemon's code by 7% and the GUI's
 # too: the compiler inlines and drops code across files.
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON CACHE BOOL "Link-time optimization")
-# The tests link the layer's C objects into C++ programs, and as parts of the
-# daemon become C, it will too. Under link-time optimization the objects hold
-# the compiler's intermediate code, which only the same compiler of the same
-# version can read.
-if(CMAKE_INTERPROCEDURAL_OPTIMIZATION AND NOT (CMAKE_C_COMPILER_ID STREQUAL CMAKE_CXX_COMPILER_ID AND
-        CMAKE_C_COMPILER_VERSION VERSION_EQUAL CMAKE_CXX_COMPILER_VERSION))
-    message(FATAL_ERROR "Link-time optimization (CMAKE_INTERPROCEDURAL_OPTIMIZATION) cannot link the C "
-        "compiler's (${CMAKE_C_COMPILER_ID} ${CMAKE_C_COMPILER_VERSION}) objects with the C++ compiler's "
-        "(${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}). Configure a new build directory with "
-        "CMAKE_C_COMPILER and CMAKE_CXX_COMPILER (or CC and CXX) set to one toolchain's C and C++ compilers.")
-endif()
+include(cmake/lto-compilers.cmake)
 # Project headers shared by the daemon and its tests.
 include_directories(common)
 find_package(Threads REQUIRED)
@@ -107,6 +97,11 @@ embed_shader(common/network_fallback.comp network/network_fallback.hpp kNetworkF
 add_custom_target(network-shaders DEPENDS ${SHADER_DIR}/network/network_verdict.hpp
     ${SHADER_DIR}/network/network_fallback.hpp)
 
+# The C functions that common/'s headers declare for C and C++: the channel's.
+# The layers, the network module, the programs and the tests link them.
+add_library(dlsslop-common-c OBJECT common/shm_protocol.c)
+set_target_properties(dlsslop-common-c PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
 # Only layer.c differs between the layers; both and the layer tests link the
 # other translation units compiled once.
 add_library(dlsslop-layer-objects OBJECT layer/shader_vk.c layer/dlssnr_pass.c layer/composition.c
@@ -118,7 +113,7 @@ target_link_libraries(dlsslop-layer-objects PUBLIC Threads::Threads ${CMAKE_DL_L
 
 function(add_neural_layer target)
     add_library(${target} SHARED layer/layer.c)
-    target_link_libraries(${target} PRIVATE dlsslop-layer-objects)
+    target_link_libraries(${target} PRIVATE dlsslop-layer-objects dlsslop-common-c)
     target_link_options(${target} PRIVATE -static-libgcc -Wl,-Bsymbolic
         "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/layer/dlssnr.map")
     target_compile_definitions(${target} PRIVATE DLSSLOP_LAYER_NAME="VK_LAYER_LOCAL_dlsslop_amd")
@@ -126,7 +121,7 @@ endfunction()
 
 add_neural_layer(VkLayer_DLSSLOP_amd)
 add_executable(dlssnr-shmctl layer/shmctl.c)
-target_link_libraries(dlssnr-shmctl PRIVATE m)
+target_link_libraries(dlssnr-shmctl PRIVATE dlsslop-common-c m)
 target_link_options(dlssnr-shmctl PRIVATE -static-libgcc)
 # A command that runs once: its code is built for size.
 target_compile_options(dlssnr-shmctl PRIVATE -Os)
@@ -164,7 +159,7 @@ target_link_libraries(dlsslop-hip PUBLIC ${CMAKE_DL_LIBS})
 add_library(dlsslop-network MODULE layer/network_module.cpp backend/processing.cpp backend/options.cpp
     backend/paths.cpp backend/files.cpp)
 target_include_directories(dlsslop-network PRIVATE backend)
-target_link_libraries(dlsslop-network PRIVATE dlsslop-vulkan ${CMAKE_DL_LIBS})
+target_link_libraries(dlsslop-network PRIVATE dlsslop-vulkan dlsslop-common-c ${CMAKE_DL_LIBS})
 target_link_options(dlsslop-network PRIVATE -static-libstdc++ -static-libgcc -Wl,-Bsymbolic
     "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/layer/network_module.map")
 add_dependencies(dlsslop-network vulkan-nr-shaders)
@@ -175,7 +170,8 @@ add_executable(dlsslopd
     backend/open.cpp backend/hip_engine.cpp backend/self_test.cpp
     backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp
     backend/processing.cpp)
-target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip dlsslop-vulkan Threads::Threads ${CMAKE_DL_LIBS})
+target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip dlsslop-vulkan dlsslop-common-c Threads::Threads
+    ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)
 target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 # What runs once per start, per transport offer or per diagnostic is built for
@@ -207,6 +203,7 @@ if(BUILD_TESTING)
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/worker-cli.py $<TARGET_FILE:dlsslopd>
         $<TARGET_FILE:hip-loader-stub> $<TARGET_FILE:hip-fake-runtime> $<TARGET_FILE:hip-fake-incomplete>)
     add_executable(worker-channel-test tests/worker_channel_test.cpp)
+    target_link_libraries(worker-channel-test PRIVATE dlsslop-common-c)
     add_test(NAME worker-channel COMMAND worker-channel-test $<TARGET_FILE:dlsslopd>)
     add_test(NAME packaging COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging_test.py)
@@ -216,7 +213,7 @@ if(BUILD_TESTING)
     add_test(NAME vulkan-storage COMMAND vulkan-storage-test)
     add_executable(network-module-test tests/network_module_test.cpp)
     target_include_directories(network-module-test PRIVATE layer)
-    target_link_libraries(network-module-test PRIVATE ${CMAKE_DL_LIBS})
+    target_link_libraries(network-module-test PRIVATE dlsslop-common-c ${CMAKE_DL_LIBS})
     # The module without dlsslop_network_close(), and one of another interface, which the loader
     # refuses.
     add_library(network-module-incomplete MODULE tests/network_module_incomplete.c)
@@ -241,7 +238,7 @@ if(BUILD_TESTING)
     add_test(NAME vulkan-files COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/vulkan-files.py
         --recorder $<TARGET_FILE:network-recorder-test> --spirv ${VKNR_SHADERS})
     add_executable(codec-test backend/codec_test.cpp)
-    target_link_libraries(codec-test PRIVATE dlsslop-codec)
+    target_link_libraries(codec-test PRIVATE dlsslop-codec dlsslop-common-c)
     add_test(NAME codec COMMAND codec-test)
     add_executable(color-gpu-test tests/color_gpu_test.cpp backend/hip.cpp backend/native_kernels.cpp backend/files.cpp)
     target_link_libraries(color-gpu-test PRIVATE ${CMAKE_DL_LIBS})
@@ -253,6 +250,7 @@ if(BUILD_TESTING)
     # import's manifest.
     add_executable(hip-weights-test tests/hip_weights_test.cpp backend/hip_weights.cpp backend/hip_plan.cpp
         backend/files.cpp)
+    target_link_libraries(hip-weights-test PRIVATE dlsslop-common-c)
     add_test(NAME hip-weights COMMAND hip-weights-test)
     add_test(NAME hip-weights-manifest COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/hip-weights-manifest.py $<TARGET_FILE:hip-weights-test>)
@@ -260,6 +258,7 @@ if(BUILD_TESTING)
     # against the kernels' metadata once scripts/build-kernels.py has run.
     add_executable(hip-plan-test tests/hip_plan_test.cpp backend/hip_plan.cpp backend/hip_weights.cpp
         backend/files.cpp)
+    target_link_libraries(hip-plan-test PRIVATE dlsslop-common-c)
     add_test(NAME hip-plan COMMAND hip-plan-test)
     add_test(NAME hip-plan-abi COMMAND hip-plan-test --modules ${HIP_MODULES})
     # The Vulkan network's weight packing against digests of upstream's, and
@@ -282,6 +281,7 @@ if(BUILD_TESTING)
     # A fake layer that serves dlsslopd frames for the tracers below; tested
     # against dlsslopd's identity mode.
     add_executable(shmclient tests/shmclient.cpp)
+    target_link_libraries(shmclient PRIVATE dlsslop-common-c)
     add_test(NAME shmclient COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/shmclient-test.py
         $<TARGET_FILE:shmclient> $<TARGET_FILE:dlsslopd> $<TARGET_FILE:dlssnr-shmctl>)
     # A tracing HIP runtime, which dlsslopd loads as its HIP library, for
@@ -300,7 +300,7 @@ if(BUILD_TESTING)
     add_test(NAME color-preserve COMMAND color-preserve-test)
     add_executable(tuning-test tests/tuning_test.cpp)
     target_include_directories(tuning-test PRIVATE backend)
-    target_link_libraries(tuning-test PRIVATE dlsslop-codec)
+    target_link_libraries(tuning-test PRIVATE dlsslop-codec dlsslop-common-c)
     add_test(NAME tuning COMMAND tuning-test)
     add_executable(temporal-test tests/temporal_test.cpp)
     target_include_directories(temporal-test PRIVATE backend)
@@ -313,29 +313,29 @@ if(BUILD_TESTING)
     add_executable(capture-writer-test tests/capture_writer_test.cpp)
     # stb_image.h is a system header here: its unused helpers do not warn.
     target_include_directories(capture-writer-test SYSTEM PRIVATE third_party/stb)
-    target_link_libraries(capture-writer-test PRIVATE dlsslop-layer-objects)
+    target_link_libraries(capture-writer-test PRIVATE dlsslop-layer-objects dlsslop-common-c)
     add_test(NAME capture-writer COMMAND capture-writer-test)
     # The layer's settings snapshot, model raster, format table, scaler names and key names, on
     # the host.
     add_executable(layer-units-test tests/layer_units_test.cpp)
-    target_link_libraries(layer-units-test PRIVATE dlsslop-layer-objects)
+    target_link_libraries(layer-units-test PRIVATE dlsslop-layer-objects dlsslop-common-c)
     add_test(NAME layer-units COMMAND layer-units-test)
     # The hotkeys' internals, in C: hotkeys_fini() with fake keyboards, the evdev reads and sweeps,
     # the choice of a backend, and XInput2 on a private Xvfb if Xvfb and libXtst are installed.
     add_executable(hotkey-test tests/hotkey_test.c)
-    target_link_libraries(hotkey-test PRIVATE dlsslop-layer-objects)
+    target_link_libraries(hotkey-test PRIVATE dlsslop-layer-objects dlsslop-common-c)
     add_test(NAME hotkey COMMAND hotkey-test)
     # The composition and scaling passes in C, on a fake device: what each build creates and each
     # fini destroys, after a failure at any step too, and what a dispatch records.
     add_executable(shader-passes-test tests/shader_passes_test.c)
     add_dependencies(shader-passes-test layer-shaders)
     target_include_directories(shader-passes-test PRIVATE ${SHADER_DIR})
-    target_link_libraries(shader-passes-test PRIVATE dlsslop-layer-objects)
+    target_link_libraries(shader-passes-test PRIVATE dlsslop-layer-objects dlsslop-common-c)
     add_test(NAME shader-passes COMMAND shader-passes-test)
     # The composition in C, on a fake device: what each build creates and each fini destroys, after a
     # failure at any call too, what each leg records, and the transport offer's descriptors.
     add_executable(composition-test tests/composition_test.c)
-    target_link_libraries(composition-test PRIVATE dlsslop-layer-objects)
+    target_link_libraries(composition-test PRIVATE dlsslop-layer-objects dlsslop-common-c)
     add_test(NAME composition COMMAND composition-test)
     # The layer's intrusive list: linking, walking, unlinking and freeing during a walk.
     add_executable(list-test tests/list_test.c)
@@ -361,12 +361,12 @@ if(BUILD_TESTING)
     find_library(X11_LIBRARY NAMES X11 libX11.so.6 REQUIRED)
     add_executable(vulkan-smoke tests/vulkan_smoke.cpp)
     target_include_directories(vulkan-smoke PRIVATE ${X11_HEADERS})
-    target_link_libraries(vulkan-smoke PRIVATE ${VULKAN_LOADER} ${X11_LIBRARY})
+    target_link_libraries(vulkan-smoke PRIVATE dlsslop-common-c ${VULKAN_LOADER} ${X11_LIBRARY})
     add_executable(hdr-shader-test tests/hdr_shader_test.cpp)
-    target_link_libraries(hdr-shader-test PRIVATE dlsslop-layer-objects ${VULKAN_LOADER})
+    target_link_libraries(hdr-shader-test PRIVATE dlsslop-layer-objects dlsslop-common-c ${VULKAN_LOADER})
     add_test(NAME hdr-shader COMMAND hdr-shader-test)
     add_executable(composition-rebuild-test tests/composition_rebuild_test.cpp)
-    target_link_libraries(composition-rebuild-test PRIVATE dlsslop-layer-objects ${VULKAN_LOADER})
+    target_link_libraries(composition-rebuild-test PRIVATE dlsslop-layer-objects dlsslop-common-c ${VULKAN_LOADER})
     add_test(NAME composition-rebuild COMMAND composition-rebuild-test)
     add_test(NAME vulkan-smoke COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/run-smoke.py
         --build-dir ${CMAKE_CURRENT_BINARY_DIR} --headless)

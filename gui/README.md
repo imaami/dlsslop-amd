@@ -7,8 +7,9 @@ require Qt. All 41 settings share definitions with the CLI and use protocol 28.
 ## Build and launch
 
 First fetch and prepare upstream sources as described in [README.md](../README.md).
-Install Qt 6 development libraries, CMake and a C++ compiler (`qt6-base-dev`,
-`cmake` and `g++` on Debian/Ubuntu). From the repository root:
+Install Qt 6 development libraries, CMake and a C and C++ compiler
+(`qt6-base-dev`, `cmake`, `gcc` and `g++` on Debian/Ubuntu): the application
+links the channel's C functions. From the repository root:
 
 ```bash
 cmake -S gui -B build-gui -DCMAKE_BUILD_TYPE=Release

@@ -2,7 +2,7 @@
 #include "options.hpp"
 #include "files.hpp"
 #include "paths.hpp"
-#include "shm_protocol.h"
+#include "shm_protocol.hpp"
 #include "vulkan_network.hpp"
 
 #include <algorithm>

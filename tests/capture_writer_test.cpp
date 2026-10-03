@@ -1,5 +1,5 @@
 #include "capture.h"
-#include "shm_protocol.h"
+#include "shm_protocol.hpp"
 #include <vulkan/vulkan.h>
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -122,19 +122,18 @@ void check_channel_paths() {
 // to the field's size, and an empty one for a null string.
 void check_text_fields() {
     static ShmHeader header;
-    ShmStoreString(&header.layerReasonSeq, header.layerReason, kReasonBytes, "first");
+    ShmStoreString(&header, SHM_TEXT_LAYER_REASON, "first");
     require(header.layerReasonSeq.load() == 1 &&
-                ShmLoadString(header.layerReasonSeq, header.layerReason, kReasonBytes) == "first",
+                ShmLoadString(&header, SHM_TEXT_LAYER_REASON) == "first",
             "a text field was not published");
     const std::string tooLong(kReasonBytes, 'x');
-    ShmStoreString(&header.layerReasonSeq, header.layerReason, kReasonBytes, tooLong.c_str());
+    ShmStoreString(&header, SHM_TEXT_LAYER_REASON, tooLong.c_str());
     require(header.layerReasonSeq.load() == 2 &&
-                ShmLoadString(header.layerReasonSeq, header.layerReason, kReasonBytes) ==
-                    tooLong.substr(0, kReasonBytes - 1),
+                ShmLoadString(&header, SHM_TEXT_LAYER_REASON) == tooLong.substr(0, kReasonBytes - 1),
             "a text field did not cut a string to its size");
-    ShmStoreString(&header.layerReasonSeq, header.layerReason, kReasonBytes, nullptr);
+    ShmStoreString(&header, SHM_TEXT_LAYER_REASON, nullptr);
     require(header.layerReasonSeq.load() == 3 &&
-                ShmLoadString(header.layerReasonSeq, header.layerReason, kReasonBytes).empty() &&
+                ShmLoadString(&header, SHM_TEXT_LAYER_REASON).empty() &&
                 !header.layerReason[0],
             "a null string did not empty a text field");
 }

@@ -5,6 +5,7 @@
 // changes settings between frames as dlsslopctl does, and prints the FNV-1a
 // 64 of every input and answer. No device-local transport is offered.
 #include "control_settings.h"
+#include "shm_protocol.hpp"
 
 #include <fcntl.h>
 #include <getopt.h>
@@ -366,7 +367,7 @@ int main(int argc, char** argv)
                     "ms=%.2f\n",
                     index, frames[index], static_cast<unsigned long long>(fnv(image, bytes)), request, ok, aw, ah,
                     static_cast<unsigned long long>(ok ? fnv(output, answer) : 0), ms);
-        if (!ok) std::printf("reason: %s\n", ShmLoadString(h->helperReasonSeq, h->helperReason, kReasonBytes).c_str());
+        if (!ok) std::printf("reason: %s\n", ShmLoadString(h, SHM_TEXT_HELPER_REASON).c_str());
         if (ok && !dump.empty()) {
             const std::string path = dump + "/answer-" + std::to_string(index) + (fp16 ? ".rgba16f" : ".rgba8");
             FILE* file = std::fopen(path.c_str(), "wb");

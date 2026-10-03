@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "channel.hpp"
+#include "../common/shm_protocol.hpp"
 #include "absolute_slider.hpp"
 #include "slider_scale.hpp"
 #include "theme.hpp"
@@ -182,8 +183,8 @@ class Window final : public QWidget {
         inode_ = channel->inode();
         activePath_ = path.constData();
         controls_->setEnabled(true);
-        const auto reason = ShmLoadString(h->helperReasonSeq, h->helperReason, kReasonBytes);
-        const auto layer = ShmLoadString(h->layerReasonSeq, h->layerReason, kReasonBytes);
+        const auto reason = ShmLoadString(h, SHM_TEXT_HELPER_REASON);
+        const auto layer = ShmLoadString(h, SHM_TEXT_LAYER_REASON);
         status_->setPlainText(QString("Snapshot on refresh\n\nProtocol: %1\nWorker state: %2\nModel up: %3\nStop requested: %4\n"
             "Request / response: %5 / %6\nProxy: %7 × %8\nNeural raster limit: %9 × %10\n"
             "Network: %11 ms\nUpload: %12 ms\nReadback: %13 ms\nReason: %14\nLayer: %15")
