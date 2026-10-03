@@ -20,12 +20,10 @@
 #include "../third_party/stb/stb_image_write.h"
 #undef STB_IMAGE_WRITE_IMPLEMENTATION
 
-/** @brief The size of a path in the batch's directory: the directory, which fits in
- *         CAPTURE_WRITER_DIR_SIZE bytes, then a slash and a file name of at most 13 bytes. A path
- *         that the kernel refuses as too long therefore fails where the file is opened, as
- *         upstream's did.
+/** @brief The size of a batch's own name after the capture directory, "/capture-PID-XXXXXX" and
+ *         its terminating null: a pid is a positive int, of at most 10 digits.
  */
-static constexpr size_t BATCH_PATH_MAX = CAPTURE_WRITER_DIR_SIZE + 16;
+static constexpr size_t BATCH_NAME_SIZE = sizeof "/capture-2147483647-XXXXXX";
 
 /** @brief How the frames of one format are written. */
 struct encoding {
@@ -193,13 +191,19 @@ write_image (struct capture_writer const *w,
 		log_printf("[capture] could not name %s_%02u", side, w->index);
 		return false;
 	}
-	char path[BATCH_PATH_MAX];
+	char *path = malloc(w->batch_length + sizeof name);
+	if (!path) {
+		log_printf("[capture] no memory for the path of %s_%02u", side, w->index);
+		return false;
+	}
 	memcpy(path, w->batch_dir, w->batch_length);
 	memcpy(path + w->batch_length, name, (size_t)length + 1);
 	bool const wrote = e.png ? write_png(path, pixels, width, height, bytes, e.swap)
 	                         : write_raw(path, pixels, bytes);
 	if (!wrote)
 		log_printf("[capture] could not write %s", path);
+	free(path);
+	path = nullptr;
 	return wrote;
 }
 
@@ -283,17 +287,23 @@ capture_writer_write_manifest (struct capture_writer const *w,
 {
 	static constexpr char manifest[] = "manifest.txt";
 	static constexpr char published[] = "published.tmp";
-	// Built after the batch's directory, whose length is known.
-	char path[BATCH_PATH_MAX];
+	// The manifest's path and its link's, built after the batch's directory, whose length is
+	// known: each has room for a slash and the longer name.
+	size_t const size = w->batch_length + 1 + sizeof published;
+	char *path = malloc(2 * size);
+	if (!path)
+		return false;
+	char *const pending = path + size;
+	bool done = false;
 	memcpy(path, w->batch_dir, w->batch_length);
 	path[w->batch_length] = '/';
 	memcpy(path + w->batch_length + 1, manifest, sizeof manifest);
 	FILE *const f = fopen(path, "we");
 	if (!f)
-		return false;
+		goto free_paths;
 
 	fprintf(f, "capture_metadata_version 2\n");
-	fprintf(f, "capture_control_seq %u\n", w->control_seq);
+	fprintf(f, "capture_control_seq %" PRIu64 "\n", w->control_seq);
 	fprintf(f, "batch_dir %s\n", w->batch_dir + w->batch_name);
 	fprintf(f, "frames %u\n", w->index);
 	fprintf(f, "width %u\nheight %u\n", width, height);
@@ -314,22 +324,23 @@ capture_writer_write_manifest (struct capture_writer const *w,
 	      "the model's edit composed onto it. Same frame, same run, one variable.\n", f);
 	bool const written = !ferror(f);
 	if (fclose(f) || !written)
-		return false;
+		goto free_paths;
 
-	char pending[BATCH_PATH_MAX];
 	memcpy(pending, path, w->batch_length + 1);
 	memcpy(pending + w->batch_length + 1, published, sizeof published);
 	if (link(path, pending))
-		return false;
+		goto free_paths;
 
 	// manifest.txt beside the batch: in the capture directory, which path starts with.
 	memcpy(path + w->batch_name, manifest, sizeof manifest);
-	if (rename(pending, path)) {
-		if (unlink(pending))
-			log_printf("[capture] cannot remove %s: %s", pending, strerror(errno));
-		return false;
-	}
-	return true;
+	done = !rename(pending, path);
+	if (!done && unlink(pending))
+		log_printf("[capture] cannot remove %s: %s", pending, strerror(errno));
+
+free_paths:
+	free(path);
+	path = nullptr;
+	return done;
 }
 
 int
@@ -347,33 +358,49 @@ capture_writer_directory (char   *buf,
 	return snprintf(buf, size, "/tmp/dlssnr-captures");
 }
 
-/** @brief Creates the batch's directory, named capture-PID-XXXXXX, in the capture directory.
+/** @brief Creates the batch's directory, named capture-PID-XXXXXX, in the capture directory, and
+ *         logs why if it cannot.
  *
- * @param w The writer, whose batch_dir receives the batch's directory, batch_name where its own
- *          name starts, and batch_length its length.
- * @return  true if the batch's directory was created; otherwise batch_dir holds the capture
- *          directory, cut to fit.
+ * @param w The writer, which has no batch directory. Its batch_dir receives the batch's directory,
+ *          batch_name where its own name starts, and batch_length its length.
+ * @return  true if the batch's directory was created.
  */
 static bool
 make_batch_dir (struct capture_writer *w)
 {
-	char *const dir = w->batch_dir;
-	int const dir_length = capture_writer_directory(dir, sizeof w->batch_dir);
-	if (dir_length < 0 || dir_length >= (int)sizeof w->batch_dir)
-		return false;
-
-	if (!make_dirs(dir))
-		return false;
-	int const room = (int)sizeof w->batch_dir - dir_length;
-	int const name_length = snprintf(dir + dir_length, (size_t)room, "/capture-%d-XXXXXX", (int)getpid());
-	if (name_length < 0 || name_length >= room || !mkdtemp(dir)) {
-		dir[dir_length] = '\0';
+	int const measured = capture_writer_directory(nullptr, 0);
+	if (measured < 0) {
+		log_printf("[capture] cannot format the capture directory");
 		return false;
 	}
-	// Both fit in batch_dir; the name starts after the slash.
-	w->batch_name = (uint32_t)dir_length + 1;
-	w->batch_length = (uint32_t)(dir_length + name_length);
+	size_t const dir_length = (size_t)measured;
+	size_t const size = dir_length + BATCH_NAME_SIZE;
+	char *dir = malloc(size);
+	if (!dir) {
+		log_printf("[capture] cannot create batch directory: no memory for its path");
+		return false;
+	}
+
+	// The environment can change between the two calls, and a path cut to fit would be another.
+	if (capture_writer_directory(dir, size) != measured || !make_dirs(dir))
+		goto fail;
+	int const name_length = snprintf(dir + dir_length, BATCH_NAME_SIZE, "/capture-%d-XXXXXX",
+	                                 (int)getpid());
+	if (name_length < 0 || name_length >= (int)BATCH_NAME_SIZE || !mkdtemp(dir))
+		goto fail;
+	// The name starts after the slash.
+	w->batch_dir = dir;
+	w->batch_name = dir_length + 1;
+	w->batch_length = dir_length + (size_t)name_length;
 	return true;
+
+fail:
+	// The capture directory, without what was put after it.
+	dir[dir_length] = '\0';
+	log_printf("[capture] cannot create batch directory in %s", dir);
+	free(dir);
+	dir = nullptr;
+	return false;
 }
 
 void
@@ -384,11 +411,12 @@ capture_writer_begin (struct capture_writer *w,
 	if (!w || !frames)
 		return;
 
-	if (!make_batch_dir(w)) {
-		log_printf("[capture] cannot create batch directory in %s", w->batch_dir);
-		w->remaining = 0;
+	// A batch that is being written is abandoned.
+	w->remaining = 0;
+	free(w->batch_dir);
+	w->batch_dir = nullptr;
+	if (!make_batch_dir(w))
 		return;
-	}
 	w->control_seq = control_seq;
 	w->remaining = frames < CAPTURE_WRITER_FRAMES ? frames : CAPTURE_WRITER_FRAMES;
 	w->index = 0;
@@ -414,6 +442,8 @@ capture_writer_write_frame (struct capture_writer         *w,
 	bool const wrote_after = write_image(w, "after", after, width, height, e, bytes);
 	if (!wrote_before || !wrote_after) {
 		w->remaining = 0;
+		free(w->batch_dir);
+		w->batch_dir = nullptr;
 		log_printf("[capture] batch failed; completion manifest was not published");
 		return;
 	}
@@ -428,4 +458,17 @@ capture_writer_write_frame (struct capture_writer         *w,
 		log_printf("[capture] wrote %u pairs to %s", w->index, w->batch_dir);
 	else
 		log_printf("[capture] could not publish completion manifest for %s", w->batch_dir);
+	free(w->batch_dir);
+	w->batch_dir = nullptr;
+}
+
+void
+capture_writer_fini (struct capture_writer *dest)
+{
+	if (!dest)
+		return;
+
+	free(dest->batch_dir);
+	dest->batch_dir = nullptr;
+	*dest = (struct capture_writer){0};
 }

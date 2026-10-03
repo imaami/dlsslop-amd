@@ -1069,6 +1069,7 @@ composition_fini (struct composition *dest)
 	drop_all(dest);
 	drop_meter_objects(dest);
 	dlss_nr_pass_fini(&dest->pass);
+	capture_writer_fini(&dest->capture);
 	*dest = composition_empty();
 }
 

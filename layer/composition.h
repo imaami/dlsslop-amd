@@ -305,8 +305,8 @@ composition_init (struct composition          *dest,
                   VkDevice                     device,
                   VkPhysicalDevice             physical_device);
 
-/** @brief Destroys what the composition owns, closes the connection of its offer, then leaves it
- *         empty.
+/** @brief Destroys what the composition owns, abandons a capture that is being written, closes the
+ *         connection of its offer, then leaves it empty.
  *
  * @param dest The composition, or nullptr.
  */

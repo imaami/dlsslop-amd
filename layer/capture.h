@@ -33,11 +33,6 @@ extern "C" {
 /** @brief The most frames that one batch writes. */
 static constexpr CAPTURE_STD(uint32_t) CAPTURE_WRITER_FRAMES = 64;
 
-/** @brief The size of a writer's batch_dir: the longest batch directory that a writer creates, its
- *         terminating null included. Linux opens no longer path.
- */
-static constexpr CAPTURE_STD(size_t) CAPTURE_WRITER_DIR_SIZE = 4096;
-
 /** @brief What the manifest says about one frame.
  *
  * The renderer's settings come from the frame's snapshot. inference_seq is the worker request that
@@ -67,16 +62,18 @@ struct capture_metadata {
 
 /** @brief A batch of matched frames that is being written.
  *
- * A zeroed writer is an idle one. A writer owns no resources, so it needs no finishing.
+ * A zeroed writer is an idle one. While a batch is being written, the writer holds its directory's
+ * path on the heap, which capture_writer_fini() frees. control_seq is 64 bits wide, which fills the
+ * padding that a narrower member would leave.
  */
 struct capture_writer {
-	struct capture_metadata metadata[CAPTURE_WRITER_FRAMES];    //!< Each frame written so far.
-	CAPTURE_STD(uint32_t)   remaining;                          //!< Frames still to write; 0: idle.
-	CAPTURE_STD(uint32_t)   index;                              //!< Frames written, and the next one's number.
-	CAPTURE_STD(uint32_t)   control_seq;                        //!< The control sequence of the request.
-	CAPTURE_STD(uint32_t)   batch_name;                         //!< Where the batch's own name starts in batch_dir.
-	CAPTURE_STD(uint32_t)   batch_length;                       //!< The length of batch_dir.
-	char                    batch_dir[CAPTURE_WRITER_DIR_SIZE]; //!< The batch's directory.
+	struct capture_metadata metadata[CAPTURE_WRITER_FRAMES]; //!< Each frame written so far.
+	char                   *batch_dir;                       //!< The batch's directory, or nullptr.
+	CAPTURE_STD(size_t)     batch_length;                    //!< The length of batch_dir.
+	CAPTURE_STD(size_t)     batch_name;                      //!< Where the batch's own name starts in batch_dir.
+	CAPTURE_STD(uint64_t)   control_seq;                     //!< The control sequence of the request.
+	CAPTURE_STD(uint32_t)   remaining;                       //!< Frames still to write; 0: idle.
+	CAPTURE_STD(uint32_t)   index;                           //!< Frames written, and the next one's number.
 };
 
 /** @brief Returns a metadata record with the renderer's defaults.
@@ -107,8 +104,8 @@ capture_writer_directory (char                *buf,
 
 /** @brief Starts a batch in a new directory under capture_writer_directory(), which it creates.
  *
- * A batch that is being written is abandoned. If the directory cannot be created, including when
- * its path does not fit in CAPTURE_WRITER_DIR_SIZE bytes, the writer logs that and stays idle.
+ * A batch that is being written is abandoned. If the directory cannot be created, the writer logs
+ * that and stays idle.
  *
  * @param w           The writer, or nullptr.
  * @param frames      How many frames to write; at most CAPTURE_WRITER_FRAMES are. 0 does nothing.
@@ -153,6 +150,14 @@ capture_writer_write_frame (struct capture_writer         *w,
                             CAPTURE_STD(uint32_t)          height,
                             CAPTURE_STD(uint32_t)          vk_format,
                             struct capture_metadata const *metadata);
+
+/** @brief Abandons the batch that is being written and frees the writer's path, then leaves the
+ *         writer idle.
+ *
+ * @param dest The writer, or nullptr.
+ */
+extern void
+capture_writer_fini (struct capture_writer *dest);
 
 #ifdef __cplusplus
 } /* extern "C" */
