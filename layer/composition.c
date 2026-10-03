@@ -12,6 +12,7 @@
 #include <sys/random.h>
 #include <unistd.h>
 
+#include "../common/util.h"
 #include "composition.h"
 #include "log.h"
 #include "shaders/meter_reduce_spv.h"
@@ -60,14 +61,6 @@ static VkDescriptorPoolSize const COMPOSITION_METER_POOL_SIZES[] = {
 // ---------------------------------------------------------------------------
 // Comparisons
 // ---------------------------------------------------------------------------
-
-/** @brief The smaller of two numbers, as std::min compares them: @a a unless @a b is less. */
-static double
-min_d (double a,
-       double b)
-{
-	return b < a ? b : a;
-}
 
 /** @brief The larger of two numbers, as std::max compares them: @a a unless it is less than @a b. */
 static uint32_t

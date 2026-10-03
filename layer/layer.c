@@ -35,6 +35,7 @@
 
 #include "../common/list.h"
 #include "../common/shm_protocol.h"
+#include "../common/util.h"
 #include "composition.h"
 #include "device_features.h"
 #include "hotkey.h"
@@ -57,14 +58,6 @@
 #else
 # define VK_LAYER_NAME "VK_LAYER_NV_dlssnr"
 #endif
-
-/** @brief The smaller of two numbers, as std::min compares them: @a a unless @a b is less. */
-static double
-min_d (double a,
-       double b)
-{
-	return b < a ? b : a;
-}
 
 // ---------------------------------------------------------------------------
 // Shared memory transport

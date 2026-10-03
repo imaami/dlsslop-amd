@@ -1,6 +1,6 @@
 /** @file
  *
- * Two helpers for the project's C: force_inline and container_of().
+ * Helpers for the project's C: force_inline, container_of() and min_d().
  *
  * Plain C, consumable from C++.
  */
@@ -30,5 +30,18 @@
 #define container_of(ptr, type, member) \
 	((void)sizeof ((ptr) == &((type *)nullptr)->member), \
 	 (type *)(void *)((char *)(ptr) - offsetof(type, member)))
+
+/** @brief The smaller of two numbers, as std::min compares them: @a a unless @a b is less.
+ *
+ * @param a A number.
+ * @param b Another number.
+ * @return  @a b if it is less than @a a, otherwise @a a.
+ */
+force_inline double
+min_d (double a,
+       double b)
+{
+	return b < a ? b : a;
+}
 
 #endif /* DLSSLOP_AMD_COMMON_UTIL_H_ */
