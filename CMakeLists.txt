@@ -132,8 +132,9 @@ function(add_neural_layer target)
 endfunction()
 
 add_neural_layer(VkLayer_DLSSLOP_amd)
-add_executable(dlssnr-shmctl layer/shmctl.cpp)
-target_link_options(dlssnr-shmctl PRIVATE -static-libstdc++ -static-libgcc)
+add_executable(dlssnr-shmctl layer/shmctl.c)
+target_link_libraries(dlssnr-shmctl PRIVATE m)
+target_link_options(dlssnr-shmctl PRIVATE -static-libgcc)
 # A command that runs once: its code is built for size.
 target_compile_options(dlssnr-shmctl PRIVATE -Os)
 
@@ -192,9 +193,6 @@ set_source_files_properties(backend/main.cpp backend/options.cpp backend/paths.c
     backend/hip_plan.cpp PROPERTIES COMPILE_OPTIONS -Os)
 
 if(BUILD_TESTING)
-    # The headers that C and C++ share, compiled as C.
-    add_library(c-headers OBJECT tests/c_headers.c)
-    target_include_directories(c-headers PRIVATE layer)
     add_test(NAME control-cli COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/control-cli.py $<TARGET_FILE:dlssnr-shmctl>)
     add_test(NAME launcher-cli COMMAND ${Python3_EXECUTABLE}

@@ -63,6 +63,8 @@ with tempfile.TemporaryDirectory(prefix='shmclient-test-') as directory:
     daemon = ['--', args.daemon, '--config', '/dev/null', '--test-identity', '--shm', shm]
     for arguments in (['--width', '1'], ['--frames', 'a'], ['--frames', ''], ['--sharpness', '2'],
                       ['--sharpness', '3:0.5'], ['--tier', '800'], ['--passes', '0'], ['--mvec', '1:'],
+                      ['--sharpness', '1e400'], ['--intensity', '-1e400'], ['--passes', '99999999999999999999'],
+                      ['--sharpness', '1e-310'],
                       ['--bogus', '1']):
         run([*client, *arguments, '--', 'true'], expected=2)
     run([args.client, '--width', '1280', '--height', '720', '--', 'true'], expected=2)

@@ -48,7 +48,7 @@ the include paths that the move broke: one line each in `layer/capture.cpp`
 | `layer_linux/src/dlssnr/DlssNr_Common.h`, `DlssNr_Layout.h` | `layer/dlssnr/` |
 | `layer_linux/src/shaders/meter_reduce.comp` | `layer/meter_reduce.comp` |
 | `layer_linux/dlssnr.map` | `layer/dlssnr.map` |
-| `tools/shmctl.cpp` | `layer/shmctl.cpp` |
+| `tools/shmctl.cpp` | `layer/shmctl.cpp` (now `shmctl.c`) |
 | `common/shm_protocol.h` | `common/shm_protocol.h` |
 | `ATTRIBUTION.md` | `layer/ATTRIBUTION.md` |
 | `core/stb_image_write.h`, `standalone_runner/third_party/stb_image.h` | `third_party/stb/` |
@@ -59,8 +59,8 @@ The fork's `LICENSE` is the AGPL-3.0 text of [LICENSE](LICENSE). The paths that
 system's Vulkan headers, so the import left out the fork's copies of the Khronos
 Vulkan and video headers.
 
-The layer's sources are being ported to C23, one module at a time, under the
-layer's license. `layer/log.h` and `layer/log.c` are the C port of
+The layer's sources are ported to C23 under the layer's license.
+`layer/log.h` and `layer/log.c` are the C port of
 `layer_linux/src/log.h`, `layer/capture.h` and `layer/capture.c` that of
 `capture.h` and `capture.cpp`, `layer/hotkey.h`, `layer/hotkey_priv.h` and
 `layer/hotkey.c` that of `hotkey.h` and `hotkey.cpp`, `layer/shader_vk.h`,
@@ -69,17 +69,18 @@ layer's license. `layer/log.h` and `layer/log.c` are the C port of
 `dlssnr_pass.h` and `dlssnr_pass.cpp`, `layer/scaler_vk.h` and
 `layer/scaler_vk.c` that of `scaler_vk.h` and `scaler_vk.cpp`,
 `layer/composition.h` and `layer/composition.c` that of `composition.h` and
-`composition.cpp`, and `layer/layer.c` that of `layer.cpp`. The port renames
-upstream names by one rule: the `dlssnr` namespace is dropped, CamelCase becomes
-snake_case, a class member takes its class as a prefix
-(`Composition::RecordCompose` becomes `composition_record_compose`), a free
-function with external linkage takes its module's name as a prefix unless its
-name begins with it (`Verbose` in log.h becomes `log_verbose`), and constants
-and enumerators become upper snake case with the class's prefix
-(`DlssNrPass::kSlots` becomes `DLSS_NR_PASS_SLOTS`). Log texts, environment
-variables, the loader's entry points, `layer/dlssnr.map` and the names in
-`common/shm_protocol.h`, which dlsslopd, the GUI, the network module and the
-tests share, keep their names. These upstream names do not follow the rule:
+`composition.cpp`, `layer/layer.c` that of `layer.cpp`, and `layer/shmctl.c`
+that of `tools/shmctl.cpp`. The port renames upstream names by one rule: the
+`dlssnr` namespace is dropped, CamelCase becomes snake_case, a class member
+takes its class as a prefix (`Composition::RecordCompose` becomes
+`composition_record_compose`), a free function with external linkage takes its
+module's name as a prefix unless its name begins with it (`Verbose` in log.h
+becomes `log_verbose`), and constants and enumerators become upper snake case
+with the class's prefix (`DlssNrPass::kSlots` becomes `DLSS_NR_PASS_SLOTS`). Log
+texts, environment variables, the loader's entry points, `layer/dlssnr.map`,
+dlsslopctl's options and output, and the names in `common/shm_protocol.h`, which
+dlsslopd, the GUI, the network module and the tests share, keep their names.
+These upstream names do not follow the rule:
 
 | Upstream name | Port | Why |
 |---|---|---|
@@ -109,6 +110,7 @@ tests share, keep their names. These upstream names do not follow the rule:
 | `g_phys` in layer.cpp | none; `struct instance_chain` holds `physical` and `physical_count` | an instance's physical devices are freed with the instance |
 | `ShmOpen`, `ShmProcessFrame` and the `ShmNeuralEnabled(ShmMap&)` overload in layer.cpp | `shm_map_open`, `shm_map_process_frame` and `shm_map_neural_enabled` | they work on a `struct shm_map`; `shm_open` is POSIX's, and `ShmNeuralEnabled` is the channel header's |
 | `ShmMap::seq` and `firstHeartbeat`, `InstanceChain::next_gipa` and `DeviceChain::next_dpa` | none; the chains call their tables' `next_gipa` and `next_dpa` | nothing read the first two, and the others repeated their tables' members |
+| `Initialised` in shmctl.cpp | none; `attach` and `print_status` compare the magic and the version that they read | each word of the header is read once |
 
 The headers that C and C++ share stay valid C++23. `common/shm_protocol.h`
 declares the channel for both languages, `layer/vk_table.h` the dispatch tables,

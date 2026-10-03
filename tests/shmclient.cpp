@@ -147,21 +147,24 @@ bool change(const char* text, const control_setting& setting, Change& out)
     char* end = nullptr;
     out = {0, &setting, 0};
     if (*text >= '0' && *text <= '9') {
+        errno = 0;
         const unsigned long long frame = std::strtoull(text, &end, 10);
+        if (errno) return false;
         if (*end == ':') {
             out.frame = frame;
             text = end + 1;
         }
     }
-    errno = 0;
     if (setting.is_float) {
         if (!*text || std::isspace(static_cast<unsigned char>(*text))) return false;
+        errno = 0;
         const double value = std::strtod(text, &end);
         if (errno || *end || !control_setting_in_range(&setting, value)) return false;
         out.value = FloatToBits(float(value) + 0.0f);
         return true;
     }
     if (*text < '0' || *text > '9') return false;
+    errno = 0;
     const unsigned long long value = std::strtoull(text, &end, 10);
     out.value = uint32_t(value);
     return !errno && !*end && control_setting_in_range(&setting, double(value));

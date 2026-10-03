@@ -90,9 +90,18 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     run('--help', '--working-scale', '0.5')
     assert header() == original
 
+    # Output that cannot be written fails the command.
+    with open('/dev/full', 'w') as full:
+        for options in (('--status',), ('--settings',), ('--help',)):
+            result = subprocess.run([control, *options], env=env, text=True, stdout=full, stderr=subprocess.PIPE)
+            assert (result.returncode, result.stderr) == (1, 'cannot write the output\n'), (options, result)
+    assert header() == original
+
     invalid_options = [
         ('--working-scale', '0.5', '--enabled', '2'),
         ('--working-scale', 'nan'), ('--working-scale', 'inf'),
+        ('--working-scale', '1e400'), ('--sharpness', '-1e400'), ('--passes', '99999999999999999999'),
+        ('--sharpness', '1e-310'), ('--intensity', '1e-400'),
         ('--working-scale', '1garbage'), ('--working-scale', '0.249'),
         ('--working-scale', '2.001'), ('--working-scale', ' 1'),
         ('--enabled', '-1'), ('--enabled', '1.0'), ('--enabled', ''),

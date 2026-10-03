@@ -159,9 +159,7 @@ intrusive list that holds the layer's instances, devices, swapchains and
 queues: that a head starts empty, static or in place; that entries are walked
 in the order they were linked, forwards and backwards, through a hook that is
 not their first member; that a walk may unlink and free its entry, the first,
-the last or one in the middle; and which lists have exactly one entry. With the
-tests, the build compiles `tests/c_headers.c`, which includes as C the headers
-that C and C++ share.
+the last or one in the middle; and which lists have exactly one entry.
 
 Two checks disassemble the built HIP modules and need `llvm-objdump`. The
 LDS-barrier check fails when a shared-memory access can still be outstanding at
