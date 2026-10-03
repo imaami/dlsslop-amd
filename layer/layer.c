@@ -2867,9 +2867,10 @@ process_in_layer (struct device_chain                     *dc,
 	if (last && last != sc && (last->flags & SWAPCHAIN_STATE_LEG2_PENDING) && !collect_leg2(dc, last))
 		return false;
 	dc->in_layer_last = sc;
-	int const state = g_network.prepare(dc->in_layer, dc->shm.hdr, composition_model_width(&sc->comp),
-	                                    composition_model_height(&sc->comp),
-	                                    composition_hdr_proxy_active(&sc->comp));
+	enum dlsslop_network_state const state = g_network.prepare(dc->in_layer, dc->shm.hdr,
+	                                                           composition_model_width(&sc->comp),
+	                                                           composition_model_height(&sc->comp),
+	                                                           composition_hdr_proxy_active(&sc->comp));
 	switch (state) {
 	case DLSSLOP_NETWORK_READY:
 		network_reason(dc, "in-layer network running", "", "");

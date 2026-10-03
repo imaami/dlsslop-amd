@@ -67,7 +67,7 @@ std::string failure_with(const network_module& module, const ShmHeader* header, 
     device.physical_dispatch = no_functions;
     DlsslopNetwork* network = module.open(&device);
     require(network, "the module did not open");
-    const bool failed = module.prepare(network, header, 1280, 720, 0) == DLSSLOP_NETWORK_FAILED;
+    const bool failed = module.prepare(network, header, 1280, 720, false) == DLSSLOP_NETWORK_FAILED;
     std::string error = failed ? module.error(network) : "";
     module.close(network);
     return error;
@@ -113,13 +113,13 @@ int main(int argc, char** argv)
     ShmInitNativeDefaults(header, false);
 
     header->style.store(3);
-    require(module.prepare(network, header, 1280, 720, 0) == DLSSLOP_NETWORK_REJECTED &&
+    require(module.prepare(network, header, 1280, 720, false) == DLSSLOP_NETWORK_REJECTED &&
                 std::strstr(module.error(network), "style 0..2"),
             "a setting out of range was not rejected, naming it");
     header->style.store(0);
     const std::string model = std::string(directory) + "/dlsslop-amd/dlssnr.bin";
     for (int frame = 0; frame < 2; ++frame)
-        require(module.prepare(network, header, 1280, 720, 0) == DLSSLOP_NETWORK_FAILED &&
+        require(module.prepare(network, header, 1280, 720, false) == DLSSLOP_NETWORK_FAILED &&
                     std::strstr(module.error(network), model.c_str()) &&
                     std::strstr(module.error(network), "dlsslop-setup --dll"),
                 "a missing model did not fail the network for good, naming it");
@@ -135,7 +135,7 @@ int main(int argc, char** argv)
     require(network, "the module did not open");
     for (uint32_t passes = 1; passes <= 2; ++passes) {
         header->passes.store(passes);
-        require(module.prepare(network, header, 16, 16, 0) == DLSSLOP_NETWORK_REJECTED &&
+        require(module.prepare(network, header, 16, 16, false) == DLSSLOP_NETWORK_REJECTED &&
                     std::strstr(module.error(network), "does not take 16x16 frames"),
                 "a frame of an extent the network does not take, or another shape of it, was not rejected, naming it");
     }
@@ -145,7 +145,7 @@ int main(int argc, char** argv)
     network = module.open(&device);
     require(network, "the module did not open");
     for (int frame = 0; frame < 2; ++frame)
-        require(module.prepare(network, header, 1280, 720, 0) == DLSSLOP_NETWORK_REJECTED &&
+        require(module.prepare(network, header, 1280, 720, false) == DLSSLOP_NETWORK_REJECTED &&
                     std::strstr(module.error(network), "does not take 1280x720 frames") &&
                     std::strstr(module.error(network), "exceed the device's storage buffers of 1048576 bytes"),
                 "a frame whose arena exceeds the device's storage buffers was not rejected, naming it");

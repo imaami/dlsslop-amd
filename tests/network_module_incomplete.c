@@ -13,15 +13,15 @@ dlsslop_network_open (struct dlsslop_network_device const *)
 }
 
 /** @brief Fails every frame. */
-int
-dlsslop_network_prepare (struct DlsslopNetwork *, struct ShmHeader const *, uint32_t, uint32_t, int)
+enum dlsslop_network_state
+dlsslop_network_prepare (struct DlsslopNetwork *, struct ShmHeader const *, uint32_t, uint32_t, bool)
 {
 	return DLSSLOP_NETWORK_FAILED;
 }
 
 /** @brief Records no frame. */
-int
-dlsslop_network_record (struct DlsslopNetwork *, VkCommandBuffer, VkBuffer, VkBuffer, uint32_t, int)
+enum dlsslop_network_state
+dlsslop_network_record (struct DlsslopNetwork *, VkCommandBuffer, VkBuffer, VkBuffer, uint32_t, bool)
 {
 	return DLSSLOP_NETWORK_FAILED;
 }

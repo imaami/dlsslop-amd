@@ -78,7 +78,7 @@ struct DlsslopNetwork {
     }
 
     // The network cannot run: WHAT says why.
-    int fail(std::string what)
+    dlsslop_network_state fail(std::string what)
     {
         error = std::move(what);
         failed = true;
@@ -101,7 +101,8 @@ DlsslopNetwork* dlsslop_network_open(const dlsslop_network_device* device)
     return new (std::nothrow) DlsslopNetwork(*device);
 }
 
-int dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader* channel, uint32_t width, uint32_t height, int fp16)
+dlsslop_network_state dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader* channel, uint32_t width,
+                                              uint32_t height, bool fp16)
 {
     if (n->building.load(std::memory_order_acquire)) return DLSSLOP_NETWORK_BUILDING;
     if (n->joinable) {
@@ -114,7 +115,7 @@ int dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader* channel, uint32_
         n->error = std::move(settings).error().what;
         return DLSSLOP_NETWORK_REJECTED;
     }
-    settings->fp16 = fp16 != 0;
+    settings->fp16 = fp16;
     const unsigned passes = std::min(ShmPasses(channel), NetworkRecorder::kMaxPasses);
     const auto frame = dlsslop::vulkan_frame(width, height, passes, *settings);
     // A frame of the network's extent: of its shape, or of another that it is reshaped for here,
@@ -142,10 +143,10 @@ int dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader* channel, uint32_
     return DLSSLOP_NETWORK_BUILDING;
 }
 
-int dlsslop_network_record(DlsslopNetwork* n, VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer, uint32_t family,
-                           int exported)
+dlsslop_network_state dlsslop_network_record(DlsslopNetwork* n, VkCommandBuffer cmd, VkBuffer proxy, VkBuffer answer,
+                                             uint32_t family, bool exported)
 {
-    n->recorder.record(cmd, proxy, answer, n->prepared, family, exported != 0);
+    n->recorder.record(cmd, proxy, answer, n->prepared, family, exported);
     return DLSSLOP_NETWORK_READY;
 }
 

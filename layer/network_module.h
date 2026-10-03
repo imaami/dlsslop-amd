@@ -95,15 +95,15 @@ dlsslop_network_open_fn (struct dlsslop_network_device const *device);
  * @param channel The channel, whose settings the frame takes.
  * @param width   The frame's width.
  * @param height  The frame's height.
- * @param fp16    Nonzero for RGBA16F frames, 0 for RGBA8.
- * @return        An enum dlsslop_network_state.
+ * @param fp16    true for RGBA16F frames, false for RGBA8.
+ * @return        What the network can do with the frame.
  */
-typedef int
+typedef enum dlsslop_network_state
 dlsslop_network_prepare_fn (struct DlsslopNetwork        *network,
                             struct ShmHeader const       *channel,
                             NETWORK_MODULE_STD(uint32_t)  width,
                             NETWORK_MODULE_STD(uint32_t)  height,
-                            int                           fp16);
+                            bool                          fp16);
 
 /** @brief Records the frame that dlsslop_network_prepare() readied: the proxy that the composition
  *         captured, through the network, into the answer for the composition.
@@ -114,16 +114,16 @@ dlsslop_network_prepare_fn (struct DlsslopNetwork        *network,
  * @param proxy    The composition's transfer buffer that holds the proxy.
  * @param answer   The composition's transfer buffer that takes the answer.
  * @param family   The queue's family.
- * @param exported Nonzero if both buffers belong to VK_QUEUE_FAMILY_EXTERNAL between uses.
+ * @param exported true if both buffers belong to VK_QUEUE_FAMILY_EXTERNAL between uses.
  * @return         DLSSLOP_NETWORK_READY or DLSSLOP_NETWORK_FAILED.
  */
-typedef int
+typedef enum dlsslop_network_state
 dlsslop_network_record_fn (struct DlsslopNetwork        *network,
                            VkCommandBuffer               cmd,
                            VkBuffer                      proxy,
                            VkBuffer                      answer,
                            NETWORK_MODULE_STD(uint32_t)  family,
-                           int                           exported);
+                           bool                          exported);
 
 /** @brief Says that the frame that dlsslop_network_record() recorded last was submitted.
  *
