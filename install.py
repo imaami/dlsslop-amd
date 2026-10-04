@@ -123,7 +123,7 @@ def validate_modules(directory):
 def vulkan_shader_names(root):
     """The files below the network's SPIR-V directory that its runtime reads, named by the runtime's tables:
     each kernel's g_STEM.spv (VULKAN_PLAN_KERNELS), the markers (VULKAN_PLAN_MARKERS), the SPIR-V of the
-    runtime's own pipelines (kAdapterBindings), and the shader constants that it checks beside the kernels' and
+    runtime's own pipelines (ADAPTER_BINDINGS), and the shader constants that it checks beside the kernels' and
     the temporal SPIR-V."""
     # The tables are read rather than compiled: each entry starts with its stem or file, and the
     # vulkan-files test checks the result against the files that a build opens.
@@ -134,8 +134,8 @@ def vulkan_shader_names(root):
             raise ValueError(f"no {name} table in {root / path}")
         return found
     return ([f"g_{stem}.spv" for stem in table("common/vulkan_plan.c", "VULKAN_PLAN_KERNELS", r'\{"(\w+)",')] +
-            table("common/vulkan_plan.c", "VULKAN_PLAN_MARKERS", r'\{"([\w.-]+)",') +
-            table("common/vulkan_runtime.cpp", "kAdapterBindings", r'"(\w+/\w+\.spv)"') +
+            table("common/vulkan_plan.c", "VULKAN_PLAN_MARKERS", r'MARKER\("([\w.-]+)",') +
+            table("common/vulkan_runtime.c", "ADAPTER_BINDINGS", r'"(\w+/\w+\.spv)"') +
             ["shader-constants.txt", "temporal/shader-constants.txt"])
 
 

@@ -3,30 +3,16 @@
  * Model packs for the Vulkan network's host tests, in memory: NRMODEL1 files of given entries, the
  * synthetic entries that upstream's graph build packed for the tests' digests, and synthetic models
  * of the entries that a plan reads. vulkan_pack.c defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_TESTS_VULKAN_PACK_H_
 #define DLSSLOP_AMD_TESTS_VULKAN_PACK_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-# include <cstdint>
-#else
-# include <stddef.h>
-# include <stdint.h>
-#endif
+#include <stddef.h>
+#include <stdint.h>
 
 #include "vulkan_plan.h"
 #include "vulkan_weights.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief FNV-1a 64's offset basis, the hash of no bytes. */
 #define VULKAN_PACK_FNV1A_BASIS UINT64_C(0xcbf29ce484222325)
@@ -38,14 +24,14 @@ extern "C" {
  * @param bytes Their number.
  * @return      The hash with them.
  */
-extern STD(uint64_t)
-vulkan_pack_fnv1a (STD(uint64_t)  hash,
-                   void const    *data,
-                   STD(size_t)    bytes);
+extern uint64_t
+vulkan_pack_fnv1a (uint64_t    hash,
+                   void const *data,
+                   size_t      bytes);
 
 /** @brief splitmix64's state. */
 struct vulkan_pack_random {
-	STD(uint64_t) state; //!< The state.
+	uint64_t state; //!< The state.
 };
 
 /** @brief splitmix64's next output.
@@ -53,7 +39,7 @@ struct vulkan_pack_random {
  * @param random The state, which advances.
  * @return       The output.
  */
-extern STD(uint64_t)
+extern uint64_t
 vulkan_pack_random_next (struct vulkan_pack_random *random);
 
 /** @brief Writes a synthetic entry: splitmix64 outputs, little-endian, seeded with the FNV-1a 64 of
@@ -68,10 +54,10 @@ vulkan_pack_random_next (struct vulkan_pack_random *random);
  * @param bytes  Its bytes.
  */
 extern void
-vulkan_pack_synthetic_entry (char const   *name,
-                             STD(size_t)   length,
-                             STD(uint8_t) *data,
-                             STD(size_t)   bytes);
+vulkan_pack_synthetic_entry (char const *name,
+                             size_t      length,
+                             uint8_t    *data,
+                             size_t      bytes);
 
 /** @brief A model pack in memory, which vulkan_model_open() reads through /proc. */
 struct vulkan_pack {
@@ -104,7 +90,7 @@ vulkan_pack_fini (struct vulkan_pack *pack);
 extern void
 vulkan_pack_write (struct vulkan_pack *pack,
                    void const         *data,
-                   STD(size_t)         size);
+                   size_t              size);
 
 /** @brief Appends the start of an NRMODEL1 file to a model pack.
  *
@@ -113,7 +99,7 @@ vulkan_pack_write (struct vulkan_pack *pack,
  */
 extern void
 vulkan_pack_header (struct vulkan_pack *pack,
-                    STD(uint32_t)       count);
+                    uint32_t            count);
 
 /** @brief The bytes of an index entry: its name's length, its name, its offset and its size.
  *
@@ -124,19 +110,19 @@ vulkan_pack_header (struct vulkan_pack *pack,
  * @param out    Receives the entry.
  * @return       Its bytes: 4 + length + 16.
  */
-extern STD(size_t)
-vulkan_pack_index_entry (char const    *name,
-                         STD(size_t)    length,
-                         STD(uint64_t)  offset,
-                         STD(uint64_t)  size,
-                         STD(uint8_t)   out[4 + VULKAN_WEIGHTS_NAME_BYTES + 16]);
+extern size_t
+vulkan_pack_index_entry (char const *name,
+                         size_t      length,
+                         uint64_t    offset,
+                         uint64_t    size,
+                         uint8_t     out[4 + VULKAN_WEIGHTS_NAME_BYTES + 16]);
 
 /** @brief An entry of an NRMODEL1 file to write. */
 struct vulkan_pack_entry {
-	char const         *name;   //!< Its name.
-	STD(uint8_t) const *data;   //!< Its data.
-	STD(size_t)         length; //!< The name's length.
-	STD(size_t)         size;   //!< The data's bytes.
+	char const    *name;   //!< Its name.
+	uint8_t const *data;   //!< Its data.
+	size_t         length; //!< The name's length.
+	size_t         size;   //!< The data's bytes.
 };
 
 /** @brief Appends the NRMODEL1 file of entries to a model pack, their data after the index in their
@@ -149,7 +135,7 @@ struct vulkan_pack_entry {
 extern void
 vulkan_pack_entries (struct vulkan_pack             *pack,
                      struct vulkan_pack_entry const *entries,
-                     STD(size_t)                     count);
+                     size_t                          count);
 
 /** @brief The size of an entry in the real model, the pack that linux/package/model-tools extracts
  *         from nvngx_dlssnr 310.8.0.
@@ -157,13 +143,13 @@ vulkan_pack_entries (struct vulkan_pack             *pack,
  * @param source The entry.
  * @return       Its bytes.
  */
-extern STD(uint32_t)
+extern uint32_t
 vulkan_pack_model_bytes (struct vulkan_source const *source);
 
 /** @brief An entry that a plan reads, by name. */
 struct vulkan_pack_source {
 	char                 name[VULKAN_WEIGHTS_NAME_BYTES]; //!< Its name.
-	STD(size_t)          length;                          //!< The name's length.
+	size_t               length;                          //!< The name's length.
 	struct vulkan_source source;                          //!< The entry.
 };
 
@@ -175,7 +161,7 @@ struct vulkan_pack_source {
  */
 extern struct vulkan_pack_source *
 vulkan_pack_plan_entries (struct vulkan_plan const *plan,
-                          STD(size_t)              *count);
+                          size_t                   *count);
 
 /** @brief Writes a model pack of synthetic entries (vulkan_pack_synthetic_entry()), of the real
  *         model's names and sizes, holding every entry that a plan reads.
@@ -193,11 +179,5 @@ extern bool
 vulkan_pack_synthetic_model (struct vulkan_plan const *plan,
                              struct vulkan_pack       *pack,
                              bool                      unclamped);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_TESTS_VULKAN_PACK_H_ */

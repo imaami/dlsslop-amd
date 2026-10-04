@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "network_module.h"
 #include "files.hpp"
-#include "network_recorder.hpp"
+#include "network_recorder.h"
 #include "options.hpp"
 #include "paths.hpp"
 #include "processing.hpp"
@@ -17,26 +17,28 @@
 #include <utility>
 
 namespace {
-using dlsslop::NetworkRecorder;
 
-// Where the module finds the network: MODEL, its shaders beside the module,
-// installed or in a source build, and the user's pipeline cache.
-dlsslop::VulkanPaths module_paths(const std::string& model)
+// Where the module finds the network's shaders, beside the module, installed or in a source build;
+// and the user's pipeline cache.
+struct ModulePaths {
+    std::string shaders, cache;
+};
+ModulePaths module_paths()
 {
     Dl_info self{};
     dladdr(reinterpret_cast<void*>(&dlsslop_network_open), &self);
     const std::string directory = self.dli_fname ? dlsslop::parent_path(dlsslop::absolute(self.dli_fname)) : std::string();
-    return {model, dlsslop::vulkan_shaders(dlsslop::parent_path(dlsslop::parent_path(directory)), directory),
+    return {dlsslop::vulkan_shaders(dlsslop::parent_path(dlsslop::parent_path(directory)), directory),
             dlsslop::vulkan_cache()};
 }
 
 // The game's device, with the next layer's physical-device functions the build queries, looked
 // up now: a lookup on the build thread would go through the loader, which takes the loader's
 // lock, and vkDestroyDevice holds that lock while the layer waits for the build to end.
-dlsslop::vulkan::Device network_device(const dlsslop_network_device& d)
+struct vulkan_device network_device(const dlsslop_network_device& d)
 {
     const auto find = [&d](const char* name) { return d.physical_dispatch(d.instance, name); };
-    dlsslop::vulkan::Device device{};
+    struct vulkan_device device{};
     device.instance = d.instance;
     device.physical = d.physical;
     device.device = d.device;
@@ -60,23 +62,36 @@ struct DlsslopNetwork {
     // The model dlsslopd loads, as its config file names it; or why that is unknown, which fails
     // the network.
     dlsslop::Result<std::string> model;
-    NetworkRecorder recorder;
-    dlsslop::VulkanFrame prepared;
+    // Empty when it could not be made, which fails the network.
+    struct network_recorder recorder{};
+    struct vulkan_frame prepared = VULKAN_FRAME_DEFAULTS;
     // A build in the background: its frame, and whether it still runs. The
     // builder sets failed and error before it clears building.
     pthread_t builder{};
     bool joinable = false;
     std::atomic<bool> building = false;
-    dlsslop::VulkanFrame target;
+    struct vulkan_frame target = VULKAN_FRAME_DEFAULTS;
     bool failed = false;
     std::string error;
 
-    DlsslopNetwork(const dlsslop_network_device& d)
-        : model(dlsslop::configured_vulkan_model()),
-          recorder(network_device(d), module_paths(model.value_or(std::string())), true)
+    DlsslopNetwork(const dlsslop_network_device& d) : model(dlsslop::configured_vulkan_model())
     {
+        // The recorder copies the paths, which borrow these strings.
+        const std::string path = model.value_or(std::string());
+        const ModulePaths found = module_paths();
+        const struct vulkan_device device = network_device(d);
+        const struct vulkan_paths paths{.model = path.c_str(),
+                                        .shaders = found.shaders.c_str(),
+                                        .cache = found.cache.c_str(),
+                                        .model_length = path.size(),
+                                        .shaders_length = found.shaders.size(),
+                                        .cache_length = found.cache.size()};
+        struct error e;
+        if (network_recorder_init(&recorder, &device, &paths, true, &e) != ERROR_NONE) fail(e.what);
         if (!model) fail(model.error().what);
     }
+    DlsslopNetwork(const DlsslopNetwork&) = delete;
+    ~DlsslopNetwork() { network_recorder_fini(&recorder); }
 
     // The network cannot run: WHAT says why.
     dlsslop_network_state fail(std::string what)
@@ -89,7 +104,9 @@ struct DlsslopNetwork {
     static void* build(void* self)
     {
         auto& n = *static_cast<DlsslopNetwork*>(self);
-        if (auto built = n.recorder.shape(n.target); !built) n.fail(std::move(built).error().what);
+        bool built = false;
+        struct error e;
+        if (network_recorder_shape(&n.recorder, &n.target, nullptr, &built, &e) != ERROR_NONE) n.fail(e.what);
         n.building.store(false, std::memory_order_release);
         return nullptr;
     }
@@ -128,24 +145,26 @@ dlsslop_network_state dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader
         return DLSSLOP_NETWORK_REJECTED;
     }
     settings->fp16 = fp16;
-    const unsigned passes = std::min(ShmPasses(channel), NetworkRecorder::kMaxPasses);
-    const auto frame = dlsslop::vulkan_frame(images->width, images->height, passes, *settings);
+    const unsigned passes = std::min(ShmPasses(channel), NETWORK_RECORDER_MAX_PASSES);
+    const struct vulkan_frame frame = dlsslop::vulkan_frame(images->width, images->height, passes, *settings);
     // A frame of the network's extent: of its shape, or of another that it is reshaped for here,
     // between frames, with no GPU work, and in images that are bound here when they are new.
-    if (n->recorder.has_extent(frame)) {
-        const dlsslop::vulkan::FrameImages surfaces{images->generation, images->input_view, images->answer,
-                                                    images->answer_view};
-        if (auto shaped = n->recorder.shape(frame, &surfaces); !shaped)
-            return n->fail(std::move(shaped).error().what);
+    if (network_recorder_has_extent(&n->recorder, &frame)) {
+        const struct vulkan_frame_images surfaces{images->generation, images->input_view, images->answer,
+                                                  images->answer_view};
+        bool shaped = false;
+        struct error e;
+        if (network_recorder_shape(&n->recorder, &frame, &surfaces, &shaped, &e) != ERROR_NONE) return n->fail(e.what);
         n->prepared = frame;
         return DLSSLOP_NETWORK_READY;
     }
     if (auto model = dlsslop::require_vulkan_model(*n->model); !model) return n->fail(std::move(model).error().what);
     // A new extent is planned here, so that one the network does not take on the device is
     // refused without a build; the build thread builds from that plan.
-    if (auto planned = n->recorder.plan(frame); !planned) {
-        if (!planned.error().rejected) return n->fail(std::move(planned).error().what);
-        n->error = std::move(planned).error().what;
+    struct error e;
+    if (const enum error_code code = network_recorder_plan(&n->recorder, &frame, &e)) {
+        if (code == ERROR_FAILED) return n->fail(e.what);
+        n->error = e.what;
         return DLSSLOP_NETWORK_REJECTED;
     }
     n->target = frame;
@@ -160,11 +179,11 @@ dlsslop_network_state dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader
 
 dlsslop_network_state dlsslop_network_record(DlsslopNetwork* n, VkCommandBuffer cmd)
 {
-    n->recorder.record(cmd, n->prepared);
+    network_recorder_record_images(&n->recorder, cmd, &n->prepared);
     return DLSSLOP_NETWORK_READY;
 }
 
-void dlsslop_network_submitted(DlsslopNetwork* n) { n->recorder.submitted(); }
+void dlsslop_network_submitted(DlsslopNetwork* n) { network_recorder_submitted(&n->recorder); }
 
 const char* dlsslop_network_error(const DlsslopNetwork* n) { return n->error.c_str(); }
 

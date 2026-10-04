@@ -90,11 +90,26 @@ file(CONFIGURE OUTPUT ${METER}_spv.h CONTENT [[#pragma once
 static const size_t kMeterReduceSpvLen = sizeof(kMeterReduceSpv) / sizeof(kMeterReduceSpv[0]);
 ]])
 add_custom_target(layer-shaders DEPENDS ${LAYER_SHADERS} ${METER}.h)
-# The Vulkan network's verdict and fallback after its last dispatch.
-embed_shader(common/network_verdict.comp network/network_verdict.hpp kNetworkVerdictSpv vulkan1.3)
-embed_shader(common/network_fallback.comp network/network_fallback.hpp kNetworkFallbackSpv vulkan1.3)
-add_custom_target(network-shaders DEPENDS ${SHADER_DIR}/network/network_verdict.hpp
-    ${SHADER_DIR}/network/network_fallback.hpp)
+# The Vulkan network's verdict and fallback after its last dispatch, which the
+# runtime embeds: SOURCE's SPIR-V for Vulkan 1.3, validated, as the uint32_t
+# array SYMBOL of its words. NAME.c below the shader directory defines it for
+# the runtime's objects, and NAME.h declares it.
+function(add_network_shader source name symbol)
+    set(output ${SHADER_DIR}/${name})
+    add_custom_command(OUTPUT ${output}.spv ${output}.h ${output}.c
+        COMMAND ${GLSLANG_VALIDATOR} --quiet -V --target-env vulkan1.3 -o ${output}.spv
+            ${CMAKE_CURRENT_SOURCE_DIR}/${source}
+        COMMAND ${SPIRV_VAL} --target-env vulkan1.3 ${output}.spv
+        COMMAND ${CMAKE_COMMAND} -D SPIRV=${output}.spv -D HEADER=${output}.h -D SOURCE=${output}.c
+            -D NAME=${name} -D SYMBOL=${symbol} -D WORDS=ON -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/spirv-array.cmake
+        DEPENDS ${source} cmake/spirv-array.cmake VERBATIM)
+    set(NETWORK_SHADERS ${NETWORK_SHADERS} ${output}.h PARENT_SCOPE)
+    set(NETWORK_SHADER_SOURCES ${NETWORK_SHADER_SOURCES} ${output}.c PARENT_SCOPE)
+endfunction()
+file(MAKE_DIRECTORY ${SHADER_DIR}/network)
+add_network_shader(common/network_verdict.comp network/network_verdict kNetworkVerdictSpv)
+add_network_shader(common/network_fallback.comp network/network_fallback kNetworkFallbackSpv)
+add_custom_target(network-shaders DEPENDS ${NETWORK_SHADERS})
 
 # The C functions that common/'s headers declare for C and C++: the channel's,
 # the settings', the Vulkan network's requirements and the errors' words. The
@@ -146,7 +161,7 @@ add_custom_target(vulkan-nr-shaders ALL DEPENDS "${VKNR_SHADERS}/shader-constant
 # The network's plan, weights and runtime, for dlsslopd and the in-layer
 # network's module alike.
 add_library(dlsslop-vulkan OBJECT common/vulkan_plan.c common/vulkan_schedule.c common/vulkan_weights.c
-    common/vulkan_runtime.cpp common/network_recorder.cpp)
+    common/vulkan_runtime.c common/network_recorder.c ${NETWORK_SHADER_SOURCES})
 set_target_properties(dlsslop-vulkan PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_dependencies(dlsslop-vulkan network-shaders)
 target_include_directories(dlsslop-vulkan PRIVATE backend ${SHADER_DIR})
@@ -233,12 +248,12 @@ if(BUILD_TESTING)
         $<TARGET_FILE:network-module-incomplete> $<TARGET_FILE:network-module-other>)
     # The network's motion history across frames that are and are not
     # submitted, recorded on a fake device that the test defines in place of
-    # the Vulkan loader.
-    add_executable(network-recorder-test tests/network_recorder_test.cpp common/network_recorder.cpp
-        common/vulkan_runtime.cpp common/vulkan_plan.c common/vulkan_schedule.c common/vulkan_weights.c
-        tests/vulkan_pack.c backend/files.c)
+    # the Vulkan loader, in C.
+    add_executable(network-recorder-test tests/network_recorder_test.c common/network_recorder.c
+        common/vulkan_runtime.c common/vulkan_plan.c common/vulkan_schedule.c common/vulkan_weights.c
+        ${NETWORK_SHADER_SOURCES} tests/vulkan_pack.c backend/files.c)
     target_include_directories(network-recorder-test PRIVATE backend ${SHADER_DIR})
-    target_link_libraries(network-recorder-test PRIVATE dlsslop-common-c Threads::Threads)
+    target_link_libraries(network-recorder-test PRIVATE dlsslop-common-c test-support Threads::Threads)
     add_dependencies(network-recorder-test vulkan-nr-shaders network-shaders)
     add_test(NAME network-recorder COMMAND network-recorder-test ${VKNR_SHADERS})
     # The network's builds open exactly the files that install.py installs for

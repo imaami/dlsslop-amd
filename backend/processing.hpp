@@ -4,7 +4,7 @@
 #include "result.hpp"
 #include "shm_protocol.h"
 #include "tuning_math.hpp"
-#include "vulkan_frame.hpp"
+#include "vulkan_frame.h"
 
 namespace dlsslop {
 
@@ -28,9 +28,9 @@ struct ProcessingSettings {
 Result<ProcessingSettings> read_settings(const ShmHeader* h);
 
 // A frame of W x H through the Vulkan network, PASSES times, as SETTINGS say.
-inline VulkanFrame vulkan_frame(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings)
+inline struct vulkan_frame vulkan_frame(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings)
 {
-    VulkanFrame f;
+    struct vulkan_frame f = VULKAN_FRAME_DEFAULTS;
     f.width = w;
     f.height = h;
     f.fp16 = settings.fp16;

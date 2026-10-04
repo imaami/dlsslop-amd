@@ -49,11 +49,16 @@ struct vulkan_shader_constant const VULKAN_PLAN_SHADER_CONSTANTS[] = {
 	{"tchain", 1},
 };
 
+/** @brief A marker of a file named by a literal and of a literal line, with their lengths. */
+#define MARKER(file, line) {file, line, sizeof (file) - 1, sizeof (line) - 1}
+
 struct vulkan_marker const VULKAN_PLAN_MARKERS[] = {
-	{"accumulation.txt", "fp32"},
-	{"coherent-act.txt", "0"},
-	{"swin-bias-storage.txt", "fp32"},
+	MARKER("accumulation.txt", "fp32"),
+	MARKER("coherent-act.txt", "0"),
+	MARKER("swin-bias-storage.txt", "fp32"),
 };
+
+#undef MARKER
 
 struct vulkan_kernel_info const VULKAN_PLAN_KERNELS[] = {
 	[VULKAN_KERNEL_FSWIN32]              = {"fswin32", "aawwwa", VULKAN_IMAGES_NONE, 84},

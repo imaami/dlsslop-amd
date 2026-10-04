@@ -7,7 +7,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <optional>
 #include <string>
 #include <vector>
 #include <unistd.h>
@@ -17,6 +16,24 @@ namespace dlsslop {
 namespace {
 
 void log_line(const char* line) { std::fprintf(stderr, "%s\n", line); }
+
+// VkResult as a Result: WHAT, and the code, when it is not VK_SUCCESS.
+Result<void> vk_check(VkResult result, const char* what)
+{
+    if (result == VK_SUCCESS) return {};
+    struct error e;
+    return forward_c(vulkan_check(result, what, &e), e);
+}
+
+// The first of MEMORY's types among BITS with every property in WANT.
+Result<uint32_t> memory_type(const VkPhysicalDeviceMemoryProperties& memory, uint32_t bits,
+                             VkMemoryPropertyFlags want)
+{
+    uint32_t type = 0;
+    struct error e;
+    if (const enum error_code code = vulkan_memory_type(&memory, bits, want, &type, &e)) return forward_c(code, e);
+    return type;
+}
 
 // What stops the network running on a device, or empty. MATRICES is the
 // instance's vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR.
@@ -48,7 +65,6 @@ struct Buffer {
 }  // namespace
 
 struct VulkanNetwork::Impl {
-    VulkanPaths paths;
     VkInstance instance = VK_NULL_HANDLE;
     VkPhysicalDevice physical = VK_NULL_HANDLE;
     VkDevice device = VK_NULL_HANDLE;
@@ -64,7 +80,8 @@ struct VulkanNetwork::Impl {
     VkFence fence = VK_NULL_HANDLE;
     VkQueryPool queries = VK_NULL_HANDLE;
     Buffer upload, download;  // host transport
-    std::optional<NetworkRecorder> recorder;
+    // Empty until create() made it.
+    struct network_recorder recorder{};
     // Device-local frames the layer exported, a proxy/answer pair per import slot.
     struct Imported {
         size_t bytes = 0;
@@ -109,7 +126,7 @@ struct VulkanNetwork::Impl {
     {
         if (device) {
             vkDeviceWaitIdle(device);
-            recorder.reset();
+            network_recorder_fini(&recorder);
             for (auto& slot : imported) release(slot);
             drop(upload);
             drop(download);
@@ -122,11 +139,10 @@ struct VulkanNetwork::Impl {
     }
 };
 
-Result<VulkanNetwork> VulkanNetwork::create(const VulkanPaths& paths, int device)
+Result<VulkanNetwork> VulkanNetwork::create(const struct vulkan_paths& paths, int device)
 {
     VulkanNetwork network(std::make_unique<Impl>());
     auto& s = *network.impl_;
-    s.paths = paths;
     // The daemon has no overlay to show: keep implicit layers (Steam's, MangoHud's) out
     // of its instance, unless the environment already says otherwise.
     setenv("VK_LOADER_LAYERS_DISABLE", "~implicit~", 0);
@@ -196,7 +212,7 @@ Result<VulkanNetwork> VulkanNetwork::create(const VulkanPaths& paths, int device
     queries.queryType = VK_QUERY_TYPE_TIMESTAMP;
     queries.queryCount = 4;
     DLSSLOP_TRY(vk_check(vkCreateQueryPool(s.device, &queries, nullptr, &s.queries), "create timestamp queries"));
-    vulkan::Device on{};
+    struct vulkan_device on{};
     on.instance = s.instance;
     on.physical = s.physical;
     on.device = s.device;
@@ -206,7 +222,9 @@ Result<VulkanNetwork> VulkanNetwork::create(const VulkanPaths& paths, int device
     on.functions = {vkGetPhysicalDeviceQueueFamilyProperties, vkGetPhysicalDeviceProperties2,
                     vkGetPhysicalDeviceFormatProperties2};
     on.log = log_line;
-    s.recorder.emplace(on, s.paths);
+    struct error e;
+    if (const enum error_code code = network_recorder_init(&s.recorder, &on, &paths, false, &e))
+        return forward_c(code, e);
     return network;
 }
 
@@ -217,16 +235,28 @@ VulkanNetwork::~VulkanNetwork() = default;
 const std::string& VulkanNetwork::device_name() const { return impl_->name; }
 unsigned VulkanNetwork::device_index() const { return impl_->index; }
 
-bool VulkanNetwork::shape_differs(const VulkanFrame& frame) const { return impl_->recorder->shape_differs(frame); }
+bool VulkanNetwork::shape_differs(const struct vulkan_frame& frame) const
+{
+    return network_recorder_shape_differs(&impl_->recorder, &frame);
+}
 
-Result<void> VulkanNetwork::plan(const VulkanFrame& frame) { return impl_->recorder->plan(frame); }
+Result<void> VulkanNetwork::plan(const struct vulkan_frame& frame)
+{
+    struct error e;
+    if (const enum error_code code = network_recorder_plan(&impl_->recorder, &frame, &e)) return forward_c(code, e);
+    return {};
+}
 
-Result<bool> VulkanNetwork::shape(const VulkanFrame& frame)
+Result<bool> VulkanNetwork::shape(const struct vulkan_frame& frame)
 {
     auto& s = *impl_;
-    if (!s.recorder->shape_differs(frame)) return false;
+    if (!network_recorder_shape_differs(&s.recorder, &frame)) return false;
     DLSSLOP_TRY(vk_check(vkDeviceWaitIdle(s.device), "wait for the device"));
-    return s.recorder->shape(frame);
+    bool changed = false;
+    struct error e;
+    if (const enum error_code code = network_recorder_shape(&s.recorder, &frame, nullptr, &changed, &e))
+        return forward_c(code, e);
+    return changed;
 }
 
 bool VulkanNetwork::import(unsigned slot, const ShmTransportOffer& offer, int fds[2])
@@ -286,7 +316,7 @@ bool VulkanNetwork::import(unsigned slot, const ShmTransportOffer& offer, int fd
     return true;
 }
 
-Result<void> VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint8_t* input, uint8_t* output)
+Result<void> VulkanNetwork::infer(const struct vulkan_frame& frame, int slot, const uint8_t* input, uint8_t* output)
 {
     auto& s = *impl_;
     (void)DLSSLOP_TRY(shape(frame));
@@ -313,7 +343,7 @@ Result<void> VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint
     vkCmdResetQueryPool(cmd, s.queries, 0, 4);
     vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, s.queries, 0);
     // The layer's exported buffers change hands at every frame.
-    s.recorder->record(cmd, source, target, frame, s.family, exported, s.queries, 1);
+    network_recorder_record_buffers(&s.recorder, cmd, source, target, &frame, s.family, exported, s.queries, 1);
     if (!exported) {
         static constexpr VkMemoryBarrier kToHost{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, VK_ACCESS_TRANSFER_WRITE_BIT,
                                                  VK_ACCESS_HOST_READ_BIT};
@@ -327,7 +357,7 @@ Result<void> VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint
     submit.pCommandBuffers = &cmd;
     DLSSLOP_TRY(vk_check(vkResetFences(s.device, 1, &s.fence), "reset fence"));
     DLSSLOP_TRY(vk_check(vkQueueSubmit(s.queue, 1, &submit, s.fence), "submit frame"));
-    s.recorder->submitted();
+    network_recorder_submitted(&s.recorder);
     // A healthy frame takes milliseconds; ten seconds means the device is gone.
     DLSSLOP_TRY(vk_check(vkWaitForFences(s.device, 1, &s.fence, VK_TRUE, 10'000'000'000ull), "wait for the frame"));
     uint64_t stamps[4] = {};
@@ -338,7 +368,7 @@ Result<void> VulkanNetwork::infer(const VulkanFrame& frame, int slot, const uint
         inference_ms = ms(1, 2);
         readback_ms = ms(2, 3);
     }
-    if (s.recorder->timed_out()) return reject(kDropped);
+    if (network_recorder_timed_out(&s.recorder)) return reject(kDropped);
     if (!exported) std::memcpy(output, s.download.mapped, bytes);
     return {};
 }

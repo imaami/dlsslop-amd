@@ -124,8 +124,10 @@ extern struct vulkan_shader_constant const VULKAN_PLAN_SHADER_CONSTANTS[VULKAN_P
 
 /** @brief A marker beside the SPIR-V: a file of one line. */
 struct vulkan_marker {
-	char const *file; //!< The file's name.
-	char const *line; //!< Its line.
+	char const  *file;        //!< The file's name.
+	char const  *line;        //!< Its line.
+	STD(size_t)  file_length; //!< The name's length.
+	STD(size_t)  line_length; //!< The line's length.
 };
 
 /** @brief The number of VULKAN_PLAN_MARKERS. */

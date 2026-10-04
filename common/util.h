@@ -1,12 +1,14 @@
 /** @file
  *
- * Helpers for the project's C: force_inline, container_of() and min_d().
+ * Helpers for the project's C: force_inline, container_of(), min_d() and now_ns().
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_COMMON_UTIL_H_
 #define DLSSLOP_AMD_COMMON_UTIL_H_
 
 #include <stddef.h>
+#include <stdint.h>
+#include <time.h>
 
 /** @brief Declares a function of a header that every call inlines. */
 #define force_inline [[gnu::always_inline]] static inline
@@ -36,6 +38,19 @@ min_d (double a,
        double b)
 {
 	return b < a ? b : a;
+}
+
+/** @brief The time of CLOCK_MONOTONIC.
+ *
+ * @return The time in nanoseconds, or 0 if the clock cannot be read.
+ */
+static inline uint64_t
+now_ns (void)
+{
+	struct timespec now;
+	if (clock_gettime(CLOCK_MONOTONIC, &now))
+		return 0;
+	return (uint64_t)now.tv_sec * UINT64_C(1000000000) + (uint64_t)now.tv_nsec;
 }
 
 #endif /* DLSSLOP_AMD_COMMON_UTIL_H_ */

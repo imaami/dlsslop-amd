@@ -392,16 +392,10 @@ vulkan_model_open (struct vulkan_model *dest,
                    struct error        *e)
 {
 	*dest = (struct vulkan_model){.fd = -1};
-	struct vulkan_model model = {.fd = -1};
-	model.path = strdup(path);
-	if (!model.path)
-		return error_fail(e, "out of memory");
-	model.fd = open(path, O_RDONLY | O_CLOEXEC);
+	struct vulkan_model model = {.path = path, .fd = open(path, O_RDONLY | O_CLOEXEC)};
 	if (model.fd < 0) {
 		int const err = errno;
-		enum error_code const code = unreadable(e, path, err);
-		vulkan_model_fini(&model);
-		return code;
+		return unreadable(e, path, err);
 	}
 	enum error_code const code = read_index(&model, e);
 	if (code) {
@@ -425,8 +419,6 @@ vulkan_model_fini (struct vulkan_model *model)
 	model->entries = nullptr;
 	free(model->names);
 	model->names = nullptr;
-	free(model->path);
-	model->path = nullptr;
 	*model = (struct vulkan_model){.fd = -1};
 }
 

@@ -6,6 +6,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/stat.h>
 
 #include "support.h"
@@ -122,4 +123,77 @@ support_read_file (char const *path,
 			*length = used;
 	}
 	return text;
+}
+
+bool
+support_text_vprintf (struct support_text *text,
+                      char const          *fmt,
+                      va_list              args)
+{
+	va_list measured;
+	va_copy(measured, args);
+	size_t const room = text->capacity - text->length;
+	int const n = vsnprintf(text->bytes ? text->bytes + text->length : nullptr, room, fmt, measured);
+	va_end(measured);
+	if (n < 0)
+		return false;
+	if ((size_t)n < room) {
+		text->length += (size_t)n;
+		return true;
+	}
+
+	// Too long for the room left: grown, and formatted again.
+	size_t const need = text->length + (size_t)n + 1;
+	size_t capacity = text->capacity ? 2 * text->capacity : 256;
+	while (capacity < need)
+		capacity *= 2;
+	char *const grown = realloc(text->bytes, capacity);
+	if (!grown) {
+		if (text->bytes)
+			text->bytes[text->length] = '\0';
+		return false;
+	}
+	text->bytes = grown;
+	text->capacity = capacity;
+	if (vsnprintf(grown + text->length, capacity - text->length, fmt, args) != n) {
+		grown[text->length] = '\0';
+		return false;
+	}
+	text->length += (size_t)n;
+	return true;
+}
+
+bool
+support_text_printf (struct support_text *text,
+                     char const          *fmt,
+                     ...)
+{
+	va_list args;
+	va_start(args, fmt);
+	bool const ok = support_text_vprintf(text, fmt, args);
+	va_end(args);
+	return ok;
+}
+
+char const *
+support_text_string (struct support_text const *text)
+{
+	return text->bytes ? text->bytes : "";
+}
+
+bool
+support_text_equal (struct support_text const *a,
+                    struct support_text const *b)
+{
+	return a->length == b->length && (!a->length || !memcmp(a->bytes, b->bytes, a->length));
+}
+
+void
+support_text_fini (struct support_text *text)
+{
+	if (text) {
+		free(text->bytes);
+		text->bytes = nullptr;
+		*text = (struct support_text){};
+	}
 }

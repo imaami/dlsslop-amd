@@ -40,7 +40,7 @@ def fixture(root):
     root.mkdir()
     paths = {"install.py", *INSTALLER.DOCUMENT_SOURCES.values(), *INSTALLER.UNIT_SOURCES.values(),
              *(source for source, *_ in INSTALLER.SCRIPT_SOURCES.values()),
-             "common/vulkan_plan.c", "common/vulkan_runtime.cpp",
+             "common/vulkan_plan.c", "common/vulkan_runtime.c",
              *(f"external/vulkan/linux/package/model-tools/{name}" for name in INSTALLER.MODEL_TOOLS)}
     for name in paths:
         target = root / name

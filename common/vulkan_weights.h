@@ -3,30 +3,16 @@
  * The Vulkan network's weights: dlssnr.bin read and packed into the blob that the network's kernels
  * read, byte for byte as upstream packs it. A port of the weight lowering of DLSSNR-AMD's
  * linux/src/core/nr_graph.cpp and tinlayout.hpp (MIT). vulkan_weights.c defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_COMMON_VULKAN_WEIGHTS_H_
 #define DLSSLOP_AMD_COMMON_VULKAN_WEIGHTS_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-# include <cstdint>
-#else
-# include <stddef.h>
-# include <stdint.h>
-#endif
+#include <stddef.h>
+#include <stdint.h>
 
 #include "error.h"
 #include "vulkan_plan.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief The bytes that the longest name of a source takes, its null included. */
 #define VULKAN_WEIGHTS_NAME_BYTES 80
@@ -38,7 +24,7 @@ extern "C" {
  * @param name   Receives the name and a null.
  * @return       The name's length.
  */
-extern STD(size_t)
+extern size_t
 vulkan_weights_entry_name (struct vulkan_source const *source,
                            char                        name[VULKAN_WEIGHTS_NAME_BYTES]);
 
@@ -52,17 +38,17 @@ struct vulkan_model_entry;
  * one, and vulkan_model_fini() frees it.
  */
 struct vulkan_model {
-	char                      *path;    //!< The pack's path.
+	char const                *path;    //!< The pack's path, the caller's.
 	char                      *names;   //!< The entries' names, one after another, without nulls.
 	struct vulkan_model_entry *entries; //!< The entries, sorted by name.
-	STD(size_t)                count;   //!< Their number.
+	size_t                     count;   //!< Their number.
 	int                        fd;      //!< The pack, or -1.
 };
 
 /** @brief Memory that grows to hold what is read into it. */
 struct vulkan_scratch {
-	STD(uint8_t) *bytes;    //!< The memory, or nullptr.
-	STD(size_t)   capacity; //!< Its bytes.
+	uint8_t *bytes;    //!< The memory, or nullptr.
+	size_t   capacity; //!< Its bytes.
 };
 
 /** @brief Frees a scratch's memory and empties it.
@@ -80,7 +66,7 @@ vulkan_scratch_fini (struct vulkan_scratch *scratch);
  *
  * @param dest Receives the model, which vulkan_model_fini() frees; empty, with no descriptor, on a
  *             failure.
- * @param path The pack.
+ * @param path The pack's path, which the model keeps for its errors: it must outlive the model.
  * @param e    Receives the words for what stopped it, or nullptr.
  * @return     ERROR_NONE, or ERROR_FAILED.
  */
@@ -109,7 +95,7 @@ extern enum error_code
 vulkan_model_read (struct vulkan_model const  *model,
                    struct vulkan_source const *source,
                    struct vulkan_scratch      *scratch,
-                   STD(size_t)                *size,
+                   size_t                     *size,
                    struct error               *e);
 
 /** @brief Packs segments of a blob, in offset order, from a model's entries; the bytes between and
@@ -131,12 +117,12 @@ vulkan_model_read (struct vulkan_model const  *model,
  */
 extern enum error_code
 vulkan_weights_pack (struct vulkan_segment const *segments,
-                     STD(size_t)                  segment_count,
-                     STD(uint32_t) const         *tables,
-                     STD(size_t)                  table_count,
+                     size_t                       segment_count,
+                     uint32_t const              *tables,
+                     size_t                       table_count,
                      struct vulkan_model const   *model,
-                     STD(uint8_t)                *blob,
-                     STD(size_t)                  blob_size,
+                     uint8_t                     *blob,
+                     size_t                       blob_size,
                      struct error                *e);
 
 /** @brief Audits which heads of the Swin layers whose position biases a plan's segments bake (BIAS
@@ -156,7 +142,7 @@ vulkan_weights_pack (struct vulkan_segment const *segments,
  */
 extern enum error_code
 vulkan_weights_clamp_free (struct vulkan_segment const *segments,
-                           STD(size_t)                  count,
+                           size_t                       count,
                            struct vulkan_model const   *model,
                            struct vulkan_clamp_free    *dest,
                            struct error                *e);
@@ -165,18 +151,18 @@ vulkan_weights_clamp_free (struct vulkan_segment const *segments,
 
 /** @brief An E4M3 code through upstream's round trip (upstream: e4m3_requantise_table): 0x80 (-0)
  *         for 0x00 (+0), 0x7f for 0xff (both NaN), and every other code as it is. */
-extern STD(uint8_t)
-vulkan_weights_requantise (STD(uint8_t) code);
+extern uint8_t
+vulkan_weights_requantise (uint8_t code);
 
 /** @brief Binary16 widened to f32 bits as tin::f16_to_f widens it: NaN becomes the quiet
  *         0x7fc00000. */
-extern STD(uint32_t)
-vulkan_weights_widen_half (STD(uint16_t) half);
+extern uint32_t
+vulkan_weights_widen_half (uint16_t half);
 
 /** @brief Binary16 widened and narrowed again (upstream: tin::f_to_f16 of tin::f16_to_f): NaN
  *         becomes 0x7e00, every other value is kept. */
-extern STD(uint16_t)
-vulkan_weights_recode_half (STD(uint16_t) half);
+extern uint16_t
+vulkan_weights_recode_half (uint16_t half);
 
 /** @brief A rows x cols row-major matrix as 16x16 tiles, 256 bytes each (upstream:
  *         tin::tile_blocked).
@@ -187,10 +173,10 @@ vulkan_weights_recode_half (STD(uint16_t) half);
  * @param out    Receives the tiles.
  */
 extern void
-vulkan_weights_tile_blocked (STD(uint8_t) const *matrix,
-                             STD(size_t)         rows,
-                             STD(size_t)         cols,
-                             STD(uint8_t)       *out);
+vulkan_weights_tile_blocked (uint8_t const *matrix,
+                             size_t         rows,
+                             size_t         cols,
+                             uint8_t       *out);
 
 /** @brief The same as vulkan_weights_tile_blocked(), then each pair of 16-row tiles interleaved in
  *         8-byte runs (upstream: pack_matrix in NrSession::build, nr_graph.cpp:3270-3281).
@@ -201,41 +187,41 @@ vulkan_weights_tile_blocked (STD(uint8_t) const *matrix,
  * @param out    Receives the tiles.
  */
 extern void
-vulkan_weights_npair_blocked (STD(uint8_t) const *matrix,
-                              STD(size_t)         rows,
-                              STD(size_t)         cols,
-                              STD(uint8_t)       *out);
+vulkan_weights_npair_blocked (uint8_t const *matrix,
+                              size_t         rows,
+                              size_t         cols,
+                              uint8_t       *out);
 
 /** @brief The byte of a C=512 FFN record that holds A[g][row][k], upstream's gather. */
-extern STD(size_t)
-vulkan_weights_ff_a (STD(size_t) g,
-                     STD(size_t) row,
-                     STD(size_t) k);
+extern size_t
+vulkan_weights_ff_a (size_t g,
+                     size_t row,
+                     size_t k);
 
 /** @brief The byte of a C=512 FFN record that holds Q0[g][j][row], upstream's gather. */
-extern STD(size_t)
-vulkan_weights_ff_q0 (STD(size_t) g,
-                      STD(size_t) j,
-                      STD(size_t) row);
+extern size_t
+vulkan_weights_ff_q0 (size_t g,
+                      size_t j,
+                      size_t row);
 
 /** @brief The byte of a C=512 FFN record that holds Q2[g][n][j], upstream's gather. */
-extern STD(size_t)
-vulkan_weights_ff_q2 (STD(size_t) g,
-                      STD(size_t) n,
-                      STD(size_t) j);
+extern size_t
+vulkan_weights_ff_q2 (size_t g,
+                      size_t n,
+                      size_t j);
 
 /** @brief The byte of a ViT QKV record that holds row row, column k of matrix which (0 Q, 1 K,
  *         2 V), upstream's gather. */
-extern STD(size_t)
-vulkan_weights_vit_qkv_weight_byte (STD(size_t) which,
-                                    STD(size_t) row,
-                                    STD(size_t) k);
+extern size_t
+vulkan_weights_vit_qkv_weight_byte (size_t which,
+                                    size_t row,
+                                    size_t k);
 
 /** @brief Which of a head's 4096 biases, in MMA C-fragment order, is bias [i][j] (upstream:
  *         deswizzle_bias). */
-extern STD(size_t)
-vulkan_weights_bias_source (STD(size_t) i,
-                            STD(size_t) j);
+extern size_t
+vulkan_weights_bias_source (size_t i,
+                            size_t j);
 
 /** @brief The bytes of the activation table. */
 #define VULKAN_WEIGHTS_ACTIVATION_BYTES 4096
@@ -245,12 +231,6 @@ vulkan_weights_bias_source (STD(size_t) i,
  * @param table Receives the table.
  */
 extern void
-vulkan_weights_activation_table (STD(uint8_t) table[VULKAN_WEIGHTS_ACTIVATION_BYTES]);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
+vulkan_weights_activation_table (uint8_t table[VULKAN_WEIGHTS_ACTIVATION_BYTES]);
 
 #endif /* DLSSLOP_AMD_COMMON_VULKAN_WEIGHTS_H_ */

@@ -3,6 +3,7 @@
 #include "paths.hpp"
 
 #include <cstdio>
+#include <string>
 
 namespace dlsslop {
 namespace {
@@ -10,7 +11,15 @@ namespace {
 Result<VulkanEngine> open_vulkan(const Options& o, unsigned tier)
 {
     DLSSLOP_TRY(require_vulkan_model(o.vulkan_model));
-    auto network = DLSSLOP_TRY(VulkanNetwork::create({o.vulkan_model, vulkan_shaders(), vulkan_cache()}, o.device));
+    // The network copies the paths, which borrow these strings.
+    const std::string shaders = vulkan_shaders(), cache = vulkan_cache();
+    const struct vulkan_paths paths{.model = o.vulkan_model.c_str(),
+                                    .shaders = shaders.c_str(),
+                                    .cache = cache.c_str(),
+                                    .model_length = o.vulkan_model.size(),
+                                    .shaders_length = shaders.size(),
+                                    .cache_length = cache.size()};
+    auto network = DLSSLOP_TRY(VulkanNetwork::create(paths, o.device));
     std::fprintf(stderr, "Vulkan network on %s\n", network.device_name().c_str());
     VulkanEngine engine(std::move(network), tier);
     DLSSLOP_TRY(engine.prepare());

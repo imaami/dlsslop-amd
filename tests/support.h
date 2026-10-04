@@ -1,7 +1,7 @@
 /** @file
  *
  * What several of the C tests need: a private temporary directory, removed with everything in it,
- * a file's whole contents, and a formatted string on the heap.
+ * a file's whole contents, a formatted string on the heap, and text that grows as it is written.
  */
 #ifndef DLSSLOP_AMD_TESTS_SUPPORT_H_
 #define DLSSLOP_AMD_TESTS_SUPPORT_H_
@@ -65,5 +65,65 @@ support_remove_tree (char const *path);
 extern char *
 support_read_file (char const *path,
                    size_t     *length);
+
+/** @brief Text that grows as it is written: a log to compare whole. A zeroed one is empty. */
+struct support_text {
+	char  *bytes;    //!< The text and a null, or nullptr while nothing was written.
+	size_t length;   //!< The text's length.
+	size_t capacity; //!< The bytes allocated.
+};
+
+/** @brief Appends formatted words to a text.
+ *
+ * @param text The text.
+ * @param fmt  A printf format.
+ * @param args The format's arguments.
+ * @return     false if they cannot be formatted or without memory for them; the text is then as
+ *             it was.
+ */
+[[gnu::format(printf, 2, 0)]]
+extern bool
+support_text_vprintf (struct support_text *text,
+                      char const          *fmt,
+                      va_list              args);
+
+/** @brief Appends formatted words to a text.
+ *
+ * @param text The text.
+ * @param fmt  A printf format.
+ * @param ...  The format's arguments.
+ * @return     false if they cannot be formatted or without memory for them; the text is then as
+ *             it was.
+ */
+[[gnu::format(printf, 2, 3)]]
+extern bool
+support_text_printf (struct support_text *text,
+                     char const          *fmt,
+                     ...);
+
+/** @brief A text's words, as a string.
+ *
+ * @param text The text.
+ * @return     Its bytes, or "" while it is empty.
+ */
+extern char const *
+support_text_string (struct support_text const *text);
+
+/** @brief Whether two texts hold the same words.
+ *
+ * @param a A text.
+ * @param b Another.
+ * @return  true if they do.
+ */
+extern bool
+support_text_equal (struct support_text const *a,
+                    struct support_text const *b);
+
+/** @brief Frees a text and empties it.
+ *
+ * @param text The text, or nullptr.
+ */
+extern void
+support_text_fini (struct support_text *text);
 
 #endif /* DLSSLOP_AMD_TESTS_SUPPORT_H_ */
