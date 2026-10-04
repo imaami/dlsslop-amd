@@ -200,7 +200,7 @@ main (int    argc,
 	struct network_module module = {};
 	bool const loaded = network_module_load(&module, argv[1]);
 	require(loaded, "%s", module.failure);
-	directory = support_temp_dir("/tmp", "dlsslop-network");
+	directory = support_temp_dir("/tmp", "dlsslop-network", nullptr);
 	require(directory, "cannot make a temporary directory");
 	require(!atexit(remove_directory), "atexit failed");
 	require(!setenv("XDG_DATA_HOME", directory, 1) && !setenv("XDG_CACHE_HOME", directory, 1)

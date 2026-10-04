@@ -694,7 +694,7 @@ main (void)
 	printf("PASS: no descriptor outlived its image view across %u builds\n", step_count);
 
 	// Captures go under XDG_STATE_HOME; keep them out of the user's state directory.
-	state_home = support_temp_dir("/tmp", "dlsslop-amd-composition");
+	state_home = support_temp_dir("/tmp", "dlsslop-amd-composition", nullptr);
 	require(state_home, "create a temporary state directory");
 	// At exit, so a failed check that exits removes it too.
 	require(!atexit(remove_state_home), "atexit failed");

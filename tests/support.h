@@ -39,11 +39,13 @@ support_format (size_t     *length,
  *
  * @param parent The directory to make it in.
  * @param prefix The start of its name.
+ * @param length Receives its path's length, or nullptr.
  * @return       Its path, which the caller frees, or nullptr if it cannot be made.
  */
 extern char *
 support_temp_dir (char const *parent,
-                  char const *prefix);
+                  char const *prefix,
+                  size_t     *length);
 
 /** @brief Removes a directory and everything in it, without following symbolic links.
  *

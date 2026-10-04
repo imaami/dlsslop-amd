@@ -627,7 +627,7 @@ main (void)
 {
 	check_channel_paths();
 	check_text_fields();
-	temporary = support_temp_dir("/tmp", "dlsslop-amd-capture-test");
+	temporary = support_temp_dir("/tmp", "dlsslop-amd-capture-test", nullptr);
 	require(temporary, "mkdtemp failed");
 	// At exit, so a failed check that exits removes it too.
 	require(!atexit(remove_temporary), "atexit failed");

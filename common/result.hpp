@@ -1,6 +1,8 @@
 // Errors without exceptions: every fallible function of ours returns a Result.
 // SPDX-License-Identifier: MIT
 #pragma once
+#include "error.h"
+
 #include <cerrno>
 #include <cstring>
 #include <expected>
@@ -57,6 +59,14 @@ struct Forward {
     }
 };
 template <class E> Forward<E> forward(E&& error) { return {std::forward<E>(error)}; }
+
+// A C function's error, CODE with the words in E, passed on to the enclosing
+// function's Result like a Failure: a rejection or a dropped frame is
+// rejected, a fault is not. Return one at once, while E holds the words.
+[[nodiscard]] inline Failure<const char*> forward_c(enum error_code code, const struct error& e)
+{
+    return {e.what, code != ERROR_FAILED};
+}
 
 } // namespace dlsslop
 

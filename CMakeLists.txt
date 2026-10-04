@@ -97,10 +97,10 @@ add_custom_target(network-shaders DEPENDS ${SHADER_DIR}/network/network_verdict.
     ${SHADER_DIR}/network/network_fallback.hpp)
 
 # The C functions that common/'s headers declare for C and C++: the channel's,
-# the settings' and the Vulkan network's requirements. The layers, the network
-# module, the programs and the tests link them.
+# the settings', the Vulkan network's requirements and the errors' words. The
+# layers, the network module, the programs and the tests link them.
 add_library(dlsslop-common-c OBJECT common/shm_protocol.c common/control_settings.c
-    common/network_requirements.c)
+    common/network_requirements.c common/error.c)
 set_target_properties(dlsslop-common-c PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # control_settings.c calls trunc().
 target_link_libraries(dlsslop-common-c PUBLIC m)
@@ -161,7 +161,7 @@ target_link_libraries(dlsslop-hip PUBLIC ${CMAKE_DL_LIBS})
 # (layer/network_module.h): the network and the libstdc++ it needs stay out of
 # the layer, which every game loads. It exports its C functions only.
 add_library(dlsslop-network MODULE layer/dlsslop_network.cpp backend/processing.cpp backend/options.cpp
-    backend/paths.cpp backend/files.cpp)
+    backend/paths.cpp backend/files.c)
 target_include_directories(dlsslop-network PRIVATE backend)
 target_link_libraries(dlsslop-network PRIVATE dlsslop-vulkan dlsslop-common-c ${CMAKE_DL_LIBS})
 target_link_options(dlsslop-network PRIVATE -static-libstdc++ -static-libgcc -Wl,-Bsymbolic
@@ -172,7 +172,7 @@ add_dependencies(dlsslop-network vulkan-nr-shaders)
 add_executable(dlsslopd
     backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.cpp
     backend/open.cpp backend/hip_engine.cpp backend/self_test.cpp
-    backend/channel.cpp backend/files.cpp backend/trace.cpp backend/vulkan_network.cpp
+    backend/channel.cpp backend/files.c backend/trace.cpp backend/vulkan_network.cpp
     backend/processing.cpp)
 target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip dlsslop-vulkan dlsslop-common-c Threads::Threads
     ${CMAKE_DL_LIBS})
@@ -181,9 +181,9 @@ target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 # What runs once per start, per transport offer or per diagnostic is built for
 # size; the frame path (serving loop, engines, codec, networks) stays at -O3.
 # GCC does not inline -O3 code into these callers, so none of it slows down.
-set_source_files_properties(backend/main.cpp backend/options.cpp backend/paths.cpp backend/files.cpp
+set_source_files_properties(backend/main.cpp backend/options.cpp backend/paths.cpp backend/files.c
     backend/channel.cpp backend/transport.cpp backend/trace.cpp backend/open.cpp backend/self_test.cpp backend/hip.cpp
-    backend/hip_plan.cpp PROPERTIES COMPILE_OPTIONS -Os)
+    backend/hip_plan.cpp common/error.c PROPERTIES COMPILE_OPTIONS -Os)
 
 if(BUILD_TESTING)
     # What several C tests need: a temporary directory removed with what it holds, a whole file and a
@@ -236,9 +236,9 @@ if(BUILD_TESTING)
     # the Vulkan loader.
     add_executable(network-recorder-test tests/network_recorder_test.cpp common/network_recorder.cpp
         common/vulkan_runtime.cpp common/vulkan_plan.cpp common/vulkan_schedule.cpp common/vulkan_weights.cpp
-        backend/files.cpp)
+        backend/files.c)
     target_include_directories(network-recorder-test PRIVATE backend ${SHADER_DIR})
-    target_link_libraries(network-recorder-test PRIVATE Threads::Threads)
+    target_link_libraries(network-recorder-test PRIVATE dlsslop-common-c Threads::Threads)
     add_dependencies(network-recorder-test vulkan-nr-shaders network-shaders)
     add_test(NAME network-recorder COMMAND network-recorder-test ${VKNR_SHADERS})
     # The network's builds open exactly the files that install.py installs for
@@ -249,8 +249,8 @@ if(BUILD_TESTING)
     add_executable(codec-test backend/codec_test.cpp)
     target_link_libraries(codec-test PRIVATE dlsslop-codec dlsslop-common-c)
     add_test(NAME codec COMMAND codec-test)
-    add_executable(color-gpu-test tests/color_gpu_test.cpp backend/hip.cpp backend/native_kernels.cpp backend/files.cpp)
-    target_link_libraries(color-gpu-test PRIVATE ${CMAKE_DL_LIBS})
+    add_executable(color-gpu-test tests/color_gpu_test.cpp backend/hip.cpp backend/native_kernels.cpp backend/files.c)
+    target_link_libraries(color-gpu-test PRIVATE dlsslop-common-c ${CMAKE_DL_LIBS})
     # Uses the GPU when the HIP runtime, a gfx1201 device and the module exist.
     set(HIP_MODULES ${CMAKE_CURRENT_SOURCE_DIR}/assets/HIP/gfx1201)
     add_test(NAME color-gpu COMMAND color-gpu-test --module ${HIP_MODULES}/linux_native.hsaco)
@@ -258,7 +258,7 @@ if(BUILD_TESTING)
     # and the element counts of the weights its plan loads against the model
     # import's manifest.
     add_executable(hip-weights-test tests/hip_weights_test.cpp backend/hip_weights.cpp backend/hip_plan.cpp
-        backend/files.cpp)
+        backend/files.c)
     target_link_libraries(hip-weights-test PRIVATE dlsslop-common-c)
     add_test(NAME hip-weights COMMAND hip-weights-test)
     add_test(NAME hip-weights-manifest COMMAND ${Python3_EXECUTABLE}
@@ -266,21 +266,23 @@ if(BUILD_TESTING)
     # The HIP network's launch plan against traces of upstream's network, and
     # against the kernels' metadata once scripts/build-kernels.py has run.
     add_executable(hip-plan-test tests/hip_plan_test.cpp backend/hip_plan.cpp backend/hip_weights.cpp
-        backend/files.cpp)
+        backend/files.c)
     target_link_libraries(hip-plan-test PRIVATE dlsslop-common-c)
     add_test(NAME hip-plan COMMAND hip-plan-test)
     add_test(NAME hip-plan-abi COMMAND hip-plan-test --modules ${HIP_MODULES})
     # The Vulkan network's weight packing against digests of upstream's, and
     # its model reader on damaged packs.
-    add_executable(vulkan-weights-test tests/vulkan_weights_test.cpp common/vulkan_weights.cpp backend/files.cpp)
+    add_executable(vulkan-weights-test tests/vulkan_weights_test.cpp common/vulkan_weights.cpp backend/files.c)
     target_include_directories(vulkan-weights-test PRIVATE backend)
+    target_link_libraries(vulkan-weights-test PRIVATE dlsslop-common-c)
     add_test(NAME vulkan-weights COMMAND vulkan-weights-test)
     # The Vulkan network's plan against goldens of upstream's graph build, the
     # push blocks and bindings of the SPIR-V the build made against it, and the
     # fork's shader markers and model entries against those it expects.
     add_executable(vulkan-plan-test tests/vulkan_plan_test.cpp common/vulkan_plan.cpp common/vulkan_schedule.cpp
-        common/vulkan_weights.cpp backend/files.cpp)
+        common/vulkan_weights.cpp backend/files.c)
     target_include_directories(vulkan-plan-test PRIVATE backend)
+    target_link_libraries(vulkan-plan-test PRIVATE dlsslop-common-c)
     add_dependencies(vulkan-plan-test vulkan-nr-shaders)
     add_test(NAME vulkan-plan COMMAND vulkan-plan-test)
     add_test(NAME vulkan-plan-abi COMMAND vulkan-plan-test --spirv ${VKNR_SHADERS})
@@ -314,10 +316,14 @@ if(BUILD_TESTING)
     add_executable(temporal-test tests/temporal_test.cpp)
     target_include_directories(temporal-test PRIVATE backend)
     add_test(NAME temporal COMMAND temporal-test)
-    add_executable(trace-test tests/trace_test.cpp backend/trace.cpp backend/files.cpp)
+    add_executable(trace-test tests/trace_test.cpp backend/trace.cpp backend/files.c)
+    target_link_libraries(trace-test PRIVATE dlsslop-common-c)
     add_test(NAME trace COMMAND trace-test ${Python3_EXECUTABLE})
-    add_executable(files-test tests/files_test.cpp backend/files.cpp)
-    target_link_libraries(files-test PRIVATE Threads::Threads)
+    # files_replace() while another writer replaces the file and a reader reads it, and its failures,
+    # in C.
+    add_executable(files-test tests/files_test.c backend/files.c)
+    target_include_directories(files-test PRIVATE backend)
+    target_link_libraries(files-test PRIVATE dlsslop-common-c test-support Threads::Threads)
     add_test(NAME files COMMAND files-test)
     add_executable(capture-writer-test tests/capture_writer_test.c)
     # stb_image.h is a system header here: its unused helpers do not warn.

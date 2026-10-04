@@ -1380,7 +1380,7 @@ static void
 check_log (void)
 {
 	char const *const tmp = getenv("TMPDIR");
-	char *made = support_temp_dir(tmp && *tmp ? tmp : "/tmp", "dlsslop-amd-log");
+	char *made = support_temp_dir(tmp && *tmp ? tmp : "/tmp", "dlsslop-amd-log", nullptr);
 	require(made, "mkdtemp failed");
 	// /proc/self/fd names the files by their real paths.
 	char *dir = realpath(made, nullptr);

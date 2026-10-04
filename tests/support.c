@@ -50,9 +50,11 @@ support_format (size_t     *length,
 
 char *
 support_temp_dir (char const *parent,
-                  char const *prefix)
+                  char const *prefix,
+                  size_t     *length)
 {
-	char *path = support_format(nullptr, "%s/%s-XXXXXX", parent, prefix);
+	// mkdtemp() replaces the Xs in place: the length stays the formatted one.
+	char *path = support_format(length, "%s/%s-XXXXXX", parent, prefix);
 	if (path && !mkdtemp(path)) {
 		free(path);
 		path = nullptr;
