@@ -93,7 +93,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     assert default(helptext, 'trace-dir').startswith('disabled')
     assert default(helptext, 'idle-exit').startswith('0 (never)')
     assert default(helptext, 'self-test-drops').startswith('0; requires --self-test')
-    for flag in ('diagnose', 'self-test', 'cpu-compose', 'cpu-codec', 'performance', 'once', 'test-identity'):
+    for flag in ('diagnose', 'self-test', 'cpu-codec', 'performance', 'once', 'test-identity'):
         entry = re.search(r'\n  -\S, --' + flag + r' .*?(?=\n  -)', helptext, re.S)
         assert entry and re.search(r'Default: off\b', entry.group(0)), (flag, helptext)
     assert 'image width (1..7680)' in helptext and 'image height (1..4320)' in helptext
@@ -273,14 +273,14 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
         result.stderr
     assert not channel.exists(), 'a missing Vulkan model created a channel'
 
-    # Only the HIP network serves the CPU composition, the CPU codec and traces:
-    # the Vulkan backend refuses them, and auto takes HIP for them.
-    for options, name in ((('-c',), '--cpu-compose'), (('--cpu-codec',), '--cpu-codec'),
+    # Only the HIP network serves the CPU codec and traces: the Vulkan backend
+    # refuses them, and auto takes HIP for them.
+    for options, name in ((('-C',), '--cpu-codec'), (('--cpu-codec',), '--cpu-codec'),
                           (('--trace-dir', str(cwd / 'traces')), '--trace-dir')):
         result = run(binary, '-b', 'vulkan', *options, env=env, cwd=cwd, expected=1)
         assert result.stderr == f'dlsslopd: {name} requires --backend hip\n', result.stderr
-    result = run(binary, '--cpu-compose', '-D', env=dict(fake, HIP_FAKE_ARCHS='gfx1201'), cwd=cwd, expected=0)
-    assert result.stderr.startswith('--cpu-compose needs the HIP network; using HIP\n'), result.stderr
+    result = run(binary, '--cpu-codec', '-D', env=dict(fake, HIP_FAKE_ARCHS='gfx1201'), cwd=cwd, expected=0)
+    assert result.stderr.startswith('--cpu-codec needs the HIP network; using HIP\n'), result.stderr
     assert result.stderr.endswith('selected device 0\n'), result.stderr
 
     # The worker's own config file sets settable long options by name, reports

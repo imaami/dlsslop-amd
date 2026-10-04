@@ -33,11 +33,6 @@
 namespace dlsslop {
 namespace {
 
-Rgb operator*(Rgb c, float x)
-{
-    return {c.r * x, c.g * x, c.b * x};
-}
-
 // Matches conversion into the upstream intermediate RGBA16_FLOAT textures.
 // Explicit IEEE round-to-nearest-even avoids requiring F16C or a HIP SDK.
 float half_round(float input)
@@ -100,99 +95,15 @@ void pack_half(float input, std::uint8_t* output)
     std::memcpy(output, &half, sizeof half);
 }
 
-float saturate(float x)
-{
-    // Nonfinite output must never be allowed to reach an integer conversion.
-    return std::isnan(x) ? 0.0f : std::clamp(x, 0.0f, 1.0f);
-}
-
-float srgb_decode(float x)
-{
-    x = saturate(x);
-    return x <= 0.04045f ? x / 12.92f : std::pow((x + 0.055f) / 1.055f, 2.4f);
-}
-
-Rgb decode(Rgb x)
-{
-    return {srgb_decode(x.r), srgb_decode(x.g), srgb_decode(x.b)};
-}
-
-float srgb_encode(float x)
-{
-    x = saturate(x);
-    return x <= 0.0031308f ? x * 12.92f : 1.055f * std::pow(x, 1.0f / 2.4f) - 0.055f;
-}
-
-float luminance(Rgb x)
-{
-    return x.r * 0.212639f + x.g * 0.715169f + x.b * 0.072192f;
-}
-
-Rgb to_lab(Rgb c)
-{
-    const float l = std::cbrt(0.4122214708f * c.r + 0.5363325363f * c.g + 0.0514459929f * c.b);
-    const float m = std::cbrt(0.2119034982f * c.r + 0.6806995451f * c.g + 0.1073969566f * c.b);
-    const float s = std::cbrt(0.0883024619f * c.r + 0.2817188376f * c.g + 0.6299787005f * c.b);
-    return {0.2104542553f * l + 0.7936177850f * m - 0.0040720468f * s,
-            1.9779984951f * l - 2.4285922050f * m + 0.4505937099f * s,
-            0.0259040371f * l + 0.7827717662f * m - 0.8086757660f * s};
-}
-
-Rgb from_lab(Rgb c)
-{
-    float l = c.r + 0.3963377774f * c.g + 0.2158037573f * c.b;
-    float m = c.r - 0.1055613458f * c.g - 0.0638541728f * c.b;
-    float s = c.r - 0.0894841775f * c.g - 1.2914855480f * c.b;
-    l *= l * l;
-    m *= m * m;
-    s *= s * s;
-    return {4.0767416621f * l - 3.3077115913f * m + 0.2309699292f * s,
-            -1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * s,
-            -0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s};
-}
-
-Rgb clamp_ap1(Rgb c)
-{
-    const float r = std::max(0.0f, 0.613097f * c.r + 0.339523f * c.g + 0.047379f * c.b);
-    const float g = std::max(0.0f, 0.070194f * c.r + 0.916354f * c.g + 0.013452f * c.b);
-    const float b = std::max(0.0f, 0.020616f * c.r + 0.109570f * c.g + 0.869815f * c.b);
-    return {1.705051f * r - 0.621792f * g - 0.083259f * b,
-            -0.130256f * r + 1.140805f * g - 0.010548f * b,
-            -0.024003f * r - 0.128969f * g + 1.152972f * b};
-}
-
-Rgb hue(Rgb incorrect, Rgb correct)
-{
-    Rgb a = to_lab(incorrect);
-    const Rgb b = to_lab(correct);
-    const float ca = std::hypot(a.g, a.b), cb = std::hypot(b.g, b.b);
-    const float scale = cb == 0.0f ? 1.0f : ca / cb;
-    a.g = b.g * scale;
-    a.b = b.b * scale;
-    return clamp_ap1(from_lab(a));
-}
-
-// Upstream lerps by TransferStrength, here at full strength: a + (b - a) * 1
-// need not round to b, so the lerp stays (as for ColorStrength below).
-Rgb upgrade(Rgb original, Rgb proxy, Rgb neural)
-{
-    const float oy = luminance(original), py = luminance(proxy), ny = luminance(neural);
-    if (ny <= 1e-5f)
-        return original;
-    const float ratio = oy < py ? oy / std::max(py, 1e-6f) :
-        (ny + std::max(0.0f, oy - py)) / ny;
-    return lerp(original, hue(neural * ratio, neural), 1.0f);
-}
-
 Rgb rgba8(const std::uint8_t* p)
 {
     return {float(p[0]) / 255.0f, float(p[1]) / 255.0f, float(p[2]) / 255.0f};
 }
 
 // The answer at source pixel (x, y) through the upstream FP16 surface. Like
-// the GPU codec, the decoders reject it when a texel it reads is not a finite
+// the GPU codec, the decoder rejects it when a texel it reads is not a finite
 // binary16: it is then not finite either.
-// Out of line: inlining it into both decoders adds about 9 KB of text.
+// Out of line: inlined, it adds 3 KB (Clang) to 8 KB (GCC) of text.
 [[gnu::noinline]] Rgb answer(const float* neural_rgb, const Geometry& g, unsigned x, unsigned y)
 {
     return sample_answer([&](unsigned px, unsigned py) {
@@ -334,36 +245,6 @@ Result<void> decode_neural_proxy(const std::uint8_t* original, const Geometry& g
                 output[p + 2] = unorm8(neural.b);
                 output[p + 3] = original[p + 3];
             }
-        }
-    }
-    return {};
-}
-
-Result<void> decode_rgba8(const std::uint8_t* original, const Geometry& g, const float* encoded_rgba,
-                          const float* neural_rgb, std::uint8_t* output)
-{
-    DLSSLOP_TRY(validate(g));
-    if (!original || !encoded_rgba || !neural_rgb) return fail("null decode image");
-    const auto encoded = [&](unsigned x, unsigned y) {
-        const float* p = encoded_rgba + (std::size_t(y) * g.width + x) * 4;
-        return Rgb{p[0], p[1], p[2]};
-    };
-    for (unsigned y = 0; y < g.source_height; ++y) {
-        for (unsigned x = 0; x < g.source_width; ++x) {
-            const std::size_t pixel = std::size_t(y) * g.source_width + x;
-            const Rgb source = decode(rgba8(original + pixel * 4));
-            const Rgb proxy = decode(sample_answer(encoded, g, x, y));
-            const Rgb sampled = answer(neural_rgb, g, x, y);
-            if (!finite(sampled)) return nonfinite_answer();
-            const Rgb neural = decode(sampled);
-            const Rgb upgraded = upgrade(source, proxy, neural);
-            const float oy = luminance(source), uy = luminance(upgraded);
-            const float ratio = oy == 0.0f ? 1.0f : std::clamp(uy / oy, 0.0f, 4.0f);
-            const Rgb result = lerp(source * ratio, upgraded, 1.0f);
-            output[pixel * 4] = unorm8(srgb_encode(result.r));
-            output[pixel * 4 + 1] = unorm8(srgb_encode(result.g));
-            output[pixel * 4 + 2] = unorm8(srgb_encode(result.b));
-            output[pixel * 4 + 3] = original[pixel * 4 + 3];
         }
     }
     return {};

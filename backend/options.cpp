@@ -16,9 +16,7 @@
 namespace dlsslop {
 const char* hip_only(const Options& o)
 {
-    // --cpu-compose sets cpu_codec too, so it goes first.
-    const std::pair<bool, const char*> options[] = {
-        {o.cpu_compose, "--cpu-compose"}, {o.cpu_codec, "--cpu-codec"}, {!o.trace_dir.empty(), "--trace-dir"}};
+    const std::pair<bool, const char*> options[] = {{o.cpu_codec, "--cpu-codec"}, {!o.trace_dir.empty(), "--trace-dir"}};
     for (const auto& [set, name] : options)
         if (set) return name;
     return nullptr;
@@ -102,10 +100,6 @@ const Spec kSpecs[] = {
         o.height = DLSSLOP_TRY(number(v, "height"));
         return {};
     }},
-    {"cpu-compose", 'c', Spec::kFlag, false, [](Options& o, const char*) -> Result<void> {
-        o.cpu_compose = o.cpu_codec = true;
-        return {};
-    }},
     {"cpu-codec", 'C', Spec::kFlag, false, [](Options& o, const char*) -> Result<void> { o.cpu_codec = true; return {}; }},
     {"performance", 'p', Spec::kFlag, true, [](Options& o, const char* v) -> Result<void> {
         o.performance = !std::strcmp(v, "true");
@@ -156,12 +150,12 @@ void usage(FILE* out)
         "  -b, --backend NAME      Where the network runs: vulkan, hip or auto\n"
         "                          Default: %s; auto takes Vulkan when its model is\n"
         "                          installed and a device supports it, else HIP.\n"
-        "                          Only HIP serves --cpu-compose, --cpu-codec and\n"
-        "                          --trace-dir: auto takes HIP for them, vulkan\n"
-        "                          refuses them. Vulkan evaluates NVIDIA's own\n"
-        "                          intensity, local tone, local structure, style,\n"
-        "                          skin structure and automatic mask controls and\n"
-        "                          sizes itself to each frame. Its SPIR-V is in\n"
+        "                          Only HIP serves --cpu-codec and --trace-dir:\n"
+        "                          auto takes HIP for them, vulkan refuses them.\n"
+        "                          Vulkan evaluates NVIDIA's own intensity, local\n"
+        "                          tone, local structure, style, skin structure and\n"
+        "                          automatic mask controls and sizes itself to each\n"
+        "                          frame. Its SPIR-V is in\n"
         "                          %s\n"
         "  -M, --vulkan-model FILE The Vulkan network's model (dlssnr.bin)\n"
         "                          Default: %s\n"
@@ -215,8 +209,6 @@ void usage(FILE* out)
         "                          Default: %u (unset); required with --input\n"
         "  -H, --height PIXELS     Offline image height (1..%u)\n"
         "                          Default: %u (unset); required with --input\n"
-        "  -c, --cpu-compose       Use CPU composition and codec (layer bypass)\n"
-        "                          Default: %s; Vulkan layer composes the result\n"
         "  -C, --cpu-codec         Slow CPU codec for numerical comparison\n"
         "                          Default: %s; use the GPU codec\n"
         "  -p, --performance       HIP: skip blocks 42,43,46, matching upstream preset\n"
@@ -248,7 +240,7 @@ void usage(FILE* out)
         kMaxPasses, kNativeDefaultPasses, dlsslop::VulkanNetwork::kMaxPasses, on_off(defaults.diagnose),
         on_off(defaults.self_test), defaults.self_test_runs, defaults.self_test_drops, kMaxW, defaults.width,
         kMaxH, defaults.height,
-        on_off(defaults.cpu_compose), on_off(defaults.cpu_codec), on_off(defaults.performance), on_off(defaults.once),
+        on_off(defaults.cpu_codec), on_off(defaults.performance), on_off(defaults.once),
         defaults.idle_exit, on_off(defaults.test_identity));
 }
 

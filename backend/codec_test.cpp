@@ -2,7 +2,6 @@
 #include "codec.hpp"
 #include "../tests/golden.hpp"
 
-#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -114,14 +113,6 @@ void test_input_contract_and_identity()
     std::vector<std::uint8_t> decoded(source.size());
     check(dlsslop::decode_neural_proxy(source.data(), g, false, neural.data(), decoded.data()), "decode_neural_proxy");
     require(decoded == source, "all 256 SDR codes + alpha must round-trip at native tier");
-    check(dlsslop::decode_rgba8(source.data(), g, encoded.data(), neural.data(), decoded.data()), "decode_rgba8");
-    unsigned worst = 0;
-    for (std::size_t i = 0; i < source.size(); ++i) {
-        worst = std::max(worst, unsigned(std::abs(int(source[i]) - int(decoded[i]))));
-        if (i % 4 == 3)
-            require(source[i] == decoded[i], "full compose changed alpha");
-    }
-    require(worst <= 1, "identity full composition changed image beyond one UNORM8 code");
 }
 
 void test_fit_and_output()
@@ -141,8 +132,6 @@ void test_fit_and_output()
     const std::vector<std::uint8_t> expected = {128, 64, 255, 37, 0xa5, 0xa5, 0xa5, 0xa5};
     check(dlsslop::decode_neural_proxy(source, g, false, neural.data(), output.data()), "decode_neural_proxy");
     require(output == expected, "constant fit decode");
-    check(dlsslop::decode_rgba8(source, g, encoded.data(), neural.data(), output.data()), "decode_rgba8");
-    require(output == expected, "constant full composition");
 
     const auto small = geometry(2, 2, 720);
     const std::uint8_t corners[] = {0, 0, 0, 0, 255, 0, 0, 255,
@@ -220,16 +209,14 @@ void test_area_downscale()
 }
 
 void expect_decode_rejection(const std::vector<std::uint8_t>& source, const dlsslop::Geometry& g,
-                             const std::vector<float>& encoded, const std::vector<float>& neural)
+                             const std::vector<float>& neural)
 {
     std::vector<std::uint8_t> output(source.size());
     require(rejected(dlsslop::decode_neural_proxy(source.data(), g, false, neural.data(), output.data())),
             "RGBA8 decode accepted a nonfinite/FP16-overflow neural sample");
-    require(rejected(dlsslop::decode_rgba8(source.data(), g, encoded.data(), neural.data(), output.data())),
-            "full composition accepted a nonfinite/FP16-overflow neural sample");
 }
 
-// Like the GPU codec, the CPU RGBA8 decodes reject an invalid neural sample
+// Like the GPU codec, the CPU RGBA8 decode rejects an invalid neural sample
 // instead of painting it and its zero-weight bilinear neighbours black.
 void test_decode_invalid_samples()
 {
@@ -244,10 +231,10 @@ void test_decode_invalid_samples()
                       -std::numeric_limits<float>::infinity(), 65520.0f, -65520.0f}) {
         std::vector<float> poisoned = neural;
         poisoned[texel] = bad;
-        expect_decode_rejection(source, g, encoded, poisoned);
+        expect_decode_rejection(source, g, poisoned);
         for (std::size_t q = 0; q < poisoned.size(); q += 3)
             poisoned[q] = bad;
-        expect_decode_rejection(source, g, encoded, poisoned);
+        expect_decode_rejection(source, g, poisoned);
     }
     std::vector<float> limit = neural;
     limit[texel] = 65519.0f;
@@ -512,6 +499,6 @@ int main()
     test_fp16_proxy();
     test_feedback_unorm8();
     test_goldens();
-    std::puts("codec: geometry, SDR/FP16 transport, reflection, round-trip, fitting, area-weighted downscale, composition, invalid-sample rejection, 8/16-bit multi-pass feedback and goldens passed");
+    std::puts("codec: geometry, SDR/FP16 transport, reflection, round-trip, fitting, area-weighted downscale, invalid-sample rejection, 8/16-bit multi-pass feedback and goldens passed");
     return EXIT_SUCCESS;
 }

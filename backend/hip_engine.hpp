@@ -42,7 +42,7 @@ class HipEngine : public EngineBase<HipEngine> {
     void* device_output_ = nullptr;
     void* device_scratch_ = nullptr; // Tuning or colour: the other stage output.
     void* answer_ = nullptr;         // The latest frame's final network answer.
-    std::vector<float> encoded_, neural_, feedback_;
+    std::vector<float> input_, neural_; // Host copies of a pass's input and answer.
     ProcessingSettings previous_settings_;
     bool warned_conditioning_ = false;
     // Stream events: frame start, uploaded, evaluated, answered. Timing never

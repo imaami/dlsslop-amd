@@ -32,11 +32,11 @@ void wake(std::atomic<uint32_t>& word)
 
 // The layer must know the real neural raster before building its proxy.
 // Otherwise it mistakes a worker-upscaled answer for native-resolution output
-// and skips its detail-preserving composition branch. CPU composition and
-// identity publish none: the mapping may retain a preceding neural worker's.
+// and skips its detail-preserving composition branch. The identity mode
+// publishes none: the mapping may retain a preceding neural worker's.
 void publish_raster(const Options& o, ShmHeader* h, unsigned tier)
 {
-    const bool neural = !o.cpu_compose && !o.test_identity;
+    const bool neural = !o.test_identity;
     h->nativeModelMaxWidth.store(neural ? ShmNativeTier(tier)->width : 0);
     h->nativeModelMaxHeight.store(neural ? tier : 0);
 }
@@ -236,8 +236,8 @@ Result<void> serve(const Options& o, Mapping& mapping, const TransportListener& 
     mapping.reason(ready);
     std::fprintf(stderr, "worker ready: %s%s\n", o.shm.c_str(), o.test_identity ? " [IDENTITY TEST]" : "");
     if (!o.test_identity)
-        std::fprintf(stderr, "neural tier=%u; %s; %s; live controls enabled\n", engine.tier(), engine.processing().c_str(),
-                     o.cpu_compose ? "CPU composition" : "native-resolution Vulkan composition");
+        std::fprintf(stderr, "neural tier=%u; %s; native-resolution Vulkan composition; live controls enabled\n",
+                     engine.tier(), engine.processing().c_str());
     std::unique_ptr<FrameTrace> pending_trace;
     uint64_t frames = 0;
     unsigned previous_passes = 0;
@@ -336,7 +336,7 @@ Result<void> run_worker(Options o)
     const unsigned tier = o.tier.value_or(ShmNativeTier(live) ? live : kNativeDefaultTier);
     h->nativeTier.store(tier);
     if (o.passes) h->passes.store(*o.passes);
-    h->compositionBypass.store(o.cpu_compose || o.test_identity ? 1 : 0);
+    h->compositionBypass.store(o.test_identity ? 1 : 0);
     publish_raster(o, h, tier);
     Heartbeat heartbeat(h);
     DLSSLOP_TRY(heartbeat.start());

@@ -46,11 +46,4 @@ Result<void> feedback_neural_rgb(const float* neural_rgb, const Geometry& g, std
 Result<void> decode_neural_proxy(const std::uint8_t* original, const Geometry& g, bool fp16,
                                  const float* neural_rgb, std::uint8_t* output);
 
-// Full upstream SDR composition, at full strength, for offline validation or
-// a layer bypass: linear-light Upgrade + Oklab hue correction + AP1 gamut
-// clamp and sRGB output. encoded_rgba is the RGBA8 encode_proxy result.
-// Neural samples are rejected as above. Input/output must not alias.
-Result<void> decode_rgba8(const std::uint8_t* original, const Geometry& g, const float* encoded_rgba,
-                          const float* neural_rgb, std::uint8_t* output);
-
 } // namespace dlsslop

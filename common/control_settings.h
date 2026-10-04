@@ -130,7 +130,7 @@ control_setting_fixed (struct control_setting const *s);
 
 /** @brief The bypass default of a channel's worker.
  *
- * A started worker that publishes no neural raster (--cpu-compose, --test-identity) returns final
+ * A started worker that publishes no neural raster (--test-identity) returns final
  * images. A never-started channel keeps the native-composition default.
  *
  * @param h The channel's header, or nullptr.

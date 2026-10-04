@@ -121,8 +121,8 @@ void help()
         "0) is sent, and before the daemon starts when FRAME is 0 or omitted. The\n"
         "daemon follows a tier only between requests, so for a --tier from a later\n"
         "frame the client waits until the daemon publishes the new neural raster\n"
-        "before it sends that frame; a daemon that publishes none (--test-identity,\n"
-        "--cpu-compose) is refused as a usage error.\n",
+        "before it sends that frame; a daemon that publishes none (--test-identity)\n"
+        "is refused as a usage error.\n",
         kMaxW, kMaxH, kFlat[0], kFlat[1], kFlat[2], kFlat[3], kDefaultFrames, kDefaultLog);
     for (const control_setting& s : CONTROL_SETTINGS)
         std::printf("      --%s [FRAME:]VALUE\n"

@@ -111,8 +111,8 @@ static_assert(kNativeTierMin == 720 && kNativeTierStep == 180 && kNativeTierCoun
 	  't', false, COMPOSITION, false, \
 	  "Classic ratio|Matched residual|Native frame + edit", 1) \
 	X("bypass", compositionBypass, 0, 1, \
-	  "0 compose the edit, 1 present the raw model result; default 1 with dlsslopd " \
-	  "--cpu-compose or --test-identity", \
+	  "0 compose the edit, 1 present the raw model result; " \
+	  "default 1 with dlsslopd --test-identity", \
 	  'b', false, COMPOSITION, false, nullptr, 1) \
 	X("ratio-smooth", ratioSmoothPercent, 0, 100, \
 	  "Neighbourhood contribution to relighting ratio (%)", \

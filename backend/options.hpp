@@ -19,7 +19,7 @@ struct Options {
     std::optional<unsigned> tier, passes;
     int device = -1;
     bool diagnose = false, test_identity = false, once = false, self_test = false;
-    bool cpu_compose = false, cpu_codec = false, performance = false;
+    bool cpu_codec = false, performance = false;
 };
 
 // The first option set that only the HIP network serves, or null: auto takes HIP

@@ -637,7 +637,7 @@ struct ShmHeader {
 	_Atomic(STD(uint32_t)) mvecPixelSize;
 
 	// Native worker capability, not a user scaling setting. Zero keeps the
-	// original transport extent (CPU composition and identity diagnostic modes).
+	// original transport extent (the identity diagnostic mode).
 	_Atomic(STD(uint32_t)) nativeModelMaxWidth;
 	_Atomic(STD(uint32_t)) nativeModelMaxHeight;
 	_Atomic(STD(uint32_t)) colorPreserveBits; //!< Native per-pass color anchoring, 0..1.

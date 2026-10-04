@@ -181,8 +181,6 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
     const uint8_t* const input = io.proxy;
     uint8_t* const output = io.answer;
     const auto g = DLSSLOP_TRY(geometry(w, h, tier_));
-    if (settings.fp16 && options_.cpu_compose)
-        return reject("FP16 proxy transport requires Vulkan composition; disable --cpu-compose");
     // Said once: the Vulkan model's conditioning, which this network does not have.
     if ((settings.style || !settings.auto_mask || settings.skin_structure != -1) &&
         !std::exchange(warned_conditioning_, true))
@@ -208,8 +206,8 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
             std::fflush(stdout);
         }
     } else {
-        DLSSLOP_TRY(encode_proxy(input, g, settings.fp16, encoded_));
-        DLSSLOP_TRY(api_.check(api_.hipMemcpy(device_input_, encoded_.data(), encoded_.size() * sizeof(float), 1),
+        DLSSLOP_TRY(encode_proxy(input, g, settings.fp16, input_));
+        DLSSLOP_TRY(api_.check(api_.hipMemcpy(device_input_, input_.data(), input_.size() * sizeof(float), 1),
                                "upload encoded frame"));
     }
     DLSSLOP_TRY(mark(1));
@@ -232,16 +230,15 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
             if (gpu_codec_) {
                 DLSSLOP_TRY(gpu_codec_->feedback(answer, pass_input, settings.precision16));
                 if (verify) {
-                    DLSSLOP_TRY(feedback_neural_rgb(neural_.data(), g, feedback_, settings.precision16));
+                    DLSSLOP_TRY(feedback_neural_rgb(neural_.data(), g, input_, settings.precision16));
                     DLSSLOP_TRY(selftest::compare(
-                        DLSSLOP_TRY(selftest::Buffer::read_pointer(api_, stream_, pass_input, feedback_.size())),
-                        feedback_, "GPU inter-pass feedback"));
+                        DLSSLOP_TRY(selftest::Buffer::read_pointer(api_, stream_, pass_input, input_.size())),
+                        input_, "GPU inter-pass feedback"));
                     std::printf("GPU feedback for pass %u/%u vs CPU reference: FP32 bit-identical\n", pass + 1, passes);
                 }
             } else {
-                // Retain the initial encoded_ for final CPU composition.
-                DLSSLOP_TRY(feedback_neural_rgb(neural_.data(), g, feedback_, settings.precision16));
-                DLSSLOP_TRY(api_.check(api_.hipMemcpy(pass_input, feedback_.data(), feedback_.size() * sizeof(float), 1),
+                DLSSLOP_TRY(feedback_neural_rgb(neural_.data(), g, input_, settings.precision16));
+                DLSSLOP_TRY(api_.check(api_.hipMemcpy(pass_input, input_.data(), input_.size() * sizeof(float), 1),
                                        "upload inter-pass feedback"));
             }
         }
@@ -295,10 +292,7 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
             std::fflush(stdout);
         }
     } else {
-        if (options_.cpu_compose)
-            DLSSLOP_TRY(decode_rgba8(input, g, encoded_.data(), neural_.data(), output));
-        else
-            DLSSLOP_TRY(decode_neural_proxy(input, g, settings.fp16, neural_.data(), output));
+        DLSSLOP_TRY(decode_neural_proxy(input, g, settings.fp16, neural_.data(), output));
         DLSSLOP_TRY(mark(3));
     }
     previous_settings_ = settings;
