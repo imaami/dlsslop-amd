@@ -1,9 +1,8 @@
 /** @file
  *
  * The layer's pure functions on the host: the settings snapshot a frame composes with, the model
- * raster, the composition's format table, the scaler names, the toggle key's names, and the log's
- * switches, lines and clock. The values are the C++ layer's, written out, so that a port has to
- * reproduce them.
+ * raster, the composition's format table, the toggle key's names, and the log's switches, lines and
+ * clock. The values are the C++ layer's, written out, so that a port has to reproduce them.
  */
 #include <dirent.h>
 #include <errno.h>
@@ -101,7 +100,6 @@ static struct word_field const WORDS[] = {
 	FIELD(reversible_mode, kReversibleKnee),
 	FIELD(apply_model, 1),
 	FIELD(hold_frame, 0),
-	FIELD(downscaler, SCALER_VK_LANCZOS3),
 	FIELD(composition_bypass, 0),
 };
 
@@ -408,7 +406,9 @@ static struct real_case const REAL_CASES[] = {
 	ROW(compareZoomBits, compare_zoom, 3.0f, 2.0f),
 	ROW(workingScaleBits, working_scale, 0.1f, 0.25f),
 	ROW(workingScaleBits, working_scale, 0.25f, 0.25f),
-	ROW(workingScaleBits, working_scale, 4.0f, 2.0f),
+	ROW(workingScaleBits, working_scale, 0.75f, 0.75f),
+	ROW(workingScaleBits, working_scale, 1.5f, 1.0f),
+	ROW(workingScaleBits, working_scale, 4.0f, 1.0f),
 };
 
 #undef ROW
@@ -498,10 +498,6 @@ check_read (void)
 		ROW(compareMode, 3, compare_mode, 0),
 		ROW(reversibleMode, kReversibleModeCount - 1, reversible_mode, kReversibleModeCount - 1),
 		ROW(reversibleMode, kReversibleModeCount, reversible_mode, kReversibleKnee),
-		ROW(scalingDownscaler, SCALER_VK_BICUBIC, downscaler, SCALER_VK_BICUBIC),
-		ROW(scalingDownscaler, SCALER_VK_MAGIC, downscaler, SCALER_VK_MAGIC),
-		ROW(scalingDownscaler, SCALER_VK_FSR1, downscaler, SCALER_VK_LANCZOS3),
-		ROW(scalingDownscaler, SCALER_VK_COUNT, downscaler, SCALER_VK_LANCZOS3),
 		ROW(controlSeq, 77, control_seq, 77),
 		ROW(tuningSeq, 78, tuning_seq, 78),
 		ROW(passes, 99, passes, 99),
@@ -588,18 +584,16 @@ check_model_extent (void)
 		{1001, 333, 0.5f, 0, 0, 501, 167},
 		{1280, 720, 0.75f, 0, 0, 960, 540},
 		{200, 100, 0.25f, 0, 0, 64, 64},
-		{1280, 720, 2.0f, 0, 0, 2560, 1440},
 		// Half a maximum, or a frame side of zero, is no maximum.
 		{1920, 1080, 0.5f, 960, 0, 960, 540},
 		{1920, 1080, 0.5f, 0, 540, 960, 540},
 		{0, 100, 1.0f, 960, 540, 0, 100},
-		// With one: the least of the working scale, 1 and each side's ratio to the maximum, and at
-		// least kMinW x kMinH. It never supersamples.
+		// With one: the least of the working scale and each side's ratio to the maximum, and at least
+		// kMinW x kMinH.
 		{1920, 1080, 1.0f, 960, 540, 960, 540},
 		{1920, 1080, 1.0f, 1280, 1280, 1280, 720},
 		{320, 192, 1.0f, 160, 96, 160, 96},
 		{640, 360, 1.0f, 1920, 1080, 640, 360},
-		{640, 360, 2.0f, 1920, 1080, 640, 360},
 		{1920, 1080, 0.25f, 3840, 2160, 480, 270},
 		{1001, 333, 0.5f, 3840, 2160, 501, 167},
 		{100, 80, 1.0f, 64, 64, 64, 64},
@@ -679,21 +673,6 @@ check_formats (void)
 			require(composition_colour_is_linear_hdr(format, modes[m].mode) == modes[m].linear,
 			        "composition_colour_is_linear_hdr(%d, %u)", (int)format, modes[m].mode);
 	}
-}
-
-/** @brief The downscalers' names. */
-static void
-check_scaler_names (void)
-{
-	static char const *const names[] = {"lanczos3", "bicubic", "catmull-rom", "lanczos2",
-	                                    "lanczos3", "kaiser2", "kaiser3", "magic"};
-	static_assert(sizeof names / sizeof *names == SCALER_VK_COUNT);
-	for (uint32_t filter = 0; filter != SCALER_VK_COUNT; ++filter)
-		require(!strcmp(scaler_vk_filter_name(filter), names[filter]), "scaler_vk_filter_name(%u)", filter);
-	uint32_t const outside[] = {SCALER_VK_COUNT, 100, UINT32_MAX};
-	for (uint32_t i = 0; i < sizeof outside / sizeof *outside; ++i)
-		require(!strcmp(scaler_vk_filter_name(outside[i]), "lanczos3"), "scaler_vk_filter_name(%u)",
-		        outside[i]);
 }
 
 /** @brief A key's name and its code. code stays 32 bits wide, as hotkey_key_name_from_code() takes
@@ -1445,9 +1424,8 @@ main (void)
 	check_read();
 	check_model_extent();
 	check_formats();
-	check_scaler_names();
 	check_key_names();
-	if (puts("layer-units-test: the log, settings, model extents, formats, scaler and key names hold") == EOF)
+	if (puts("layer-units-test: the log, settings, model extents, formats and key names hold") == EOF)
 		return 1;
 	return 0;
 }

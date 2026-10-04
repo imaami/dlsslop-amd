@@ -110,21 +110,21 @@ The smoke then stops the worker, and later kills one, and checks that presents
 neither publish to a stopped worker nor wait more than a moment for a killed
 one. Each mode destroys its devices and fails if the layer still holds a
 descriptor or mapping of the channel or its producer lock.
-The composition rebuild test changes the layer's model raster, colour domain
-and downscaler in place and fails when a dispatch binds a descriptor written for
-an image view that has since been destroyed. The smoke, this test and the HDR
+The composition rebuild test changes the layer's model raster and colour
+domain in place and fails when a dispatch binds a descriptor written for an
+image view that has since been destroyed. The smoke, this test and the HDR
 shader test prefer software Vulkan (Mesa lavapipe) and fall back to a hardware
 device; the latter two skip when no suitable device is available. Without
 Vulkan, the layer-units test checks the settings the layer composes a frame
 with: their defaults, values that are not finite or out of range, and the five
 environment overrides, each in a process of its own because the layer reads
 them once. It also checks the model raster over working scales and native
-maxima, the swapchain formats the composition takes, the names of the
-downscalers and of the toggle key, and the layer's log: the variables that
-switch it, its verbose and timing switches, the text of its lines, standard
-error when `DLSSNR_LOG` names no file that opens, lines from several threads,
-its clock, that executed programs do not inherit its file, that it closes the
-file it opened when the process exits, and that a child forked while a thread
+maxima, the swapchain formats the composition takes, the toggle key's
+names, and the layer's log: the variables that switch it, its verbose and
+timing switches, the text of its lines, standard error when `DLSSNR_LOG`
+names no file that opens, lines from several threads, its clock, that
+executed programs do not inherit its file, that it closes the file it
+opened when the process exits, and that a child forked while a thread
 writes a line can still exit. The hotkey test checks the toggle key's
 internals without a real keyboard: that finishing the hotkeys closes the
 keyboards they opened and nothing else, once, and unloads libX11 and libXi;
@@ -136,19 +136,18 @@ those files answer as keyboards, mice and power buttons do: only keyboards
 open, a live keyboard stays open, one that has gone closes, and one that
 appears later is logged. When Xvfb and libXtst are installed, the test starts
 Xvfb on a free display and checks that the XInput2 backend reads the key
-presses that XTEST sends. The shader-passes test builds the composition and
-scaling passes on a fake device. It checks that finishing a pass destroys what
-its build created, once, also when any step of the build fails and leaves its
-output undefined, and that empty passes and passes without a device own
-nothing. It checks that each pass runs the SPIR-V of its shader, which for an
-average is the one that its filter value selects, and the constant ring's
+presses that XTEST sends. The shader-passes test builds the composition pass on
+a fake device. It checks that finishing the pass destroys what its build
+created, once, also when any step of the build fails and leaves its output
+undefined, and that empty passes and passes without a device own nothing. It
+checks that the pass runs the SPIR-V of its shader, and the constant ring's
 stride. It checks that a dispatch writes its constants into its slot and every
 binding of the slot's set, dispatches the shader's groups and makes the
 placeholder only once, that the dispatch after a failed placeholder makes it
-again, and that the passes refuse dispatches that miss a command buffer or an
-image. The composition test builds the composition on a fake device in seven
-arrangements of its surfaces: 8-bit frames at, below and above the model's
-raster, linear frames with and without a float16 proxy, an exported transport
+again, and that the pass refuses dispatches that miss a command buffer or an
+image. The composition test builds the composition on a fake device in six
+arrangements of its surfaces: 8-bit frames at and above the model's raster,
+linear frames with and without a float16 proxy, an exported transport
 pair and the raw bypass. In each, it fails every fallible call in turn and
 checks that the composition then holds every object it made and no other,
 that the next frame builds again, that both legs record the dispatches and

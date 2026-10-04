@@ -34,7 +34,6 @@
 #include "../common/shm_protocol.h"
 #include "capture.h"
 #include "dlssnr_pass.h"
-#include "scaler_vk.h"
 #include "vk_table.h"
 
 /** @brief One frame's worth of settings, read from the shared header once so that a control changed
@@ -69,7 +68,7 @@ struct composition_frame_settings {
 	uint32_t white_point_source;      //!< enum WhitePointSource.
 	float    compare_split;           //!< Where the compare view splits, 0..1.
 	float    compare_zoom;            //!< The compare view's zoom, 1..2.
-	float    working_scale;           //!< The model's raster over the frame's, 0.25..2.
+	float    working_scale;           //!< The model's raster over the frame's, 0.25..1.
 	uint32_t native_model_max_width;  //!< The native model's widest raster, or 0.
 	uint32_t native_model_max_height; //!< The native model's tallest raster, or 0.
 	uint32_t transfer;                //!< The transfer mode, 0..2.
@@ -79,7 +78,6 @@ struct composition_frame_settings {
 	uint32_t reversible_mode;         //!< enum ReversibleMode.
 	uint32_t apply_model;             //!< Whether the model's answer is applied.
 	uint32_t hold_frame;              //!< Whether the frame is held.
-	uint32_t downscaler;              //!< enum scaler_vk_filter, never SCALER_VK_FSR1.
 	uint32_t composition_bypass;      //!< 1: the model's raw answer is the frame.
 	float    ghost_slack;             //!< The running pair's step toward a new answer.
 	float    edit_blur;               //!< The stale edit's split radius, in uv.
@@ -140,12 +138,6 @@ enum composition_flags : uint64_t {
  * member would leave. generation tells the surfaces' builds apart where their handles cannot: a
  * destroyed object's handle can come back for a new one.
  *
- * Supersampling: the model works above the frame, so the proxy is enlarged on the way in and the
- * answer averaged back on the way out. model_native holds that average; without it the resolve would
- * read the larger answer through a bilinear sampler and alias, which is the reason upstream gave this
- * its own filter rather than reusing the resolve's. model_native exists exactly while the model works
- * above the frame.
- *
  * The white point meter: a grid of tile peak luminances measured off the captured frame, and the
  * percentile taken across it -- on the GPU. The reduce pass keeps the percentile, the history and the
  * resolved value in a device-local state buffer; the resolve reads the resolved value through a
@@ -160,8 +152,6 @@ enum composition_flags : uint64_t {
  */
 struct composition {
 	struct dlss_nr_pass             pass;                    //!< The composition shader's pass.
-	struct scaler_vk                super_up;                //!< Supersampling's enlarge.
-	struct scaler_vk                super_down;              //!< Supersampling's average.
 	struct capture_writer           capture;                 //!< The matched frames being written.
 	struct capture_metadata         capture_metadata;        //!< What the manifest says about the frame.
 	struct composition_image        frame;                   //!< The swapchain image, copied.
@@ -169,7 +159,6 @@ struct composition {
 	struct composition_image        work;                    //!< What the model is handed, if not proxy.
 	struct composition_image        model;                   //!< The model's answer.
 	struct composition_image        composed;                //!< The resolve's result.
-	struct composition_image        model_native;            //!< The answer averaged back to the frame.
 	struct composition_image        meter;                   //!< The meter's grid of tile peaks.
 	struct composition_host_buffer  meter_mirror;            //!< The host's copy of the meter's state.
 	struct composition_host_buffer  download;                //!< The proxy, for the model.
@@ -197,7 +186,6 @@ struct composition {
 	VkFormat                        swapchain_format;        //!< The swapchain's format.
 	VkFormat                        work_format;             //!< Usually the swapchain's UNORM twin.
 	uint32_t                        hdr_transfer;            //!< 1: the swapchain carries PQ.
-	uint32_t                        scaler_filter;           //!< The supersampling's scaler_vk_filter.
 	float                           measured_white_point;    //!< What the meter settled on, or 0.
 	float                           held_white_point;        //!< The white point that a held frame keeps.
 	uint32_t                        export_family;           //!< The queue family that both legs run on.
@@ -339,7 +327,7 @@ composition_reason (struct composition const *c)
  * @param width  The frame's width.
  * @param height The frame's height.
  * @param s      The frame's settings.
- * @return       The model's extent.
+ * @return       The model's extent, at most the frame's for a frame of at least kMinW x kMinH.
  */
 extern VkExtent2D
 composition_model_extent (uint32_t                                 width,
@@ -362,9 +350,13 @@ composition_model_extent (uint32_t                                 width,
  * build for the other kind rebuilds every surface, keeping a held frame. Each build takes a generation
  * that no other build in the process had.
  *
+ * The frame is at least kMinW x kMinH, as the layer passes smaller swapchains through, so the model's
+ * raster, composition_model_extent(), is at most the frame's: the composition reduces the frame to
+ * it and never enlarges it.
+ *
  * @param c                The composition, or nullptr.
- * @param width            The frame's width.
- * @param height           The frame's height.
+ * @param width            The frame's width, at least kMinW.
+ * @param height           The frame's height, at least kMinH.
  * @param swapchain_format The swapchain's format.
  * @param s                The frame's settings.
  * @param linear_hdr       Whether the frame holds linear light.

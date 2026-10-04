@@ -56,7 +56,7 @@ reviews:
         otherwise or a significant performance gain; upstream names and
         contracts are preserved. Never suggest restyling upstream or
         vendored code.
-    - path: "{common/shm_protocol.{c,h},layer/{capture.{c,h},composition.{c,h},dlssnr_pass.{c,h},hotkey.{c,h},hotkey_priv.h,layer.c,log.{c,h},scaler_vk.{c,h},shader_vk.{c,h},shader_vk_priv.h,shmctl.c,vk_table.h,dlssnr/*.h}}"
+    - path: "{common/shm_protocol.{c,h},layer/{capture.{c,h},composition.{c,h},dlssnr_pass.{c,h},hotkey.{c,h},hotkey_priv.h,layer.c,log.{c,h},shader_vk.{c,h},shader_vk_priv.h,shmctl.c,vk_table.h,dlssnr/*.h}}"
       instructions: >-
         The C23 port of the layer's sources imported from dlsslop-amd's
         fork of the layer (PROVENANCE.md). AGENTS.md's C sections are
@@ -64,14 +64,13 @@ reviews:
         texts, environment variables, the loader's entry points,
         dlsslopctl's options and output and the channel header's names
         are contracts and keep their names.
-    - path: "{layer/dlssnr/*.comp,layer/scaling/**,layer/hlsl_ops.glsl}"
+    - path: "{layer/dlssnr/*.comp,layer/hlsl_ops.glsl}"
       instructions: >-
-        GLSL ports of the layer's composition HLSL and OptiScaler's
-        scaling HLSL. They reproduce the DXC-built originals' arithmetic,
-        including DXC's folded forms, documented beside each upstream
-        expression, except where a comment marks a fixed upstream bug;
-        upstream names and comments are kept. A change that alters
-        output must say so.
+        The GLSL port of the layer's composition HLSL. It reproduces
+        the DXC-built original's arithmetic, including DXC's folded
+        forms, documented beside each upstream expression, except where
+        a comment marks a fixed upstream bug; upstream names and
+        comments are kept. A change that alters output must say so.
     - path: "gui/**"
       instructions: >-
         Qt 6 Widgets controller; Qt stays at this boundary. The

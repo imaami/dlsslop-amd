@@ -9,8 +9,8 @@
  * carries over to the other. Where the class returned a bool or nothing, the port returns the VkResult
  * of the step that failed. A pass owns the objects whose handles are not null.
  *
- * A pass embeds struct shader_vk as its first member: struct dlss_nr_pass and struct scaler_vk. What
- * a pass builds itself with is in shader_vk_priv.h.
+ * A pass embeds struct shader_vk as its first member, as struct dlss_nr_pass does. What a pass
+ * builds itself with is in shader_vk_priv.h.
  */
 #ifndef DLSSLOP_AMD_LAYER_SHADER_VK_H_
 #define DLSSLOP_AMD_LAYER_SHADER_VK_H_

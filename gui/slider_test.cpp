@@ -142,7 +142,7 @@ void settingScales(Slider& slider)
     slider.resize(slider.width() + (4 - span % 4) % 4, slider.height());
     const auto& linear = setting("working-scale");
     QTest::mouseClick(&slider, Qt::LeftButton, Qt::NoModifier, slider.pointAt(2500));
-    require(slider.value() == 2500 && dlsslop_gui::sliderValue(linear, slider.value()) == 0.6875,
+    require(slider.value() == 2500 && dlsslop_gui::sliderValue(linear, slider.value()) == 0.4375,
             "linear setting click must preserve the selected fractional position");
     const auto& logarithmic = setting("white-point-scale");
     QTest::mouseClick(&slider, Qt::LeftButton, Qt::NoModifier, slider.pointAt(5000));

@@ -54,7 +54,7 @@ struct control_setting {
 
 /** @brief The number of CONTROL_SETTINGS, the rows of control_settings.c's table, which checks it. */
 enum : STD(uint32_t) {
-	CONTROL_SETTING_COUNT = 41,
+	CONTROL_SETTING_COUNT = 40,
 };
 
 /** @brief Every setting, in the order of their options and of the controller's cards.

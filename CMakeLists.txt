@@ -43,10 +43,10 @@ find_path(XINPUT_HEADERS X11/extensions/XInput2.h REQUIRED)
 find_program(GLSLANG_VALIDATOR glslangValidator REQUIRED)
 find_program(SPIRV_VAL spirv-val REQUIRED)
 set(SHADER_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
-# The composition and scaling shaders, ported to GLSL from the layer's and
-# OptiScaler's HLSL. Each module is the unsigned char array SYMBOL with the
-# entry point CSMain, as DXC wrote them for the layer: NAME.c below the shader
-# directory defines it for the layer's objects, and NAME.h declares it.
+# The composition shader, ported to GLSL from the layer's HLSL. A module is
+# the unsigned char array SYMBOL with the entry point CSMain, as DXC wrote it
+# for the layer: NAME.c below the shader directory defines it for the layer's
+# objects, and NAME.h declares it.
 # glslang's depfile names the .spv, so it is the first output: the Makefile
 # generator attaches the depfile to that one.
 function(add_layer_shader source name symbol)
@@ -61,11 +61,8 @@ function(add_layer_shader source name symbol)
     set(LAYER_SHADERS ${LAYER_SHADERS} ${output}.h PARENT_SCOPE)
     set(LAYER_SHADER_SOURCES ${LAYER_SHADER_SOURCES} ${output}.c PARENT_SCOPE)
 endfunction()
-file(MAKE_DIRECTORY ${SHADER_DIR}/dlssnr ${SHADER_DIR}/scaling)
+file(MAKE_DIRECTORY ${SHADER_DIR}/dlssnr)
 add_layer_shader(layer/dlssnr/dlssnr.comp dlssnr/DlssNr_Shader_Vk dlssnr_spv)
-foreach(name bcus bcds_bicubic bcds_catmull bcds_lanczos2 bcds_lanczos3 bcds_kaiser2 bcds_kaiser3 bcds_magc)
-    add_layer_shader(layer/scaling/${name}.comp scaling/${name}_Shader_Vk ${name}_spv)
-endforeach()
 # Project GLSL that a program embeds: SOURCE's SPIR-V for the target
 # environment ENV, validated, as the uint32_t array SYMBOL in HEADER below the
 # shader directory. No file of its own is loaded at run time. The header
@@ -111,7 +108,7 @@ target_link_libraries(dlsslop-common-c PUBLIC m)
 # Only layer.c differs between the layers; both and the layer tests link the
 # other translation units compiled once.
 add_library(dlsslop-layer-objects OBJECT layer/shader_vk.c layer/dlssnr_pass.c layer/composition.c
-    layer/capture.c layer/scaler_vk.c layer/hotkey.c layer/log.c layer/network_module.c
+    layer/capture.c layer/hotkey.c layer/log.c layer/network_module.c
     ${LAYER_SHADER_SOURCES})
 set_target_properties(dlsslop-layer-objects PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_dependencies(dlsslop-layer-objects layer-shaders)
@@ -327,8 +324,7 @@ if(BUILD_TESTING)
     target_include_directories(capture-writer-test SYSTEM PRIVATE third_party/stb)
     target_link_libraries(capture-writer-test PRIVATE dlsslop-layer-objects dlsslop-common-c test-support)
     add_test(NAME capture-writer COMMAND capture-writer-test)
-    # The layer's settings snapshot, model raster, format table, scaler names and key names, on
-    # the host.
+    # The layer's settings snapshot, model raster, format table and key names, on the host.
     add_executable(layer-units-test tests/layer_units_test.c)
     target_link_libraries(layer-units-test PRIVATE dlsslop-layer-objects dlsslop-common-c test-support)
     add_test(NAME layer-units COMMAND layer-units-test)
@@ -337,8 +333,8 @@ if(BUILD_TESTING)
     add_executable(hotkey-test tests/hotkey_test.c)
     target_link_libraries(hotkey-test PRIVATE dlsslop-layer-objects dlsslop-common-c)
     add_test(NAME hotkey COMMAND hotkey-test)
-    # The composition and scaling passes in C, on a fake device: what each build creates and each
-    # fini destroys, after a failure at any step too, and what a dispatch records.
+    # The composition pass in C, on a fake device: what its build creates and its fini destroys,
+    # after a failure at any step too, and what a dispatch records.
     add_executable(shader-passes-test tests/shader_passes_test.c)
     add_dependencies(shader-passes-test layer-shaders)
     target_include_directories(shader-passes-test PRIVATE ${SHADER_DIR})

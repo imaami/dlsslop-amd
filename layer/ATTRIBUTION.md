@@ -7,7 +7,7 @@ credited without attributing project work to them.
 ## Project provenance
 
 The base DLSS5VKLayer project is by [bmitch87](https://github.com/bmitch87). The Vulkan layer,
-shared-memory protocol, helper integration, GUI, capture and frame-hold path, scaling and meter
+shared-memory protocol, helper integration, GUI, capture and frame-hold path, meter
 implementation, motion-vector implementation, packaging, and subsequent HDR/zero-copy work are
 project-specific implementations. They must not be attributed wholesale to the upstream projects
 listed below. The git history identifies the project contributors, including bmitch87 and Thomas
@@ -17,7 +17,7 @@ Eric, for the respective changes.
 
 | Project | License | What is taken |
 |---|---|---|
-| [OptiScaler](https://github.com/cdozdil/OptiScaler) | GPL-3.0 | `Shader_Vk` and the output-scaling shader lineage. The Vulkan dispatch-table port and current layer integration are project work. |
+| [OptiScaler](https://github.com/cdozdil/OptiScaler) | GPL-3.0 | `Shader_Vk`. The Vulkan dispatch-table port and current layer integration are project work. |
 | [Dagherbou/OptiScaler_DLSSNR](https://github.com/Dagherbou/OptiScaler_DLSSNR) | GPL-3.0 | The original DLSS-NR shader/module snapshot, imported from commit `97376162`. The current shader is a project-maintained derivative; its later HDR, controls, and Vulkan integration are not Dagherbou's work. |
 | [RenoDX](https://github.com/clshortfuse/renodx) | MIT | The DLSS 5 colour-composition design reimplemented in `dlssnr.hlsl`; see below. |
 | [xenmods/DLSSNR-Cost-Scaler](https://github.com/xenmods/DLSSNR-Cost-Scaler) | MIT | The native + edit enlargement technique only. No code was copied. |

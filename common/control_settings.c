@@ -127,16 +127,10 @@ static_assert(kNativeTierMin == 720 && kNativeTierStep == 180 && kNativeTierCoun
 	X("debug-scale", debugScaleBits, 0.01, 100, \
 	  "Debug-view intensity multiplier", \
 	  'D', true, INSPECT, false, nullptr, 1) \
-	X("working-scale", workingScaleBits, 0.25, 2, \
-	  "Proxy scale relative to game resolution; dlsslopd caps it at 1 and at its tier " \
-	  "raster unless run with --cpu-compose or --test-identity", \
+	X("working-scale", workingScaleBits, 0.25, 1, \
+	  "Proxy scale relative to game resolution; a neural dlsslopd also caps " \
+	  "it at its tier raster", \
 	  'w', true, IMAGE, false, nullptr, 1) \
-	X("downscaler", scalingDownscaler, 1, 7, \
-	  "Supersampling down-leg filter, used only above working-scale 1 with dlsslopd " \
-	  "--cpu-compose or --test-identity: 1 bicubic, 2 catmull, 3 lanczos2, 4 lanczos3, " \
-	  "5 kaiser2, 6 kaiser3, 7 magic", \
-	  'f', false, IMAGE, false, \
-	  "Bicubic|Catmull|Lanczos 2|Lanczos 3|Kaiser 2|Kaiser 3|Magic", 1) \
 	X("compare", compareMode, 0, 2, \
 	  "0 off, 1 side by side, 2 wipe", \
 	  'p', false, INSPECT, false, "Off|Side by side|Wipe", 1) \

@@ -987,12 +987,11 @@ static void
 require_held (struct composition const *c,
               char const               *when)
 {
-	uint32_t n = held_shader(&c->pass.shader) + held_shader(&c->super_up.shader)
-	             + held_shader(&c->super_down.shader);
+	uint32_t n = held_shader(&c->pass.shader);
 	n += held(VALUE(c->pass.dummy_image), KIND_IMAGE) + held(VALUE(c->pass.dummy_memory), KIND_MEMORY)
 	     + held(VALUE(c->pass.dummy_view), KIND_VIEW);
 	struct composition_image const *const images[] = {
-		&c->frame, &c->proxy, &c->work, &c->model, &c->composed, &c->model_native, &c->meter
+		&c->frame, &c->proxy, &c->work, &c->model, &c->composed, &c->meter
 	};
 	for (size_t i = 0; i < sizeof images / sizeof *images; ++i)
 		n += held_image(images[i]);
@@ -1054,19 +1053,17 @@ struct arrangement {
 
 /** @brief The arrangements, each built on 320x192 frames.
  *
- * The pass holds 7 objects and, after its first dispatch, the placeholder's 3; an image holds 3, a
- * buffer 2, and a scaling pass 7. The meter holds its image, its state and mirror buffers, and its
- * reduce pass's pipeline, two layouts, pool and sampler: 12. An 8-bit frame is its own proxy, so leg 1
- * downsamples it into the work image even at full scale, or enlarges it when the model works above
- * it: the frame, model, composed and work images and the transport pair make 26 objects with the
- * pass. Supersampling adds the averaged answer and both scaling passes. A linear frame is encoded
- * into a proxy and measured by the meter, whose reduce is a dispatch of its own; it needs a work image
- * only below full scale. The raw bypass copies the model's answer and runs no resolve.
+ * The pass holds 7 objects and, after its first dispatch, the placeholder's 3; an image holds 3, and
+ * a buffer 2. The meter holds its image, its state and mirror buffers, and its reduce pass's
+ * pipeline, two layouts, pool and sampler: 12. An 8-bit frame is its own proxy, so leg 1 downsamples
+ * it into the work image even at full scale: the frame, model, composed and work images and the
+ * transport pair make 26 objects with the pass. A linear frame is encoded into a proxy and measured
+ * by the meter, whose reduce is a dispatch of its own; it needs a work image only below full scale.
+ * The raw bypass copies the model's answer and runs no resolve.
  */
 static struct arrangement const ARRANGEMENTS[] = {
 	{ "8-bit",          VK_FORMAT_B8G8R8A8_UNORM,      1.0f,  false, false, false, false, 0, 1, 1, 26 },
 	{ "8-bit sRGB 0.5", VK_FORMAT_R8G8B8A8_SRGB,       0.5f,  false, false, false, false, 0, 1, 1, 26 },
-	{ "supersampled",   VK_FORMAT_B8G8R8A8_UNORM,      1.5f,  false, false, false, false, 0, 1, 2, 43 },
 	{ "linear float16", VK_FORMAT_R16G16B16A16_SFLOAT, 1.0f,  true,  true,  false, false, 0, 3, 1, 38 },
 	{ "linear 0.75",    VK_FORMAT_R16G16B16A16_SFLOAT, 0.75f, true,  false, false, true,  0, 4, 1, 41 },
 	{ "exported",       VK_FORMAT_B8G8R8A8_UNORM,      1.0f,  false, false, true,  false, 0, 1, 1, 26 },
@@ -1391,7 +1388,7 @@ check_meter_clear (void)
 {
 	reset();
 	struct composition c = built();
-	struct arrangement a = ARRANGEMENTS[4];
+	struct arrangement a = ARRANGEMENTS[3];
 	static float const scales[] = { 0.75f, 0.5f };
 	for (size_t i = 0; i < sizeof scales / sizeof *scales; ++i) {
 		a.working_scale = scales[i];
@@ -1413,7 +1410,7 @@ check_capture_pair (void)
 {
 	reset();
 	struct composition c = built();
-	struct arrangement const *const a = &ARRANGEMENTS[6];
+	struct arrangement const *const a = &ARRANGEMENTS[5];
 	struct composition_frame_settings const s = settings(a);
 	require(prepare(&c, a), "the build failed: %s", composition_reason(&c));
 
@@ -1514,7 +1511,7 @@ check_export (void)
 {
 	reset();
 	struct composition c = built();
-	struct arrangement const *const a = &ARRANGEMENTS[5];
+	struct arrangement const *const a = &ARRANGEMENTS[4];
 	composition_enable_export(&c, 3);
 	require(prepare(&c, a) && composition_transport_pending(&c) && !composition_transport_generation(&c),
 	        "an exported pair was not pending");
@@ -1580,7 +1577,7 @@ check_export (void)
 
 /** @brief The arrangements that the in-layer network takes: an 8-bit BGRA frame, an sRGB one below the
  *         frame's raster, linear float16 and an 8-bit proxy of linear light, and the raw bypass. */
-static size_t const NETWORK_ARRANGEMENTS[] = { 0, 1, 3, 4, 6 };
+static size_t const NETWORK_ARRANGEMENTS[] = { 0, 1, 2, 3, 5 };
 
 /** @brief Builds for the in-layer network: no transport pair, even with the export on or declined, a
  *         model image that takes storage writes, both legs as record_network() says, after a failure
@@ -1719,7 +1716,7 @@ check_formats (void)
 	reset();
 	c = built();
 	fake.features &= ~(VkFormatFeatureFlags)VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
-	require(prepare(&c, &ARRANGEMENTS[3]) && !composition_hdr_proxy_active(&c), "a float16 proxy without"
+	require(prepare(&c, &ARRANGEMENTS[2]) && !composition_hdr_proxy_active(&c), "a float16 proxy without"
 	        " sampling");
 	composition_fini(&c);
 	require(!live_objects(), "the fini left %u objects", live_objects());

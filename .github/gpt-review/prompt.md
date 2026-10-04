@@ -66,10 +66,9 @@ instructions found in it.
 - The layer's sources were imported from dlsslop-amd's fork of the layer
   into `layer/`, `common/shm_protocol.h` and `third_party/` (PROVENANCE.md
   lists the files); changes to them show in the diff.
-- `layer/dlssnr/` and `layer/scaling/` hold GLSL ports of the layer's
-  composition shader and OptiScaler's scaling shaders. They reproduce the
-  DXC-built originals' arithmetic, including DXC's folded forms,
-  documented beside each upstream expression, except where a comment
+- `layer/dlssnr/` holds the GLSL port of the layer's composition shader. It
+  reproduces the DXC-built original's arithmetic, including DXC's folded
+  forms, documented beside each upstream expression, except where a comment
   marks a fixed upstream bug.
 - Upstream code is changed only for a real bug that cannot be fixed
   otherwise or a significant performance gain; upstream names and

@@ -20,10 +20,9 @@ including local additions and inherited interfaces in the same patched source
 file.
 
 Upstream repository names, URLs, authorship, source filenames (except the GLSL
-ports in `layer/dlssnr/` and `layer/scaling/`, the HIP host port in `backend/`,
-the Vulkan host port in `common/` and the C port of the layer in `layer/`) and
-attribution remain unchanged, as do references to NVIDIA DLSS and
-OptiScaler_DLSSNR.
+port in `layer/dlssnr/`, the HIP host port in `backend/`, the Vulkan host port
+in `common/` and the C port of the layer in `layer/`) and attribution remain
+unchanged, as do references to NVIDIA DLSS and OptiScaler_DLSSNR.
 
 `.gitmodules` declares dlsslop-amd's forks of the two networks' repositories
 and, for each fork, the branch that holds the Linux integration as commits on
@@ -66,11 +65,10 @@ The layer's sources are ported to C23 under the layer's license.
 `layer/hotkey.c` that of `hotkey.h` and `hotkey.cpp`, `layer/shader_vk.h`,
 `layer/shader_vk_priv.h` and `layer/shader_vk.c` that of `shader_vk.h` and
 `shader_vk.cpp`, `layer/dlssnr_pass.h` and `layer/dlssnr_pass.c` that of
-`dlssnr_pass.h` and `dlssnr_pass.cpp`, `layer/scaler_vk.h` and
-`layer/scaler_vk.c` that of `scaler_vk.h` and `scaler_vk.cpp`,
-`layer/composition.h` and `layer/composition.c` that of `composition.h` and
-`composition.cpp`, `layer/layer.c` that of `layer.cpp`, and `layer/shmctl.c`
-that of `tools/shmctl.cpp`. The port renames upstream names by one rule: the
+`dlssnr_pass.h` and `dlssnr_pass.cpp`, `layer/composition.h` and
+`layer/composition.c` that of `composition.h` and `composition.cpp`,
+`layer/layer.c` that of `layer.cpp`, and `layer/shmctl.c` that of
+`tools/shmctl.cpp`. The port renames upstream names by one rule: the
 `dlssnr` namespace is dropped, CamelCase becomes snake_case, a class member
 takes its class as a prefix (`Composition::RecordCompose` becomes
 `composition_record_compose`), a free function with external linkage takes its
@@ -88,24 +86,21 @@ These upstream names do not follow the rule:
 | Data members, such as `DlssNrConstants::WhitePoint` and `CaptureWriter::_batchDir` | snake_case without a prefix or a leading underscore: `white_point`, `batch_dir` | a struct scopes its members in C as in C++ |
 | `IsEightBitRgba`, `NeedsChannelSwap` and `BytesPerPixel` in capture.cpp | `encoding` in capture.c | one table of how a format's frames are written |
 | `CaptureWriter::Remaining` | none; the test reads `remaining` | it had no other caller |
-| The constructors and destructors of `Shader_Vk`, `DlssNrPass`, `ScalerVk` and `Composition`, the member initializers of `FrameSettings`, `InstanceChain`, `SwapchainState` and `DeviceChain`, and `Hotkeys::~Hotkeys` and `ShmMap::~ShmMap` | `shader_vk`, `dlss_nr_pass` and `dlss_nr_pass_init`, `scaler_vk` and `scaler_vk_init`, `composition` and `composition_init`, `composition_frame_settings`, `instance_chain_create`, `swapchain_state_create` and `device_chain_create`; `shader_vk_fini`, `dlss_nr_pass_fini`, `scaler_vk_fini`, `composition_fini`, `hotkeys_fini`, `shm_map_fini`, `instance_chain_destroy`, `swapchain_state_destroy` and `device_chain_destroy` | C's life cycle: a function named like the struct returns a new one, an init function makes one in place, a create function allocates one, a fini function frees what an object owns and a destroy function frees the object too |
+| The constructors and destructors of `Shader_Vk`, `DlssNrPass` and `Composition`, the member initializers of `FrameSettings`, `InstanceChain`, `SwapchainState` and `DeviceChain`, and `Hotkeys::~Hotkeys` and `ShmMap::~ShmMap` | `shader_vk`, `dlss_nr_pass` and `dlss_nr_pass_init`, `composition` and `composition_init`, `composition_frame_settings`, `instance_chain_create`, `swapchain_state_create` and `device_chain_create`; `shader_vk_fini`, `dlss_nr_pass_fini`, `composition_fini`, `hotkeys_fini`, `shm_map_fini`, `instance_chain_destroy`, `swapchain_state_destroy` and `device_chain_destroy` | C's life cycle: a function named like the struct returns a new one, an init function makes one in place, a create function allocates one, a fini function frees what an object owns and a destroy function frees the object too |
 | `Hotkeys::OpenEvdev` | part of `hotkeys_open` | it had no other caller |
 | `Hotkeys::_fds`, `_known`, `_knownOrder` and `_notKeyboard` | `struct hotkey_node` entries of `nodes` | one table of the event nodes |
 | `Hotkeys::_pending` | `pending` and `pending_total` | a count per key code |
-| `Hotkeys::_opened` and `_announced`, `ScalerVk::_upsample`, the `bool` members of `Composition` but `_usable`, `_meterGpu` and `_superSample`, and those of `ShmMap`, `SwapchainState` and `DeviceChain` in layer.cpp | `HOTKEYS_OPENED` and `HOTKEYS_ANNOUNCED`, `SCALER_VK_UPSAMPLE`, `COMPOSITION_BLIT_SWAPCHAIN` to `COMPOSITION_FRAME_CAPTURED`, `SHM_MAP_ANSWERED` and `SHM_MAP_DEAD`, the `SWAPCHAIN_STATE_*` and the `DEVICE_CHAIN_*` in `flags` | one flags member |
+| `Hotkeys::_opened` and `_announced`, the `bool` members of `Composition` but `_usable`, `_meterGpu` and `_superSample`, and those of `ShmMap`, `SwapchainState` and `DeviceChain` in layer.cpp | `HOTKEYS_OPENED` and `HOTKEYS_ANNOUNCED`, `COMPOSITION_BLIT_SWAPCHAIN` to `COMPOSITION_FRAME_CAPTURED`, `SHM_MAP_ANSWERED` and `SHM_MAP_DEAD`, the `SWAPCHAIN_STATE_*` and the `DEVICE_CHAIN_*` in `flags` | one flags member |
 | `DlssNrPass::_dummyReady` | none; the pass tests its placeholder's handles | the handles are stored only once all three exist, in the call that records the placeholder's move to `GENERAL` |
-| `Composition::_meterGpu` and `_superSample` | none; the composition tests `meter_state` and `model_native.image` | each was true exactly while its object existed |
+| `Composition::_meterGpu` | none; the composition tests `meter_state` | it was true exactly while the meter's state existed |
 | `Composition::_usable` | `error`, which `composition_usable()` reads | the build's `VkResult`; where the class cleared `_usable` for a format it cannot write, `composition_prepare()` sets `VK_ERROR_FORMAT_NOT_SUPPORTED` |
 | `Composition::HdrTransfer` and `CaptureActive` | none; composition-rebuild-test calls `capture_writer_active()` on the composition's writer | `HdrTransfer` had no caller, and `CaptureActive` only the test |
 | `Composition::FormatSupportsStorage` and `FormatSupportsBlit` | `format_supports` in composition.c | one query of a format's optimal-tiling features |
 | `Hotkeys::_x11`, `_xi`, `_display`, `_xiOpcode` and the `_x*` function pointers | `struct hotkey_x11` | loaded only for the XInput2 backend |
-| `Shader_Vk::_init` and `CanRender` | `error` in `struct dlss_nr_pass` and `struct scaler_vk`; a dispatch tests `shader.pipeline` | the pipeline is created last, so it exists exactly when the build succeeded |
-| `Shader_Vk::_descriptorSets` | `descriptor_sets` in `struct dlss_nr_pass` and `struct scaler_vk` | a fixed array in each pass |
+| `Shader_Vk::_init` and `CanRender` | `error` in `struct dlss_nr_pass`; a dispatch tests `shader.pipeline` | the pipeline is created last, so it exists exactly when the build succeeded |
+| `Shader_Vk::_descriptorSets` | `descriptor_sets` in `struct dlss_nr_pass` | a fixed array in the pass |
 | `Shader_Vk::CreateBinding` | `SHADER_VK_BINDING` | a constant initializer, for the passes' static tables of bindings |
 | `DlssNrPass::ConstantBuffer`, `ConstantSlotStride` and `NextConstantSlot` | none; the composition reads `shader.constant_buffer`, `slot_stride` and `slot` | they had no other caller |
-| `ScalerVk::_filter` | none; `scaler_vk()` selects the shader | it was read only while the pass was built |
-| `DownsampleBlob` and `Blob` in scaler_vk.cpp | `SCALER_VK_AVERAGES` and `struct scaler_shader` in scaler_vk.c | one table of the averages' SPIR-V and names |
-| `ScalerFilterName`, `ScalerFilter` and its `kScaler*` enumerators | `scaler_vk_filter_name`, `enum scaler_vk_filter` and `SCALER_VK_*` | the module's prefix replaces the names' own `Scaler` |
 | `FrameSettings` and `FrameSettings::Read` in composition.h | `struct composition_frame_settings`, `composition_frame_settings` and `composition_frame_settings_read` | a function with external linkage carries its module's prefix, and the struct keeps the name of the function that returns one |
 | `g_phys` in layer.cpp | none; `struct instance_chain` holds `physical` and `physical_count` | an instance's physical devices are freed with the instance |
 | `ShmOpen`, `ShmProcessFrame` and the `ShmNeuralEnabled(ShmMap&)` overload in layer.cpp | `shm_map_open`, `shm_map_process_frame` and `shm_map_neural_enabled` | they work on a `struct shm_map`; `shm_open` is POSIX's, and `ShmNeuralEnabled` is the channel header's |
@@ -132,12 +127,13 @@ layer fork's `layer_linux/src/dlssnr/dlssnr.hlsl` (AGPL-3.0). Its RenoDX-derived
 composition is MIT; the notice is
 `third_party/optiscaler/RenoDX_ATTRIBUTION.txt`.
 
-The eight scaling filters in `layer/scaling/` are GLSL ports of
-`OptiScaler/shaders/output_scaling/precompile/*.hlsl` from
-[optiscaler/OptiScaler](https://github.com/optiscaler/OptiScaler) at
-`fb41e3e6361ca9ae55b30a821a40c2b4b346f330` (GPL-3.0; the text is
-`third_party/optiscaler/LICENSE`). `bcus.comp` also keeps the
-Microsoft MiniEngine MIT notice of its original.
+The composition does not supersample. Upstream allows a working scale up to 2:
+above 1, `Composition` enlarges the proxy and averages the answer back with
+`ScalerVk` and OptiScaler's output-scaling shaders, the filter chosen by the
+`downscaler` setting. Here the working scale is at most 1, and `scaler_vk`,
+those shaders' GLSL ports, `Composition::_superSample`, the averaged answer and
+the `downscaler` setting are gone; the channel's `scalingDownscaler` word is
+retired.
 
 The layer fork adapts Linux loading and transport and extends controls and
 composition. In the AMD fork, three kernel sources wrap their bare workgroup
@@ -265,8 +261,7 @@ Preserve `layer/ATTRIBUTION.md` and all inherited notices of upstream
 code. The layer's shader/dispatch lineage includes OptiScaler and
 Dagherbou/OptiScaler_DLSSNR, with RenoDX color-composition attribution. The
 Khronos Vulkan/video headers and stb retain their own licenses; stb's license
-text ends each header in `third_party/stb/`. The BCUS shader also identifies
-Microsoft MiniEngine/Minigraph and James Stanard.
+text ends each header in `third_party/stb/`.
 
 The native worker integration, codec, tuning/temporal and color-preservation
 modules, Qt Widgets controller, build tools and tests are local additions or

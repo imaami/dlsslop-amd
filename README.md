@@ -30,8 +30,8 @@ daemon runs the network on a proxy of the game frame, on a Vulkan device of its
 own or, as the alternative, with HIP; the Vulkan layer composes the neural edit
 at the original resolution. Experimentally, the layer runs the Vulkan network
 itself, on the game's own device (`dlsslop-run --layer-network`). The
-standalone Qt 6 Widgets controller exposes all 41 settings. Worker, layer, CLI
-and GUI use shared-memory protocol **28**.
+standalone Qt 6 Widgets controller exposes all 40 settings. Worker, layer, CLI
+and GUI use shared-memory protocol **30**.
 
 This repository contains source and build tools. **No compiled binaries
 or model weights are included.** See [VALIDATION.md](VALIDATION.md) for automated
@@ -95,12 +95,12 @@ cmake --build build --parallel 2
 ctest --test-dir build --output-on-failure
 ```
 
-This compiles and validates ten Vulkan shaders, compiles the Vulkan network's
+This compiles and validates four Vulkan shaders, compiles the Vulkan network's
 SPIR-V with `glslang` and the `gfx1201` HIP modules (the HIP network's and
 `linux_native`, its codec, tuning, color and motion kernels), and builds the
 daemon, layer, CLI, Qt GUI and tests.
 CMake compiles the layer's shaders, the composition shader in `layer/dlssnr/`
-and the scaling filters in `layer/scaling/`, with glslang.
+and the meter's `layer/meter_reduce.comp`, with glslang.
 Compilation does not require a GPU, ROCm runtime or model weights. Qt uses the
 distribution's shared Qt 6 libraries; the worker and layer have no Qt dependency.
 For an independent GUI build, see [gui/README.md](gui/README.md).

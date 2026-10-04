@@ -1,9 +1,9 @@
 /** @file
  *
- * What the layer asks of a device, on the host: the shaders' storage images, which must be formatless
- * and only written, and the device features that the layer enables for them and for the in-layer
- * network, in the game's chain or in private copies of it; the network's requirements of a device
- * that stubs answer for; and DLSSLOP_LAYER_NETWORK.
+ * What the layer asks of a device, on the host: the composition shader's storage images, which must
+ * be formatless and only written, and the device features that the layer enables for them and for
+ * the in-layer network, in the game's chain or in private copies of it; the network's requirements
+ * of a device that stubs answer for; and DLSSLOP_LAYER_NETWORK.
  */
 #include <stdarg.h>
 #include <stddef.h>
@@ -16,14 +16,6 @@
 
 // The SPIR-V that the layer loads.
 #include "dlssnr/DlssNr_Shader_Vk.h"
-#include "scaling/bcds_bicubic_Shader_Vk.h"
-#include "scaling/bcds_catmull_Shader_Vk.h"
-#include "scaling/bcds_kaiser2_Shader_Vk.h"
-#include "scaling/bcds_kaiser3_Shader_Vk.h"
-#include "scaling/bcds_lanczos2_Shader_Vk.h"
-#include "scaling/bcds_lanczos3_Shader_Vk.h"
-#include "scaling/bcds_magc_Shader_Vk.h"
-#include "scaling/bcus_Shader_Vk.h"
 
 /** @brief Ends the test with a message unless a condition holds. */
 [[gnu::format(printf, 2, 3)]]
@@ -784,14 +776,6 @@ main (void)
 	network_availability();
 #define SHADER(name) shader(name##_spv, sizeof name##_spv, #name)
 	SHADER(dlssnr);
-	SHADER(bcus);
-	SHADER(bcds_bicubic);
-	SHADER(bcds_catmull);
-	SHADER(bcds_lanczos2);
-	SHADER(bcds_lanczos3);
-	SHADER(bcds_kaiser2);
-	SHADER(bcds_kaiser3);
-	SHADER(bcds_magc);
 #undef SHADER
 	return 0;
 }

@@ -254,9 +254,8 @@ destroy_view (VkDevice                     device,
 	tracker.destroy_view(device, view, allocator);
 }
 
-/** @brief The scalers and the meter re-create their descriptor pools on every rebuild, so a new set
- *         can reuse a freed one's handle value. It starts with nothing written, whatever its
- *         predecessor held.
+/** @brief The meter re-creates its descriptor pool on every rebuild, so a new set can reuse a freed
+ *         one's handle value. It starts with nothing written, whatever its predecessor held.
  */
 static VKAPI_ATTR VkResult VKAPI_CALL
 allocate (VkDevice                           device,
@@ -580,13 +579,12 @@ context_submit (struct context *c)
 	vk_check(vkQueueWaitIdle(c->queue), "wait for queue");
 }
 
-/** @brief A step of the rebuilds: the model raster, the colour domain and the downscaler.
- *         linear_hdr is 32 bits wide, as the downscaler is, so that no padding follows it.
+/** @brief A step of the rebuilds: the model raster and the colour domain. linear_hdr is 32 bits
+ *         wide, as the working scale is, so that no padding follows it.
  */
 struct step {
 	float    working_scale; //!< The working scale.
 	uint32_t linear_hdr;    //!< Whether the frame holds linear light.
-	uint32_t downscaler;    //!< The downscaler.
 };
 
 /** @brief One presented frame: leg 1, the identity answer, then leg 2 with device-memory allocations
@@ -674,23 +672,17 @@ main (void)
 	require(composition_init(&composition, &context.device_table, &context.instance_table, context.device,
 	                         context.physical) == VK_SUCCESS,
 	        "%s", composition_reason(&composition));
-	// Every step changes the model raster, the colour domain or the downscaler, so
-	// composition_prepare() destroys and recreates the composition surfaces while the pass and its
-	// sets live on.
+	// Every step changes the model raster or the colour domain, so composition_prepare() destroys
+	// and recreates the composition surfaces while the pass and its sets live on.
 	static struct step const steps[] = {
-		{1.0f, false, SCALER_VK_LANCZOS3}, {0.5f, false, SCALER_VK_LANCZOS3},
-		{1.0f, false, SCALER_VK_LANCZOS3}, {0.5f, false, SCALER_VK_LANCZOS3},
-		{0.75f, false, SCALER_VK_LANCZOS3}, {1.5f, false, SCALER_VK_LANCZOS3},
-		{1.5f, false, SCALER_VK_CATMULL_ROM}, {1.0f, true, SCALER_VK_LANCZOS3},
-		{0.5f, true, SCALER_VK_LANCZOS3}, {1.0f, false, SCALER_VK_LANCZOS3},
-		{0.5f, false, SCALER_VK_LANCZOS3}, {0.75f, false, SCALER_VK_LANCZOS3},
+		{1.0f, false}, {0.5f, false}, {1.0f, false}, {0.5f, false}, {0.75f, false}, {0.25f, false},
+		{0.625f, false}, {1.0f, true}, {0.5f, true}, {1.0f, false}, {0.5f, false}, {0.75f, false},
 	};
 	uint32_t const step_count = sizeof steps / sizeof *steps;
 	uint32_t composed = 0;
 	for (uint32_t i = 0; i < step_count; ++i) {
 		struct composition_frame_settings settings = composition_frame_settings();
 		settings.working_scale = steps[i].working_scale;
-		settings.downscaler = steps[i].downscaler;
 		for (uint32_t frame = 0; frame < 3; ++frame)
 			composed += compose_frame(&context, &composition, &settings, width, height, format,
 			                          steps[i].linear_hdr, false);

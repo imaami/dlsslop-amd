@@ -2,8 +2,8 @@
 
 `dlsslopctl --help` is the canonical option, range and default reference.
 `--settings` prints current values alongside reset defaults. Omitted options leave
-current settings unchanged. There are 40 settings: 39 of the 41 inherited controls
-and native per-pass color preservation, all mapped below.
+current settings unchanged. There are 40 settings: 38 of the 41 inherited controls,
+native per-pass color preservation and the native tier, all mapped below.
 
 “Native equivalent” means an implemented AMD-side operation, not an implementation
 of NVIDIA's proprietary parameter mapping. “Fixed” means neither network supports
@@ -42,8 +42,8 @@ channel. The HIP network ignores the Vulkan-only settings and says so once.
 | `whitepointscale` | `-G`, `--white-point-scale` | Multiplies the selected manual or measured white point. |
 | `whitepointsource` | `-O`, `--white-point-source` | Selects manual white point or GPU frame measurement. |
 | `whitepointtrim` | `-I`, `--white-point-trim` | Adjusts measured white point only. |
-| `workingscale` | `-w`, `--working-scale` | Sets proxy scale; `dlsslopd` caps it at 1 and at its tier raster unless run with `--cpu-compose` or `--test-identity`. |
-| `downscaler` | `-f`, `--downscaler` | Selects the down-leg filter when the model raster exceeds display size, which only `--working-scale` above 1 with `dlsslopd --cpu-compose` or `--test-identity` produces. |
+| `workingscale` | `-w`, `--working-scale` | Sets proxy scale, 0.25..1; a neural `dlsslopd` also caps it at its tier raster. Upstream's scales above 1, which supersample, are not offered. |
+| `downscaler` | None | **Not applicable:** the model never works above the frame's raster, so no down-leg filter runs. |
 | `compare` | `-p`, `--compare` | Enables side-by-side or wipe comparison. |
 | `comparesplit` | `-x`, `--compare-split` | Sets the comparison divider. |
 | `comparezoom` | `-z`, `--compare-zoom` | Sets side-by-side magnification. |
@@ -53,6 +53,7 @@ channel. The HIP network ignores the Vulkan-only settings and says so once.
 | `applymodel` | `-m`, `--apply-model` | Shows the clean frame or applies the computed edit; inference still runs. |
 | `hold` | `-H`, `--hold` | Freezes captured input while allowing settings to rerun processing. |
 | `togglekey` | `-k`, `--toggle-key` | Selects the Linux input key watched by the layer. |
+| None | `-T`, `--tier` | Selects the neural raster height, 720, 900 or 1080; a change rebuilds the network between frames. |
 | None | `-L`, `--color-preserve` | Anchors each pass's broad chroma changes to the original input before feedback, and on HIP before history too; see [COLOR-PRESERVATION.md](COLOR-PRESERVATION.md). |
 
 The native residual controls operate after **each** evaluation and before its

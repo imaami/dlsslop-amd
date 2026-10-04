@@ -75,8 +75,9 @@ enum : STD(uint32_t) {
 	 * v27: offers carry their buffers' sizes.
 	 * v28: offers name the exporting device and driver.
 	 * v29: each frame count is one 64-bit atomic, and layerFrames moved to the end.
+	 * v30: the working scale is at most 1, and scalingDownscaler is retired.
 	 */
-	kShmVersion = 29,
+	kShmVersion = 30,
 };
 
 /** @brief The frames that the channel carries. */
@@ -210,27 +211,6 @@ enum ReversibleMode : STD(uint32_t) {
 	kReversibleHybrid = 3,
 	kReversibleHybridReplace = 4,
 	kReversibleModeCount = 5,
-};
-
-/** @brief The filter that brings the model's answer back down when it ran above native resolution.
- *
- * Only consulted when the working scale is above 1.0.
- *
- * These are OptiScaler's own Scaler numbers, kept identical so a value copied from an OptiScaler
- * profile means the same thing here. FSR1 keeps slot 0 for that reason even though this pass cannot
- * use it -- it wants a different constant block, and it is an upscaler rather than the averaging
- * filter the down-leg needs. A header asking for it falls back to Lanczos3.
- */
-enum Downscaler : STD(uint32_t) {
-	kDownscaleFsr1 = 0,  //!< unsupported here; reserved so the numbering matches upstream
-	kDownscaleBicubic = 1,
-	kDownscaleCatmullRom = 2,
-	kDownscaleLanczos2 = 3,
-	kDownscaleLanczos3 = 4,  //!< upstream's default: the sharp one
-	kDownscaleKaiser2 = 5,
-	kDownscaleKaiser3 = 6,
-	kDownscaleMagic = 7,
-	kDownscalerCount = 8,
 };
 
 /** @brief What the helper has managed to do, for the GUI and for the layer's fail-open decision.
@@ -467,13 +447,13 @@ struct ShmHeader {
 	_Atomic(STD(uint32_t)) whitePointScaleBits;
 	_Atomic(STD(uint32_t)) whitePointSource;
 	_Atomic(STD(uint32_t)) whitePointTrimBits;
-	// What fraction of the frame's resolution the model works at. The frame itself is never reduced:
-	// only the model's contribution is computed at this scale and resized, so the picture underneath
-	// is untouched whatever this is.
+	// What fraction of the frame's resolution the model works at, 0.25..1. The frame itself is never
+	// reduced: only the model's contribution is computed at this scale and resized, so the picture
+	// underneath is untouched whatever this is.
 	//
-	// Above 1.0 is supersampling -- the model runs above native and its answer is brought back down
-	// by scalingDownscaler. Upstream allows up to 2.0. Below 1.0 it also cuts what crosses the shared
-	// memory, quadratically, which on this transport matters more than it does upstream.
+	// Below 1.0 it also cuts what crosses the shared memory, quadratically, which on this transport
+	// matters more than it does upstream. Upstream goes up to 2.0, where the model supersamples; the
+	// layer stops at 1.0.
 	_Atomic(STD(uint32_t)) workingScaleBits;
 	// 0 off, 1 side by side, 2 a wipe.
 	_Atomic(STD(uint32_t)) compareMode;
@@ -511,7 +491,8 @@ struct ShmHeader {
 	// alive somewhere it would not otherwise be.
 	_Atomic(STD(uint32_t)) holdFrame;
 
-	// The filter for the supersampling down-leg. See Downscaler; only read when workingScale > 1.
+	// Protocols up to 29 kept the supersampling's down-leg filter here, which only a working scale
+	// above 1 read. Unused since, the slot keeps the fields after it where they were.
 	_Atomic(STD(uint32_t)) scalingDownscaler;
 
 	// --- status, written by the helper --------------------------------------------------------

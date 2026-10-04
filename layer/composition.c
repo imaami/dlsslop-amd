@@ -177,25 +177,6 @@ static struct frame_override const FRAME_OVERRIDES[] = {
 
 #undef FRAME_OVERRIDE
 
-// The header's scalingDownscaler becomes the scaler's filter, so the two numberings have to agree.
-// They are separate types because the layer should not have to include the shared header to name a
-// filter -- but a mismatch between them was a real bug: the default came out as Catmull-Rom because
-// the protocol's older, narrower numbering put Lanczos3 at 2. Unary plus compares the numbers rather
-// than two enumerations.
-#define SAME_DOWNSCALER(scaler, protocol) \
-	static_assert(+SCALER_VK_##scaler == +kDownscale##protocol, "the protocol's Downscaler numbering " \
-	              "must match the scaler's")
-SAME_DOWNSCALER(FSR1, Fsr1);
-SAME_DOWNSCALER(BICUBIC, Bicubic);
-SAME_DOWNSCALER(CATMULL_ROM, CatmullRom);
-SAME_DOWNSCALER(LANCZOS2, Lanczos2);
-SAME_DOWNSCALER(LANCZOS3, Lanczos3);
-SAME_DOWNSCALER(KAISER2, Kaiser2);
-SAME_DOWNSCALER(KAISER3, Kaiser3);
-SAME_DOWNSCALER(MAGIC, Magic);
-#undef SAME_DOWNSCALER
-static_assert(+SCALER_VK_COUNT == +kDownscalerCount, "the protocol has as many downscalers as the scaler");
-
 /** @brief The number of overrides. */
 static constexpr size_t FRAME_OVERRIDE_COUNT = sizeof FRAME_OVERRIDES / sizeof *FRAME_OVERRIDES;
 
@@ -240,7 +221,6 @@ composition_frame_settings (void)
 		.transfer           = 1,
 		.reversible_mode    = kReversibleKnee,
 		.apply_model        = 1,
-		.downscaler         = SCALER_VK_LANCZOS3,
 		.ghost_slack        = 0.5f,
 		.edit_blur          = 0.04f,
 		.motion_smooth      = 1.0f,
@@ -279,7 +259,6 @@ composition_frame_settings_read (struct ShmHeader const *h)
 	s.reversible_mode = atomic_load(&h->reversibleMode);
 	s.apply_model = atomic_load(&h->applyModel);
 	s.hold_frame = atomic_load(&h->holdFrame);
-	s.downscaler = atomic_load(&h->scalingDownscaler);
 	s.composition_bypass = atomic_load(&h->compositionBypass);
 	s.ratio_smooth = (float)atomic_load(&h->ratioSmoothPercent) / 100.0f;
 	s.colour_trust = (float)atomic_load(&h->colourTrustPercent) / 100.0f;
@@ -314,10 +293,9 @@ composition_frame_settings_read (struct ShmHeader const *h)
 	s.compare_split = clamp(s.compare_split, 0.0f, 1.0f, 0.5f);
 	s.compare_zoom = clamp(s.compare_zoom, 1.0f, 2.0f, 1.0f);
 
-	// Above 1.0 the model supersamples, up to upstream's 2x ceiling.
-	s.working_scale = clamp(s.working_scale, 0.25f, 2.0f, 1.0f);
-	if (s.downscaler >= SCALER_VK_COUNT || s.downscaler == SCALER_VK_FSR1)
-		s.downscaler = SCALER_VK_LANCZOS3;
+	// Upstream goes up to 2, where the model supersamples; here the model works at most at the
+	// frame's raster.
+	s.working_scale = clamp(s.working_scale, 0.25f, 1.0f, 1.0f);
 
 	// Native + edit is mode 2; the clamp used to stop at 1 and silently killed it.
 	if (s.transfer > 2)
@@ -989,9 +967,8 @@ make_meter_state (struct composition *c)
 /** @brief The generation of the last build of a composition's surfaces in the process. */
 static _Atomic(uint64_t) generations;
 
-/** @brief Destroys every surface, the transport pair, the meter's state and the supersampling
- *         filters, closes the connection of an offer, and forgets the frame's shape and the build's
- *         generation.
+/** @brief Destroys every surface, the transport pair and the meter's state, closes the connection
+ *         of an offer, and forgets the frame's shape and the build's generation.
  *
  * The meter's pass and the composition's pass stay.
  *
@@ -1006,14 +983,11 @@ drop_all (struct composition *c)
 	drop_image(c, &c->work);
 	drop_image(c, &c->model);
 	drop_image(c, &c->composed);
-	drop_image(c, &c->model_native);
 	drop_image(c, &c->meter);
 	drop_meter_state(c);
 	drop_host_buffer(c, &c->download);
 	drop_host_buffer(c, &c->upload);
 	composition_withdraw_offer(c);
-	scaler_vk_fini(&c->super_up);
-	scaler_vk_fini(&c->super_down);
 	c->flags &= ~(COMPOSITION_FRAME_CAPTURED | COMPOSITION_CAPTURE_RECORDED);
 	c->generation = 0;
 	c->width = c->height = c->model_w = c->model_h = 0;
@@ -1032,7 +1006,6 @@ composition (struct device_table const   *vk,
 		.instance         = instance,
 		.device           = device,
 		.physical_device  = physical_device,
-		.scaler_filter    = SCALER_VK_LANCZOS3,
 		.held_white_point = 1.0f,
 		.offer            = -1
 	};
@@ -1219,14 +1192,14 @@ composition_model_extent (uint32_t                                 width,
 	//
 	// No rounding to a workgroup multiple: every dispatch here covers a partial group and the shader
 	// bounds-checks against gWidth/gHeight, so alignment buys nothing -- and rounding *up* was worse
-	// than nothing, because at a scale of exactly 1.0 it pushed a 500-pixel frame to 504 and quietly
-	// engaged supersampling on a setting that means "leave it alone". A floor of 64 only stops a
+	// than nothing, because at a scale of exactly 1.0 it pushed a 500-pixel frame to 504, a model
+	// raster above the frame's on a setting that means "leave it alone". A floor of 64 only stops a
 	// pathologically small window from producing a degenerate raster.
 	if (s->native_model_max_width && s->native_model_max_height && width && height) {
 		// Keep the low-resolution source and answer together. Upscaling the
 		// answer inside the worker hid its true resolution from the resolve
 		// shader and bypassed the native-detail-preserving transfer branch.
-		double const scale = min_d(min_d(min_d((double)s->working_scale, 1.0),
+		double const scale = min_d(min_d((double)s->working_scale,
 		                                 (double)s->native_model_max_width / width),
 		                           (double)s->native_model_max_height / height);
 		return (VkExtent2D){
@@ -1242,44 +1215,6 @@ composition_model_extent (uint32_t                                 width,
 		max_u(64, (uint32_t)lround((double)width * scale)),
 		max_u(64, (uint32_t)lround((double)height * scale))
 	};
-}
-
-/** @brief Builds the averaged answer and the two filters that get there, for supersampling, and logs
- *         what supersampling costs the transport.
- *
- * @param c      The composition, whose filters are empty and whose model raster and proxy are set.
- * @param width  The frame's width.
- * @param height The frame's height.
- * @param format The proxy's format.
- * @param filter The average's enum scaler_vk_filter.
- * @return       true if the image and both filters exist; the filters are empty if either failed.
- */
-static bool
-make_super_sample (struct composition *c,
-                   uint32_t            width,
-                   uint32_t            height,
-                   VkFormat            format,
-                   uint32_t            filter)
-{
-	// Said out loud because it is the transport, not the GPU, that decides whether this is usable:
-	// the proxy and the answer both cross shared memory at the model's raster, so the per-frame copy
-	// grows with the square of the scale.
-	log_printf("[comp] supersampling to %ux%u means %.0f MB across shared memory each way, every frame",
-	           c->model_w, c->model_h, (double)composition_model_bytes(c) / (1024.0 * 1024.0));
-
-	bool const made = make_image(c, &c->model_native, width, height, format,
-	                             VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
-	VkResult const up = scaler_vk_init(&c->super_up, c->vk, c->instance, c->device,
-	                                   c->physical_device, true, filter);
-	VkResult const down = scaler_vk_init(&c->super_down, c->vk, c->instance, c->device,
-	                                     c->physical_device, false, filter);
-	if (up == VK_SUCCESS && down == VK_SUCCESS)
-		return made;
-
-	log_printf("[comp] the resampling filters could not be built; supersampling is unavailable");
-	scaler_vk_fini(&c->super_up);
-	scaler_vk_fini(&c->super_down);
-	return false;
 }
 
 /** @brief What a frame holds, as composition_prepare() builds for it. */
@@ -1398,7 +1333,6 @@ composition_prepare (struct composition                      *c,
 	// shaderStorageImageWriteWithoutFormat, so each declaration matches the bound view's
 	// actual format (RGBA8, BGRA8 or float) without changing shader arithmetic.
 	VkExtent2D const model = composition_model_extent(width, height, s);
-	bool const super_sample = model.width > width || model.height > height;
 
 	// The float16 proxy needs a surface the shader can write and sample as float. Where the device
 	// says it cannot, the request quietly becomes the 8-bit arrangement that shipped before -- the
@@ -1421,21 +1355,20 @@ composition_prepare (struct composition                      *c,
 	if (c->width == width && c->height == height && c->swapchain_format == swapchain_format
 	    && c->model_w == model.width && c->model_h == model.height
 	    && (c->flags & (COMPOSITION_LINEAR_HDR | COMPOSITION_HDR_PROXY | COMPOSITION_NETWORK)) == shape
-	    && c->hdr_transfer == hdr_transfer && c->scaler_filter == s->downscaler && c->frame.image)
+	    && c->hdr_transfer == hdr_transfer && c->frame.image)
 		return true;
 
-	log_printf("[comp] building %ux%u, model %ux%u, %s%s%s%s", width, height, model.width, model.height,
-	           domain->log, proxy->log[hdr_transfer != 0], answer->log,
-	           super_sample ? " (supersampling)" : "");
+	log_printf("[comp] building %ux%u, model %ux%u, %s%s%s", width, height, model.width, model.height,
+	           domain->log, proxy->log[hdr_transfer != 0], answer->log);
 
 	// Keep the captured frame across a rebuild that does not change its shape.
 	//
 	// Almost everything here is rebuilt because the *model's* raster changed -- passes, model
-	// resolution, the down-leg filter -- while the captured frame stays the swapchain's size in the
-	// swapchain's working format. Dropping it anyway costs nothing while the frame is not held,
-	// because the next frame captures another one. A held frame would be lost: the capture
-	// unfreezes the moment COMPOSITION_FRAME_CAPTURED goes, so the next composition would read the
-	// swapchain image instead of the held picture.
+	// resolution -- while the captured frame stays the swapchain's size in the swapchain's working
+	// format. Dropping it anyway costs nothing while the frame is not held, because the next frame
+	// captures another one. A held frame would be lost: the capture unfreezes the moment
+	// COMPOSITION_FRAME_CAPTURED goes, so the next composition would read the swapchain image
+	// instead of the held picture.
 	struct composition_image kept = {0};
 	if ((c->flags & COMPOSITION_FRAME_CAPTURED) && c->frame.image && c->width == width
 	    && c->height == height && c->work_format == work) {
@@ -1497,12 +1430,7 @@ composition_prepare (struct composition                      *c,
 	                     || make_image(c, &c->work, model.width, model.height, proxy->format,
 	                                   sampled | storage | src);
 
-	// The averaged answer, and the two filters that get there. Built only when supersampling;
-	// drop_all() left both filters empty.
-	bool const ok_super = !super_sample
-	                      || make_super_sample(c, width, height, proxy->format, s->downscaler);
-
-	if (!ok || !ok_transport || !ok_work || !ok_meter || !ok_super) {
+	if (!ok || !ok_transport || !ok_work || !ok_meter) {
 		c->reason = "could not allocate the composition surfaces";
 		drop_all(c);
 		return false;
@@ -1512,7 +1440,6 @@ composition_prepare (struct composition                      *c,
 	c->height = height;
 	c->model_w = model.width;
 	c->model_h = model.height;
-	c->scaler_filter = s->downscaler;
 	c->generation = atomic_fetch_add_explicit(&generations, 1, memory_order_relaxed) + 1;
 	c->reason = nullptr;
 	return true;
@@ -1828,8 +1755,7 @@ note_hold (struct composition                      *c,
 	log_printf("[comp] frame held (white point %.3f)", (double)c->held_white_point);
 }
 
-/** @brief Records what the model is handed when it is not the proxy: the enlarge when the model
- *         works above the frame, the downsample otherwise.
+/** @brief Records what the model is handed when it is not the proxy: the downsample.
  *
  * @param c      The composition, whose work image exists.
  * @param cb     The command buffer to record into.
@@ -1845,11 +1771,6 @@ record_work (struct composition             *c,
 {
 	transition(c, cb, source, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	transition(c, cb, &c->work, VK_IMAGE_LAYOUT_GENERAL);
-
-	// Enlarge, so the model has more pixels to synthesise into than the frame has.
-	if (c->model_native.image)
-		return scaler_vk_dispatch(&c->super_up, cb, source->view, c->work.view, c->width, c->height,
-		                          c->model_w, c->model_h);
 
 	// Reduce, with the module's own area filter -- the model then works on fewer pixels and less
 	// crosses the shared memory.
@@ -2202,20 +2123,8 @@ record_resolve (struct composition                      *c,
                 VkImage                                  swapchain_image,
                 struct composition_frame_settings const *s)
 {
-	// When the model worked above the frame its answer is averaged back to native first, and the
-	// composition then sees a native proxy against a native answer -- which is what it should see,
-	// because from its point of view the model effectively ran at the frame's own resolution.
-	struct composition_image *answer = &c->model;
-	struct composition_image *source = c->work.image ? &c->work : &c->proxy;
-	if (c->model_native.image) {
-		transition(c, cb, &c->model_native, VK_IMAGE_LAYOUT_GENERAL);
-		if (!scaler_vk_dispatch(&c->super_down, cb, answer->view, c->model_native.view, c->model_w,
-		                        c->model_h, c->width, c->height))
-			return false;
-		transition(c, cb, &c->model_native, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-		answer = &c->model_native;
-		source = c->proxy.image ? &c->proxy : &c->frame;
-	}
+	struct composition_image *const answer = &c->model;
+	struct composition_image *const source = c->work.image ? &c->work : &c->proxy;
 
 	transition(c, cb, source, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	transition(c, cb, &c->frame, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);

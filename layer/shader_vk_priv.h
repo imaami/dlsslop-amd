@@ -1,7 +1,7 @@
 /** @file
  *
- * What a pass builds itself with: Shader_Vk's protected members, which shader_vk.c, dlssnr_pass.c
- * and scaler_vk.c share. C only.
+ * What a pass builds itself with: Shader_Vk's protected members, which shader_vk.c and dlssnr_pass.c
+ * share. C only.
  *
  * Each function that creates an object logs why it could not, and returns the VkResult that says so.
  */

@@ -2,7 +2,7 @@
 
 A native C++23 **Qt 6 Widgets** application with no QML, JavaScript or web engine.
 It controls an existing worker channel; the worker and Vulkan layer do not
-require Qt. All 41 settings share definitions with the CLI and use protocol 29.
+require Qt. All 40 settings share definitions with the CLI and use protocol 30.
 
 ## Build and launch
 

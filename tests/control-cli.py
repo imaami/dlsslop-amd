@@ -72,7 +72,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     assert values['sdr16-multipass'] == (1, 1)
     assert values['hdr-mode'] == (1, 1)
     assert values['mvec'] == (0, 0)
-    assert len(values) == 41, values.keys()
+    assert len(values) == 40, values.keys()
     assert channel.stat().st_mode & 0o777 == 0o600
 
     # Every supported setting advertises the same default as --settings.
@@ -103,13 +103,13 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
         ('--working-scale', '1e400'), ('--sharpness', '-1e400'), ('--passes', '99999999999999999999'),
         ('--sharpness', '1e-310'), ('--intensity', '1e-400'),
         ('--working-scale', '1garbage'), ('--working-scale', '0.249'),
-        ('--working-scale', '2.001'), ('--working-scale', ' 1'),
+        ('--working-scale', '1.001'), ('--working-scale', '1.5'), ('--working-scale', ' 1'),
         ('--enabled', '-1'), ('--enabled', '1.0'), ('--enabled', ''),
         ('--passes', '0'), ('--passes', str(max_passes + 1)), ('--passes', '-1'),
         ('--passes', '2.5'), ('--passes', '2x'), ('--passes',),
         ('--tier', '800'), ('--tier', '540'), ('--tier', '1260'), ('--tier', '900.0'),
         ('--capture', '65'), ('--capture', '4294967296'), ('--capture', '2x'),
-        ('--debug-view', '6'), ('--downscaler', '0'),
+        ('--debug-view', '6'), ('--downscaler', '3'), ('-f', '3'),
         ('--enabled',), ('--unknown',),
         ('--color-preserve', '1.001'), ('--color-preserve', '-0.1'), ('--intensity', '4.001'), ('--local-tone', '-0.1'), ('--sharpness', '1.01'),
         ('--hdr-mode', '3'), ('--mvec-quality', '3'), ('--mvec-units', '1'), ('-U', '1'),

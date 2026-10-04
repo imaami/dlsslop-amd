@@ -1,11 +1,11 @@
 /** @file
  *
- * The composition and scaling passes on the host, on a fake device: what a build creates and what
- * the fini functions destroy, after a failure at each step of a build as well as after a whole one;
- * that zeroed, finished and unbuilt passes own nothing; the stride of the constant ring; what a
+ * The composition pass on the host, on a fake device: what a build creates and what the fini
+ * functions destroy, after a failure at each step of a build as well as after a whole one; that
+ * zeroed, finished and unbuilt passes own nothing; the stride of the constant ring; and what a
  * dispatch writes into its slot and its descriptor set, the groups it dispatches and the dispatches
- * it refuses; and the downscalers' names. What the shaders compute is hdr-shader-test's and
- * composition-rebuild-test's, on a real device.
+ * it refuses. What the shader computes is hdr-shader-test's and composition-rebuild-test's, on a
+ * real device.
  */
 #include <stdarg.h>
 #include <stddef.h>
@@ -15,19 +15,10 @@
 #include <string.h>
 
 #include "dlssnr_pass.h"
-#include "scaler_vk.h"
 #include "shader_vk_priv.h"
 
-// The SPIR-V that the passes must run.
+// The SPIR-V that the pass must run.
 #include "dlssnr/DlssNr_Shader_Vk.h"
-#include "scaling/bcds_bicubic_Shader_Vk.h"
-#include "scaling/bcds_catmull_Shader_Vk.h"
-#include "scaling/bcds_kaiser2_Shader_Vk.h"
-#include "scaling/bcds_kaiser3_Shader_Vk.h"
-#include "scaling/bcds_lanczos2_Shader_Vk.h"
-#include "scaling/bcds_lanczos3_Shader_Vk.h"
-#include "scaling/bcds_magc_Shader_Vk.h"
-#include "scaling/bcus_Shader_Vk.h"
 
 /** @brief Ends the test with a message unless a condition holds. */
 [[gnu::format(printf, 2, 3)]]
@@ -647,9 +638,6 @@ static VkPhysicalDevice const PHYSICAL = HANDLE(VkPhysicalDevice, 0x20);
 /** @brief The command buffer that the passes record into. */
 static VkCommandBuffer const CMD = HANDLE(VkCommandBuffer, 0x30);
 
-/** @brief Both directions of the supersampling: the average, then the enlarge. */
-static bool const UPSAMPLE[] = { false, true };
-
 /** @brief Fills the fake device's tables. */
 static void
 tables (void)
@@ -753,57 +741,14 @@ check_pass_failures (void)
 	}
 }
 
-/** @brief Builds and finishes the scaling passes with each fallible call failing in turn. */
-static void
-check_scaler_failures (void)
-{
-	for (size_t i = 0; i < sizeof UPSAMPLE / sizeof *UPSAMPLE; ++i) {
-		bool const up = UPSAMPLE[i];
-		reset();
-		struct scaler_vk scaler = scaler_vk(&device_table, &instance_table, DEVICE, PHYSICAL, up,
-		                                    SCALER_VK_MAGIC);
-		require(scaler.error == VK_SUCCESS && scaler.shader.pipeline,
-		        "the scaling pass was not built");
-		uint32_t const steps = fake.creates;
-		require(steps == 11, "the scaling pass's build made %u fallible calls, not 11", steps);
-		require(live_objects() == 7 && fake.mapped == 1, "a built scaling pass holds %u objects", live_objects());
-		// The base owns all of them: its own fini frees them and empties it.
-		shader_vk_fini(&scaler.shader);
-		require(!live_objects() && !fake.mapped && zeroed(&scaler.shader, sizeof scaler.shader), "the scaling"
-		        " pass's base's fini left %u objects", live_objects());
-		scaler_vk_fini(&scaler);
-		require(!live_objects() && !fake.mapped && zeroed(&scaler, sizeof scaler), "the scaling pass's fini"
-		        " left %u objects", live_objects());
-
-		for (uint32_t k = 1; k <= steps; ++k) {
-			reset();
-			fake.fail_at = k;
-			VkResult const r = scaler_vk_init(&scaler, &device_table, &instance_table, DEVICE, PHYSICAL, up,
-			                                  SCALER_VK_LANCZOS3);
-			require(r == FAILURE && scaler.error == FAILURE && !scaler.shader.pipeline,
-			        "the scaling pass's build with call %u failing returned %d", k, r);
-			require(!holds_poison(scaler.descriptor_sets, SCALER_VK_SLOTS),
-			        "with call %u failing, the scaling pass kept a set that it was not given", k);
-			require(!scaler_vk_dispatch(&scaler, CMD, HANDLE(VkImageView, 1), HANDLE(VkImageView, 2), 8, 8, 4, 4)
-			        && !fake.dispatches, "an unbuilt scaling pass dispatched");
-			scaler_vk_fini(&scaler);
-			require(!live_objects() && !fake.mapped && zeroed(&scaler, sizeof scaler), "with call %u failing,"
-			        " the scaling pass's fini left %u objects", k, live_objects());
-		}
-	}
-}
-
 /** @brief Empty, zeroed and deviceless passes own nothing and call nothing. */
 static void
 check_empty (void)
 {
 	reset();
 	struct dlss_nr_pass pass = {};
-	struct scaler_vk scaler = {};
 	dlss_nr_pass_fini(&pass);
 	dlss_nr_pass_fini(nullptr);
-	scaler_vk_fini(&scaler);
-	scaler_vk_fini(nullptr);
 	shader_vk_fini(nullptr);
 	VkImageSubresourceRange const range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 	shader_vk_set_image_layout(nullptr, CMD, HANDLE(VkImage, 1), VK_IMAGE_LAYOUT_UNDEFINED,
@@ -813,8 +758,6 @@ check_empty (void)
 	require(!fake.calls, "finishing empty passes, or moving an image with one, called the device %u times",
 	        fake.calls);
 	require(dlss_nr_pass_init(nullptr, &device_table, &instance_table, DEVICE, PHYSICAL)
-	        == VK_ERROR_INITIALIZATION_FAILED
-	        && scaler_vk_init(nullptr, &device_table, &instance_table, DEVICE, PHYSICAL, false, 0)
 	        == VK_ERROR_INITIALIZATION_FAILED, "an init without a destination did not fail");
 
 	pass = dlss_nr_pass(&device_table, &instance_table, VK_NULL_HANDLE, PHYSICAL);
@@ -823,14 +766,10 @@ check_empty (void)
 	require(pass.error == VK_ERROR_INITIALIZATION_FAILED && !fake.calls, "a composition pass without a physical"
 	        " device");
 	dlss_nr_pass_fini(&pass);
-	scaler = scaler_vk(&device_table, &instance_table, VK_NULL_HANDLE, PHYSICAL, true, 0);
-	require(scaler.error == VK_ERROR_INITIALIZATION_FAILED && !fake.calls, "a scaling pass without a device");
-	scaler_vk_fini(&scaler);
-	require(!fake.calls, "finishing deviceless passes called the device");
+	require(!fake.calls, "finishing a deviceless pass called the device");
 	require(!dlss_nr_pass_dispatch(nullptr, CMD, &(struct dlss_nr_constants){}, 1, 1, VK_NULL_HANDLE,
 	                               VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, HANDLE(VkImageView, 1),
-	                               VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL)
-	        && !scaler_vk_dispatch(nullptr, CMD, HANDLE(VkImageView, 1), HANDLE(VkImageView, 2), 1, 1, 1, 1),
+	                               VK_NULL_HANDLE, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL),
 	        "a dispatch without a pass");
 
 	// No host-visible memory: the ring's buffer goes again, and nothing is left.
@@ -855,13 +794,10 @@ check_stride (void)
 		reset();
 		fake.alignment = cases[i].alignment;
 		struct dlss_nr_pass pass = dlss_nr_pass(&device_table, &instance_table, DEVICE, PHYSICAL);
-		struct scaler_vk scaler = scaler_vk(&device_table, &instance_table, DEVICE, PHYSICAL, false, 1);
-		require(pass.slot_stride == cases[i].stride && scaler.slot_stride == cases[i].stride, "alignment %llu"
-		        " gave strides %llu and %llu, not %llu", (unsigned long long)cases[i].alignment,
-		        (unsigned long long)pass.slot_stride, (unsigned long long)scaler.slot_stride,
+		require(pass.slot_stride == cases[i].stride, "alignment %llu gave the stride %llu, not %llu",
+		        (unsigned long long)cases[i].alignment, (unsigned long long)pass.slot_stride,
 		        (unsigned long long)cases[i].stride);
 		dlss_nr_pass_fini(&pass);
-		scaler_vk_fini(&scaler);
 	}
 }
 
@@ -977,80 +913,12 @@ check_pass_dispatch (void)
 	}
 }
 
-/** @brief What the scaling passes' dispatches record. */
-static void
-check_scaler_dispatch (void)
-{
-	for (size_t i = 0; i < sizeof UPSAMPLE / sizeof *UPSAMPLE; ++i) {
-		bool const up = UPSAMPLE[i];
-		reset();
-		struct scaler_vk scaler = scaler_vk(&device_table, &instance_table, DEVICE, PHYSICAL, up,
-		                                    SCALER_VK_KAISER3);
-		VkImageView const source = HANDLE(VkImageView, 0x801), dest = HANDLE(VkImageView, 0x802);
-		require(!scaler_vk_dispatch(&scaler, VK_NULL_HANDLE, source, dest, 1, 1, 1, 1)
-		        && !scaler_vk_dispatch(&scaler, CMD, VK_NULL_HANDLE, dest, 1, 1, 1, 1)
-		        && !scaler_vk_dispatch(&scaler, CMD, source, VK_NULL_HANDLE, 1, 1, 1, 1)
-		        && !scaler.slot && !fake.dispatches, "a refused scaling dispatch recorded something");
-		uint32_t const tile = up ? 16 : 8;
-		for (uint32_t n = 0; n < 2 * SCALER_VK_SLOTS + 1; ++n) {
-			uint32_t const slot = scaler.slot;
-			uint32_t const sw = 67 + n, sh = 41, dw = up ? 100 + n : 33 + n, dh = up ? 61 : 21;
-			memset(fake.ring + scaler.slot_stride * slot, 0xa5, 256);
-			require(scaler_vk_dispatch(&scaler, CMD, source, dest, sw, sh, dw, dh), "scaling dispatch %u", n);
-			require(scaler.slot == (slot + 1) % SCALER_VK_SLOTS, "a scaling dispatch took slot %u", slot);
-			int32_t block[64];
-			memcpy(block, fake.ring + scaler.slot_stride * slot, sizeof block);
-			require(block[0] == (int32_t)sw && block[1] == (int32_t)sh && block[2] == (int32_t)dw
-			        && block[3] == (int32_t)dh && zeroed(block + 4, sizeof block - 16), "scaling dispatch %u's"
-			        " block", n);
-			require(fake.groups[0] == (dw + tile - 1) / tile && fake.groups[1] == (dh + tile - 1) / tile
-			        && fake.groups[2] == 1, "scaling dispatch %u: %u x %u groups", n, fake.groups[0],
-			        fake.groups[1]);
-			require(fake.write_count == 4 && fake.buffer.buffer == scaler.shader.constant_buffer
-			        && fake.buffer.offset == scaler.slot_stride * slot && fake.buffer.range == 256
-			        && fake.bound_set == scaler.descriptor_sets[slot]
-			        && fake.bound_pipeline == scaler.shader.pipeline, "scaling dispatch %u's bindings", n);
-			VkDescriptorType const types[4] = {
-				VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
-				VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_DESCRIPTOR_TYPE_SAMPLER
-			};
-			VkDescriptorImageInfo const images[4] = {
-				{},
-				{ VK_NULL_HANDLE, source, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
-				{ VK_NULL_HANDLE, dest, VK_IMAGE_LAYOUT_GENERAL },
-				{ scaler.shader.texture_sampler, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED }
-			};
-			for (uint32_t b = 0; b < 4; ++b) {
-				require(fake.writes[b].dstSet == scaler.descriptor_sets[slot] && fake.writes[b].dstBinding == b
-				        && fake.writes[b].descriptorType == types[b], "scaling dispatch %u: write %u", n, b);
-				require(!b || (fake.images[b].sampler == images[b].sampler
-				               && fake.images[b].imageView == images[b].imageView
-				               && fake.images[b].imageLayout == images[b].imageLayout),
-				        "scaling dispatch %u: binding %u's image", n, b);
-			}
-		}
-		scaler_vk_fini(&scaler);
-		require(!live_objects(), "the scaling pass's fini left %u objects after dispatches", live_objects());
-	}
-}
 
 #undef HANDLE
 
-/** @brief What a scaling pass must be. */
-struct expected_scaler {
-	unsigned char const *spv;   //!< Its SPIR-V.
-	size_t               size;  //!< The SPIR-V's size.
-	char const          *name;  //!< The pass's name.
-	uint64_t             flags; //!< The pass's flags.
-};
-
-/** @brief The SPIR-V that each pass runs, and the scaling passes' names and flags.
- *
- * The composition pass runs its shader, and the enlarge runs bcus whatever the filter. An average
- * runs its filter's shader, and Lanczos3 for FSR1 and for any value from SCALER_VK_COUNT on.
- */
+/** @brief The SPIR-V that the composition pass runs. */
 static void
-check_shaders (void)
+check_shader (void)
 {
 	reset();
 	struct dlss_nr_pass pass = dlss_nr_pass(&device_table, &instance_table, DEVICE, PHYSICAL);
@@ -1058,60 +926,6 @@ check_shaders (void)
 	        && fake.module_hash == fnv1a(dlssnr_spv, sizeof dlssnr_spv),
 	        "the composition pass runs %zu bytes of other SPIR-V", fake.module_size);
 	dlss_nr_pass_fini(&pass);
-
-#define AVERAGE(spv) { spv, sizeof spv, "dlssnr-average", 0 }
-	struct {
-		struct expected_scaler average;
-		uint32_t               filter;
-	} const cases[] = {
-		{ AVERAGE(bcds_lanczos3_spv), SCALER_VK_FSR1        },
-		{ AVERAGE(bcds_bicubic_spv),  SCALER_VK_BICUBIC     },
-		{ AVERAGE(bcds_catmull_spv),  SCALER_VK_CATMULL_ROM },
-		{ AVERAGE(bcds_lanczos2_spv), SCALER_VK_LANCZOS2    },
-		{ AVERAGE(bcds_lanczos3_spv), SCALER_VK_LANCZOS3    },
-		{ AVERAGE(bcds_kaiser2_spv),  SCALER_VK_KAISER2     },
-		{ AVERAGE(bcds_kaiser3_spv),  SCALER_VK_KAISER3     },
-		{ AVERAGE(bcds_magc_spv),     SCALER_VK_MAGIC       },
-		{ AVERAGE(bcds_lanczos3_spv), SCALER_VK_COUNT       },
-		{ AVERAGE(bcds_lanczos3_spv), 9                     },
-		{ AVERAGE(bcds_lanczos3_spv), 100                   },
-		{ AVERAGE(bcds_lanczos3_spv), UINT32_MAX            }
-	};
-#undef AVERAGE
-	struct expected_scaler const enlarge = {
-		bcus_spv, sizeof bcus_spv, "dlssnr-enlarge", SCALER_VK_UPSAMPLE
-	};
-	for (size_t c = 0; c < sizeof cases / sizeof *cases; ++c) {
-		struct expected_scaler const *const directions[] = { &cases[c].average, &enlarge };
-		for (size_t i = 0; i < sizeof UPSAMPLE / sizeof *UPSAMPLE; ++i) {
-			struct expected_scaler const *const e = directions[i];
-			reset();
-			struct scaler_vk scaler = scaler_vk(&device_table, &instance_table, DEVICE, PHYSICAL, UPSAMPLE[i],
-			                                    cases[c].filter);
-			require(scaler.error == VK_SUCCESS && fake.module_size == e->size
-			        && fake.module_hash == fnv1a(e->spv, e->size), "filter %u, upsample %d: %zu bytes of other"
-			        " SPIR-V", cases[c].filter, UPSAMPLE[i], fake.module_size);
-			require(!strcmp(scaler.shader.name, e->name) && scaler.flags == e->flags, "filter %u, upsample %d:"
-			        " the pass %s with flags %#llx", cases[c].filter, UPSAMPLE[i], scaler.shader.name,
-			        (unsigned long long)scaler.flags);
-			scaler_vk_fini(&scaler);
-		}
-	}
-}
-
-/** @brief The downscalers' names, and the fallbacks to Lanczos3. */
-static void
-check_names (void)
-{
-	char const *const names[SCALER_VK_COUNT] = {
-		"lanczos3", "bicubic", "catmull-rom", "lanczos2", "lanczos3", "kaiser2", "kaiser3", "magic"
-	};
-	for (uint32_t f = 0; f < SCALER_VK_COUNT; ++f)
-		require(!strcmp(scaler_vk_filter_name(f), names[f]), "filter %u is %s", f, scaler_vk_filter_name(f));
-	uint32_t const beyond[] = { SCALER_VK_COUNT, 9, 100, UINT32_MAX };
-	for (size_t i = 0; i < sizeof beyond / sizeof *beyond; ++i)
-		require(!strcmp(scaler_vk_filter_name(beyond[i]), "lanczos3"), "filter %u is %s", beyond[i],
-		        scaler_vk_filter_name(beyond[i]));
 }
 
 int
@@ -1120,12 +934,9 @@ main (void)
 	tables();
 	check_empty();
 	check_pass_failures();
-	check_scaler_failures();
 	check_stride();
 	check_pass_dispatch();
-	check_scaler_dispatch();
-	check_shaders();
-	check_names();
-	puts("PASS: the passes build, dispatch and free what they create, after a failure at any step too");
+	check_shader();
+	puts("PASS: the pass builds, dispatches and frees what it creates, after a failure at any step too");
 	return 0;
 }

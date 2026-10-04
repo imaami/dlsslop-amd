@@ -241,7 +241,6 @@ ShmInitDefaults (struct ShmHeader *h)
 	atomic_store(&h->reversibleMode, kReversibleKnee);
 	atomic_store(&h->applyModel, 1);
 	atomic_store(&h->holdFrame, 0);
-	atomic_store(&h->scalingDownscaler, kDownscaleLanczos3);
 
 	atomic_store(&h->hdrMode, kHdrAuto);
 	atomic_store(&h->hdrDetected, kHdrNone);
