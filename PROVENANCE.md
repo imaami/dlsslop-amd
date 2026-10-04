@@ -197,7 +197,8 @@ network launches.
 
 dlsslopd and the in-layer network run the DLSSNR-AMD fork's SPIR-V with the
 project's own host code. `common/vulkan_weights.*`, `common/vulkan_plan.*`,
-`common/vulkan_schedule.*` and `common/vulkan_runtime.*` port the production
+`common/vulkan_plan_priv.h`, `common/vulkan_schedule.c` and
+`common/vulkan_runtime.*` port the production
 path of the fork's `linux/src/core` (MIT) at `a75ac49`: `nr_runtime.cpp`,
 `nr_graph.cpp`, `nrvk.hpp`, `nr_native_plan.cpp` with its layer table,
 `tinlayout.hpp` and `nr_activation_lut.hpp`, including the fork's changes to
@@ -251,7 +252,10 @@ does so for one pass with motion history only and makes views and sets for each
 recording in a ring, it does so for every shape, blitting an RGBA32F answer into
 the model image, and writes its sets only between frames, when the composition's
 generation changes. `vulkan-plan-abi` and `vulkan-constants` check the fetched
-shaders and the model tools' entry list against the port. `common/vulkan_plan.hpp`
+shaders and the model tools' entry list against the port. The plan and the
+weights are C, and rename upstream's names by the layer's rule: `PushFSwin`,
+`PersistRec` and `NoiseJob` become `struct push_f_swin`, `struct persist_rec`
+and `struct noise_job`. `common/vulkan_plan.h`
 holds the constants that the plan takes from `linux/build/arch/rdna4.sh` and
 from `nr_graph.cpp`'s defaults at `a75ac49`; `vulkan-constants` checks those
 that the markers in `pipelines.json` record and the tile of `gemmvqkvnorms` that

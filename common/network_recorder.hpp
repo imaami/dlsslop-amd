@@ -26,6 +26,7 @@ public:
     // a caller's images (vulkan::FrameImages) instead of buffers.
     NetworkRecorder(const vulkan::Device& device, VulkanPaths paths, bool external = false);
     NetworkRecorder(const NetworkRecorder&) = delete;
+    ~NetworkRecorder();
 
     // True when shape() would build or reshape.
     bool shape_differs(const VulkanFrame& frame) const;
@@ -80,10 +81,10 @@ private:
     // The history's last frame submitted, and the last frame recorded; none
     // since a build.
     std::optional<VulkanFrame> last_, recorded_;
-    // The device's storage buffers' limit, the plan of an extent to build, and
-    // the last extent rejected.
+    // The device's storage buffers' limit, the plan of an extent to build
+    // (none: width 0), and the last extent rejected.
     uint64_t storage_;
-    std::optional<vulkan::Plan> plan_;
+    struct vulkan_plan plan_{};
     uint32_t rejected_[2] = {};
     std::string rejection_;
     // When the next line about a wait that ran out may be logged.

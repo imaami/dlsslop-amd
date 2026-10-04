@@ -132,7 +132,7 @@ target_compile_options(dlssnr-shmctl PRIVATE -Os)
 
 # The Vulkan network's SPIR-V from DLSSNR-AMD's linux/ tree, and the project's
 # own host code that runs it. The host knows the constants the SPIR-V is built
-# with (common/vulkan_plan.hpp) and refuses SPIR-V whose markers disagree.
+# with (common/vulkan_plan.h) and refuses SPIR-V whose markers disagree.
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 set(VKNR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/external/vulkan/linux")
 set(VKNR_SHADERS "${CMAKE_CURRENT_BINARY_DIR}/vulkan-nr/network")
@@ -145,7 +145,7 @@ add_custom_command(OUTPUT "${VKNR_SHADERS}/shader-constants.txt"
 add_custom_target(vulkan-nr-shaders ALL DEPENDS "${VKNR_SHADERS}/shader-constants.txt")
 # The network's plan, weights and runtime, for dlsslopd and the in-layer
 # network's module alike.
-add_library(dlsslop-vulkan OBJECT common/vulkan_plan.cpp common/vulkan_schedule.cpp common/vulkan_weights.cpp
+add_library(dlsslop-vulkan OBJECT common/vulkan_plan.c common/vulkan_schedule.c common/vulkan_weights.c
     common/vulkan_runtime.cpp common/network_recorder.cpp)
 set_target_properties(dlsslop-vulkan PROPERTIES POSITION_INDEPENDENT_CODE ON)
 add_dependencies(dlsslop-vulkan network-shaders)
@@ -235,8 +235,8 @@ if(BUILD_TESTING)
     # submitted, recorded on a fake device that the test defines in place of
     # the Vulkan loader.
     add_executable(network-recorder-test tests/network_recorder_test.cpp common/network_recorder.cpp
-        common/vulkan_runtime.cpp common/vulkan_plan.cpp common/vulkan_schedule.cpp common/vulkan_weights.cpp
-        backend/files.c)
+        common/vulkan_runtime.cpp common/vulkan_plan.c common/vulkan_schedule.c common/vulkan_weights.c
+        tests/vulkan_pack.c backend/files.c)
     target_include_directories(network-recorder-test PRIVATE backend ${SHADER_DIR})
     target_link_libraries(network-recorder-test PRIVATE dlsslop-common-c Threads::Threads)
     add_dependencies(network-recorder-test vulkan-nr-shaders network-shaders)
@@ -271,16 +271,17 @@ if(BUILD_TESTING)
     add_test(NAME hip-plan COMMAND hip-plan-test)
     add_test(NAME hip-plan-abi COMMAND hip-plan-test --modules ${HIP_MODULES})
     # The Vulkan network's weight packing against digests of upstream's, and
-    # its model reader on damaged packs.
-    add_executable(vulkan-weights-test tests/vulkan_weights_test.cpp common/vulkan_weights.cpp backend/files.c)
+    # its model reader on damaged packs, in C.
+    add_executable(vulkan-weights-test tests/vulkan_weights_test.c tests/vulkan_pack.c common/vulkan_weights.c
+        backend/files.c)
     target_include_directories(vulkan-weights-test PRIVATE backend)
     target_link_libraries(vulkan-weights-test PRIVATE dlsslop-common-c)
     add_test(NAME vulkan-weights COMMAND vulkan-weights-test)
     # The Vulkan network's plan against goldens of upstream's graph build, the
     # push blocks and bindings of the SPIR-V the build made against it, and the
-    # fork's shader markers and model entries against those it expects.
-    add_executable(vulkan-plan-test tests/vulkan_plan_test.cpp common/vulkan_plan.cpp common/vulkan_schedule.cpp
-        common/vulkan_weights.cpp backend/files.c)
+    # fork's shader markers and model entries against those it expects, in C.
+    add_executable(vulkan-plan-test tests/vulkan_plan_test.c tests/vulkan_pack.c common/vulkan_plan.c
+        common/vulkan_schedule.c common/vulkan_weights.c backend/files.c)
     target_include_directories(vulkan-plan-test PRIVATE backend)
     target_link_libraries(vulkan-plan-test PRIVATE dlsslop-common-c)
     add_dependencies(vulkan-plan-test vulkan-nr-shaders)

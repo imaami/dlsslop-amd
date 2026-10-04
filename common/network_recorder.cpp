@@ -21,6 +21,8 @@ NetworkRecorder::NetworkRecorder(const vulkan::Device& device, VulkanPaths paths
 {
 }
 
+NetworkRecorder::~NetworkRecorder() { vulkan_plan_fini(&plan_); }
+
 bool NetworkRecorder::shape_differs(const VulkanFrame& frame) const
 {
     // Pass stages stay built for frames without them: such a frame blits its answer out instead of copying it.
@@ -45,18 +47,20 @@ Result<void> NetworkRecorder::plan(const VulkanFrame& frame)
 // plan_ for WIDTH x HEIGHT, unless it holds it or the extent was rejected.
 Result<void> NetworkRecorder::plan_for(uint32_t width, uint32_t height)
 {
-    if (plan_ && plan_->width == width && plan_->height == height) return {};
+    if (plan_.width && plan_.width == width && plan_.height == height) return {};
     if (rejected_[0] == width && rejected_[1] == height && !rejection_.empty()) return forward(Error{rejection_, true});
-    auto planned = vulkan::plan(width, height, storage_);
-    if (!planned) {
-        if (planned.error().rejected) {
+    struct vulkan_plan planned;
+    struct error e;
+    if (const enum error_code code = vulkan_plan_init(&planned, width, height, storage_, &e)) {
+        if (code != ERROR_FAILED) {
             rejected_[0] = width;
             rejected_[1] = height;
-            rejection_ = planned.error().what;
+            rejection_ = e.what;
         }
-        return forward(std::move(planned).error());
+        return forward_c(code, e);
     }
-    plan_ = std::move(*planned);
+    vulkan_plan_fini(&plan_);
+    plan_ = planned;
     return {};
 }
 
@@ -76,9 +80,9 @@ Result<bool> NetworkRecorder::shape(const VulkanFrame& frame, const vulkan::Fram
     } else {
         DLSSLOP_TRY(plan_for(frame.width, frame.height));
         // The plan is not kept: the runtime takes the steps and push words it records.
-        vulkan::Plan plan = *std::exchange(plan_, std::nullopt);
         runtime_.reset();
-        runtime_.emplace(DLSSLOP_TRY(vulkan::Runtime::build(device_, paths_, shape, std::move(plan))));
+        runtime_.emplace(
+            DLSSLOP_TRY(vulkan::Runtime::build(device_, paths_, shape, std::exchange(plan_, vulkan_plan{}))));
         // A build binds no images.
         if (images) DLSSLOP_TRY(reshape(shape, images));
     }

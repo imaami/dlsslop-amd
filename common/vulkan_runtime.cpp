@@ -3,12 +3,13 @@
 #include "files.hpp"
 #include "network/network_fallback.hpp"
 #include "network/network_verdict.hpp"
-#include "vulkan_weights.hpp"
+#include "vulkan_weights.h"
 
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <pthread.h>
@@ -112,32 +113,31 @@ constexpr Bindings kAdapterBindings[] = {
     {"", "sts", sizeof(StagePush), "runtime/pass_stages.spv"},
     {"", "tss", sizeof(LumaPush), "temporal/motion_luma.spv"},
     {"", "ssss", sizeof(FlowPush), "temporal/motion_estimate.spv"},
-    {"aawwwap", "tttt", sizeof(PushFSwin) + sizeof(PushPreImage), "temporal/temporal_pre_fp32.spv"},
-    {"aawwwap", "tttt", sizeof(PushFSwin) + sizeof(PushPreImage), "temporal/temporal_pre_fp32nh.spv"},
-    {"aawwwp", "ssttt", sizeof(PushFSwin) + sizeof(PushUps) + sizeof(PushImageTail),
+    {"aawwwap", "tttt", sizeof(push_f_swin) + sizeof(push_pre_image), "temporal/temporal_pre_fp32.spv"},
+    {"aawwwap", "tttt", sizeof(push_f_swin) + sizeof(push_pre_image), "temporal/temporal_pre_fp32nh.spv"},
+    {"aawwwp", "ssttt", sizeof(push_f_swin) + sizeof(push_ups) + sizeof(push_image_tail),
      "temporal/temporal_post_fp32.spv"},
     {"av", "", sizeof(VerdictPush), "network_verdict.comp", kNetworkVerdictSpv},
     {"", "st", sizeof(FallbackPush), "network_fallback.comp", kNetworkFallbackSpv},
 };
-// A kernel's images, by Images.
+// A kernel's images, by enum vulkan_images.
 constexpr const char* kKernelImages[] = {"", "t", "sst"};
 
-// Pipeline PIPELINE's: a Kernel, or one of the runtime's own after them.
-constexpr Bindings bindings_of(size_t pipeline)
+// Pipeline PIPELINE's: a kernel, or one of the runtime's own after them.
+Bindings bindings_of(size_t pipeline)
 {
-    if (pipeline >= size_t(Kernel::kCount)) return kAdapterBindings[pipeline - size_t(Kernel::kCount)];
-    const KernelInfo& k = kKernels[pipeline];
+    if (pipeline >= VULKAN_KERNEL_COUNT) return kAdapterBindings[pipeline - VULKAN_KERNEL_COUNT];
+    const vulkan_kernel_info& k = VULKAN_PLAN_KERNELS[pipeline];
     return {k.buffers, kKernelImages[size_t(k.images)], k.push, nullptr};
 }
 
-// The most bindings a pipeline has.
+// The most bindings a pipeline has: a kernel's at most
+// VULKAN_KERNEL_MOST_BINDINGS, or one of the runtime's own.
 constexpr size_t most_bindings()
 {
-    size_t most = 0;
-    for (size_t p = 0; p < std::size(kKernels) + std::size(kAdapterBindings); ++p) {
-        const Bindings b = bindings_of(p);
+    size_t most = VULKAN_KERNEL_MOST_BINDINGS;
+    for (const Bindings& b : kAdapterBindings)
         most = std::max(most, std::string_view(b.buffers).size() + std::string_view(b.images).size());
-    }
     return most;
 }
 constexpr size_t kMostBindings = most_bindings();
@@ -172,15 +172,16 @@ void write_log(const Device& d, const char* line)
 }
 
 // DIRECTORY/shader-constants.txt, which must be this build's exactly
-// (kManifest, then kShaderConstants' lines): the SPIR-V was built with the
-// constants the plan's arithmetic assumes.
+// (VULKAN_PLAN_MANIFEST, then VULKAN_PLAN_SHADER_CONSTANTS' lines): the SPIR-V
+// was built with the constants the plan's arithmetic assumes.
 Result<void> check_constants(const std::string& directory)
 {
     const std::string path = join(directory, "shader-constants.txt");
     const auto text = read_file(path);
     if (!text) return fail("cannot read " + path + ": " + text.error().what);
-    std::string expected = std::string(kManifest) + "\n";
-    for (const auto& c : kShaderConstants) expected += std::string(c.key) + " " + std::to_string(c.value) + "\n";
+    std::string expected = std::string(VULKAN_PLAN_MANIFEST) + "\n";
+    for (const vulkan_shader_constant& c : VULKAN_PLAN_SHADER_CONSTANTS)
+        expected += std::string(c.key) + " " + std::to_string(c.value) + "\n";
     if (*text == expected) return {};
     // The line that differs first, which starts at the same place in both.
     const size_t at = size_t(std::ranges::mismatch(expected, *text).in1 - expected.begin());
@@ -191,10 +192,10 @@ Result<void> check_constants(const std::string& directory)
                 "\" is expected; rebuild the network's shaders");
 }
 
-// The one-line markers beside the network's SPIR-V (kMarkers).
+// The one-line markers beside the network's SPIR-V (VULKAN_PLAN_MARKERS).
 Result<void> check_markers(const std::string& directory)
 {
-    for (const auto& m : kMarkers) {
+    for (const vulkan_marker& m : VULKAN_PLAN_MARKERS) {
         const std::string path = join(directory, m.file);
         const auto text = read_file(path);
         if (!text) return fail("cannot read " + path + ": " + text.error().what);
@@ -375,7 +376,7 @@ Result<void> make_pipeline(VkDevice device, VkPipelineCache cache, const std::st
                            Pipeline& p)
 {
     const Bindings b = bindings_of(pipeline);
-    const std::string file = b.file ? b.file : std::string("g_") + kKernels[pipeline].stem + ".spv";
+    const std::string file = b.file ? b.file : std::string("g_") + VULKAN_PLAN_KERNELS[pipeline].stem + ".spv";
     VkDescriptorSetLayoutBinding bindings[kMostBindings];
     uint32_t n = 0;
     for (const char* t = b.buffers; *t; ++t, ++n)
@@ -531,15 +532,15 @@ void copy_general(VkCommandBuffer cmd, VkImage from, VkImage to, uint32_t width,
     barrier(cmd, from, kGeneral, kGeneral, kTransfer, kCopyRead, kCompute, kRead | kWrite);
 }
 
-// The pre block's controls in its PushPreImage (upstream: patch_push): the
+// The pre block's controls in its push_pre_image (upstream: patch_push): the
 // style; the tone, which later passes do without; and the structures, under
 // the automatic mask the skin's and the rest's. A nonzero SEED has the
 // shader compute the noise for it instead of reading the noise field, which
 // the build computed for seed 0 (upstream: pre_seed in record_all).
 void patch_pre(uint32_t* words, const Controls& c, bool later, uint32_t seed)
 {
-    PushPreImage p;
-    std::memcpy(&p, words + sizeof(PushFSwin) / 4, sizeof p);
+    push_pre_image p;
+    std::memcpy(&p, words + sizeof(push_f_swin) / 4, sizeof p);
     p.style = float(c.style) / 128;
     p.tone = later ? 0.0f : c.tone;
     p.structure = c.auto_mask ? 1.0f : c.structure;
@@ -549,16 +550,16 @@ void patch_pre(uint32_t* words, const Controls& c, bool later, uint32_t seed)
         p.seed = seed;
         p.noise_off = 0;
     }
-    std::memcpy(words + sizeof(PushFSwin) / 4, &p, sizeof p);
+    std::memcpy(words + sizeof(push_f_swin) / 4, &p, sizeof p);
 }
 
-// The post block's controls in its PushImageTail (upstream: patch_push): the
+// The post block's controls in its push_image_tail (upstream: patch_push): the
 // intensity, and whether it restores the frame's alpha itself (bit 31) and
 // rounds the answer to 8 bits (bit 30).
 void patch_post(uint32_t* words, const Controls& c, bool post_alpha, bool rgba8)
 {
-    constexpr size_t at = (sizeof(PushFSwin) + sizeof(PushUps)) / 4;
-    PushImageTail p;
+    constexpr size_t at = (sizeof(push_f_swin) + sizeof(push_ups)) / 4;
+    push_image_tail p;
     std::memcpy(&p, words + at, sizeof p);
     p.intensity = std::clamp(c.intensity, 0.0f, 2.0f);
     p.w_off = (p.w_off & 0x3FFFFFFFu) | (post_alpha ? 0x80000000u | (rgba8 ? 0x40000000u : 0u) : 0u);
@@ -579,6 +580,14 @@ void settle(std::vector<VkImageMemoryBarrier>& layouts, const Image& image, VkIm
                            VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, layout,
                            VK_QUEUE_FAMILY_IGNORED, VK_QUEUE_FAMILY_IGNORED, image.image, kColor});
 }
+
+// A model pack's index, open while a build reads it.
+struct OpenModel {
+    struct vulkan_model model{nullptr, nullptr, nullptr, 0, -1};
+    OpenModel() = default;
+    OpenModel(const OpenModel&) = delete;
+    ~OpenModel() { vulkan_model_fini(&model); }
+};
 
 } // namespace
 
@@ -610,18 +619,22 @@ uint64_t storage_limit(const Device& device)
     return std::min<uint64_t>(properties.properties.limits.maxStorageBufferRange, allocation.maxMemoryAllocationSize);
 }
 
-Result<Runtime> Runtime::build(const Device& device, const VulkanPaths& paths, const Shape& shape, Plan plan)
+Result<Runtime> Runtime::build(const Device& device, const VulkanPaths& paths, const Shape& shape,
+                               struct vulkan_plan plan)
 {
     Runtime runtime(device);
-    DLSSLOP_TRY(runtime.make(paths, shape, plan));
+    Result<void> made = runtime.make(paths, shape, plan);
+    vulkan_plan_fini(&plan);
+    if (!made) return forward(std::move(made).error());
     return runtime;
 }
 
 Runtime::Runtime(Runtime&& other) noexcept
     : device_(other.device_), objects_(std::exchange(other.objects_, {})), shape_(other.shape_), state_(other.state_),
       images_(other.images_), history_(other.history_), recorded_(other.recorded_), settled_(other.settled_),
-      steps_(std::move(other.steps_)), push_(std::move(other.push_)), values_end_(other.values_end_),
-      timeouts_(std::move(other.timeouts_))
+      steps_(std::exchange(other.steps_, nullptr)), step_count_(std::exchange(other.step_count_, 0)),
+      push_(std::exchange(other.push_, nullptr)), values_end_(other.values_end_),
+      timeouts_(std::exchange(other.timeouts_, nullptr)), timeout_count_(std::exchange(other.timeout_count_, 0))
 {
 }
 
@@ -641,26 +654,41 @@ Runtime::~Runtime()
         for (Image& i : pyramid) destroy(d, i);
     for (Image* i : {&o.frame, &o.scratch, &o.shown, &o.second, &o.answer, &o.input}) destroy(d, *i);
     for (Buffer* b : {&o.verdict, &o.params, &o.weights, &o.arena}) destroy(d, *b);
+    std::free(timeouts_);
+    std::free(push_);
+    std::free(steps_);
 }
 
-Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, Plan& plan)
+Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, struct vulkan_plan& plan)
 {
     const auto start = std::chrono::steady_clock::now();
-    if (plan.width != shape.width || plan.height != shape.height || plan.steps.size() < 2 ||
-        plan.steps.front().kernel != Kernel::kFswinImagePreds32 ||
-        plan.steps.back().kernel != Kernel::kFswinImagePost32 || plan.steps.back().after != After::kFull ||
-        plan.timeouts.size() > std::size(VerdictPush{}.words))
+    if (plan.width != shape.width || plan.height != shape.height || plan.step_count < 2 ||
+        plan.steps[0].kernel != VULKAN_KERNEL_FSWIN_IMAGE_PREDS32 ||
+        plan.steps[plan.step_count - 1].kernel != VULKAN_KERNEL_FSWIN_IMAGE_POST32 ||
+        plan.steps[plan.step_count - 1].after != VULKAN_AFTER_FULL ||
+        plan.timeout_count > std::size(VerdictPush{}.words))
         return fail("network plan: not a plan of the frames the network is built for");
     // What the build reads and what the device offers, before any object.
     DLSSLOP_TRY(check_constants(paths.shaders));
     DLSSLOP_TRY(check_constants(join(paths.shaders, "temporal")));
     DLSSLOP_TRY(check_markers(paths.shaders));
-    const Model model = DLSSLOP_TRY(Model::open(paths.model));
-    unclamp(plan, DLSSLOP_TRY(clamp_free(plan.segments, model)));
-    steps_ = plan.steps;
-    push_ = plan.push;
+    OpenModel open;
+    struct error e;
+    if (const enum error_code code = vulkan_model_open(&open.model, paths.model.c_str(), &e))
+        return forward_c(code, e);
+    struct vulkan_clamp_free clamp_free;
+    if (const enum error_code code =
+            vulkan_weights_clamp_free(plan.segments, plan.segment_count, &open.model, &clamp_free, &e))
+        return forward_c(code, e);
+    vulkan_plan_unclamp(&plan, &clamp_free);
+    // The runtime takes the steps, the push words and the timeouts.
+    steps_ = std::exchange(plan.steps, nullptr);
+    step_count_ = std::exchange(plan.step_count, 0);
+    push_ = std::exchange(plan.push, nullptr);
+    plan.push_count = 0;
     values_end_ = plan.values_end;
-    timeouts_ = plan.timeouts;
+    timeouts_ = std::exchange(plan.timeouts, nullptr);
+    timeout_count_ = std::exchange(plan.timeout_count, 0);
     DLSSLOP_TRY(adopt(shape));
     // What stays while the runtime lives: the activation arena, the weights
     // and the input's sampler.
@@ -687,11 +715,11 @@ Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, Plan& p
     const auto setting_up = std::chrono::steady_clock::now();
     Setup setup{d.device};
     DLSSLOP_TRY(begin_setup(setup));
-    DLSSLOP_TRY(upload(plan, model, setup));
+    DLSSLOP_TRY(upload(plan, open.model, setup));
     const double packed = seconds_since(setting_up);
     DLSSLOP_TRY(end_setup(setup));
     const double ran = seconds_since(setting_up) - packed;
-    destroy(d.device, o.pipelines[size_t(Kernel::kNoiseField)]);
+    destroy(d.device, o.pipelines[VULKAN_KERNEL_NOISE_FIELD]);
 
     size_t pipelines = 0;
     for (const Pipeline& p : o.pipelines) pipelines += p.pipeline != VK_NULL_HANDLE;
@@ -699,7 +727,7 @@ Result<void> Runtime::make(const VulkanPaths& paths, const Shape& shape, Plan& p
     std::snprintf(line, sizeof line,
                   "built the network in %.2f s (pipelines %.2f s, weights %.2f s, GPU %.2f s) for %s, "
                   "%zu dispatches a pass, arena %.1f MB, weights %.1f MB, %zu pipelines, %u barriers chained",
-                  seconds_since(start), compiled, packed, ran, described().c_str(), steps_.size(),
+                  seconds_since(start), compiled, packed, ran, described().c_str(), step_count_,
                   double(plan.arena_bytes) / 1e6, double(plan.blob_bytes) / 1e6, pipelines, unsigned(plan.chained));
     write_log(d, line);
     return {};
@@ -818,8 +846,8 @@ Result<void> Runtime::make_pipelines(const VulkanPaths& paths)
     // motion, the temporal variants replace the pre and post blocks, whose
     // kernels' pipelines are made all the same.
     bool wanted[kPipelines] = {};
-    wanted[size_t(Kernel::kNoiseField)] = true;
-    for (const Step& step : steps_) wanted[size_t(step.kernel)] = true;
+    wanted[VULKAN_KERNEL_NOISE_FIELD] = true;
+    for (size_t i = 0; i < step_count_; ++i) wanted[size_t(steps_[i].kernel)] = true;
     std::fill(wanted + kAlpha, wanted + kPipelines, true);
     wanted[temporal_pre() == kPre ? kPreNh : kPre] = false;
     size_t which[kPipelines], n = 0;
@@ -879,13 +907,13 @@ Result<void> Runtime::make_sets()
                                        : stored(o.answer);
     const ImageDescriptor first =
         !s.external && s.passes > 1 ? ImageDescriptor{o.shown.view, kGeneral, o.nearest} : frame;
-    // A kernel's images, by Images.
+    // A kernel's images, by enum vulkan_images.
     const ImageDescriptor kernel_images[][3] = {{}, {frame}, {target, stored(o.second), frame}};
     std::vector<SetDescriptor> sets;
-    for (size_t k = 0; k < size_t(Kernel::kCount); ++k)
+    for (size_t k = 0; k < VULKAN_KERNEL_COUNT; ++k)
         if (o.pipelines[k].pipeline) {
             SetDescriptor& set = sets.emplace_back(SetDescriptor{k, &o.kernel_sets[k], {}});
-            std::copy_n(kernel_images[size_t(kKernels[k].images)], 3, set.images);
+            std::copy_n(kernel_images[size_t(VULKAN_PLAN_KERNELS[k].images)], 3, set.images);
         }
     if (s.passes > 1) {
         sets.push_back({kAlpha, &o.alpha_sets[0], {stored(o.answer), first}});
@@ -924,8 +952,8 @@ Result<void> Runtime::make_sets()
     // The pre and post blocks of later passes, which read history 0 and
     // store into the answer: in image mode sets of their own, which sample
     // the input; otherwise the first pass's.
-    const size_t pre = s.motion ? temporal_pre() : size_t(steps_.front().kernel);
-    const size_t post = s.motion ? size_t(kPost) : size_t(steps_.back().kernel);
+    const size_t pre = s.motion ? temporal_pre() : size_t(steps_[0].kernel);
+    const size_t post = s.motion ? size_t(kPost) : size_t(steps_[step_count_ - 1].kernel);
     const bool later = s.external && s.passes > 1;
     if (later && s.motion) {
         sets.push_back({pre, &o.later_sets[0], {input, linear(o.flow[0]), linear(o.history[0]), linear(o.depth)}});
@@ -1047,7 +1075,7 @@ Result<void> Runtime::begin_setup(Setup& setup) const
 
 // A build's part of SETUP: the weights packed straight into the staging
 // memory and uploaded, the arena zeroed, and the noise field in the weights.
-Result<void> Runtime::upload(const Plan& plan, const Model& model, Setup& setup) const
+Result<void> Runtime::upload(const struct vulkan_plan& plan, const struct vulkan_model& model, Setup& setup) const
 {
     const VkDevice d = device_.device;
     const Objects& o = objects_;
@@ -1056,14 +1084,18 @@ Result<void> Runtime::upload(const Plan& plan, const Model& model, Setup& setup)
     void* mapped = nullptr;
     DLSSLOP_TRY(
         vk_check(vkMapMemory(d, setup.staging.memory, 0, VK_WHOLE_SIZE, 0, &mapped), "map the network's upload"));
-    DLSSLOP_TRY(pack(plan.segments, plan.tables, model, {static_cast<uint8_t*>(mapped), plan.blob_bytes}));
+    struct error e;
+    if (const enum error_code code = vulkan_weights_pack(plan.segments, plan.segment_count, plan.tables,
+                                                         plan.table_count, &model, static_cast<uint8_t*>(mapped),
+                                                         plan.blob_bytes, &e))
+        return forward_c(code, e);
     const VkCommandBuffer cmd = setup.cmd;
     const VkBufferCopy weights{0, 0, plan.blob_bytes};
     vkCmdCopyBuffer(cmd, setup.staging.buffer, o.weights.buffer, 1, &weights);
     vkCmdFillBuffer(cmd, o.arena.buffer, 0, plan.arena_bytes, 0);
     const VkMemoryBarrier uploaded{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, kCopyWrite, kRead | kWrite};
     vkCmdPipelineBarrier(cmd, kTransfer, kCompute, 0, 1, &uploaded, 0, nullptr, 0, nullptr);
-    const size_t noise = size_t(Kernel::kNoiseField);
+    const size_t noise = VULKAN_KERNEL_NOISE_FIELD;
     dispatch(cmd, noise, o.kernel_sets[noise], (plan.noise.width + 7) / 8, (plan.noise.height + 7) / 8, &plan.noise,
              sizeof plan.noise);
     return {};
@@ -1131,11 +1163,11 @@ void Runtime::dispatch(VkCommandBuffer cmd, size_t pipeline, VkDescriptorSet set
 
 // STEP through PIPELINE with SET and PUSH, its words, then the barrier the
 // plan puts after it.
-void Runtime::run_step(VkCommandBuffer cmd, const Step& step, size_t pipeline, VkDescriptorSet set,
+void Runtime::run_step(VkCommandBuffer cmd, const struct vulkan_step& step, size_t pipeline, VkDescriptorSet set,
                        const uint32_t* push) const
 {
     dispatch(cmd, pipeline, set, step.groups[0], step.groups[1], push, 4 * step.words, step.groups[2]);
-    if (step.after != After::kNothing) compute_barrier(cmd, step.after == After::kInvalidate);
+    if (step.after != VULKAN_AFTER_NOTHING) compute_barrier(cmd, step.after == VULKAN_AFTER_INVALIDATE);
 }
 
 // Starts a frame: the images into their layouts until a frame was
@@ -1225,8 +1257,8 @@ VkImage Runtime::record_network(VkCommandBuffer cmd, const Controls& c, bool res
     compute_barrier(cmd);
     // The pre and post blocks, which carry the frame's controls, or with
     // motion their temporal variants.
-    const Step& first = steps_.front();
-    const Step& last = steps_.back();
+    const struct vulkan_step& first = steps_[0];
+    const struct vulkan_step& last = steps_[step_count_ - 1];
     size_t pre = size_t(first.kernel), post = size_t(last.kernel);
     VkDescriptorSet pre_set = o.kernel_sets[pre], post_set = o.kernel_sets[post];
     uint32_t seed = 0;
@@ -1289,15 +1321,15 @@ VkImage Runtime::record_network(VkCommandBuffer cmd, const Controls& c, bool res
             post_set = o.later_sets[1];
         }
         uint32_t words[32];
-        std::copy_n(push_.data() + first.push, first.words, words);
+        std::copy_n(push_ + first.push, first.words, words);
         patch_pre(words, c, pass > 0, seed);
         run_step(cmd, first, pre, pre_set, words);
-        for (size_t i = 1; i + 1 < steps_.size(); ++i) {
-            const Step& step = steps_[i];
+        for (size_t i = 1; i + 1 < step_count_; ++i) {
+            const struct vulkan_step& step = steps_[i];
             const size_t kernel = size_t(step.kernel);
-            run_step(cmd, step, kernel, o.kernel_sets[kernel], push_.data() + step.push);
+            run_step(cmd, step, kernel, o.kernel_sets[kernel], push_ + step.push);
         }
-        std::copy_n(push_.data() + last.push, last.words, words);
+        std::copy_n(push_ + last.push, last.words, words);
         patch_post(words, c, s.post_alpha, s.rgba8);
         run_step(cmd, last, post, post_set, words);
         if (s.stored) {
@@ -1331,8 +1363,8 @@ VkImage Runtime::record_network(VkCommandBuffer cmd, const Controls& c, bool res
     // Whether a wait of the frame ran out, which the host reads once the
     // frame has run; then the first pass's input into the result, over the
     // grid that the verdict leaves empty when none did.
-    VerdictPush verdict{gx, gy, uint32_t(timeouts_.size()), {}};
-    std::ranges::copy(timeouts_, verdict.words);
+    VerdictPush verdict{gx, gy, uint32_t(timeout_count_), {}};
+    std::copy_n(timeouts_, timeout_count_, verdict.words);
     dispatch(cmd, kVerdict, o.verdict_set, 1, 1, &verdict, sizeof verdict);
     const VkMemoryBarrier judged{VK_STRUCTURE_TYPE_MEMORY_BARRIER, nullptr, kWrite,
                                  VK_ACCESS_INDIRECT_COMMAND_READ_BIT | kWrite | VK_ACCESS_HOST_READ_BIT};
@@ -1346,7 +1378,7 @@ VkImage Runtime::record_network(VkCommandBuffer cmd, const Controls& c, bool res
 
 size_t Runtime::temporal_pre() const
 {
-    return steps_.front().kernel == Kernel::kFswinImagePreds32Nh ? kPreNh : kPre;
+    return steps_[0].kernel == VULKAN_KERNEL_FSWIN_IMAGE_PREDS32_NH ? kPreNh : kPre;
 }
 
 void Runtime::submitted()

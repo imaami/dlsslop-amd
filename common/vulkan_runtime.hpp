@@ -6,12 +6,14 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "result.hpp"
-#include "vulkan_plan.hpp"
+#include "vulkan_plan.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
-#include <vector>
 #include <vulkan/vulkan.h>
+
+struct vulkan_model;
 
 namespace dlsslop {
 
@@ -31,8 +33,6 @@ Result<uint32_t> memory_type(const VkPhysicalDeviceMemoryProperties& memory, uin
 } // namespace dlsslop
 
 namespace dlsslop::vulkan {
-
-class Model;
 
 // The physical-device queries a build makes: the loader's in dlsslopd; in the
 // layer's module the next layer's, looked up when the module opens, so that
@@ -64,8 +64,8 @@ struct Device {
     void (*log)(const char* line);
 };
 
-// The most bytes one of DEVICE's storage buffers holds bound whole, as plan()
-// takes it: the smaller of its maxStorageBufferRange and
+// The most bytes one of DEVICE's storage buffers holds bound whole, as
+// vulkan_plan_init() takes it: the smaller of its maxStorageBufferRange and
 // maxMemoryAllocationSize; no limit when DEVICE cannot say, which fails its
 // build.
 uint64_t storage_limit(const Device& device);
@@ -154,11 +154,14 @@ class Runtime {
 public:
     // The network for SHAPE on DEVICE, from PLAN, which is of SHAPE's extent
     // on DEVICE's storage_limit(), with the kernels without the upper clamp
-    // that the model's weights allow (unclamp()): its SPIR-V from
+    // that the model's weights allow (vulkan_plan_unclamp()): its SPIR-V from
     // PATHS.shaders, its weights from PATHS.model and its pipeline cache at
     // PATHS.cache, with the pipelines of every shape of that extent. The queue
-    // must be free of the frames of a runtime being replaced.
-    static Result<Runtime> build(const Device& device, const VulkanPaths& paths, const Shape& shape, Plan plan);
+    // must be free of the frames of a runtime being replaced. The runtime
+    // takes PLAN's steps, push words and timeouts, and vulkan_plan_fini()
+    // frees the rest, whether the build succeeds or not.
+    static Result<Runtime> build(const Device& device, const VulkanPaths& paths, const Shape& shape,
+                                 struct vulkan_plan plan);
     Runtime(Runtime&& other) noexcept;
     Runtime& operator=(Runtime&&) = delete;
     ~Runtime();
@@ -207,7 +210,7 @@ public:
 private:
     // The network's kernels' pipelines, then the runtime's own.
     enum Adapter : size_t {
-        kAlpha = size_t(Kernel::kCount), kStages, kLuma, kFlow, kPre, kPreNh, kPost, kVerdict, kFallback, kPipelines
+        kAlpha = VULKAN_KERNEL_COUNT, kStages, kLuma, kFlow, kPre, kPreNh, kPost, kVerdict, kFallback, kPipelines
     };
     static constexpr size_t kAdapters = kPipelines - kAlpha;
     static constexpr uint32_t kLevels = 4; // the motion estimate's pyramid
@@ -234,7 +237,7 @@ private:
         // Each kernel's set, and the runtime's own pipelines' by what they
         // differ in: the answer or the scratch, the parity and level, and
         // the history.
-        VkDescriptorSet kernel_sets[size_t(Kernel::kCount)];
+        VkDescriptorSet kernel_sets[VULKAN_KERNEL_COUNT];
         VkDescriptorSet alpha_sets[2], stage_sets[2], luma_sets[2][kLevels], flow_sets[2][kLevels];
         VkDescriptorSet pre_sets[2], post_sets[2], verdict_set, fallback_sets[2];
         // The pre and post blocks' sets of the passes after the first, which
@@ -280,17 +283,20 @@ private:
     // A frame submitted since the last build or reshape moved the images into
     // their layouts.
     bool settled_ = false;
-    std::vector<Step> steps_;
-    std::vector<uint32_t> push_;
-    // The plan's values_end and timeouts.
+    // The plan's steps, push words, values_end and timeouts, which the
+    // runtime frees.
+    struct vulkan_step* steps_ = nullptr;
+    size_t step_count_ = 0;
+    uint32_t* push_ = nullptr;
     uint64_t values_end_ = 0;
-    std::vector<uint32_t> timeouts_;
+    uint32_t* timeouts_ = nullptr;
+    size_t timeout_count_ = 0;
 
     // The commands of a build, submitted once.
     struct Setup;
 
     explicit Runtime(const Device& device) : device_(device) {}
-    Result<void> make(const VulkanPaths& paths, const Shape& shape, Plan& plan);
+    Result<void> make(const VulkanPaths& paths, const Shape& shape, struct vulkan_plan& plan);
     // The pre block with motion history: kPreNh when the plan's pre block is
     // without the upper clamp, else kPre.
     size_t temporal_pre() const;
@@ -302,13 +308,13 @@ private:
     void begin(VkCommandBuffer cmd, bool reset) const;
     VkImage record_network(VkCommandBuffer cmd, const Controls& c, bool reset, VkQueryPool queries, uint32_t query);
     Result<void> begin_setup(Setup& setup) const;
-    Result<void> upload(const Plan& plan, const Model& model, Setup& setup) const;
+    Result<void> upload(const struct vulkan_plan& plan, const struct vulkan_model& model, Setup& setup) const;
     Result<void> end_setup(Setup& setup);
     std::string described() const;
     void bind(VkCommandBuffer cmd, size_t pipeline, VkDescriptorSet set, const void* push, uint32_t bytes) const;
     void dispatch(VkCommandBuffer cmd, size_t pipeline, VkDescriptorSet set, uint32_t x, uint32_t y,
                   const void* push, uint32_t bytes, uint32_t z = 1) const;
-    void run_step(VkCommandBuffer cmd, const Step& step, size_t pipeline, VkDescriptorSet set,
+    void run_step(VkCommandBuffer cmd, const struct vulkan_step& step, size_t pipeline, VkDescriptorSet set,
                   const uint32_t* push) const;
 };
 

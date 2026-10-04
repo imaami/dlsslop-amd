@@ -31,8 +31,10 @@
 // pre block is not, so that tests/vulkan-files.py can see the files that a
 // build opens; with --unclamped too, from a synthetic model whose weights
 // free every Swin layer of the exponent's upper clamp.
+#include "files.hpp"
 #include "network_recorder.hpp"
-#include "vulkan_pack.hpp"
+#include "vulkan_pack.h"
+#include "vulkan_plan.h"
 
 #include <getopt.h>
 #include <algorithm>
@@ -62,6 +64,31 @@ void require(bool value, const char* message)
     std::fprintf(stderr, "network-recorder test: %s\n", message);
     std::exit(1);
 }
+
+// The network's plan of WIDTH x HEIGHT frames; OK says whether it was made.
+struct Plan {
+    struct vulkan_plan plan{};
+    bool ok;
+    Plan(uint32_t width, uint32_t height)
+    {
+        struct error e;
+        ok = !vulkan_plan_init(&plan, width, height, UINT64_MAX, &e);
+    }
+    Plan(const Plan&) = delete;
+    ~Plan() { vulkan_plan_fini(&plan); }
+    std::span<const uint32_t> timeouts() const { return {plan.timeouts, plan.timeout_count}; }
+};
+
+// A model pack in memory, which vulkan_model_open() reads through /proc.
+struct Pack {
+    struct vulkan_pack pack;
+    Pack() { vulkan_pack_init(&pack); }
+    Pack(const Pack&) = delete;
+    ~Pack() { vulkan_pack_fini(&pack); }
+};
+
+// The FNV-1a 64 of BYTES at DATA.
+uint64_t fnv1a(const void* data, size_t bytes) { return vulkan_pack_fnv1a(VULKAN_PACK_FNV1A_BASIS, data, bytes); }
 
 // The fake device's handles are numbers from 1. It keeps the sizes of its
 // buffers and allocations, and host memory for the allocations mapped; what
@@ -198,7 +225,7 @@ VKAPI_ATTR VkResult VKAPI_CALL vkCreateShaderModule(VkDevice, const VkShaderModu
 {
     make(module);
     const std::lock_guard lock(making);
-    made[id(*module)] = "pipeline " + std::to_string(vulkan_test::fnv1a(info->pCode, info->codeSize));
+    made[id(*module)] = "pipeline " + std::to_string(fnv1a(info->pCode, info->codeSize));
     return VK_SUCCESS;
 }
 VKAPI_ATTR VkResult VKAPI_CALL vkAllocateMemory(VkDevice, const VkMemoryAllocateInfo* info,
@@ -348,7 +375,7 @@ VKAPI_ATTR void VKAPI_CALL vkCmdPushConstants(VkCommandBuffer, VkPipelineLayout,
     std::vector<uint32_t> words(bytes / 4);
     std::memcpy(words.data(), data, bytes);
     log("push", {}, {}, words);
-    constexpr size_t seed = (sizeof(vulkan::PushFSwin) + offsetof(vulkan::PushPreImage, seed)) / 4;
+    constexpr size_t seed = (sizeof(push_f_swin) + offsetof(push_pre_image, seed)) / 4;
     if (frame.pre && seed < words.size()) frame.seed = words[seed];
     frame.pre = false;
 }
@@ -458,7 +485,7 @@ std::string history(const Frame& f)
 // A pipeline made from CODE as a frame names it at its first use.
 std::string named(std::span<const uint32_t> code)
 {
-    return "(pipeline " + std::to_string(vulkan_test::fnv1a(code.data(), code.size_bytes())) + ")";
+    return "(pipeline " + std::to_string(fnv1a(code.data(), code.size_bytes())) + ")";
 }
 
 // The handle that TOKEN names, as a frame's line names it, without what its
@@ -477,7 +504,7 @@ std::string_view handle(std::string_view token) { return token.substr(0, token.f
 // mode it is FRAME, and ANSWER, the caller's answer, is the image the
 // fallback stores into, with nothing after it, or what that image is blitted
 // into last.
-bool judged(std::string_view commands, uint32_t width, uint32_t height, const std::vector<uint32_t>& timeouts,
+bool judged(std::string_view commands, uint32_t width, uint32_t height, std::span<const uint32_t> timeouts,
             std::string_view frame = {}, std::string_view answer = {})
 {
     std::vector<std::string_view> l;
@@ -592,8 +619,8 @@ void check_reshapes(const dlsslop::VulkanPaths& paths)
                 {3, true, true, 0.5f}, {1, true, true, 0.5f},  {1, true, false, 0},     {1, false, false, 0},
                 {2, false, false, 0},  {1, false, false, 0}};
     dlsslop::NetworkRecorder recorder(fake_device(), paths);
-    const auto plan = vulkan::plan(64, 64);
-    require(bool(plan), "cannot plan 64x64 frames");
+    const Plan plan(64, 64);
+    require(plan.ok, "cannot plan 64x64 frames");
     for (const auto& step : walk) {
         dlsslop::VulkanFrame f;
         f.width = f.height = 64;
@@ -617,7 +644,7 @@ void check_reshapes(const dlsslop::VulkanPaths& paths)
         require(lines(unsubmitted, kSettle) == 1,
                 ("the first frame after the reshape for " + what + " does not move the images into their layouts")
                     .c_str());
-        require(judged(unsubmitted, f.width, f.height, plan->timeouts),
+        require(judged(unsubmitted, f.width, f.height, plan.timeouts()),
                 ("a frame of " + what + " does not judge its waits after the network, or answers with its input "
                  "otherwise than over the verdict's grid")
                     .c_str());
@@ -645,28 +672,28 @@ void check_reshapes(const dlsslop::VulkanPaths& paths)
 // temporal pre block without it, never their twins with the clamp.
 void check_unclamped(const std::string& spirv)
 {
-    const auto plan = vulkan::plan(64, 64);
-    vulkan_test::Pack model;
-    require(plan && vulkan_test::synthetic_model(*plan, model, true), "cannot make the unclamped model");
+    const Plan plan(64, 64);
+    Pack model;
+    require(plan.ok && vulkan_pack_synthetic_model(&plan.plan, &model.pack, true), "cannot make the unclamped model");
     // A pipeline as a frame names it at its first use.
     auto named = [&](const std::string& file) {
         const auto code = dlsslop::read_file(dlsslop::join(spirv, file));
         require(bool(code), ("cannot read " + file).c_str());
-        return "(pipeline " + std::to_string(vulkan_test::fnv1a(code->data(), code->size())) + ")";
+        return "(pipeline " + std::to_string(fnv1a(code->data(), code->size())) + ")";
     };
     for (const bool motion : {false, true}) {
         dlsslop::VulkanFrame f;
         f.width = f.height = 64;
         f.motion = motion;
-        dlsslop::NetworkRecorder recorder(fake_device(), {model.path, spirv, ""});
+        dlsslop::NetworkRecorder recorder(fake_device(), {model.pack.path, spirv, ""});
         require(recorder.shape(f).value_or(false), "cannot build the network from the unclamped model");
         const std::string commands = record(recorder, f).commands;
         std::vector<std::pair<std::string, std::string>> twins;
         if (motion) twins.push_back({"temporal/temporal_pre_fp32.spv", "temporal/temporal_pre_fp32nh.spv"});
         else
-            for (const auto& [kernel, twin] : vulkan::kUnclamped)
-                twins.push_back({std::string("g_") + vulkan::kKernels[size_t(kernel)].stem + ".spv",
-                                 std::string("g_") + vulkan::kKernels[size_t(twin)].stem + ".spv"});
+            for (const vulkan_unclamped& u : VULKAN_PLAN_UNCLAMPED)
+                twins.push_back({std::string("g_") + VULKAN_PLAN_KERNELS[u.kernel].stem + ".spv",
+                                 std::string("g_") + VULKAN_PLAN_KERNELS[u.twin].stem + ".spv"});
         for (const auto& [clamped, unclamped] : twins)
             require(lines(commands, "pipeline #", named(unclamped)) == 1 &&
                         !lines(commands, "pipeline #", named(clamped)),
@@ -743,8 +770,8 @@ std::string as_named(const Frame& f, uint64_t image)
 // the same images.
 void check_images(const dlsslop::VulkanPaths& paths)
 {
-    const auto plan = vulkan::plan(64, 64);
-    require(bool(plan), "cannot plan 64x64 frames");
+    const Plan plan(64, 64);
+    require(plan.ok, "cannot plan 64x64 frames");
     dlsslop::VulkanFrame f;
     f.width = f.height = 64;
     f.motion = true;
@@ -829,7 +856,7 @@ void check_images(const dlsslop::VulkanPaths& paths)
                 ("a frame of " + what + " in image mode samples the caller's frame in "
                  + std::to_string(naming(one, views[id(own.frame)])) + " sets, not " + std::to_string(samplers))
                     .c_str());
-        require(judged(one.commands, f.width, f.height, plan->timeouts, frame_name, answer_name),
+        require(judged(one.commands, f.width, f.height, plan.timeouts(), frame_name, answer_name),
                 ("a frame of " + what + " in image mode does not judge its waits after the network, or answers "
                  "with the caller's frame otherwise than into the caller's answer")
                     .c_str());
@@ -870,8 +897,8 @@ void count_timeouts(const char* line)
 // starts over zeroes the arena.
 void check_timeouts(const dlsslop::VulkanPaths& paths)
 {
-    const auto plan = vulkan::plan(64, 64);
-    require(bool(plan), "cannot plan 64x64 frames");
+    const Plan plan(64, 64);
+    require(plan.ok, "cannot plan 64x64 frames");
     dlsslop::VulkanFrame f;
     f.width = f.height = 64;
     f.motion = true;
@@ -880,8 +907,8 @@ void check_timeouts(const dlsslop::VulkanPaths& paths)
     dlsslop::NetworkRecorder recorder(device, paths);
     require(recorder.shape(f).value_or(false), "cannot build the network for 64x64 frames");
     std::vector<uint8_t>& grid = verdict();
-    const std::string zeroed = "(buffer " + std::to_string(plan->arena_bytes) + ") " +
-                               std::to_string(plan->values_end) + " " + std::to_string(VK_WHOLE_SIZE);
+    const std::string zeroed = "(buffer " + std::to_string(plan.plan.arena_bytes) + ") " +
+                               std::to_string(plan.plan.values_end) + " " + std::to_string(VK_WHOLE_SIZE);
     // Compute (2048) to transfer (4096) stages, shader writes (64) to transfer writes (4096), and
     // back to shader reads and writes (96).
     const std::string_view before = "barrier 2048 4096 1\n memory 64 4096\n",
@@ -951,11 +978,11 @@ int main(int argc, char** argv)
     char end;
     if (optind + 1 != argc || (!extent.empty() && std::sscanf(extent.c_str(), "%ux%u%c", &width, &height, &end) != 2))
         return 2;
-    const auto plan = vulkan::plan(width, height);
-    require(bool(plan), "cannot plan the frames");
-    vulkan_test::Pack model;
-    require(vulkan_test::synthetic_model(*plan, model, unclamped), "cannot make the synthetic model");
-    const dlsslop::VulkanPaths paths{model.path, argv[optind], ""};
+    const Plan plan(width, height);
+    require(plan.ok, "cannot plan the frames");
+    Pack model;
+    require(vulkan_pack_synthetic_model(&plan.plan, &model.pack, unclamped), "cannot make the synthetic model");
+    const dlsslop::VulkanPaths paths{model.pack.path, argv[optind], ""};
     if (!extent.empty()) {
         dlsslop::VulkanFrame f;
         f.width = width;
