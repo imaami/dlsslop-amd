@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "codec.hpp"
+#include "geometry.h"
 #include "native_kernels.hpp"
 
 #include <cstddef>
@@ -96,7 +96,8 @@ public:
     Result<void> encode(const std::uint8_t* input, const struct geometry& g, void* device_rgba, bool fp16,
                         bool device = false)
     {
-        DLSSLOP_TRY(validate(g));
+        struct error e;
+        if (const enum error_code code = geometry_validate(&g, &e)) return forward_c(code, e);
         if (!device_rgba) return fail("null GPU encode output");
         format_ = &kFormats[fp16];
         source_ = input;

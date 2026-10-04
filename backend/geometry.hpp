@@ -10,14 +10,3 @@
 #else
 #define DLSSLOP_INLINE inline
 #endif
-
-namespace dlsslop {
-
-// Whether the fitted picture is nonempty and inside the padded extent.
-inline bool fits(const struct geometry& g)
-{
-    return g.fit_width && g.fit_height && g.x < g.width && g.y < g.height &&
-           g.fit_width <= g.width - g.x && g.fit_height <= g.height - g.y;
-}
-
-} // namespace dlsslop

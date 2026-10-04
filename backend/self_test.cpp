@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "engine.hpp"
 #include "files.hpp"
+#include "geometry.h"
 #include "hip_engine.hpp"
 #include "vulkan_engine.hpp"
 
@@ -78,7 +79,9 @@ Result<void> run_self_test(const Options& o, HipEngine& engine)
     const std::vector<uint8_t> input = gradient(w, h, 192, 64);
     std::vector<uint8_t> output(input.size());
     const unsigned repeats = o.self_test_runs;
-    const auto g = DLSSLOP_TRY(dlsslop::geometry(w, h, engine.tier()));
+    struct error e;
+    struct geometry g;
+    if (const enum error_code code = geometry_init(&g, w, h, engine.tier(), &e)) return forward_c(code, e);
     std::vector<float> first_raw;
     std::vector<uint8_t> first_output;
     // Only the first run checks the codec against the CPU reference, so the

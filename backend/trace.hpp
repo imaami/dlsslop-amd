@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "files.hpp"
-#include "geometry.hpp"
+#include "geometry.h"
 #include "result.hpp"
 
 #include <cstdint>

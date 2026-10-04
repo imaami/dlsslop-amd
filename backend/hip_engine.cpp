@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: MIT
 #include "hip_engine.hpp"
-#include "codec.hpp"
 #include "control_selftest.hpp"
+#include "geometry.h"
+#include "reference.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -119,8 +120,11 @@ Result<void> HipEngine::prepare()
     const size_t pixels = size_t(raster.width) * raster.networkHeight;
     DLSSLOP_TRY(api_.check(api_.hipMalloc(&device_input_, pixels * 16), "allocate network input"));
     DLSSLOP_TRY(api_.check(api_.hipMalloc(&device_output_, pixels * 12), "allocate network output"));
-    // The host copy of the answer serves the CPU codec and the self-test's checks.
-    if (!gpu_codec_ || options_.self_test) neural_.resize(pixels * 3);
+    // The host copies of a pass's input and answer serve the CPU codec and the self-test's checks.
+    if (!gpu_codec_ || options_.self_test) {
+        input_.resize(pixels * 4);
+        neural_.resize(pixels * 3);
+    }
     // One evaluation, without a history, before the daemon reports itself
     // ready, so that a kernel that cannot launch fails here. It is the
     // network's first frame, which has a buffer assignment of its own.
@@ -180,7 +184,9 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
 {
     const uint8_t* const input = io.proxy;
     uint8_t* const output = io.answer;
-    const auto g = DLSSLOP_TRY(geometry(w, h, tier_));
+    struct error e;
+    struct geometry g;
+    if (const enum error_code code = geometry_init(&g, w, h, tier_, &e)) return forward_c(code, e);
     // Said once: the Vulkan model's conditioning, which this network does not have.
     if ((settings.style || !settings.auto_mask || settings.skin_structure != -1) &&
         !std::exchange(warned_conditioning_, true))
@@ -197,8 +203,9 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
     if (gpu_codec_) {
         DLSSLOP_TRY(gpu_codec_->encode(input, g, device_input_, settings.fp16, io.slot >= 0));
         if (verify) {
-            std::vector<float> reference;
-            DLSSLOP_TRY(encode_proxy(input, g, settings.fp16, reference));
+            std::vector<float> reference(size_t(g.width) * g.height * 4);
+            if (const enum error_code code = reference_encode_proxy(input, &g, settings.fp16, reference.data(), &e))
+                return forward_c(code, e);
             DLSSLOP_TRY(selftest::compare(
                 DLSSLOP_TRY(selftest::Buffer::read_pointer(api_, stream_, device_input_, reference.size())), reference,
                 "GPU encoder"));
@@ -206,7 +213,8 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
             std::fflush(stdout);
         }
     } else {
-        DLSSLOP_TRY(encode_proxy(input, g, settings.fp16, input_));
+        if (const enum error_code code = reference_encode_proxy(input, &g, settings.fp16, input_.data(), &e))
+            return forward_c(code, e);
         DLSSLOP_TRY(api_.check(api_.hipMemcpy(device_input_, input_.data(), input_.size() * sizeof(float), 1),
                                "upload encoded frame"));
     }
@@ -230,14 +238,19 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
             if (gpu_codec_) {
                 DLSSLOP_TRY(gpu_codec_->feedback(answer, pass_input, settings.precision16));
                 if (verify) {
-                    DLSSLOP_TRY(feedback_neural_rgb(neural_.data(), g, input_, settings.precision16));
+                    if (const enum error_code code = reference_feedback_neural_rgb(neural_.data(), &g,
+                                                                                   settings.precision16,
+                                                                                   input_.data(), &e))
+                        return forward_c(code, e);
                     DLSSLOP_TRY(selftest::compare(
                         DLSSLOP_TRY(selftest::Buffer::read_pointer(api_, stream_, pass_input, input_.size())),
                         input_, "GPU inter-pass feedback"));
                     std::printf("GPU feedback for pass %u/%u vs CPU reference: FP32 bit-identical\n", pass + 1, passes);
                 }
             } else {
-                DLSSLOP_TRY(feedback_neural_rgb(neural_.data(), g, input_, settings.precision16));
+                if (const enum error_code code = reference_feedback_neural_rgb(neural_.data(), &g, settings.precision16,
+                                                                               input_.data(), &e))
+                    return forward_c(code, e);
                 DLSSLOP_TRY(api_.check(api_.hipMemcpy(pass_input, input_.data(), input_.size() * sizeof(float), 1),
                                        "upload inter-pass feedback"));
             }
@@ -280,7 +293,9 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
         if (verify) {
             const size_t bpp = settings.fp16 ? 8 : 4;
             std::vector<uint8_t> reference(size_t(w) * h * bpp);
-            DLSSLOP_TRY(decode_neural_proxy(input, g, settings.fp16, neural_.data(), reference.data()));
+            if (const enum error_code code = reference_decode_neural_proxy(input, &g, settings.fp16, neural_.data(),
+                                                                           reference.data(), &e))
+                return forward_c(code, e);
             const size_t first = std::mismatch(reference.begin(), reference.end(), output).first - reference.begin();
             if (first < reference.size()) {
                 std::fprintf(stderr, "GPU decoder first mismatch: x=%zu y=%zu byte=%zu GPU=%u CPU=%u\n",
@@ -292,7 +307,9 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
             std::fflush(stdout);
         }
     } else {
-        DLSSLOP_TRY(decode_neural_proxy(input, g, settings.fp16, neural_.data(), output));
+        if (const enum error_code code = reference_decode_neural_proxy(input, &g, settings.fp16, neural_.data(), output,
+                                                                       &e))
+            return forward_c(code, e);
         DLSSLOP_TRY(mark(3));
     }
     previous_settings_ = settings;

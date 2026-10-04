@@ -25,6 +25,10 @@ add_compile_options(-ffunction-sections -fdata-sections)
 # types at run time nowhere. GCC warns about -fno-rtti for C.
 add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
 add_link_options(-Wl,--gc-sections $<$<CONFIG:Release>:-s>)
+# A program that the C driver links gets no C++ standard library, even where
+# it holds a C++ object (backend/kernel_math.cpp): a dependency on one fails
+# its link. CMake would add it as one of the C++ compiler's own libraries.
+list(REMOVE_ITEM CMAKE_CXX_IMPLICIT_LINK_LIBRARIES stdc++)
 # Link-time optimization shrinks the daemon's code by 7% and the GUI's
 # too: the compiler inlines and drops code across files.
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON CACHE BOOL "Link-time optimization")
@@ -167,7 +171,18 @@ add_dependencies(dlsslop-vulkan network-shaders)
 target_include_directories(dlsslop-vulkan PRIVATE backend ${SHADER_DIR})
 target_link_libraries(dlsslop-vulkan PUBLIC vulkan Threads::Threads)
 
-add_library(dlsslop-codec OBJECT backend/codec.cpp)
+# The CPU references of the daemon's kernels: the kernels' own math, which
+# kernel_math.cpp runs on the host, and the C that checks what it is given. It
+# needs no C++ runtime: the C tests that link it link with the C driver.
+add_library(dlsslop-codec OBJECT backend/kernel_math.cpp backend/reference.c backend/geometry.c
+    backend/tuning.c)
+# With clang, without SLP vectorization, and so outside LTO, whose link would
+# vectorize it again: clang packs pairs of the loops' scalars into vectors whose
+# other lanes hold what the caller left in the registers, and a denormal there
+# slows every divide (the --cpu-codec encode took twice as long). The results
+# are the same: nothing is reordered or fused. GCC's vectors do not slow down.
+set_source_files_properties(backend/kernel_math.cpp PROPERTIES
+    COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:Clang>:-fno-lto;-fno-tree-slp-vectorize>")
 # The HIP backend: the runtime, the network and the daemon's own kernels.
 add_library(dlsslop-hip OBJECT backend/hip.cpp backend/hip_weights.cpp backend/hip_plan.cpp backend/hip_network.cpp
     backend/native_kernels.cpp)
@@ -176,7 +191,7 @@ target_link_libraries(dlsslop-hip PUBLIC ${CMAKE_DL_LIBS})
 # (layer/network_module.h): the network and the libstdc++ it needs stay out of
 # the layer, which every game loads. It exports its C functions only.
 add_library(dlsslop-network MODULE layer/dlsslop_network.cpp backend/processing.cpp backend/options.cpp
-    backend/paths.cpp backend/files.c)
+    backend/paths.cpp backend/files.c backend/tuning.c)
 target_include_directories(dlsslop-network PRIVATE backend)
 target_link_libraries(dlsslop-network PRIVATE dlsslop-vulkan dlsslop-common-c ${CMAKE_DL_LIBS})
 target_link_options(dlsslop-network PRIVATE -static-libstdc++ -static-libgcc -Wl,-Bsymbolic
@@ -261,11 +276,18 @@ if(BUILD_TESTING)
     # it, the test skips.
     add_test(NAME vulkan-files COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/vulkan-files.py
         --recorder $<TARGET_FILE:network-recorder-test> --spirv ${VKNR_SHADERS})
-    add_executable(codec-test backend/codec_test.cpp)
-    target_link_libraries(codec-test PRIVATE dlsslop-codec dlsslop-common-c)
-    add_test(NAME codec COMMAND codec-test)
+    # The CPU references against properties and goldens, in C.
+    add_executable(codec-test tests/codec_test.c)
+    add_executable(color-preserve-test tests/color_preserve_test.c)
+    add_executable(tuning-test tests/tuning_test.c)
+    foreach(test codec color-preserve tuning)
+        target_include_directories(${test}-test PRIVATE backend)
+        target_link_libraries(${test}-test PRIVATE dlsslop-codec dlsslop-common-c)
+        set_target_properties(${test}-test PROPERTIES LINKER_LANGUAGE C)
+        add_test(NAME ${test} COMMAND ${test}-test)
+    endforeach()
     add_executable(color-gpu-test tests/color_gpu_test.cpp backend/hip.cpp backend/native_kernels.cpp backend/files.c)
-    target_link_libraries(color-gpu-test PRIVATE dlsslop-common-c ${CMAKE_DL_LIBS})
+    target_link_libraries(color-gpu-test PRIVATE dlsslop-codec dlsslop-common-c ${CMAKE_DL_LIBS})
     # Uses the GPU when the HIP runtime, a gfx1201 device and the module exist.
     set(HIP_MODULES ${CMAKE_CURRENT_SOURCE_DIR}/assets/HIP/gfx1201)
     add_test(NAME color-gpu COMMAND color-gpu-test --module ${HIP_MODULES}/linux_native.hsaco)
@@ -322,17 +344,12 @@ if(BUILD_TESTING)
         $<TARGET_FILE:hiptrace> $<TARGET_FILE:hiptrace-fake-runtime> $<TARGET_FILE:shmclient>)
     add_executable(color-kernel-host-test tests/color_kernel_host_test.cpp)
     target_compile_options(color-kernel-host-test PRIVATE -Wno-attributes -Wno-unknown-pragmas)
+    target_link_libraries(color-kernel-host-test PRIVATE dlsslop-codec dlsslop-common-c)
     add_test(NAME color-kernel-host COMMAND color-kernel-host-test)
-    add_executable(color-preserve-test tests/color_preserve_test.cpp)
-    add_test(NAME color-preserve COMMAND color-preserve-test)
-    add_executable(tuning-test tests/tuning_test.cpp)
-    target_include_directories(tuning-test PRIVATE backend)
-    target_link_libraries(tuning-test PRIVATE dlsslop-codec dlsslop-common-c)
-    add_test(NAME tuning COMMAND tuning-test)
     add_executable(temporal-test tests/temporal_test.cpp)
     target_include_directories(temporal-test PRIVATE backend)
     add_test(NAME temporal COMMAND temporal-test)
-    add_executable(trace-test tests/trace_test.cpp backend/trace.cpp backend/files.c)
+    add_executable(trace-test tests/trace_test.cpp backend/trace.cpp backend/files.c backend/geometry.c)
     target_link_libraries(trace-test PRIVATE dlsslop-common-c)
     add_test(NAME trace COMMAND trace-test ${Python3_EXECUTABLE})
     # files_replace() while another writer replaces the file and a reader reads it, and its failures,

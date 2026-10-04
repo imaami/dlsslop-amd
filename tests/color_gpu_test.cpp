@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Independent HIP test: no model weights, game or worker required.
-#include "../backend/color_preserve.hpp"
 #include "../backend/native_kernels.hpp"
+#include "../backend/reference.h"
 #include <getopt.h>
 #include <unistd.h>
 #include <algorithm>
@@ -35,7 +35,7 @@ dlsslop::Result<void> run(const dlsslop::hip::Api& api, int device, const std::s
     DLSSLOP_TRY(api.check(api.hipStreamCreate(&r.stream), "create stream"));
     const struct geometry g{1920,1080,1920,1152,1080,0,0,1920,1080};
     const std::size_t pixels=std::size_t(g.width)*g.height;
-    std::vector<float> input(pixels*4),model(pixels*3),expected,actual(pixels*3);
+    std::vector<float> input(pixels*4),model(pixels*3),expected(pixels*3),actual(pixels*3);
     for(std::size_t p=0;p<pixels;++p) {
         for(unsigned c=0;c<3;++c) {
             input[p*4+c]=float((p*11+c*71)%1000)/999;
@@ -62,7 +62,9 @@ dlsslop::Result<void> run(const dlsslop::hip::Api& api, int device, const std::s
             DLSSLOP_TRY(api.check(api.hipMemcpy(r.original,input.data(),input.size()*sizeof(float),1),"replace test reference"));
         }
         for(float strength : {0.f,.25f,.5f,1.f}) {
-            DLSSLOP_TRY(dlsslop::preserve_color(input.data(),model.data(),g,strength,expected));
+            struct error e;
+            if(const enum error_code code=reference_preserve_color(input.data(),model.data(),&g,strength,expected.data(),&e))
+                return dlsslop::forward_c(code,e);
             DLSSLOP_TRY(dlsslop::gpu_preserve_color(kernels,g,r.original,r.raw,r.output,strength));
             DLSSLOP_TRY(api.check(api.hipStreamSynchronize(r.stream),"finish correction"));
             DLSSLOP_TRY(api.check(api.hipMemcpy(actual.data(),r.output,actual.size()*sizeof(float),2),"read correction"));

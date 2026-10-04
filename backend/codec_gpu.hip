@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // SDR GPU boundary port of lmxxf's native_codec_encode/decode shaders.
-// See codec.cpp for the retained upstream copyright and MIT permission notice.
-// The complete CPU reference remains in codec.cpp.
+// See kernel_math.cpp for the retained upstream copyright and MIT permission notice.
+// The CPU reference runs the same math in kernel_math.cpp.
 #include "kernel.hpp"
 #include "codec_math.hpp"
 

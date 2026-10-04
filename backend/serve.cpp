@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "serve.hpp"
 #include "channel.hpp"
+#include "geometry.h"
 #include "open.hpp"
 #include "transport.hpp"
 
@@ -201,7 +202,9 @@ Result<std::string> process(const Request& r, E& engine, Mapping& mapping, Frame
     metadata.source_proxy_hash = 14695981039346656037ull;
     for (uint8_t byte : proxy) metadata.source_proxy_hash = (metadata.source_proxy_hash ^ byte) * 1099511628211ull;
     metadata.passes = r.passes;
-    metadata.geometry = DLSSLOP_TRY(geometry(r.width, r.height, engine.tier()));
+    struct error e;
+    if (const enum error_code code = geometry_init(&metadata.geometry, r.width, r.height, engine.tier(), &e))
+        return forward_c(code, e);
     metadata.fp16_proxy = settings.fp16;
     metadata.fp16_feedback = settings.precision16;
     metadata.motion = settings.motion;

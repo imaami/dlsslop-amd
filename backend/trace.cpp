@@ -69,7 +69,8 @@ Result<void> trace_write_text(const std::string& file, const std::string& text)
 
 Result<void> trace_write_pfm(const std::string& file, const float* data, const struct geometry& g, unsigned channels)
 {
-    if (!data || (channels != 3 && channels != 4) || !fits(g)) return fail("invalid diagnostic image geometry");
+    if (!data || (channels != 3 && channels != 4) || !geometry_fits(&g))
+        return fail("invalid diagnostic image geometry");
     char header[64];
     const int header_bytes = std::snprintf(header, sizeof header, "PF\n%u %u\n%s", g.fit_width, g.fit_height,
                                            std::endian::native == std::endian::little ? "-1.0\n" : "1.0\n");

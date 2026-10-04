@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "codec.hpp"
 #include "temporal_math.hpp"
 #include "native_kernels.hpp"
 #include <vector>

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// The codec's sampling math, shared by the CPU reference (codec.cpp) and the
-// GPU kernels (codec_gpu.hip), which must agree bit for bit.
+// The codec's sampling math, shared by the CPU reference (kernel_math.cpp) and
+// the GPU kernels (codec_gpu.hip), which must agree bit for bit.
 #pragma once
 
 #include "geometry.hpp"

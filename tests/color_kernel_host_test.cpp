@@ -1,6 +1,9 @@
-// Exercises the actual kernel entry point on the host. Not a HIP execution test.
-#include "../backend/color_preserve.hpp"
+// Exercises the actual kernel entry point on the host against the CPU reference's loop, which runs the
+// same math in kernel_math.cpp. Not a HIP execution test.
+#include "../backend/kernel_math.h"
 #include <cstdio>
+#include <cstring>
+#include <vector>
 static unsigned group_id, item_id;
 static unsigned __builtin_amdgcn_workgroup_id_x() { return group_id; }
 static unsigned __builtin_amdgcn_workitem_id_x() { return item_id; }
@@ -9,7 +12,7 @@ int main()
 {
     const struct geometry g{37,19,37,19,19,2,1,32,17};
     const unsigned pixels=g.width*g.height;
-    std::vector<float> original(pixels*4), raw(pixels*3), actual(pixels*3+8,12345), expected;
+    std::vector<float> original(pixels*4), raw(pixels*3), actual(pixels*3+8,12345), expected(pixels*3);
     for(unsigned p=0;p<pixels;++p) {
         for(unsigned c=0;c<3;++c) {
             original[p*4+c]=float((p*11+c*71)%1000)/999;
@@ -18,7 +21,7 @@ int main()
         original[p*4+3]=1;
     }
     for(float strength : {0.f,.25f,.5f,1.f}) {
-        if(!dlsslop::preserve_color(original.data(),raw.data(),g,strength,expected)) {
+        if(!kernel_math_preserve_color(original.data(),raw.data(),&g,strength,expected.data())) {
             std::fprintf(stderr,"reference refused its input\n");return 1;
         }
         for(group_id=0;group_id<(pixels+255)/256;++group_id)

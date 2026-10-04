@@ -2,8 +2,9 @@
 #pragma once
 
 #include "codec_gpu.hpp"
+#include "geometry.h"
+#include "reference.h"
 #include "temporal_gpu.hpp"
-#include "tuning.hpp"
 
 #include <cmath>
 #include <cstddef>
@@ -85,7 +86,7 @@ inline Result<void> check_tuning(const NativeKernels& kernels)
 {
     const struct geometry g{7, 5, 7, 5, 5, 0, 0, 7, 5};
     const std::size_t pixels = g.width * g.height;
-    std::vector<float> input(pixels * 4), model(pixels * 3), reference;
+    std::vector<float> input(pixels * 4), model(pixels * 3), reference(pixels * 3);
     for (unsigned p = 0; p < pixels; ++p) {
         for (unsigned c = 0; c < 3; ++c) {
             input[p * 4 + c] = float((p * 3 + c * 7) % 31) / 32.0f;
@@ -99,8 +100,11 @@ inline Result<void> check_tuning(const NativeKernels& kernels)
     DLSSLOP_TRY(device_input.upload(input)); DLSSLOP_TRY(device_model.upload(model));
     const struct native_tuning states[] = {NATIVE_TUNING_DEFAULTS, {0, 1, 1, 0}, {1.75f, .25f, 2.5f, .375f},
                                            {1, 0, 1, 0}, {1, 1, 0, 1}};
+    struct error e;
     for (const auto& state : states) {
-        DLSSLOP_TRY(tune_neural_rgb(input.data(), model.data(), g, reference, state));
+        if (const enum error_code code = reference_tune_neural_rgb(input.data(), model.data(), &g, &state,
+                                                                   reference.data(), &e))
+            return forward_c(code, e);
         DLSSLOP_TRY(gpu_tune(kernels, g, device_input.pointer, device_model.pointer, device_result.pointer, state));
         DLSSLOP_TRY(compare(DLSSLOP_TRY(device_result.read()), reference, "GPU native tuning"));
     }
@@ -271,7 +275,9 @@ inline Result<bool> codec_rejects(GpuCodec& codec, const std::vector<std::uint8_
 
 inline Result<void> check_codec(const NativeKernels& kernels)
 {
-    const struct geometry g = DLSSLOP_TRY(geometry(7, 5, 720));
+    struct error e;
+    struct geometry g;
+    if (const enum error_code code = geometry_init(&g, 7, 5, 720, &e)) return forward_c(code, e);
     const std::size_t pixels = std::size_t(g.width) * g.height;
     std::vector<std::uint8_t> proxy(g.source_width * g.source_height * 8);
     const std::uint16_t half_samples[] = {0xb800, 0x0000, 0x3400, 0x3a00, 0x3e00, 0x4000};
@@ -286,8 +292,9 @@ inline Result<void> check_codec(const NativeKernels& kernels)
     auto device_rgb = DLSSLOP_TRY(Buffer::allocate(kernels, pixels * 3 * sizeof(float)));
     GpuCodec codec(kernels);
     DLSSLOP_TRY(codec.init());
-    std::vector<float> reference, model(pixels * 3);
-    DLSSLOP_TRY(encode_proxy(proxy.data(), g, true, reference));
+    std::vector<float> reference(pixels * 4), model(pixels * 3);
+    if (const enum error_code code = reference_encode_proxy(proxy.data(), &g, true, reference.data(), &e))
+        return forward_c(code, e);
     DLSSLOP_TRY(codec.encode(proxy.data(), g, device_input.pointer, true));
     DLSSLOP_TRY(compare(DLSSLOP_TRY(device_input.read()), reference, "GPU FP16 proxy encode"));
 
@@ -300,7 +307,9 @@ inline Result<void> check_codec(const NativeKernels& kernels)
     std::vector<std::uint8_t> decoded(proxy.size()), expected(proxy.size());
     DLSSLOP_TRY(codec.decode(device_rgb.pointer, decoded.data()));
     DLSSLOP_TRY(codec.finish());
-    DLSSLOP_TRY(decode_neural_proxy(proxy.data(), g, true, model.data(), expected.data()));
+    if (const enum error_code code = reference_decode_neural_proxy(proxy.data(), &g, true, model.data(),
+                                                                   expected.data(), &e))
+        return forward_c(code, e);
     DLSSLOP_TRY(require(decoded == expected, "GPU FP16 proxy decode disagrees on exact signed/extended-range fixture"));
     // Decode overwrites the uploaded proxy's RGB in place; a repeat must agree.
     std::vector<std::uint8_t> repeated(proxy.size());
@@ -329,7 +338,9 @@ inline Result<void> check_codec(const NativeKernels& kernels)
     }
     DLSSLOP_TRY(device_rgb.upload(model));
     for (bool precision16 : {true, false}) {
-        DLSSLOP_TRY(feedback_neural_rgb(model.data(), g, reference, precision16));
+        if (const enum error_code code = reference_feedback_neural_rgb(model.data(), &g, precision16, reference.data(),
+                                                                       &e))
+            return forward_c(code, e);
         DLSSLOP_TRY(codec.feedback(device_rgb.pointer, device_input.pointer, precision16));
         DLSSLOP_TRY(compare(DLSSLOP_TRY(device_input.read()), reference, precision16 ? "GPU FP16 feedback" : "GPU UNORM8 feedback"));
     }
@@ -337,15 +348,18 @@ inline Result<void> check_codec(const NativeKernels& kernels)
 
     // A source larger than the fit (4 and 4.17 texels per pixel) takes the
     // area-weighted encode, which no other check reaches.
-    const struct geometry large = DLSSLOP_TRY(geometry(40, 3000, 720));
+    struct geometry large;
+    if (const enum error_code code = geometry_init(&large, 40, 3000, 720, &e)) return forward_c(code, e);
     std::vector<std::uint8_t> source(std::size_t(large.source_width) * large.source_height * 8);
     for (std::size_t i = 0; i < source.size() / 2; ++i) {
         const std::uint16_t value = std::uint16_t(0x2c00u + (i * 37u) % 0x1000u); // 1/16 up to 1
         std::memcpy(source.data() + i * 2, &value, sizeof(value));
     }
     auto device_large = DLSSLOP_TRY(Buffer::allocate(kernels, std::size_t(large.width) * large.height * 4 * sizeof(float)));
+    reference.resize(std::size_t(large.width) * large.height * 4);
     for (bool fp16 : {false, true}) {
-        DLSSLOP_TRY(encode_proxy(source.data(), large, fp16, reference));
+        if (const enum error_code code = reference_encode_proxy(source.data(), &large, fp16, reference.data(), &e))
+            return forward_c(code, e);
         DLSSLOP_TRY(codec.encode(source.data(), large, device_large.pointer, fp16));
         DLSSLOP_TRY(compare(DLSSLOP_TRY(device_large.read()), reference, fp16 ? "GPU FP16 downscaling encode" : "GPU RGBA8 downscaling encode"));
     }

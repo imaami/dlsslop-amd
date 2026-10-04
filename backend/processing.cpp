@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "processing.hpp"
-#include "tuning.hpp"
+#include "tuning.h"
 
 namespace dlsslop {
 
@@ -25,7 +25,8 @@ Result<ProcessingSettings> read_settings(const ShmHeader* h)
         return reject("the preset must be 0, style 0..2, auto-mask 0 or 1 and skin structure -1..2");
     if (!(settings.color_preserve >= 0 && settings.color_preserve <= 1))
         return reject("invalid color preservation strength");
-    DLSSLOP_TRY(validate_native_tuning(settings.tuning));
+    struct error e;
+    if (const enum error_code code = tuning_validate(&settings.tuning, &e)) return forward_c(code, e);
     return settings;
 }
 
