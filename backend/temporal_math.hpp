@@ -6,21 +6,11 @@
 #include "geometry.hpp"
 
 namespace dlsslop_temporal {
-struct Flow { float x, y, error; };
-struct Extent { unsigned width, height; };
-struct Search {
-    Extent image, grid, coarse_grid;
-    unsigned step, radius, patch, has_coarse, final_level;
-};
-struct Warp {
-    Extent image, grid;
-    unsigned padded_height, step, x, y, fit_width, fit_height;
-};
 DLSSLOP_INLINE float absolute(float v) { return v < 0 ? -v : v; }
 DLSSLOP_INLINE float clamp(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 DLSSLOP_INLINE unsigned min_u(unsigned a, unsigned b) { return a < b ? a : b; }
 DLSSLOP_INLINE int round_int(float v) { return int(v + (v >= 0 ? .5f : -.5f)); }
-DLSSLOP_INLINE float sample(const float* image, Extent e, float x, float y)
+DLSSLOP_INLINE float sample(const float* image, struct temporal_extent e, float x, float y)
 {
     x = clamp(x, 0, float(e.width - 1));
     y = clamp(y, 0, float(e.height - 1));
@@ -37,7 +27,8 @@ DLSSLOP_INLINE float sample(const float* image, Extent e, float x, float y)
 // issue together.
 template<int patch> using Patch = float[(2 * patch + 1) * (2 * patch + 1)];
 template<int patch>
-DLSSLOP_INLINE void sample_patch(Patch<patch>& reference, const float* current, Extent e, float x, float y)
+DLSSLOP_INLINE void sample_patch(Patch<patch>& reference, const float* current, struct temporal_extent e,
+                                 float x, float y)
 {
     constexpr int side = 2 * patch + 1;
 #pragma GCC unroll 25
@@ -47,7 +38,7 @@ DLSSLOP_INLINE void sample_patch(Patch<patch>& reference, const float* current, 
 // Mean absolute difference between the patch and the previous frame displaced by (dx, dy).
 template<int patch>
 DLSSLOP_INLINE float patch_cost(const Patch<patch>& reference, const float* previous,
-                                      Extent e, float x, float y, float dx, float dy)
+                                      struct temporal_extent e, float x, float y, float dx, float dy)
 {
     if (x + dx < 0 || y + dy < 0 || x + dx > float(e.width - 1) || y + dy > float(e.height - 1))
         return 10;
@@ -60,28 +51,30 @@ DLSSLOP_INLINE float patch_cost(const Patch<patch>& reference, const float* prev
     return cost / float(side * side);
 }
 // The flow at pixel (x, y) of a grid of one vector per step x step pixels.
-DLSSLOP_INLINE Flow sample_flow(const Flow* image, Extent e, unsigned step, float x, float y)
+DLSSLOP_INLINE struct temporal_flow sample_flow(const struct temporal_flow* image, struct temporal_extent e,
+                                                unsigned step, float x, float y)
 {
     x = clamp((x + .5f) / float(step) - .5f, 0, float(e.width - 1));
     y = clamp((y + .5f) / float(step) - .5f, 0, float(e.height - 1));
     const unsigned ix = unsigned(x), iy = unsigned(y);
     const unsigned hx = min_u(ix + 1, e.width - 1), hy = min_u(iy + 1, e.height - 1);
     const float fx = x - float(ix), fy = y - float(iy);
-    const Flow a = image[iy * e.width + ix], b = image[iy * e.width + hx];
-    const Flow c = image[hy * e.width + ix], d = image[hy * e.width + hx];
+    const struct temporal_flow a = image[iy * e.width + ix], b = image[iy * e.width + hx];
+    const struct temporal_flow c = image[hy * e.width + ix], d = image[hy * e.width + hx];
     return {(a.x + (b.x - a.x) * fx) * (1 - fy) + (c.x + (d.x - c.x) * fx) * fy,
             (a.y + (b.y - a.y) * fx) * (1 - fy) + (c.y + (d.y - c.y) * fx) * fy,
             (a.error + (b.error - a.error) * fx) * (1 - fy) + (c.error + (d.error - c.error) * fx) * fy};
 }
 template<int patch>
-DLSSLOP_INLINE Flow estimate_patch(const float* current, const float* previous,
-                                         const Flow* coarse, Search s, unsigned index)
+DLSSLOP_INLINE struct temporal_flow estimate_patch(const float* current, const float* previous,
+                                                   const struct temporal_flow* coarse, struct temporal_search s,
+                                                   unsigned index)
 {
     const float x = clamp((float(index % s.grid.width) + .5f) * float(s.step) - .5f,
                           0, float(s.image.width - 1));
     const float y = clamp((float(index / s.grid.width) + .5f) * float(s.step) - .5f,
                           0, float(s.image.height - 1));
-    Flow start{};
+    struct temporal_flow start{};
     if (s.has_coarse) {
         start = sample_flow(coarse, s.coarse_grid, s.step * 2, x, y);
         start.x = float(round_int(start.x * 2)); start.y = float(round_int(start.y * 2));
@@ -96,7 +89,7 @@ DLSSLOP_INLINE Flow estimate_patch(const float* current, const float* previous,
     // the parabolic refinement between them.
     constexpr float step_x[4] = {-1, 1, 0, 0}, step_y[4] = {0, 0, -1, 1};
     const int radius = int(s.radius), searched = (2 * radius + 1) * (2 * radius + 1);
-    Flow best{};
+    struct temporal_flow best{};
     float best_score = 0, around[4]{}, vx = 0, vy = 0;
     for (int k = 0, dx = -radius, dy = -radius;; ++k) {
         const float cost = patch_cost<patch>(reference, previous, s.image, x, y, vx, vy);
@@ -131,8 +124,9 @@ DLSSLOP_INLINE Flow estimate_patch(const float* current, const float* previous,
     return best;
 }
 // The patch radius is 1 or 2 (quality 2); each is a static instance.
-DLSSLOP_INLINE Flow estimate(const float* current, const float* previous,
-                                   const Flow* coarse, Search s, unsigned index)
+DLSSLOP_INLINE struct temporal_flow estimate(const float* current, const float* previous,
+                                             const struct temporal_flow* coarse, struct temporal_search s,
+                                             unsigned index)
 {
     return s.patch == 2 ? estimate_patch<2>(current, previous, coarse, s, index) :
                           estimate_patch<1>(current, previous, coarse, s, index);
@@ -142,13 +136,13 @@ DLSSLOP_INLINE Flow estimate(const float* current, const float* previous,
 // pixel, which gives the network exactly the input of its no-history path.
 DLSSLOP_INLINE void warp(const float* __restrict__ current_luma, const float* __restrict__ previous_gray,
                                const float* __restrict__ history, const float* __restrict__ fallback,
-                               const Flow* __restrict__ flow, float* __restrict__ output, Warp w, unsigned index,
-                               bool cut = false)
+                               const struct temporal_flow* __restrict__ flow, float* __restrict__ output,
+                               struct temporal_warp w, unsigned index, bool cut = false)
 {
     const unsigned x = index % w.image.width, padded_y = index / w.image.width;
     const unsigned y = padded_y < w.image.height ? padded_y : 2 * w.image.height - 2 - padded_y;
     const unsigned pixel = y * w.image.width + x;
-    const Flow f = sample_flow(flow, w.grid, w.step, float(x), float(y));
+    const struct temporal_flow f = sample_flow(flow, w.grid, w.step, float(x), float(y));
     const float px = float(x) + f.x, py = float(y) + f.y;
     // Both samples weight only the fitted picture; the bars' history is the network's answer for
     // black. Validity below already requires px >= w.x and py >= w.y.

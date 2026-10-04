@@ -33,7 +33,7 @@ dlsslop::Result<void> run(const dlsslop::hip::Api& api, int device, const std::s
     DLSSLOP_TRY(api.check(api.hipSetDevice(device), "select device"));
     Resources r{api};
     DLSSLOP_TRY(api.check(api.hipStreamCreate(&r.stream), "create stream"));
-    const dlsslop::Geometry g{1920,1080,1920,1152,1080,0,0,1920,1080};
+    const struct geometry g{1920,1080,1920,1152,1080,0,0,1920,1080};
     const std::size_t pixels=std::size_t(g.width)*g.height;
     std::vector<float> input(pixels*4),model(pixels*3),expected,actual(pixels*3);
     for(std::size_t p=0;p<pixels;++p) {

@@ -4,7 +4,7 @@
 #include "tuning_math.hpp"
 
 KERNEL void dlsslop_tune_rgb(const float* __restrict__ input_rgba, const float* __restrict__ raw_rgb,
-                    float* __restrict__ output_rgb, dlsslop::Geometry g, dlsslop::NativeTuning tuning)
+                    float* __restrict__ output_rgb, struct geometry g, struct native_tuning tuning)
 {
     const unsigned pixel = thread_index();
     if (pixel >= g.width * g.height)

@@ -19,8 +19,8 @@ void require(bool condition, const char* message)
     std::exit(1);
 }
 
-void tune(const std::vector<float>& input, const std::vector<float>& model, const dlsslop::Geometry& g,
-          std::vector<float>& output, const dlsslop::NativeTuning& tuning)
+void tune(const std::vector<float>& input, const std::vector<float>& model, const struct geometry& g,
+          std::vector<float>& output, const struct native_tuning& tuning)
 {
     require(bool(dlsslop::tune_neural_rgb(input.data(), model.data(), g, output, tuning)), "valid tuning refused");
 }
@@ -31,11 +31,12 @@ void close(float actual, float expected, const char* message)
 }
 
 // The control self-test's states (control_selftest.hpp), the default one first.
-const dlsslop::NativeTuning kStates[] = {{}, {0, 1, 1, 0}, {1.75f, .25f, 2.5f, .375f}, {1, 0, 1, 0}, {1, 1, 0, 1}};
+const struct native_tuning kStates[] = {NATIVE_TUNING_DEFAULTS, {0, 1, 1, 0}, {1.75f, .25f, 2.5f, .375f}, {1, 0, 1, 0},
+                                        {1, 1, 0, 1}};
 
 // How many of the reference's outputs, one per state, moved from their goldens
 // (golden.hpp).
-unsigned moved_goldens(const char* fixture, const dlsslop::Geometry& g, const std::vector<float>& input,
+unsigned moved_goldens(const char* fixture, const struct geometry& g, const std::vector<float>& input,
                        const std::vector<float>& model,
                        const std::uint64_t (&goldens)[sizeof kStates / sizeof *kStates])
 {
@@ -54,7 +55,7 @@ unsigned moved_goldens(const char* fixture, const dlsslop::Geometry& g, const st
 // random one, bit for bit.
 void goldens()
 {
-    const dlsslop::Geometry self_test{7, 5, 7, 5, 5, 0, 0, 7, 5};
+    const struct geometry self_test{7, 5, 7, 5, 5, 0, 0, 7, 5};
     std::vector<float> input(35 * 4), model(35 * 3);
     for (unsigned p = 0; p < 35; ++p) {
         for (unsigned c = 0; c < 3; ++c) {
@@ -66,7 +67,7 @@ void goldens()
     unsigned moved = moved_goldens("self-test", self_test, input, model, {
         0xb72c2574ee5214f8u, 0x5b4b322ec30cbd50u, 0x5647251848209bf3u, 0xf65855719c16435fu, 0x6e618c8b4da1a9dbu});
     // 640x480 at the 720 tier: pillarboxed, and padded below.
-    const dlsslop::Geometry pillarboxed{640, 480, 1280, 768, 720, 160, 0, 960, 720};
+    const struct geometry pillarboxed{640, 480, 1280, 768, 720, 160, 0, 960, 720};
     const std::size_t pixels = std::size_t(pillarboxed.width) * pillarboxed.height;
     input.resize(pixels * 4);
     model.resize(pixels * 3);
@@ -85,10 +86,10 @@ void goldens()
 
 int main()
 {
-    dlsslop::Geometry g{5, 5, 5, 5, 5, 0, 0, 5, 5};
+    struct geometry g{5, 5, 5, 5, 5, 0, 0, 5, 5};
     std::vector<float> input(25 * 4, 0.25f), model(25 * 3, 0.5f), output;
     for (unsigned p = 0; p < 25; ++p) input[p * 4 + 3] = 1.0f;
-    dlsslop::NativeTuning t;
+    struct native_tuning t = NATIVE_TUNING_DEFAULTS;
     // A deliberately non-half sample exposes accidental default rounding.
     model[12 * 3] = 0.53123456f;
     tune(input, model, g, output, t);
@@ -143,12 +144,12 @@ int main()
     t.intensity = std::numeric_limits<float>::quiet_NaN();
     const auto nonfinite = dlsslop::tune_neural_rgb(input.data(), model.data(), g, output, t);
     require(!nonfinite && nonfinite.error().rejected, "nonfinite tuning must fail");
-    for (const dlsslop::NativeTuning& invalid : {dlsslop::NativeTuning{4.5f, 1, 1, 0}, dlsslop::NativeTuning{1, -1, 1, 0},
-                                                 dlsslop::NativeTuning{1, 1, 1, 1.5f}}) {
+    for (const struct native_tuning& invalid : {native_tuning{4.5f, 1, 1, 0}, native_tuning{1, -1, 1, 0},
+                                                native_tuning{1, 1, 1, 1.5f}}) {
         const auto validated = dlsslop::validate_native_tuning(invalid);
         require(!validated && validated.error().rejected, "out-of-range tuning must reject the request");
     }
-    const auto in_place = dlsslop::tune_neural_rgb(input.data(), model.data(), g, model, {});
+    const auto in_place = dlsslop::tune_neural_rgb(input.data(), model.data(), g, model, NATIVE_TUNING_DEFAULTS);
     require(!in_place && !in_place.error().rejected, "in-place neighbourhood processing must fail");
     goldens();
     std::puts("native tuning: defaults, intensity, tone, structure, sharpness, viewport, errors and goldens passed");

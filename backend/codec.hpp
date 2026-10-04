@@ -13,10 +13,10 @@ namespace dlsslop {
 // tier_height: 0 selects the smallest fitting tier; otherwise 720, 900 or 1080.
 // Larger source pictures are fitted into the largest tier. Fails on invalid
 // geometry; sources must be nonempty and no larger than 16384 per dimension.
-Result<Geometry> geometry(unsigned source_width, unsigned source_height, unsigned tier_height = 0);
+Result<struct geometry> geometry(unsigned source_width, unsigned source_height, unsigned tier_height = 0);
 
 // Fails unless g is what geometry() returns for its source extent and tier.
-Result<void> validate(const Geometry& g);
+Result<void> validate(const struct geometry& g);
 
 // Source is tightly packed display-referred SDR sRGB RGBA8, or with fp16
 // native-endian RGBA16F, deliberately NOT gamma-decoded or clamped before
@@ -25,7 +25,7 @@ Result<void> validate(const Geometry& g);
 // in the upstream RGBA16_FLOAT encoding texture. Alpha is one. A source no
 // larger than the fit is sampled bilinearly; a larger one is averaged over
 // each pixel's footprint.
-Result<void> encode_proxy(const std::uint8_t* source, const Geometry& g, bool fp16, std::vector<float>& rgba);
+Result<void> encode_proxy(const std::uint8_t* source, const struct geometry& g, bool fp16, std::vector<float>& rgba);
 
 // Feed a raw neural result into another pass at the same processing extent.
 // Preserve the fitted viewport, round RGB through binary16 without UNORM8
@@ -33,7 +33,7 @@ Result<void> encode_proxy(const std::uint8_t* source, const Geometry& g, bool fp
 // letterbox and reflected bottom padding. Fail on nonfinite/FP16-overflow values
 // within the fitted viewport. With precision16=false, clamp/round finite input
 // to UNORM8 before the binary16 conversion instead. Input/output must not alias.
-Result<void> feedback_neural_rgb(const float* neural_rgb, const Geometry& g, std::vector<float>& rgba,
+Result<void> feedback_neural_rgb(const float* neural_rgb, const struct geometry& g, std::vector<float>& rgba,
                                  bool precision16 = true);
 
 // Raw neural view: undo aspect fitting and padding, round through the upstream
@@ -43,7 +43,7 @@ Result<void> feedback_neural_rgb(const float* neural_rgb, const Geometry& g, std
 // the GPU codec, a nonfinite or FP16-overflow neural sample that the resampling
 // reads rejects the frame. The original source's alpha is preserved.
 // Output holds the source's extent and format; input/output must not alias.
-Result<void> decode_neural_proxy(const std::uint8_t* original, const Geometry& g, bool fp16,
+Result<void> decode_neural_proxy(const std::uint8_t* original, const struct geometry& g, bool fp16,
                                  const float* neural_rgb, std::uint8_t* output);
 
 } // namespace dlsslop

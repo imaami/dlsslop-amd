@@ -3,7 +3,7 @@
 #include "color_preserve_math.hpp"
 
 KERNEL void dlsslop_preserve_color(const float* __restrict__ original_rgba, const float* __restrict__ model_rgb,
-                          float* __restrict__ output_rgb, dlsslop::Geometry g, float strength)
+                          float* __restrict__ output_rgb, struct geometry g, float strength)
 {
     const unsigned pixel = thread_index();
     if (pixel >= g.width * g.height) return;

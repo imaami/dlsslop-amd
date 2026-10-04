@@ -104,7 +104,7 @@ Rgb rgba8(const std::uint8_t* p)
 // the GPU codec, the decoder rejects it when a texel it reads is not a finite
 // binary16: it is then not finite either.
 // Out of line: inlined, it adds 3 KB (Clang) to 8 KB (GCC) of text.
-[[gnu::noinline]] Rgb answer(const float* neural_rgb, const Geometry& g, unsigned x, unsigned y)
+[[gnu::noinline]] Rgb answer(const float* neural_rgb, const struct geometry& g, unsigned x, unsigned y)
 {
     return sample_answer([&](unsigned px, unsigned py) {
         const float* p = neural_rgb + (std::size_t(py) * g.width + px) * 3;
@@ -117,7 +117,7 @@ Failure<const char*> nonfinite_answer()
     return reject("neural output contains nonfinite or FP16-overflow samples");
 }
 
-void reflect_padding(const Geometry& g, std::vector<float>& rgba)
+void reflect_padding(const struct geometry& g, std::vector<float>& rgba)
 {
     const std::size_t row = std::size_t(g.width) * 4;
     for (unsigned y = g.valid_height; y < g.height; ++y)
@@ -126,7 +126,7 @@ void reflect_padding(const Geometry& g, std::vector<float>& rgba)
 
 } // namespace
 
-Result<Geometry> geometry(unsigned source_width, unsigned source_height, unsigned tier_height)
+Result<struct geometry> geometry(unsigned source_width, unsigned source_height, unsigned tier_height)
 {
     if (!source_width || !source_height || source_width > 16384 || source_height > 16384)
         return fail("source extent must be in 1..16384");
@@ -135,7 +135,7 @@ Result<Geometry> geometry(unsigned source_width, unsigned source_height, unsigne
     const NativeTier* tier = tier_height ? ShmNativeTier(tier_height)
         : std::min(std::find_if(std::begin(kNativeTiers), std::end(kNativeTiers), holds), std::end(kNativeTiers) - 1);
     if (!tier) return fail("network height must be 0, 720, 900 or 1080");
-    Geometry g;
+    struct geometry g{};
     g.source_width = source_width;
     g.source_height = source_height;
     g.width = tier->width;
@@ -154,14 +154,14 @@ Result<Geometry> geometry(unsigned source_width, unsigned source_height, unsigne
     return g;
 }
 
-Result<void> validate(const Geometry& g)
+Result<void> validate(const struct geometry& g)
 {
     const auto expected = geometry(g.source_width, g.source_height, g.valid_height);
     if (!expected || std::memcmp(&*expected, &g, sizeof g)) return fail("inconsistent codec geometry");
     return {};
 }
 
-Result<void> encode_proxy(const std::uint8_t* source, const Geometry& g, bool fp16, std::vector<float>& rgba)
+Result<void> encode_proxy(const std::uint8_t* source, const struct geometry& g, bool fp16, std::vector<float>& rgba)
 {
     DLSSLOP_TRY(validate(g));
     if (!source) return fail("null source image");
@@ -191,7 +191,7 @@ Result<void> encode_proxy(const std::uint8_t* source, const Geometry& g, bool fp
     return {};
 }
 
-Result<void> feedback_neural_rgb(const float* neural_rgb, const Geometry& g, std::vector<float>& rgba,
+Result<void> feedback_neural_rgb(const float* neural_rgb, const struct geometry& g, std::vector<float>& rgba,
                                  bool precision16)
 {
     DLSSLOP_TRY(validate(g));
@@ -223,7 +223,7 @@ Result<void> feedback_neural_rgb(const float* neural_rgb, const Geometry& g, std
     return {};
 }
 
-Result<void> decode_neural_proxy(const std::uint8_t* original, const Geometry& g, bool fp16,
+Result<void> decode_neural_proxy(const std::uint8_t* original, const struct geometry& g, bool fp16,
                                  const float* neural_rgb, std::uint8_t* output)
 {
     DLSSLOP_TRY(validate(g));

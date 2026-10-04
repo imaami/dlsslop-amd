@@ -8,22 +8,16 @@
 
 namespace dlsslop {
 
-struct NativeTuning {
-    float intensity = 1.0f;
-    float tone = 1.0f;
-    float structure = 1.0f;
-    float sharpness = 0.0f;
-};
-
-DLSSLOP_INLINE bool operator==(const NativeTuning& a, const NativeTuning& b)
+DLSSLOP_INLINE bool operator==(const struct native_tuning& a, const struct native_tuning& b)
 {
     return a.intensity == b.intensity && a.tone == b.tone && a.structure == b.structure &&
            a.sharpness == b.sharpness;
 }
 
-DLSSLOP_INLINE bool native_tuning_is_default(const NativeTuning& tuning)
+DLSSLOP_INLINE bool native_tuning_is_default(const struct native_tuning& tuning)
 {
-    return tuning == NativeTuning{};
+    const struct native_tuning defaults = NATIVE_TUNING_DEFAULTS;
+    return tuning == defaults;
 }
 
 DLSSLOP_INLINE unsigned clamp_coordinate(int position, unsigned low, unsigned high)
@@ -63,7 +57,7 @@ DLSSLOP_INLINE Binomial binomial3x3_rgb(
 DLSSLOP_INLINE void tune_neural_pixel(
     const float* __restrict__ input_rgba, const float* __restrict__ raw_rgb, unsigned width,
     unsigned x, unsigned y, unsigned low_x, unsigned low_y,
-    unsigned high_x, unsigned high_y, const NativeTuning& tuning, float* __restrict__ out)
+    unsigned high_x, unsigned high_y, const struct native_tuning& tuning, float* __restrict__ out)
 {
     const unsigned pixel = y * width + x;
     const float* model = raw_rgb + pixel * 3;

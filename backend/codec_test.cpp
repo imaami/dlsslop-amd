@@ -20,7 +20,7 @@ void require(bool ok, const char* message)
 }
 
 // A geometry the test expects to be valid.
-dlsslop::Geometry geometry(unsigned width, unsigned height, unsigned tier = 0)
+struct geometry geometry(unsigned width, unsigned height, unsigned tier = 0)
 {
     const auto g = dlsslop::geometry(width, height, tier);
     require(bool(g), "valid geometry refused");
@@ -208,7 +208,7 @@ void test_area_downscale()
             "3x downscale accepted a nonfinite FP16 texel");
 }
 
-void expect_decode_rejection(const std::vector<std::uint8_t>& source, const dlsslop::Geometry& g,
+void expect_decode_rejection(const std::vector<std::uint8_t>& source, const struct geometry& g,
                              const std::vector<float>& neural)
 {
     std::vector<std::uint8_t> output(source.size());
@@ -390,7 +390,7 @@ void test_feedback_unorm8()
 
 // A source of the extent from fixture SEED: random RGBA8, or FP16 with any
 // finite binary16 in every channel, alpha included.
-std::vector<std::uint8_t> fixture_source(const dlsslop::Geometry& g, bool fp16, std::uint32_t seed)
+std::vector<std::uint8_t> fixture_source(const struct geometry& g, bool fp16, std::uint32_t seed)
 {
     std::vector<std::uint8_t> source(std::size_t(g.source_width) * g.source_height * (fp16 ? 8 : 4));
     if (!fp16) {
@@ -407,7 +407,7 @@ std::vector<std::uint8_t> fixture_source(const dlsslop::Geometry& g, bool fp16, 
 
 // A network's answer at g's processing extent from fixture SEED, NaN outside
 // the fitted picture, which no reference reads.
-std::vector<float> fixture_neural(const dlsslop::Geometry& g, std::uint32_t seed)
+std::vector<float> fixture_neural(const struct geometry& g, std::uint32_t seed)
 {
     std::vector<float> rgb(std::size_t(g.width) * g.height * 3, std::numeric_limits<float>::quiet_NaN());
     for (unsigned y = g.y; y < g.y + g.fit_height; ++y) {

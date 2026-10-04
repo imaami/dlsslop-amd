@@ -61,7 +61,7 @@ class HipEngine : public EngineBase<HipEngine> {
     Result<void> mark(unsigned i) { return api_.check(api_.hipEventRecord(marks_[i], stream_), "record timing event"); }
     Result<void> synchronize() { return api_.check(api_.hipStreamSynchronize(stream_), "network completion"); }
     // A pass's stage, read back into the trace.
-    Result<void> trace_image(FrameTrace* trace, const Geometry& g, unsigned pass, const char* stage,
+    Result<void> trace_image(FrameTrace* trace, const struct geometry& g, unsigned pass, const char* stage,
                              const void* pointer, unsigned channels);
 
 public:

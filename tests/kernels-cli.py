@@ -97,8 +97,8 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
         'geometry.hpp is included directly'
     native = json.loads((root / 'mixed-out/modules.json').read_text())[0]
     assert native['sources'] == {name: hashlib.sha256((backend / name).read_bytes()).hexdigest()
-                                 for name in (*native_sources, 'kernel.hpp', 'geometry.hpp', 'codec_math.hpp',
-                                              'tuning_math.hpp', 'color_preserve_math.hpp',
+                                 for name in (*native_sources, 'kernel.hpp', 'geometry.hpp', 'kernel_args.h',
+                                              'codec_math.hpp', 'tuning_math.hpp', 'color_preserve_math.hpp',
                                               'temporal_math.hpp')}, native
     # The compile finds an upstream source's quoted includes through -I backend, and a header's own
     # includes beside it: decoys beside the source must not be recorded.
@@ -113,7 +113,7 @@ with tempfile.TemporaryDirectory(prefix='build-kernels-cli-') as directory:
     assert module['sources'] == {
         'deep_reference.hip': hashlib.sha256((kernels / 'deep_reference.hip').read_bytes()).hexdigest(),
         **{name: native['sources'][name]
-           for name in ('color_preserve_math.hpp', 'tuning_math.hpp', 'geometry.hpp')}}, module
+           for name in ('color_preserve_math.hpp', 'tuning_math.hpp', 'geometry.hpp', 'kernel_args.h')}}, module
 
     newer = compilers('newer', {'amdclang++': 'AMD clang version 22.0.0git',
                                 'clang++-22': 'Debian clang version 22.1.8'})

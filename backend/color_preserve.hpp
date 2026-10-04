@@ -13,7 +13,7 @@ namespace dlsslop {
 // forcing original chroma onto newly generated edges. This preserves weighted
 // proxy-space luma (not physical linear-light luminance). High-frequency chroma
 // changes remain possible; this is not a guarantee of inference correctness.
-inline Result<void> preserve_color(const float* original_rgba, const float* model_rgb, const Geometry& g,
+inline Result<void> preserve_color(const float* original_rgba, const float* model_rgb, const struct geometry& g,
                                    float strength, std::vector<float>& result)
 {
     if (!std::isfinite(strength) || strength < 0 || strength > 1)

@@ -8,7 +8,6 @@
 typedef unsigned uint;
 typedef unsigned char byte;
 typedef unsigned short halfword;
-typedef dlsslop::Geometry Geometry;
 typedef dlsslop::Rgb Rgb;
 
 // Do not call this helper half_round: AMD Clang's OpenCL library simplifier
@@ -58,22 +57,22 @@ DEV Rgb checked(Rgb c, uint* invalid)
 
 template<bool fp16>
 DEV void encode_proxy(const byte* __restrict__ source, float* __restrict__ rgba, uint* __restrict__ invalid,
-                      Geometry g)
+                      struct geometry g)
 {
     const uint index = thread_index();
     if (index >= g.width * g.height)
         return;
-    const uint x = index % g.width, y = codec_row(g, index / g.width);
+    const uint x = index % g.width, y = dlsslop::codec_row(g, index / g.width);
     Rgb c{};
-    if (fitted(g, x, y)) {
+    if (dlsslop::fitted(g, x, y)) {
         if constexpr (fp16) {
-            c = checked(sample_proxy([=](uint px, uint py) {
+            c = checked(dlsslop::sample_proxy([=](uint px, uint py) {
                 const halfword* p = reinterpret_cast<const halfword*>(source) + (py * g.source_width + px) * 4;
                 return Rgb{dlsslop_unpack_binary16(p[0]), dlsslop_unpack_binary16(p[1]),
                            dlsslop_unpack_binary16(p[2])};
             }, g, x, y), invalid);
         } else {
-            c = sample_proxy([=](uint px, uint py) {
+            c = dlsslop::sample_proxy([=](uint px, uint py) {
                 const byte* p = source + (py * g.source_width + px) * 4;
                 return Rgb{float(p[0]) / 255.0f, float(p[1]) / 255.0f, float(p[2]) / 255.0f};
             }, g, x, y);
@@ -86,13 +85,13 @@ DEV void encode_proxy(const byte* __restrict__ source, float* __restrict__ rgba,
 }
 
 KERNEL void dlsslop_encode_rgba8(const byte* source, float* rgba, uint* invalid,
-                              Geometry g)
+                              struct geometry g)
 {
     encode_proxy<false>(source, rgba, invalid, g);
 }
 
 KERNEL void dlsslop_encode_rgba16f(const byte* source, float* rgba, uint* invalid,
-                                Geometry g)
+                                struct geometry g)
 {
     encode_proxy<true>(source, rgba, invalid, g);
 }
@@ -100,14 +99,14 @@ KERNEL void dlsslop_encode_rgba16f(const byte* source, float* rgba, uint* invali
 // Binary16 feedback flags what rounds past binary16; UNORM8 feedback, which
 // clamps, only a nonfinite raw sample.
 KERNEL void dlsslop_feedback_rgb(const float* __restrict__ neural_rgb, float* __restrict__ rgba,
-                               uint* __restrict__ invalid, Geometry g, uint precision16)
+                               uint* __restrict__ invalid, struct geometry g, uint precision16)
 {
     const uint index = thread_index();
     if (index >= g.width * g.height)
         return;
-    const uint x = index % g.width, y = codec_row(g, index / g.width);
+    const uint x = index % g.width, y = dlsslop::codec_row(g, index / g.width);
     Rgb c{};
-    if (fitted(g, x, y)) {
+    if (dlsslop::fitted(g, x, y)) {
         const float* p = neural_rgb + (y * g.width + x) * 3;
         if (precision16) {
             c = checked(round_to_binary16(p), invalid);
@@ -126,17 +125,18 @@ KERNEL void dlsslop_feedback_rgb(const float* __restrict__ neural_rgb, float* __
 
 // The answer at source pixel (x, y) through the upstream FP16 surface: all
 // four texels load before the one check of their sample.
-DEV Rgb answer(const float* __restrict__ neural_rgb, Geometry g, uint pixel, uint* __restrict__ invalid)
+DEV Rgb answer(const float* __restrict__ neural_rgb, struct geometry g, uint pixel, uint* __restrict__ invalid)
 {
-    return checked(sample_answer([=](uint px, uint py) { return round_to_binary16(neural_rgb + (py * g.width + px) * 3); },
-                                 g, pixel % g.source_width, pixel / g.source_width), invalid);
+    return checked(dlsslop::sample_answer([=](uint px, uint py) {
+        return round_to_binary16(neural_rgb + (py * g.width + px) * 3);
+    }, g, pixel % g.source_width, pixel / g.source_width), invalid);
 }
 
 // Decode writes the answer's RGB with the proxy's alpha into target, which may
 // be the proxy itself. Each pixel is one whole-word store: a partial-word store
 // makes the readback slower.
 KERNEL void dlsslop_decode_rgba8(const uint* proxy, uint* target, const float* __restrict__ neural_rgb,
-                              uint* __restrict__ invalid, Geometry g)
+                              uint* __restrict__ invalid, struct geometry g)
 {
     const uint pixel = thread_index();
     if (pixel >= g.source_width * g.source_height)
@@ -147,7 +147,7 @@ KERNEL void dlsslop_decode_rgba8(const uint* proxy, uint* target, const float* _
 }
 
 KERNEL void dlsslop_decode_rgba16f(const unsigned long long* proxy, unsigned long long* target,
-                                const float* __restrict__ neural_rgb, uint* __restrict__ invalid, Geometry g)
+                                const float* __restrict__ neural_rgb, uint* __restrict__ invalid, struct geometry g)
 {
     const uint pixel = thread_index();
     if (pixel >= g.source_width * g.source_height)

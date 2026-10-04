@@ -161,7 +161,7 @@ bool HipEngine::import_into(unsigned slot, const ShmTransportOffer& offer, Descr
     return true;
 }
 
-Result<void> HipEngine::trace_image(FrameTrace* trace, const Geometry& g, unsigned pass, const char* stage,
+Result<void> HipEngine::trace_image(FrameTrace* trace, const struct geometry& g, unsigned pass, const char* stage,
                                     const void* pointer, unsigned channels)
 {
     if (!trace) return {};

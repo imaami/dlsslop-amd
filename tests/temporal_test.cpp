@@ -9,8 +9,8 @@
 #include <vector>
 
 namespace {
-struct Plane { dlsslop_temporal::Extent size; std::vector<float> pixels; };
-struct Field { dlsslop_temporal::Extent size; std::vector<dlsslop_temporal::Flow> pixels; };
+struct Plane { struct temporal_extent size; std::vector<float> pixels; };
+struct Field { struct temporal_extent size; std::vector<struct temporal_flow> pixels; };
 void require(bool value, const char* message)
 {
     if (value) return;
@@ -49,7 +49,7 @@ Field optical_flow(const Plane& current, const Plane& previous, unsigned quality
         const auto e = a[level].size;
         Field field{{(e.width + step - 1) / step, (e.height + step - 1) / step}, {}};
         field.pixels.resize(field.size.width * field.size.height);
-        dlsslop_temporal::Search s{e, field.size, coarse.size, step, quality + 1,
+        struct temporal_search s{e, field.size, coarse.size, step, quality + 1,
             quality == 2 ? 2u : 1u, unsigned(!coarse.pixels.empty()), unsigned(!level)};
         for (unsigned p = 0; p < field.pixels.size(); ++p)
             field.pixels[p] = dlsslop_temporal::estimate(a[level].pixels.data(), b[level].pixels.data(), coarse.pixels.data(), s, p);
@@ -65,7 +65,7 @@ float random(unsigned x, unsigned y)
 }
 // The flow search as it was before it sampled the current patch once per grid point:
 // every candidate resamples both frames. The shipped search must match it bit for bit.
-float reference_cost(const float* current, const float* previous, dlsslop_temporal::Extent e,
+float reference_cost(const float* current, const float* previous, struct temporal_extent e,
                      float x, float y, float dx, float dy, unsigned patch)
 {
     if (x + dx < 0 || y + dy < 0 || x + dx > float(e.width - 1) || y + dy > float(e.height - 1))
@@ -78,20 +78,20 @@ float reference_cost(const float* current, const float* previous, dlsslop_tempor
     const unsigned side = patch * 2 + 1;
     return cost / float(side * side);
 }
-dlsslop_temporal::Flow reference_estimate(const float* current, const float* previous,
-                                          const dlsslop_temporal::Flow* coarse, dlsslop_temporal::Search s, unsigned index)
+struct temporal_flow reference_estimate(const float* current, const float* previous,
+                                        const struct temporal_flow* coarse, struct temporal_search s, unsigned index)
 {
     using dlsslop_temporal::absolute;
     using dlsslop_temporal::clamp;
     const float x = clamp((float(index % s.grid.width) + .5f) * float(s.step) - .5f, 0, float(s.image.width - 1));
     const float y = clamp((float(index / s.grid.width) + .5f) * float(s.step) - .5f, 0, float(s.image.height - 1));
-    dlsslop_temporal::Flow start{};
+    struct temporal_flow start{};
     if (s.has_coarse) {
         start = dlsslop_temporal::sample_flow(coarse, s.coarse_grid, s.step * 2, x, y);
         start.x = float(dlsslop_temporal::round_int(start.x * 2));
         start.y = float(dlsslop_temporal::round_int(start.y * 2));
     }
-    dlsslop_temporal::Flow best{0, 0, reference_cost(current, previous, s.image, x, y, 0, 0, s.patch)};
+    struct temporal_flow best{0, 0, reference_cost(current, previous, s.image, x, y, 0, 0, s.patch)};
     float best_score = best.error;
     for (int dy = -int(s.radius); dy <= int(s.radius); ++dy) {
         for (int dx = -int(s.radius); dx <= int(s.radius); ++dx) {
@@ -120,8 +120,8 @@ dlsslop_temporal::Flow reference_estimate(const float* current, const float* pre
 // edges, must read back its own grid coordinate, clamped to the grid.
 void flow_grid()
 {
-    const dlsslop_temporal::Extent g{5, 4};
-    std::vector<dlsslop_temporal::Flow> ramp(g.width * g.height);
+    const struct temporal_extent g{5, 4};
+    std::vector<struct temporal_flow> ramp(g.width * g.height);
     for (unsigned j = 0; j < g.height; ++j)
         for (unsigned i = 0; i < g.width; ++i) ramp[j * g.width + i] = {float(i), float(j), float(i + j)};
     unsigned positions = 0;
@@ -160,12 +160,12 @@ void search_equivalence()
                 for (unsigned has_coarse = 0; has_coarse < 2; ++has_coarse)
                     for (unsigned final_level = 0; final_level < 2; ++final_level) {
                         const unsigned step = 1u << grid;
-                        const dlsslop_temporal::Extent e{w, h}, g{(w + step - 1) / step, (h + step - 1) / step};
-                        const dlsslop_temporal::Extent cg{(g.width + 1) / 2, (g.height + 1) / 2};
-                        std::vector<dlsslop_temporal::Flow> coarse(cg.width * cg.height);
+                        const struct temporal_extent e{w, h}, g{(w + step - 1) / step, (h + step - 1) / step};
+                        const struct temporal_extent cg{(g.width + 1) / 2, (g.height + 1) / 2};
+                        std::vector<struct temporal_flow> coarse(cg.width * cg.height);
                         for (auto& f : coarse)
                             f = {float(int(rng() % 9) - 4) * .5f, float(int(rng() % 9) - 4) * .5f, 0};
-                        const dlsslop_temporal::Search s{e, g, cg, step, quality + 1, quality == 2 ? 2u : 1u,
+                        const struct temporal_search s{e, g, cg, step, quality + 1, quality == 2 ? 2u : 1u,
                                                          has_coarse, final_level};
                         for (unsigned i = 0; i < g.width * g.height; ++i, ++vectors) {
                             const auto a = reference_estimate(current.data(), previous.data(), coarse.data(), s, i);
@@ -188,7 +188,7 @@ void letterbox()
     const std::vector<float> current = luma(rgba);
     std::vector<float> history(width * height * 3, sentinel), fallback(rgba.size(), fallback_value);
     std::vector<float> output(rgba.size());
-    std::vector<dlsslop_temporal::Flow> flow(width * height);
+    std::vector<struct temporal_flow> flow(width * height);
     const auto inside = [](unsigned x, unsigned y) { return float(x) + float(y) * width; };
     for (unsigned y = 0; y < height; ++y)
         for (unsigned x = 0; x < width; ++x)
@@ -196,7 +196,7 @@ void letterbox()
     for (unsigned y = top; y <= bottom; ++y)
         for (unsigned x = left; x <= right; ++x)
             for (unsigned c = 0; c < 3; ++c) history[(y * width + x) * 3 + c] = inside(x, y);
-    const dlsslop_temporal::Warp w{{width, height}, {width, height}, height, 1, left, top, fit_width, fit_height};
+    const struct temporal_warp w{{width, height}, {width, height}, height, 1, left, top, fit_width, fit_height};
     struct Case { float dx, dy; unsigned x, y; float expected; const char* message; };
     const Case cases[] = {
         {.75f, 0, right, 3, inside(right, 3), "rightward sub-pixel motion did not return the edge history"},
@@ -209,7 +209,7 @@ void letterbox()
         {0, 0, left - 1, 3, fallback_value, "a bar pixel did not fall back"},
     };
     for (const Case& t : cases) {
-        std::fill(flow.begin(), flow.end(), dlsslop_temporal::Flow{t.dx, t.dy, 0});
+        std::fill(flow.begin(), flow.end(), temporal_flow{t.dx, t.dy, 0});
         const unsigned index = t.y * width + t.x;
         dlsslop_temporal::warp(current.data(), gray.data(), history.data(), fallback.data(), flow.data(), output.data(), w, index);
         for (unsigned c = 0; c < 3; ++c) require(output[index * 4 + c] == t.expected, t.message);
@@ -257,8 +257,8 @@ void run()
         }
     }
     const std::vector<float> current_luma = luma(rgba);
-    std::fill(pixels.pixels.begin(), pixels.pixels.end(), dlsslop_temporal::Flow{-6, 3, 0});
-    dlsslop_temporal::Warp w{{width, height}, pixels.size, height + 8, 4, 0, 0, width, height};
+    std::fill(pixels.pixels.begin(), pixels.pixels.end(), temporal_flow{-6, 3, 0});
+    struct temporal_warp w{{width, height}, pixels.size, height + 8, 4, 0, 0, width, height};
     for (unsigned p = 0; p < width * (height + 8); ++p)
         dlsslop_temporal::warp(current_luma.data(), previous.pixels.data(), history.data(), fallback.data(), pixels.pixels.data(), output.data(), w, p);
     const unsigned x = 60, y = 40;
@@ -267,14 +267,14 @@ void run()
     require(output[0] == .125f, "out-of-frame history must use corresponding current-pass input");
     const unsigned mirrored = 2 * height - 2 - (height + 7);
     require(output[((height + 7) * width + x) * 4] == output[(mirrored * width + x) * 4], "history padding is not reflected");
-    std::fill(pixels.pixels.begin(), pixels.pixels.end(), dlsslop_temporal::Flow{-6, 3, .5f});
+    std::fill(pixels.pixels.begin(), pixels.pixels.end(), temporal_flow{-6, 3, .5f});
     dlsslop_temporal::warp(current_luma.data(), previous.pixels.data(), history.data(), fallback.data(), pixels.pixels.data(), output.data(), w, y * width + x);
     require(output[(y * width + x) * 4] == .125f, "rejected motion contaminated history");
     // A scene cut rejects even valid motion everywhere: every pixel, padding included,
     // is the current pass input's reflected pixel, opaque.
     std::vector<float> input(rgba.size());
     for (std::size_t i = 0; i < input.size(); ++i) input[i] = float(i % 1021) / 1021;
-    std::fill(pixels.pixels.begin(), pixels.pixels.end(), dlsslop_temporal::Flow{-6, 3, 0});
+    std::fill(pixels.pixels.begin(), pixels.pixels.end(), temporal_flow{-6, 3, 0});
     for (unsigned p = 0; p < width * (height + 8); ++p) {
         dlsslop_temporal::warp(current_luma.data(), previous.pixels.data(), history.data(), input.data(), pixels.pixels.data(), output.data(), w, p, true);
         const unsigned row = p / width, source = (row < height ? row : 2 * height - 2 - row) * width + p % width;

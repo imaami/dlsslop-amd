@@ -23,7 +23,7 @@ struct TraceFrameMetadata {
     std::uint32_t held_input{}, held_input_end{};
     std::uint64_t source_proxy_hash{};
     unsigned passes{};
-    Geometry geometry{};
+    struct geometry geometry{};
     bool fp16_proxy{}, fp16_feedback{}, motion{};
     float intensity{}, local_tone{}, local_structure{}, sharpness{}, color_preserve{};
 
@@ -37,7 +37,7 @@ Result<void> trace_write_text(const std::string& file, const std::string& text);
 // PFM is bottom-up RGB float32. Negative scale identifies little-endian data.
 // Retain model-domain values, including signed/extended values and NaNs: this
 // is evidence, not a preview image, and no display transform is applied.
-Result<void> trace_write_pfm(const std::string& file, const float* data, const Geometry& g, unsigned channels);
+Result<void> trace_write_pfm(const std::string& file, const float* data, const struct geometry& g, unsigned channels);
 
 class FrameTrace {
     std::string root_, token_;
@@ -53,7 +53,7 @@ public:
     // worker stops or unwinds first; the client need not wait for a timeout.
     ~FrameTrace();
     // After a failed stage, the frame's later stages are not written.
-    void image(const std::string& name, const float* data, const Geometry& g, unsigned channels);
+    void image(const std::string& name, const float* data, const struct geometry& g, unsigned channels);
     // A failure replaces any error a stage recorded.
     void finish(const std::string& metadata, const char* failure = nullptr);
 };

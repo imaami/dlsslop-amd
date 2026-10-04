@@ -52,8 +52,8 @@ public:
 // Native tuning of one pass's raw RGB, queued after its inference. The caller
 // keeps the three buffers until the stream reaches the kernel; it reads
 // neighbours, so the output is distinct from both inputs.
-inline Result<void> gpu_tune(const NativeKernels& kernels, Geometry g, const void* input_rgba, const void* raw_rgb,
-                             void* output_rgb, NativeTuning tuning)
+inline Result<void> gpu_tune(const NativeKernels& kernels, struct geometry g, const void* input_rgba,
+                             const void* raw_rgb, void* output_rgb, struct native_tuning tuning)
 {
     if (output_rgb == input_rgba || output_rgb == raw_rgb)
         return fail("GPU native tuning requires distinct input and output buffers");
@@ -63,7 +63,7 @@ inline Result<void> gpu_tune(const NativeKernels& kernels, Geometry g, const voi
 
 // Colour preservation of one pass against the frame's encoded input (the
 // reference), with the same buffer rules as gpu_tune.
-inline Result<void> gpu_preserve_color(const NativeKernels& kernels, Geometry g, const void* original_rgba,
+inline Result<void> gpu_preserve_color(const NativeKernels& kernels, struct geometry g, const void* original_rgba,
                                        const void* raw_rgb, void* output_rgb, float strength)
 {
     if (output_rgb == original_rgba || output_rgb == raw_rgb)

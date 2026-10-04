@@ -23,7 +23,7 @@ DLSSLOP_INLINE bool finite(Rgb c)
 
 // Whether processing pixel (x, y) shows the picture. Unsigned wrap-around
 // also excludes the pixels left of and above it.
-DLSSLOP_INLINE bool fitted(const Geometry& g, unsigned x, unsigned y)
+DLSSLOP_INLINE bool fitted(const struct geometry& g, unsigned x, unsigned y)
 {
     return x - g.x < g.fit_width && y - g.y < g.fit_height;
 }
@@ -31,7 +31,7 @@ DLSSLOP_INLINE bool fitted(const Geometry& g, unsigned x, unsigned y)
 // The viewport row a processing row holds: the padding below the viewport
 // reflects it (reflect101: ..., h-2, h-1, h-2, ...), as upstream's
 // native_game_rgb_input.hlsl does. Every tier pads less than one period.
-DLSSLOP_INLINE unsigned codec_row(const Geometry& g, unsigned y)
+DLSSLOP_INLINE unsigned codec_row(const struct geometry& g, unsigned y)
 {
     return y < g.valid_height ? y : 2 * g.valid_height - 2 - y;
 }
@@ -68,7 +68,7 @@ DLSSLOP_INLINE Rgb bilinear(const Read& read, float x, float y, unsigned low_x, 
 // is integrated over the pixel's footprint with area weights, as the layer's
 // downscaler does, rather than dropping the texels between the taps.
 template<class Read>
-DLSSLOP_INLINE Rgb sample_proxy(const Read& read, const Geometry& g, unsigned x, unsigned y)
+DLSSLOP_INLINE Rgb sample_proxy(const Read& read, const struct geometry& g, unsigned x, unsigned y)
 {
     const float sw = float(g.source_width), sh = float(g.source_height);
     const float fw = float(g.fit_width), fh = float(g.fit_height);
@@ -97,7 +97,7 @@ DLSSLOP_INLINE Rgb sample_proxy(const Read& read, const Geometry& g, unsigned x,
 
 // Decode: the network's answer at the centre of source pixel (x, y).
 template<class Read>
-DLSSLOP_INLINE Rgb sample_answer(const Read& read, const Geometry& g, unsigned x, unsigned y)
+DLSSLOP_INLINE Rgb sample_answer(const Read& read, const struct geometry& g, unsigned x, unsigned y)
 {
     return bilinear(read, float(g.x) + (float(x) + 0.5f) * float(g.fit_width) / float(g.source_width) - 0.5f,
                     float(g.y) + (float(y) + 0.5f) * float(g.fit_height) / float(g.source_height) - 0.5f,

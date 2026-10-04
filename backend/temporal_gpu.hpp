@@ -11,7 +11,7 @@ namespace dlsslop {
 // on consecutive original frames; each neural pass owns its own previous output.
 class GpuTemporal {
     struct Level {
-        dlsslop_temporal::Extent image{}, grid{};
+        struct temporal_extent image{}, grid{};
         void *current = nullptr, *previous = nullptr, *flow = nullptr;
     };
     const NativeKernels& kernels_;
@@ -20,7 +20,7 @@ class GpuTemporal {
     std::vector<Level> levels_;
     std::vector<void*> history_;
     void *warped_ = nullptr, *scene_cut_ = nullptr;
-    Geometry geometry_{};
+    struct geometry geometry_{};
     unsigned quality_ = 0, grid_ = 0, passes_ = 0, completed_ = 0;
     bool configured_ = false, valid_ = false, pending_ = false;
 
@@ -40,7 +40,7 @@ class GpuTemporal {
         warped_ = scene_cut_ = nullptr;
         configured_ = valid_ = pending_ = false;
     }
-    Result<void> configure(const Geometry& g, unsigned quality, unsigned grid, unsigned passes)
+    Result<void> configure(const struct geometry& g, unsigned quality, unsigned grid, unsigned passes)
     {
         if (!g.width || !g.valid_height || g.valid_height > g.height || g.height > 2 * g.valid_height - 2)
             return fail("invalid temporal geometry");
@@ -64,7 +64,7 @@ class GpuTemporal {
         configured_ = true;
         return {};
     }
-    Result<void> allocate_buffers(const Geometry& g, unsigned quality, unsigned grid, unsigned passes)
+    Result<void> allocate_buffers(const struct geometry& g, unsigned quality, unsigned grid, unsigned passes)
     {
         const std::size_t pixels = std::size_t(g.width) * g.height;
         DLSSLOP_TRY(allocate(warped_, pixels * 16, "allocate warped temporal history"));
@@ -79,14 +79,14 @@ class GpuTemporal {
             auto& level = levels_.back();
             DLSSLOP_TRY(allocate(level.current, std::size_t(width) * height * 4, "allocate current luma pyramid"));
             DLSSLOP_TRY(allocate(level.previous, std::size_t(width) * height * 4, "allocate previous luma pyramid"));
-            DLSSLOP_TRY(allocate(level.flow, std::size_t(level.grid.width) * level.grid.height * sizeof(dlsslop_temporal::Flow),
+            DLSSLOP_TRY(allocate(level.flow, std::size_t(level.grid.width) * level.grid.height * sizeof(struct temporal_flow),
                                  "allocate flow pyramid"));
             if (width < 8 || height < 8) break;
             width = (width + 1) / 2; height = (height + 1) / 2;
         }
         return {};
     }
-    dlsslop_temporal::Warp warp_geometry() const
+    struct temporal_warp warp_geometry() const
     {
         return {{geometry_.width, geometry_.valid_height}, levels_[0].grid,
                 geometry_.height, 1u << grid_, geometry_.x, geometry_.y,
@@ -112,7 +112,7 @@ public:
     // Inputs are float4 raster data in the same encoding as the network. Commands
     // remain on its HIP stream; begin reads rgba there before multi-pass feedback.
     // Motion settings are in the ranges the protocol's ShmMVec* readers return.
-    Result<void> begin(void* rgba, const Geometry& g, unsigned quality, unsigned grid, unsigned passes,
+    Result<void> begin(void* rgba, const struct geometry& g, unsigned quality, unsigned grid, unsigned passes,
                        bool reset_history = false)
     {
         if (!rgba || pending_) return fail("temporal begin without previous end or input");
@@ -132,7 +132,7 @@ public:
             auto& level = levels_[i];
             const bool coarse = i + 1 < levels_.size();
             void* coarse_flow = coarse ? levels_[i + 1].flow : level.flow;
-            dlsslop_temporal::Search search{level.image, level.grid,
+            struct temporal_search search{level.image, level.grid,
                 coarse ? levels_[i + 1].grid : level.grid, 1u << grid_, quality_ + 1,
                 quality_ == 2 ? 2u : 1u, unsigned(coarse), unsigned(i == 0)};
             void* flow_args[] = {&level.current, &level.previous, &coarse_flow, &level.flow, &search};

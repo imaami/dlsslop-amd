@@ -22,7 +22,7 @@ class GpuCodec {
     bool pinning_ = api_.hipHostRegister && api_.hipHostUnregister;
     std::uint8_t* pinned_[2]{};
     std::size_t pinned_bytes_ = 0;
-    Geometry uploaded_{};
+    struct geometry uploaded_{};
     // Per proxy precision, RGBA8 then RGBA16F: its kernels and bytes per pixel.
     struct Format { Kernel encode, decode; unsigned bytes; };
     static constexpr Format kFormats[2] = {{kEncodeRgba8, kDecodeRgba8, 4}, {kEncodeRgba16f, kDecodeRgba16f, 8}};
@@ -93,7 +93,8 @@ public:
     // until decode is done (pageable input is staged). Input and decode's
     // output are host memory, copied through the codec's own proxy, or with
     // DEVICE the caller's device frames, which the kernels read and write.
-    Result<void> encode(const std::uint8_t* input, const Geometry& g, void* device_rgba, bool fp16, bool device = false)
+    Result<void> encode(const std::uint8_t* input, const struct geometry& g, void* device_rgba, bool fp16,
+                        bool device = false)
     {
         DLSSLOP_TRY(validate(g));
         if (!device_rgba) return fail("null GPU encode output");

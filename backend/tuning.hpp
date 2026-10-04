@@ -11,7 +11,7 @@
 namespace dlsslop {
 
 // Tuning outside the controls' ranges rejects a request.
-inline Result<void> validate_native_tuning(const NativeTuning& tuning)
+inline Result<void> validate_native_tuning(const struct native_tuning& tuning)
 {
     for (float value : {tuning.intensity, tuning.tone, tuning.structure})
         if (!std::isfinite(value) || value < 0.0f || value > 4.0f)
@@ -23,8 +23,8 @@ inline Result<void> validate_native_tuning(const NativeTuning& tuning)
 
 // CPU reference of the GPU kernel. The vectors backing input and raw must be
 // distinct from output; the neighbourhood filter is not in-place.
-inline Result<void> tune_neural_rgb(const float* input_rgba, const float* raw_rgb, const Geometry& g,
-                                    std::vector<float>& output, const NativeTuning& tuning)
+inline Result<void> tune_neural_rgb(const float* input_rgba, const float* raw_rgb, const struct geometry& g,
+                                    std::vector<float>& output, const struct native_tuning& tuning)
 {
     DLSSLOP_TRY(validate_native_tuning(tuning));
     if (!fits(g) || g.width > 16384 || g.height > 16384) return fail("invalid native tuning geometry");

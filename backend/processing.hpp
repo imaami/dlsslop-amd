@@ -9,7 +9,7 @@
 namespace dlsslop {
 
 struct ProcessingSettings {
-    NativeTuning tuning;
+    struct native_tuning tuning = NATIVE_TUNING_DEFAULTS;
     // The Vulkan model's own conditioning; the HIP network has only the defaults.
     unsigned style = 0;
     float skin_structure = -1;

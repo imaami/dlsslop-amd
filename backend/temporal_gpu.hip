@@ -6,7 +6,7 @@ KERNEL void dlsslop_temporal_luma(const float* rgba, float* luma, unsigned count
     const unsigned i = thread_index();
     if (i < count) luma[i] = rgba[i * 4] * .2126f + rgba[i * 4 + 1] * .7152f + rgba[i * 4 + 2] * .0722f;
 }
-KERNEL void dlsslop_temporal_reduce(const float* input, float* output, dlsslop_temporal::Extent source, dlsslop_temporal::Extent target)
+KERNEL void dlsslop_temporal_reduce(const float* input, float* output, struct temporal_extent source, struct temporal_extent target)
 {
     const unsigned i = thread_index();
     if (i >= target.width * target.height) return;
@@ -15,16 +15,16 @@ KERNEL void dlsslop_temporal_reduce(const float* input, float* output, dlsslop_t
     output[i] = (input[y * source.width + x] + input[y * source.width + xx] +
                  input[yy * source.width + x] + input[yy * source.width + xx]) * .25f;
 }
-KERNEL void dlsslop_temporal_flow(const float* current, const float* previous, const dlsslop_temporal::Flow* coarse,
-                               dlsslop_temporal::Flow* flow, dlsslop_temporal::Search search)
+KERNEL void dlsslop_temporal_flow(const float* current, const float* previous, const struct temporal_flow* coarse,
+                               struct temporal_flow* flow, struct temporal_search search)
 {
     const unsigned i = thread_index();
     if (i < search.grid.width * search.grid.height) flow[i] = dlsslop_temporal::estimate(current, previous, coarse, search, i);
 }
 KERNEL void dlsslop_temporal_warp(const float* __restrict__ current_luma, const float* __restrict__ previous_gray,
                                const float* __restrict__ history, const float* __restrict__ fallback,
-                               const dlsslop_temporal::Flow* __restrict__ flow, float* __restrict__ output,
-                               const unsigned* __restrict__ cut, dlsslop_temporal::Warp geometry)
+                               const struct temporal_flow* __restrict__ flow, float* __restrict__ output,
+                               const unsigned* __restrict__ cut, struct temporal_warp geometry)
 {
     const unsigned i = thread_index();
     if (i < geometry.image.width * geometry.padded_height)
@@ -33,11 +33,11 @@ KERNEL void dlsslop_temporal_warp(const float* __restrict__ current_luma, const 
 
 // Whether one of 8x8 samples over the fitted picture fails its match.
 DEV bool cut_sample(const float* current, const float* previous,
-                    const dlsslop_temporal::Flow* flow, const dlsslop_temporal::Warp& w, unsigned i)
+                    const struct temporal_flow* flow, const struct temporal_warp& w, unsigned i)
 {
     const float x = float(w.x) + (float(i % 8) + .5f) * float(w.fit_width) / 8 - .5f;
     const float y = float(w.y) + (float(i / 8) + .5f) * float(w.fit_height) / 8 - .5f;
-    const dlsslop_temporal::Flow f = dlsslop_temporal::sample_flow(flow, w.grid, w.step, x, y);
+    const struct temporal_flow f = dlsslop_temporal::sample_flow(flow, w.grid, w.step, x, y);
     dlsslop_temporal::Patch<1> reference;
     dlsslop_temporal::sample_patch<1>(reference, current, w.image, x, y);
     return !(dlsslop_temporal::patch_cost<1>(reference, previous, w.image, x, y, f.x, f.y) < .1f);
@@ -47,7 +47,7 @@ DEV bool cut_sample(const float* current, const float* previous,
 // rejected independently in the warp, at every processing pixel. One wave32
 // counts the samples: lane i takes samples i and i + 32.
 KERNEL void dlsslop_temporal_cut(const float* current, const float* previous,
-                              const dlsslop_temporal::Flow* flow, unsigned* cut, dlsslop_temporal::Warp w)
+                              const struct temporal_flow* flow, unsigned* cut, struct temporal_warp w)
 {
     const unsigned i = thread_index();
     if (i >= 32) return;

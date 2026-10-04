@@ -83,7 +83,7 @@ inline Result<void> compare(const std::vector<float>& actual, const std::vector<
 
 inline Result<void> check_tuning(const NativeKernels& kernels)
 {
-    const Geometry g{7, 5, 7, 5, 5, 0, 0, 7, 5};
+    const struct geometry g{7, 5, 7, 5, 5, 0, 0, 7, 5};
     const std::size_t pixels = g.width * g.height;
     std::vector<float> input(pixels * 4), model(pixels * 3), reference;
     for (unsigned p = 0; p < pixels; ++p) {
@@ -97,8 +97,8 @@ inline Result<void> check_tuning(const NativeKernels& kernels)
     auto device_model = DLSSLOP_TRY(Buffer::allocate(kernels, model.size() * sizeof(float)));
     auto device_result = DLSSLOP_TRY(Buffer::allocate(kernels, model.size() * sizeof(float)));
     DLSSLOP_TRY(device_input.upload(input)); DLSSLOP_TRY(device_model.upload(model));
-    const NativeTuning states[] = {{}, {0, 1, 1, 0}, {1.75f, .25f, 2.5f, .375f},
-                                  {1, 0, 1, 0}, {1, 1, 0, 1}};
+    const struct native_tuning states[] = {NATIVE_TUNING_DEFAULTS, {0, 1, 1, 0}, {1.75f, .25f, 2.5f, .375f},
+                                           {1, 0, 1, 0}, {1, 1, 0, 1}};
     for (const auto& state : states) {
         DLSSLOP_TRY(tune_neural_rgb(input.data(), model.data(), g, reference, state));
         DLSSLOP_TRY(gpu_tune(kernels, g, device_input.pointer, device_model.pointer, device_result.pointer, state));
@@ -121,7 +121,7 @@ inline Result<void> check_temporal(const NativeKernels& kernels)
     auto& api = kernels.api;
     const auto stream = kernels.stream;
     constexpr unsigned width = 128, height = 96, padded_height = 104;
-    const Geometry g{width, height, width, padded_height, height, 0, 0, width, height};
+    const struct geometry g{width, height, width, padded_height, height, 0, 0, width, height};
     const std::size_t pixels = width * padded_height;
     std::vector<float> original(pixels * 4), shifted(pixels * 4), unrelated(pixels * 4), fallback(pixels * 4, .125f);
     std::vector<float> previous_gray(width * height), histories[2];
@@ -221,14 +221,14 @@ inline Result<void> check_temporal(const NativeKernels& kernels)
     // a new placement of the picture in the network raster drops the history;
     // a new quality, grid or pass count reallocates and drops it too. Each
     // reallocation is followed by a frame that runs with the new sizes.
-    Geometry resized = g;
+    struct geometry resized = g;
     resized.source_width /= 2;
     resized.source_height /= 2;
-    Geometry moved = resized;
+    struct geometry moved = resized;
     moved.x = 8;
     moved.fit_width -= 16;
     const struct {
-        const Geometry& geometry;
+        const struct geometry& geometry;
         unsigned quality, grid, passes;
         bool history;
         const char* failure;
@@ -259,7 +259,7 @@ inline Result<void> check_temporal(const NativeKernels& kernels)
 }
 
 // Runs one FP16 frame through the codec; true when finish() rejects it.
-inline Result<bool> codec_rejects(GpuCodec& codec, const std::vector<std::uint8_t>& proxy, const Geometry& g,
+inline Result<bool> codec_rejects(GpuCodec& codec, const std::vector<std::uint8_t>& proxy, const struct geometry& g,
                                   void* device_input, void* device_rgb, std::vector<std::uint8_t>& decoded)
 {
     DLSSLOP_TRY(codec.encode(proxy.data(), g, device_input, true));
@@ -271,7 +271,7 @@ inline Result<bool> codec_rejects(GpuCodec& codec, const std::vector<std::uint8_
 
 inline Result<void> check_codec(const NativeKernels& kernels)
 {
-    const Geometry g = DLSSLOP_TRY(geometry(7, 5, 720));
+    const struct geometry g = DLSSLOP_TRY(geometry(7, 5, 720));
     const std::size_t pixels = std::size_t(g.width) * g.height;
     std::vector<std::uint8_t> proxy(g.source_width * g.source_height * 8);
     const std::uint16_t half_samples[] = {0xb800, 0x0000, 0x3400, 0x3a00, 0x3e00, 0x4000};
@@ -337,7 +337,7 @@ inline Result<void> check_codec(const NativeKernels& kernels)
 
     // A source larger than the fit (4 and 4.17 texels per pixel) takes the
     // area-weighted encode, which no other check reaches.
-    const Geometry large = DLSSLOP_TRY(geometry(40, 3000, 720));
+    const struct geometry large = DLSSLOP_TRY(geometry(40, 3000, 720));
     std::vector<std::uint8_t> source(std::size_t(large.source_width) * large.source_height * 8);
     for (std::size_t i = 0; i < source.size() / 2; ++i) {
         const std::uint16_t value = std::uint16_t(0x2c00u + (i * 37u) % 0x1000u); // 1/16 up to 1

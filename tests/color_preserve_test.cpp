@@ -12,7 +12,7 @@ static void check(bool value, const char* message)
     std::fprintf(stderr, "%s\n", message);
     std::exit(1);
 }
-static void preserve(const std::vector<float>& original, const std::vector<float>& raw, const dlsslop::Geometry& g,
+static void preserve(const std::vector<float>& original, const std::vector<float>& raw, const struct geometry& g,
                      float strength, std::vector<float>& result)
 {
     check(bool(dlsslop::preserve_color(original.data(), raw.data(), g, strength, result)),
@@ -22,7 +22,7 @@ static float luma(const float* rgb) { return .2126f*rgb[0]+.7152f*rgb[1]+.0722f*
 // Corrects a uniform frame of one original and one model colour; returns the centre pixel.
 static std::array<float,3> uniform(const float* original_rgb, const float* model_rgb, float strength)
 {
-    const dlsslop::Geometry g{8,8,8,8,8,1,1,6,6};
+    const struct geometry g{8,8,8,8,8,1,1,6,6};
     std::vector<float> original(8*8*4, 1), raw(8*8*3), result;
     for (unsigned p=0; p<64; ++p) for (unsigned c=0; c<3; ++c) {
         original[p*4+c]=original_rgb[c];
@@ -36,7 +36,7 @@ static std::array<float,3> uniform(const float* original_rgb, const float* model
 // (golden.hpp). 3440x1440 at the 720 tier: letterboxed, and padded below.
 static void goldens()
 {
-    const dlsslop::Geometry g{3440,1440,1280,768,720,0,92,1280,536};
+    const struct geometry g{3440,1440,1280,768,720,0,92,1280,536};
     const std::size_t pixels=std::size_t(g.width)*g.height;
     std::vector<float> original(pixels*4), model(pixels*3), result;
     for (std::size_t p=0; p<pixels; ++p) {
@@ -60,7 +60,7 @@ static void goldens()
 }
 int main()
 {
-    dlsslop::Geometry g{8,8,8,8,8,1,1,6,6};
+    struct geometry g{8,8,8,8,8,1,1,6,6};
     std::vector<float> original(8*8*4, .4f), raw(8*8*3), result, half;
     for (unsigned p=0; p<64; ++p) {
         raw[p*3]=.6f; raw[p*3+1]=.4f; raw[p*3+2]=.2f;

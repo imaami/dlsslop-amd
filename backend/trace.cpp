@@ -67,7 +67,7 @@ Result<void> trace_write_text(const std::string& file, const std::string& text)
     return {};
 }
 
-Result<void> trace_write_pfm(const std::string& file, const float* data, const Geometry& g, unsigned channels)
+Result<void> trace_write_pfm(const std::string& file, const float* data, const struct geometry& g, unsigned channels)
 {
     if (!data || (channels != 3 && channels != 4) || !fits(g)) return fail("invalid diagnostic image geometry");
     char header[64];
@@ -98,7 +98,7 @@ FrameTrace::~FrameTrace()
     if (!finished_) finish("{}", error_.empty() ? "worker stopped before a traced frame completed" : nullptr);
 }
 
-void FrameTrace::image(const std::string& name, const float* data, const Geometry& g, unsigned channels)
+void FrameTrace::image(const std::string& name, const float* data, const struct geometry& g, unsigned channels)
 {
     if (!error_.empty()) return;
     if (const auto written = trace_write_pfm(join(join(root_, token_), name + ".pfm"), data, g, channels); !written) {
