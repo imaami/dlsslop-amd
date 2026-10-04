@@ -76,8 +76,9 @@ enum : STD(uint32_t) {
 	 * v28: offers name the exporting device and driver.
 	 * v29: each frame count is one 64-bit atomic, and layerFrames moved to the end.
 	 * v30: the working scale is at most 1, and scalingDownscaler is retired.
+	 * v31: the retired and unused fields are gone, and the frame counts lead the header.
 	 */
-	kShmVersion = 30,
+	kShmVersion = 31,
 };
 
 /** @brief The frames that the channel carries. */
@@ -256,16 +257,6 @@ enum ProxyFormat : STD(uint32_t) {
 	kProxyRgba16F = 2,
 };
 
-/** @brief How the motion field the helper hands the model is scaled.
- *
- * From bmitch87's motion-vector work.
- */
-enum MVecScaleMode : STD(uint32_t) {
-	kMVecNormalized = 0,
-	kMVecPixels = 1,
-	kMVecUv01 = 2,
-};
-
 /** @brief What the optical-flow engine is asked for.
  *
  * Higher costs more of the frame's budget.
@@ -396,13 +387,16 @@ struct ShmHeader {
 	_Atomic(STD(uint32_t)) magic;
 	_Atomic(STD(uint32_t)) version;
 
+	// The frame counts, first so that they start at multiples of eight bytes.
+	_Atomic(STD(uint64_t)) helperFrames; //!< the frames the helper answered
+	_Atomic(STD(uint64_t)) layerFrames;  //!< the frames the layer composed
+
 	// The frame handshake. The layer bumps seq_req after writing a proxy; the helper answers by
 	// storing the same number into seq_resp once the model's answer is in the output region.
 	_Atomic(STD(uint32_t)) seq_req;
 	_Atomic(STD(uint32_t)) seq_resp;
 	_Atomic(STD(uint32_t)) width;
 	_Atomic(STD(uint32_t)) height;
-	_Atomic(STD(uint32_t)) format; //!< always 1 (RGBA byte order); kept so a v1 helper is not silently wrong
 	_Atomic(STD(uint32_t)) quit;
 	_Atomic(STD(uint32_t)) heartbeat;
 
@@ -418,7 +412,6 @@ struct ShmHeader {
 	// --- the model ---------------------------------------------------------------------------
 	_Atomic(STD(uint32_t)) enabled;
 	_Atomic(STD(uint32_t)) passes;
-	_Atomic(STD(uint32_t)) unlockPasses;
 	_Atomic(STD(uint32_t)) preset;
 	_Atomic(STD(uint32_t)) style;
 	_Atomic(STD(uint32_t)) autoMask;
@@ -491,20 +484,12 @@ struct ShmHeader {
 	// alive somewhere it would not otherwise be.
 	_Atomic(STD(uint32_t)) holdFrame;
 
-	// Protocols up to 29 kept the supersampling's down-leg filter here, which only a working scale
-	// above 1 read. Unused since, the slot keeps the fields after it where they were.
-	_Atomic(STD(uint32_t)) scalingDownscaler;
-
 	// --- status, written by the helper --------------------------------------------------------
 	_Atomic(STD(uint32_t)) helperState;
 	_Atomic(STD(uint32_t)) modelUp;
-	_Atomic(STD(uint64_t)) helperFrames;      //!< the frames answered
 	_Atomic(STD(uint32_t)) helperEvalMsBits;
 	_Atomic(STD(uint32_t)) helperUploadMsBits;
 	_Atomic(STD(uint32_t)) helperReadbackMsBits;
-	_Atomic(STD(uint32_t)) helperVramMB;
-	_Atomic(STD(uint32_t)) helperFeatures;    //!< how many NGX features are actually built
-	_Atomic(STD(uint32_t)) helperPassCeiling; //!< what the VRAM budget currently allows
 
 	// --- status, written by the layer ---------------------------------------------------------
 	// The pid of the process the layer is loaded into, or 0 when no layer is attached.
@@ -520,17 +505,11 @@ struct ShmHeader {
 	// value. Same width as the flag it replaces, so the layout and the protocol version are
 	// unchanged; an older layer simply leaves it zero, which reads as "no layer" exactly as before.
 	_Atomic(STD(uint32_t)) layerPid;
-	// Protocols up to 28 kept the layer's frame count here, in two words. A 64-bit atomic has to start
-	// at a multiple of eight bytes, which this slot does not, so the count is layerFrames at the end,
-	// and the slot keeps the fields after it where they were.
-	_Atomic(STD(uint32_t)) retiredLayerFrames[2];
 	_Atomic(STD(uint32_t)) layerWidth;
 	_Atomic(STD(uint32_t)) layerHeight;
-	_Atomic(STD(uint32_t)) layerFormat;
 	_Atomic(STD(uint32_t)) layerCompositionUp;
 	_Atomic(STD(uint32_t)) layerMsBits;
 	_Atomic(STD(uint32_t)) layerMeasuredWhiteBits;
-	_Atomic(STD(uint32_t)) layerHeartbeat;
 
 	// Free text, each guarded by its own sequence number, which ShmStoreString() bumps after it
 	// writes the bytes. Nothing marks a field while it is written, so a reader that copies then can
@@ -547,7 +526,6 @@ struct ShmHeader {
 	// Appended after the pass array on purpose: everything before it has a pinned offset, and a new
 	// field inserted higher up would move all of them. Motion vectors, from bmitch87's work.
 	_Atomic(STD(uint32_t)) mvecEnabled;
-	_Atomic(STD(uint32_t)) mvecScaleMode;
 	_Atomic(STD(uint32_t)) mvecQuality;
 	// How far the helper has answered *successfully*. seq_resp says a frame came back; this says it
 	// was worth using, so the layer can present the game's own frame when it was not.
@@ -559,15 +537,6 @@ struct ShmHeader {
 	// turns it on.
 	_Atomic(STD(uint32_t)) compositionBypass;
 
-	// Wall-clock milliseconds the helper waits after the last tuning change before it rebuilds a
-	// feature, and between one rebuild and the next. NGX creation is expensive and back-to-back
-	// creation was seen to exhaust the driver's latches on some setups, so the default spaces
-	// rebuilds rather than firing them at once; 0 means no spacing -- build the moment the change
-	// settles and chain the remaining builds back to back. It is time rather than frames because a
-	// frame-counted wait crawls on a 30 fps game and races on a 144 fps one. dlsslopd, the layer and
-	// the tools do not read it; it stays so that the header's layout does not change.
-	_Atomic(STD(uint32_t)) rebuildSettleMs;
-
 	// The raster the helper actually answered, echoed before seq_resp. More than one swapchain can
 	// share this channel -- a game and the Steam overlay, or a game mid-resize with its old and new
 	// swapchains both presenting -- and seq_resp only says *a* frame came back. Without the echo a
@@ -575,20 +544,6 @@ struct ShmHeader {
 	// number of bytes, which is the row-shifted colour garbage this field exists to refuse.
 	_Atomic(STD(uint32_t)) answeredW;
 	_Atomic(STD(uint32_t)) answeredH;
-
-	// Retired: phase 5's dma-buf exchange. The helper named its exported proxy and answer images
-	// here, and the layer echoed the export sequences it had imported. Nothing uses these fields any
-	// more; they keep their slots so that the layout stays the same.
-	_Atomic(STD(uint32_t)) proxyExportSeq;
-	_Atomic(STD(uint32_t)) proxyPid;
-	_Atomic(STD(uint32_t)) proxyFd;
-	_Atomic(STD(uint32_t)) proxyGen;
-	_Atomic(STD(uint32_t)) answerExportSeq;
-	_Atomic(STD(uint32_t)) answerPid;
-	_Atomic(STD(uint32_t)) answerFd;
-	_Atomic(STD(uint32_t)) answerGen;
-	_Atomic(STD(uint32_t)) layerProxySeq;
-	_Atomic(STD(uint32_t)) layerAnswerSeq;
 
 	// The HDR input path. hdrMode is the user's choice (see HdrMode); hdrDetected and hdrKind are the
 	// layer's reading of the primary swapchain's format and colour space; hdrActive is the decision
@@ -649,9 +604,6 @@ struct ShmHeader {
 	// that does not hold the named generation stores it in transportMiss and fails the frame, so
 	// the layer offers again.
 	_Atomic(STD(uint32_t)) transportGen;
-	// Protocols 24 and 25 acknowledged offers here. Unused since, the slot keeps transportMiss
-	// where a layer attached before an upgrade still reads it, so that layer offers again.
-	_Atomic(STD(uint32_t)) retiredTransportAck;
 	_Atomic(STD(uint32_t)) transportMiss;
 
 	// Native neural raster height: 720, 900 or 1080. A controller stores the tier it wants; between
@@ -659,10 +611,6 @@ struct ShmHeader {
 	// meanwhile) and publishes the new raster in nativeModelMaxWidth/Height. A value it cannot use
 	// is overwritten with the active tier. Storing the active tier again changes nothing.
 	_Atomic(STD(uint32_t)) nativeTier;
-
-	// The frames the layer composed. layerFramesPad starts the count at a multiple of eight bytes.
-	_Atomic(STD(uint32_t)) layerFramesPad;
-	_Atomic(STD(uint64_t)) layerFrames;
 };
 
 /** @brief One device-local transport offer.

@@ -530,8 +530,6 @@ shm_map_process_frame (struct shm_map *s,
 	double const t_copy = log_now_ms();
 	atomic_store(&s->hdr->width, w);
 	atomic_store(&s->hdr->height, h);
-	// RGBA byte order either way; the float path keeps the same swizzle
-	atomic_store(&s->hdr->format, 1u);
 	// Say what the bytes ARE before announcing them: the helper sizes its read by this, never by what
 	// it hopes the layer has switched to. The release fence below covers it like the pixels.
 	atomic_store(&s->hdr->hdrEncode, hdr_encode ? 1u : 0u);
@@ -2563,12 +2561,10 @@ publish_frame (struct device_chain          *dc,
 	atomic_store(&hdr->layerFrames, ++dc->frames_composed);
 	atomic_store(&hdr->layerWidth, sc->width);
 	atomic_store(&hdr->layerHeight, sc->height);
-	atomic_store(&hdr->layerFormat, (uint32_t)sc->format);
 	atomic_store(&hdr->layerCompositionUp, 1);
 	atomic_store(&hdr->layerPid, dc->pid);
 	atomic_store(&hdr->layerMsBits, FloatToBits((float)ms));
 	atomic_store(&hdr->layerMeasuredWhiteBits, FloatToBits(composition_measured_white_point(&sc->comp)));
-	atomic_fetch_add(&hdr->layerHeartbeat, 1);
 }
 
 /** @brief Logs one of the in-layer network's lines. */

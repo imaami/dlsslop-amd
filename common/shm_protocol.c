@@ -50,24 +50,24 @@ static_assert(sizeof (uint64_t) == sizeof (unsigned long long) && ATOMIC_LLONG_L
 // Every member is a word, a count, a char array of a multiple of four bytes, or the pass array, and
 // the counts start at multiples of eight bytes, so there is no padding: with the words and the
 // counts pinned above, these hold in C and C++ alike.
-static_assert(sizeof (struct ShmHeader) == 2008, "the header layout changed -- bump kShmVersion");
+static_assert(sizeof (struct ShmHeader) == 1912, "the header layout changed -- bump kShmVersion");
 static_assert(alignof (struct ShmHeader) == 8, "layout changed -- bump kShmVersion");
 static_assert(sizeof (struct PassControl) == 36, "layout changed -- bump kShmVersion");
 
-static_assert(offsetof(struct ShmHeader, enabled) == 44, "layout changed -- bump kShmVersion");
-static_assert(offsetof(struct ShmHeader, transferStrengthBits) == 88, "layout changed -- bump kShmVersion");
-static_assert(offsetof(struct ShmHeader, helperState) == 176, "layout changed -- bump kShmVersion");
-static_assert(offsetof(struct ShmHeader, helperFrames) == 184, "layout changed -- bump kShmVersion");
-static_assert(offsetof(struct ShmHeader, helperReason) == 260, "layout changed -- bump kShmVersion");
-static_assert(offsetof(struct ShmHeader, layerReason) == 456, "layout changed -- bump kShmVersion");
-static_assert(offsetof(struct ShmHeader, gameName) == 652, "layout changed -- bump kShmVersion");
-static_assert(offsetof(struct ShmHeader, pass) == 780, "layout changed -- bump kShmVersion");
-static_assert(offsetof(struct ShmHeader, mvecEnabled) == 1860, "layout changed -- bump kShmVersion");
-static_assert(offsetof(struct ShmHeader, seq_ok) == 1872, "layout changed -- bump kShmVersion");
-static_assert(offsetof(struct ShmHeader, hdrEncode) == 1948, "layout changed -- bump kShmVersion");
-static_assert(offsetof(struct ShmHeader, transportGen) == 1980, "layout changed -- bump kShmVersion");
-static_assert(offsetof(struct ShmHeader, nativeTier) == 1992, "layout changed -- bump kShmVersion");
-static_assert(offsetof(struct ShmHeader, layerFrames) == 2000, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, helperFrames) == 8, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, layerFrames) == 16, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, enabled) == 56, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, transferStrengthBits) == 96, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, helperState) == 180, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, helperReason) == 228, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, layerReason) == 424, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, gameName) == 620, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, pass) == 748, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, mvecEnabled) == 1828, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, seq_ok) == 1836, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, hdrEncode) == 1868, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, transportGen) == 1900, "layout changed -- bump kShmVersion");
+static_assert(offsetof(struct ShmHeader, nativeTier) == 1908, "layout changed -- bump kShmVersion");
 
 static_assert(sizeof (struct ShmTransportOffer) == 72, "the transport offer's layout changed");
 
@@ -215,7 +215,6 @@ ShmInitDefaults (struct ShmHeader *h)
 	atomic_store(&h->magic, kShmMagic);
 	atomic_store(&h->version, kShmVersion);
 	atomic_store(&h->helperState, kHelperStopped);
-	atomic_store(&h->format, 1);
 	atomic_store(&h->passes, 1);
 	atomic_store(&h->enabled, 1);
 	atomic_store(&h->autoMask, 1);
@@ -248,12 +247,10 @@ ShmInitDefaults (struct ShmHeader *h)
 	atomic_store(&h->proxyFormat, kProxyRgba8);
 
 	atomic_store(&h->mvecEnabled, 1);
-	atomic_store(&h->mvecScaleMode, kMVecPixels);
 	atomic_store(&h->mvecQuality, kMVecBalanced);
 	atomic_store(&h->mvecPixelSize, kMVecPixels4);
 	atomic_store(&h->seq_ok, 0);
 	atomic_store(&h->compositionBypass, 1);
-	atomic_store(&h->rebuildSettleMs, 100);
 	atomic_store(&h->colourTrustPercent, 200);
 
 	atomic_store(&h->ratioSmoothPercent, 100);

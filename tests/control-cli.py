@@ -273,11 +273,11 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
             refused = f"'{notes}' is not a dlsslop channel; refusing to modify it\n" in error
             assert refused == (options != ('--status',)), (text[:20], options, error)
 
-    # --status prints each frame count whole: helperFrames at offset 184, layerFrames at 2000.
+    # --status prints each frame count whole: helperFrames at offset 8, layerFrames at 16.
     counts = bytearray(header())
     helper_frames, layer_frames = 0x123456789, 0xabcdef0123
-    counts[184:192] = helper_frames.to_bytes(8, 'little')
-    counts[2000:2008] = layer_frames.to_bytes(8, 'little')
+    counts[8:16] = helper_frames.to_bytes(8, 'little')
+    counts[16:24] = layer_frames.to_bytes(8, 'little')
     with channel.open('r+b') as stream:
         stream.write(counts)
     status = run('-S')

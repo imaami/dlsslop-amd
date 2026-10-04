@@ -85,13 +85,13 @@ public:
         if (fd_ >= 0) close(fd_);
     }
     static size_t bytes(bool fp16) { return size_t(kWidth) * kHeight * (fp16 ? 8 : 4); }
-    // Publish one request as the layer does and return its number.
-    uint32_t publish(bool fp16, uint8_t seed, uint32_t format = 1)
+    // Publish one request as the layer does and return its number. A WIDTH beyond kMaxW makes it
+    // malformed.
+    uint32_t publish(bool fp16, uint8_t seed, uint32_t width = kWidth)
     {
         for (size_t i = 0; i < bytes(fp16); ++i) input[i] = uint8_t(seed + i * 7);
-        h->width.store(kWidth);
+        h->width.store(width);
         h->height.store(kHeight);
-        h->format.store(format);
         h->hdrEncode.store(fp16 ? 1u : 0u);
         const uint32_t request = h->seq_req.load() + 1;
         std::atomic_thread_fence(std::memory_order_release);
@@ -222,7 +222,7 @@ void rejection(const char* executable, const std::filesystem::path& directory)
     };
     for (const bool fp16 : {false, true, false}) {
         for (const uint8_t seed : {4, 5})
-            require(!channel.answered(channel.publish(fp16, seed, 2), fp16), "a malformed request succeeded");
+            require(!channel.answered(channel.publish(fp16, seed, kMaxW + 1), fp16), "a malformed request succeeded");
         reports("unsupported request");
         require(channel.answered(channel.publish(fp16, 6), fp16), "the worker stopped serving after a rejection");
         require(channel.reason() == ready, "a served request left the rejection as the reason: " + channel.reason());
@@ -234,7 +234,7 @@ void rejection(const char* executable, const std::filesystem::path& directory)
     channel.h->style.store(3);
     require(!channel.answered(channel.publish(false, 8), false), "style 3 was accepted");
     reports("the preset must be 0");
-    require(!channel.answered(channel.publish(false, 9, 2), false), "a malformed request succeeded");
+    require(!channel.answered(channel.publish(false, 9, kMaxW + 1), false), "a malformed request succeeded");
     reports("unsupported request");
     channel.h->style.store(0);
     require(channel.answered(channel.publish(false, 10), false), "the worker stopped serving after a rejection");
@@ -259,8 +259,8 @@ void controls(const char* executable, const std::filesystem::path& directory)
     h->tuningSeq.fetch_add(1);
     const uint32_t control = h->controlSeq.fetch_add(1) + 1;
     require(channel.answered(channel.publish(false, 11), false), "a request after a tuning change failed");
-    // Past the settle time that the header still carries and dlsslopd does not read.
-    std::this_thread::sleep_for(std::chrono::milliseconds(h->rebuildSettleMs.load() + 200));
+    // Long enough after the change for a debounced rebuild to have published.
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
     require(channel.answered(channel.publish(false, 12), false), "a later request failed");
     require(h->controlSeq.load() == control, "the worker published a control generation");
     require(worker.quit(channel) == 0, "worker did not quit cleanly:\n" + worker.text());
@@ -364,7 +364,7 @@ void once(const char* executable, const std::filesystem::path& directory)
     Channel channel((directory / "once.bin").string());
     for (const bool good : {false, true}) {
         Worker worker(executable, channel, (directory / "once.log").string(), true);
-        const uint32_t request = channel.publish(true, 8, good ? 1 : 2);
+        const uint32_t request = channel.publish(true, 8, good ? kWidth : kMaxW + 1);
         require(channel.answered(request, true) == good, "--once answered its request wrongly");
         require(worker.status() == (good ? 0 : 1), std::string("--once exit status after a ") +
                 (good ? "successful" : "failed") + " request:\n" + worker.text());

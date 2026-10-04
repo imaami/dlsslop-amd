@@ -141,8 +141,7 @@ Result<Request> read_request(const Options& o, ShmHeader* h, Request request, un
                              unsigned& previous_passes)
 {
     const unsigned w = request.width, height = request.height;
-    if (!w || !height || w > kMaxW || height > kMaxH || h->format.load() != 1)
-        return reject("unsupported request dimensions or proxy format");
+    if (!w || !height || w > kMaxW || height > kMaxH) return reject("unsupported request dimensions");
     request.settings = DLSSLOP_TRY(read_settings(h));
     const ProcessingSettings& settings = request.settings;
     request.bytes = size_t(w) * height * (settings.fp16 ? 8 : 4);

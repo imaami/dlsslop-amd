@@ -132,8 +132,8 @@ above 1, `Composition` enlarges the proxy and averages the answer back with
 `ScalerVk` and OptiScaler's output-scaling shaders, the filter chosen by the
 `downscaler` setting. Here the working scale is at most 1, and `scaler_vk`,
 those shaders' GLSL ports, `Composition::_superSample`, the averaged answer and
-the `downscaler` setting are gone; the channel's `scalingDownscaler` word is
-retired.
+the `downscaler` setting are gone, and so is the channel's `scalingDownscaler`
+word.
 
 The layer fork adapts Linux loading and transport and extends controls and
 composition. In the AMD fork, three kernel sources wrap their bare workgroup

@@ -338,7 +338,6 @@ int main(int argc, char** argv)
         std::memcpy(input, image, bytes);
         h->width.store(width);
         h->height.store(height);
-        h->format.store(1);
         h->hdrEncode.store(fp16);
         const uint32_t request = h->seq_req.load() + 1;
         const auto sent = Clock::now();
