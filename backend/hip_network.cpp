@@ -18,26 +18,37 @@ Model::~Model()
         if (module) api_.hipModuleUnload(module);
 }
 
-Result<void> Model::load(const std::string& modules, const std::string& assets, std::span<const WeightSpec> weights)
+Result<void> Model::upload(const std::string& assets, const hip_weight_spec& spec, hip_weight_file& file)
 {
-    for (size_t m = 0; m < size_t(Module::kCount); ++m)
-        modules_[m] = DLSSLOP_TRY(load_module(api_, join(modules, kModuleFiles[m])));
-    for (size_t k = 0; k < size_t(Kernel::kCount); ++k)
-        DLSSLOP_TRY(api_.check(api_.hipModuleGetFunction(&functions_[k], modules_[size_t(kKernels[k].module)],
-                                                         kKernels[k].name),
-                               kKernels[k].name));
-    weights_.reserve(weights.size());
-    for (const WeightSpec& spec : weights) {
-        auto file = DLSSLOP_TRY(read_weights(assets, spec));
-        DLSSLOP_TRY(pack(spec, file));
-        const size_t bytes = file.values.size() * sizeof(float);
-        void* weight = nullptr;
-        if (const int error = api_.hipMalloc(&weight, bytes))
-            return api_.check(error, ("allocate weight " + file.path).c_str());
-        weights_.push_back(weight);
-        bytes_ += bytes;
-        if (const int error = api_.hipMemcpy(weight, file.values.data(), bytes, 1))
-            return api_.check(error, ("upload weight " + file.path).c_str());
+    struct error e;
+    if (const enum error_code code = hip_weights_load(&file, assets.c_str(), assets.size(), &spec, &e))
+        return forward_c(code, e);
+    const size_t bytes = file.count * sizeof(float);
+    void* weight = nullptr;
+    if (const int error = api_.hipMalloc(&weight, bytes))
+        return api_.check(error, ("allocate weight " + std::string(file.path)).c_str());
+    weights_.push_back(weight);
+    bytes_ += bytes;
+    if (const int error = api_.hipMemcpy(weight, file.values, bytes, 1))
+        return api_.check(error, ("upload weight " + std::string(file.path)).c_str());
+    return {};
+}
+
+Result<void> Model::load(const std::string& modules, const std::string& assets, const hip_weight_spec* weights,
+                         size_t count)
+{
+    for (size_t m = 0; m < HIP_MODULE_COUNT; ++m)
+        modules_[m] = DLSSLOP_TRY(load_module(api_, join(modules, HIP_PLAN_MODULE_FILES[m])));
+    for (size_t k = 0; k < HIP_KERNEL_COUNT; ++k)
+        DLSSLOP_TRY(api_.check(api_.hipModuleGetFunction(&functions_[k], modules_[HIP_PLAN_KERNELS[k].module],
+                                                         HIP_PLAN_KERNELS[k].name),
+                               HIP_PLAN_KERNELS[k].name));
+    weights_.reserve(count);
+    for (size_t w = 0; w < count; ++w) {
+        hip_weight_file file{};
+        const Result<void> uploaded = upload(assets, weights[w], file);
+        hip_weight_file_fini(&file);
+        if (!uploaded) return uploaded;
     }
     return {};
 }
@@ -49,17 +60,19 @@ Network::~Network()
         if (map) api_.hipFree(map);
 }
 
-Result<void> Network::build(const Plan& plan, const Placement& placement)
+Result<void> Network::build(const hip_plan& plan, const hip_placement& placement)
 {
-    buffers_.reserve(placement.buffers.size());
-    for (const size_t bytes : placement.buffers) {
+    buffers_.reserve(placement.buffer_count);
+    for (size_t b = 0; b < placement.buffer_count; ++b) {
+        const size_t bytes = placement.buffers[b];
         void* buffer = nullptr;
         DLSSLOP_TRY(api_.check(api_.hipMalloc(&buffer, bytes), "allocate network buffer"));
         buffers_.push_back(buffer);
         bytes_ += bytes;
     }
+    std::vector<uint32_t> map(size_t(plan.tokens) * 1024);
     for (unsigned inverse = 0; inverse < 2; ++inverse) {
-        const std::vector<uint32_t> map = gather_map(plan.tokens, inverse);
+        hip_plan_gather_map(map.data(), plan.tokens, inverse);
         const size_t bytes = map.size() * sizeof(uint32_t);
         void* buffer = nullptr;
         DLSSLOP_TRY(api_.check(api_.hipMalloc(&buffer, bytes), "allocate gather map"));
@@ -68,36 +81,37 @@ Result<void> Network::build(const Plan& plan, const Placement& placement)
         DLSSLOP_TRY(api_.check(api_.hipMemcpy(buffer, map.data(), bytes, 1), "upload gather map"));
     }
     size_t arguments = 0;
-    for (const Launch& launch : plan.launches) arguments += launch.count;
+    for (size_t l = 0; l < plan.launch_count; ++l) arguments += plan.launches[l].count;
     values_.assign(2 * arguments, 0);
     argv_.assign(2 * arguments, nullptr);
     // The frame's arguments, in the order of their kinds.
-    static_assert(Arg::kHistory == Arg::kRgba + 1 && Arg::kTemporal == Arg::kRgba + 2 &&
-                  Arg::kOutput == Arg::kRgba + 3);
+    static_assert(HIP_ARG_HISTORY == HIP_ARG_RGBA + 1 && HIP_ARG_TEMPORAL == HIP_ARG_RGBA + 2 &&
+                  HIP_ARG_OUTPUT == HIP_ARG_RGBA + 3);
     void* const frame[] = {&frame_.rgba, &frame_.history, &frame_.temporal, &frame_.output};
-    launches_.reserve(plan.launches.size());
+    launches_.reserve(plan.launch_count);
     size_t at = 0;
-    for (const Launch& launch : plan.launches) {
-        launches_.push_back({model_.function(launch.kernel), launch.grid, kKernels[size_t(launch.kernel)].threads,
+    for (size_t l = 0; l < plan.launch_count; ++l) {
+        const hip_launch& launch = plan.launches[l];
+        launches_.push_back({model_.function(launch.kernel), launch.grid, HIP_PLAN_KERNELS[launch.kernel].threads,
                              launch.kernel, {&argv_[at], &argv_[arguments + at]}});
         for (unsigned later = 0; later < 2; ++later) {
-            const std::vector<uint16_t>& buffer_of = later ? placement.later : placement.first;
+            const uint16_t* const buffer_of = later ? placement.later : placement.first;
             for (unsigned i = 0; i < launch.count; ++i) {
-                const Arg arg = launch.args[i];
+                const hip_arg arg = launch.args[i];
                 const size_t slot = later * arguments + at + i;
                 uint64_t& value = values_[slot];
                 argv_[slot] = &value;
                 switch (arg.kind) {
-                case Arg::kU32:
-                case Arg::kF32: value = arg.value; break;
-                case Arg::kNull: break;
-                case Arg::kTensor: value = std::bit_cast<uint64_t>(buffers_[buffer_of[arg.value]]); break;
-                case Arg::kWeight: value = std::bit_cast<uint64_t>(model_.weight(arg.value)); break;
-                case Arg::kGather: value = std::bit_cast<uint64_t>(gather_[arg.value]); break;
-                case Arg::kRgba:
-                case Arg::kHistory:
-                case Arg::kTemporal:
-                case Arg::kOutput: argv_[slot] = frame[arg.kind - Arg::kRgba];
+                case HIP_ARG_U32:
+                case HIP_ARG_F32: value = arg.value; break;
+                case HIP_ARG_NULL: break;
+                case HIP_ARG_TENSOR: value = std::bit_cast<uint64_t>(buffers_[buffer_of[arg.value]]); break;
+                case HIP_ARG_WEIGHT: value = std::bit_cast<uint64_t>(model_.weight(arg.value)); break;
+                case HIP_ARG_GATHER: value = std::bit_cast<uint64_t>(gather_[arg.value]); break;
+                case HIP_ARG_RGBA:
+                case HIP_ARG_HISTORY:
+                case HIP_ARG_TEMPORAL:
+                case HIP_ARG_OUTPUT: argv_[slot] = frame[arg.kind - HIP_ARG_RGBA];
                 }
             }
         }
@@ -112,7 +126,7 @@ Result<void> Network::enqueue(void* rgba, void* history, void* output)
     for (const Bound& b : launches_)
         if (const int error = api_.hipModuleLaunchKernel(b.function, b.grid, 1, 1, b.threads, 1, 1, 0, stream_,
                                                          b.argv[warm_], nullptr))
-            return api_.check(error, kKernels[size_t(b.kernel)].name);
+            return api_.check(error, HIP_PLAN_KERNELS[b.kernel].name);
     warm_ = true;
     return {};
 }

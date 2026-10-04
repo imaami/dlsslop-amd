@@ -4,24 +4,27 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "hip.hpp"
-#include "hip_plan.hpp"
+#include "hip_plan.h"
 
 #include <cstddef>
 #include <cstdint>
-#include <span>
 #include <string>
 #include <vector>
 
 namespace dlsslop::hip {
 
-// The network's code objects, every kernel of kKernels, and the weights of a
-// plan, packed and uploaded in its order.
+// The network's code objects, every kernel of HIP_PLAN_KERNELS, and the
+// weights of a plan, packed and uploaded in its order.
 class Model {
     const Api& api_;
-    Handle modules_[size_t(Module::kCount)]{};
-    Handle functions_[size_t(Kernel::kCount)]{};
+    Handle modules_[HIP_MODULE_COUNT]{};
+    Handle functions_[HIP_KERNEL_COUNT]{};
     std::vector<void*> weights_;
     size_t bytes_ = 0;
+
+    // SPEC's file read from ASSETS into FILE, which the caller frees, then
+    // packed and uploaded.
+    Result<void> upload(const std::string& assets, const hip_weight_spec& spec, hip_weight_file& file);
 
 public:
     explicit Model(const Api& api) : api_(api) {}
@@ -29,11 +32,12 @@ public:
     Model& operator=(const Model&) = delete;
     // Frees what load() made; the stream must be done with it.
     ~Model();
-    // The modules in MODULES with their kernels, then each of WEIGHTS read
-    // from ASSETS, packed and uploaded. On failure, what it loaded stays for
-    // the destructor.
-    Result<void> load(const std::string& modules, const std::string& assets, std::span<const WeightSpec> weights);
-    Handle function(Kernel kernel) const { return functions_[size_t(kernel)]; }
+    // The modules in MODULES with their kernels, then each of the COUNT
+    // WEIGHTS read from ASSETS, packed and uploaded. On failure, what it
+    // loaded stays for the destructor.
+    Result<void> load(const std::string& modules, const std::string& assets, const hip_weight_spec* weights,
+                      size_t count);
+    Handle function(hip_kernel kernel) const { return functions_[kernel]; }
     // The image of the plan's weight INDEX.
     void* weight(uint32_t index) const { return weights_[index]; }
     // The device memory the weights take, and their allocations.
@@ -59,7 +63,7 @@ class Network {
         Handle function;
         uint32_t grid;
         uint16_t threads;
-        Kernel kernel;
+        hip_kernel kernel;
         void** argv[2]; // For the first frame, and for later ones.
     };
     // A frame's own arguments, which the bound arguments point to. HIP copies
@@ -92,7 +96,7 @@ public:
     ~Network();
     // The pool PLACEMENT sizes, the gather maps and PLAN's launches, bound.
     // On failure, what it made stays for the destructor.
-    Result<void> build(const Plan& plan, const Placement& placement);
+    Result<void> build(const hip_plan& plan, const hip_placement& placement);
     // One evaluation of the W x H x 4 floats at RGBA, with the frame at
     // HISTORY (null for none), writing W x H x 3 floats to OUTPUT; queued on
     // the stream.

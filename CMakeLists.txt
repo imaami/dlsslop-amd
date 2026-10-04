@@ -184,7 +184,7 @@ add_library(dlsslop-codec OBJECT backend/kernel_math.cpp backend/reference.c bac
 set_source_files_properties(backend/kernel_math.cpp PROPERTIES
     COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:Clang>:-fno-lto;-fno-tree-slp-vectorize>")
 # The HIP backend: the runtime, the network and the daemon's own kernels.
-add_library(dlsslop-hip OBJECT backend/hip.cpp backend/hip_weights.cpp backend/hip_plan.cpp backend/hip_network.cpp
+add_library(dlsslop-hip OBJECT backend/hip.cpp backend/hip_weights.c backend/hip_plan.c backend/hip_network.cpp
     backend/native_kernels.cpp)
 target_link_libraries(dlsslop-hip PUBLIC ${CMAKE_DL_LIBS})
 # The in-layer network, in a module beside the layer that loads it on demand
@@ -213,7 +213,7 @@ target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 # GCC does not inline -O3 code into these callers, so none of it slows down.
 set_source_files_properties(backend/main.cpp backend/options.cpp backend/paths.cpp backend/files.c
     backend/channel.cpp backend/transport.cpp backend/trace.cpp backend/open.cpp backend/self_test.cpp backend/hip.cpp
-    backend/hip_plan.cpp common/error.c PROPERTIES COMPILE_OPTIONS -Os)
+    backend/hip_plan.c common/error.c PROPERTIES COMPILE_OPTIONS -Os)
 
 if(BUILD_TESTING)
     # What several C tests need: a temporary directory removed with what it holds, a whole file and a
@@ -293,18 +293,20 @@ if(BUILD_TESTING)
     add_test(NAME color-gpu COMMAND color-gpu-test --module ${HIP_MODULES}/linux_native.hsaco)
     # The HIP network's weight packing against digests of upstream's packers,
     # and the element counts of the weights its plan loads against the model
-    # import's manifest.
-    add_executable(hip-weights-test tests/hip_weights_test.cpp backend/hip_weights.cpp backend/hip_plan.cpp
+    # import's manifest, in C.
+    add_executable(hip-weights-test tests/hip_weights_test.c backend/hip_weights.c backend/hip_plan.c
         backend/files.c)
-    target_link_libraries(hip-weights-test PRIVATE dlsslop-common-c)
+    target_include_directories(hip-weights-test PRIVATE backend)
+    target_link_libraries(hip-weights-test PRIVATE dlsslop-common-c test-support)
     add_test(NAME hip-weights COMMAND hip-weights-test)
     add_test(NAME hip-weights-manifest COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/hip-weights-manifest.py $<TARGET_FILE:hip-weights-test>)
     # The HIP network's launch plan against traces of upstream's network, and
-    # against the kernels' metadata once scripts/build-kernels.py has run.
-    add_executable(hip-plan-test tests/hip_plan_test.cpp backend/hip_plan.cpp backend/hip_weights.cpp
+    # against the kernels' metadata once scripts/build-kernels.py has run, in C.
+    add_executable(hip-plan-test tests/hip_plan_test.c backend/hip_plan.c backend/hip_weights.c
         backend/files.c)
-    target_link_libraries(hip-plan-test PRIVATE dlsslop-common-c)
+    target_include_directories(hip-plan-test PRIVATE backend)
+    target_link_libraries(hip-plan-test PRIVATE dlsslop-common-c test-support)
     add_test(NAME hip-plan COMMAND hip-plan-test)
     add_test(NAME hip-plan-abi COMMAND hip-plan-test --modules ${HIP_MODULES})
     # The Vulkan network's weight packing against digests of upstream's, and

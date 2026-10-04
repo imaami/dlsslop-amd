@@ -98,16 +98,31 @@ Result<void> HipEngine::prepare()
     // With default flags, the stream's work stays in order with the null
     // stream's synchronous copies, which the CPU codec and diagnostics make.
     if (!stream_) DLSSLOP_TRY(api_.check(api_.hipStreamCreate(&stream_), "create the HIP stream"));
-    const auto plan = DLSSLOP_TRY(hip::plan(raster.width, raster.networkHeight, options_.performance));
-    const auto placement = DLSSLOP_TRY(hip::place(plan));
+    // The plan and its placement, which the model and the network read, freed on return.
+    struct Planned {
+        hip_plan plan{};
+        hip_placement placement{};
+        ~Planned()
+        {
+            hip_placement_fini(&placement);
+            hip_plan_fini(&plan);
+        }
+    } planned;
+    struct error e;
+    if (const enum error_code code =
+            hip_plan_init(&planned.plan, raster.width, raster.networkHeight, options_.performance, &e))
+        return forward_c(code, e);
+    if (const enum error_code code = hip_plan_place(&planned.placement, &planned.plan, &e)) return forward_c(code, e);
     if (!model_) {
         // A model that failed to load is freed, so that no later network binds it.
-        if (auto loaded = model_.emplace(api_).load(options_.modules, options_.assets, plan.weights); !loaded) {
+        if (auto loaded = model_.emplace(api_).load(options_.modules, options_.assets, planned.plan.weights,
+                                                     planned.plan.weight_count);
+            !loaded) {
             model_.reset();
             return loaded;
         }
     }
-    DLSSLOP_TRY(network_.emplace(api_, *model_, stream_).build(plan, placement));
+    DLSSLOP_TRY(network_.emplace(api_, *model_, stream_).build(planned.plan, planned.placement));
     for (auto& event : marks_) DLSSLOP_TRY(api_.check(api_.hipEventCreate(&event), "create timing event"));
     // Tuning, colour and motion use the module's kernels with the CPU codec too.
     kernels_.emplace(api_, stream_);
