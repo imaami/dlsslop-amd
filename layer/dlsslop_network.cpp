@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <dlfcn.h>
 #include <new>
@@ -133,6 +134,13 @@ dlsslop_network_state dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader
         n->joinable = false;
     }
     if (n->failed) return DLSSLOP_NETWORK_FAILED;
+    // A channel of another protocol has its settings elsewhere.
+    if (const uint32_t version = channel->version.load(std::memory_order_relaxed); version != kShmVersion) {
+        char what[80];
+        std::snprintf(what, sizeof what, "the channel is of protocol v%u, the network of v%u", version,
+                      unsigned(kShmVersion));
+        return n->fail(what);
+    }
     // The frame's format: the composition's proxy, RGBA8 or the float16 proxy.
     const bool fp16 = images->format == VK_FORMAT_R16G16B16A16_SFLOAT;
     if (!fp16 && images->format != VK_FORMAT_R8G8B8A8_UNORM)

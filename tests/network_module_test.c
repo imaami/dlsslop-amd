@@ -237,6 +237,21 @@ main (int    argc,
 	        "images of no generation did not fail the network, naming why");
 	module.close(no_generation);
 	no_generation = nullptr;
+	// A channel of another protocol fails the network, naming both.
+	struct DlsslopNetwork *other_protocol = module.open(&device);
+	require(other_protocol, "the module did not open");
+	atomic_store(&header->version, kShmVersion - 1);
+	char protocols[64];
+	int const length = snprintf(protocols, sizeof protocols, "protocol v%u, the network of v%u", kShmVersion - 1,
+	                            kShmVersion);
+	require(length >= 0 && length < (int)sizeof protocols, "the protocols do not fit");
+	require(module.prepare(other_protocol, header, images(1280, 720, VK_FORMAT_R8G8B8A8_UNORM))
+	        == DLSSLOP_NETWORK_FAILED
+	        && strstr(module.error(other_protocol), protocols),
+	        "a channel of another protocol did not fail the network, naming both");
+	atomic_store(&header->version, kShmVersion);
+	module.close(other_protocol);
+	other_protocol = nullptr;
 	atomic_store(&header->style, 3);
 	require(module.prepare(network, header, images(1280, 720, VK_FORMAT_R8G8B8A8_UNORM))
 	        == DLSSLOP_NETWORK_REJECTED

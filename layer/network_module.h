@@ -129,7 +129,8 @@ dlsslop_network_open_fn (struct dlsslop_network_device const *device);
  * @param network The network.
  * @param channel The channel, whose settings the frame takes.
  * @param images  The images that the frame goes through.
- * @return        What the network can do with the frame. Images of another format fail the network.
+ * @return        What the network can do with the frame. Images of another format, and a channel of
+ *                another kShmVersion, fail the network.
  */
 typedef enum dlsslop_network_state
 dlsslop_network_prepare_fn (struct DlsslopNetwork               *network,
