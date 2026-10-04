@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "codec.hpp"
+#include "../tests/golden.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -400,6 +401,103 @@ void test_feedback_unorm8()
     }
 }
 
+// A source of the extent from fixture SEED: random RGBA8, or FP16 with any
+// finite binary16 in every channel, alpha included.
+std::vector<std::uint8_t> fixture_source(const dlsslop::Geometry& g, bool fp16, std::uint32_t seed)
+{
+    std::vector<std::uint8_t> source(std::size_t(g.source_width) * g.source_height * (fp16 ? 8 : 4));
+    if (!fp16) {
+        for (std::size_t i = 0; i < source.size(); ++i)
+            source[i] = std::uint8_t(golden::bits(seed, i));
+        return source;
+    }
+    for (std::size_t i = 0; i < source.size() / 2; ++i) {
+        const std::uint16_t half = golden::half(seed, i);
+        std::memcpy(source.data() + i * 2, &half, sizeof half);
+    }
+    return source;
+}
+
+// A network's answer at g's processing extent from fixture SEED, NaN outside
+// the fitted picture, which no reference reads.
+std::vector<float> fixture_neural(const dlsslop::Geometry& g, std::uint32_t seed)
+{
+    std::vector<float> rgb(std::size_t(g.width) * g.height * 3, std::numeric_limits<float>::quiet_NaN());
+    for (unsigned y = g.y; y < g.y + g.fit_height; ++y) {
+        for (unsigned x = g.x; x < g.x + g.fit_width; ++x) {
+            const std::size_t p = (std::size_t(y) * g.width + x) * 3;
+            for (std::size_t i = p; i < p + 3; ++i)
+                rgb[i] = golden::neural(seed, i);
+        }
+    }
+    return rgb;
+}
+
+// The references' outputs over fixtures, bit for bit (golden.hpp).
+void test_goldens()
+{
+    struct Fixture {
+        unsigned width, height, tier;
+        const char* name;
+        std::uint64_t rgba8, fp16; // Or 8-bit and 16-bit feedback.
+    };
+    // Identity, enlarging (bilinear) and reducing (area-weighted) into the
+    // 720 and 1080 tiers, by integral and other ratios, letterboxed or not.
+    const Fixture encodes[] = {
+        {1280, 720, 720, "identity 720", 0xc84be590d97083e9u, 0x7e7c0cb2abb7a392u},
+        {1920, 1080, 1080, "identity 1080", 0x2a813dfd1dad093bu, 0x6f61916b9ff2a475u},
+        {853, 480, 720, "upscale 720", 0x58b6349f33c931fbu, 0x18200a5975265df7u},
+        {640, 480, 1080, "upscale 1080", 0xb97db8db0e3062dfu, 0x60680b606aa1a7f2u},
+        {1920, 1080, 720, "downscale 720", 0x13ec170dead5e0d0u, 0x772f278d3e678ad3u},
+        {3440, 1440, 1080, "downscale 1080", 0x856a00c01416d8beu, 0xd6045436a5eb871cu},
+    };
+    // Letterboxed and pillarboxed answers fed into another pass.
+    const Fixture feedbacks[] = {
+        {3440, 1440, 900, "3440x1440 900", 0x1caed93f276895a1u, 0x619a08a80adc808au},
+        {640, 480, 720, "640x480 720", 0x15ab44c40c58a97eu, 0x9153a140fe206707u},
+    };
+    // Answers reduced to a smaller source and enlarged to a larger one.
+    const Fixture decodes[] = {
+        {853, 480, 720, "853x480 720", 0xdc22f9dd3cd6bafcu, 0x37c6f22cddf5d104u},
+        {3440, 1440, 1080, "3440x1440 1080", 0x47b36df8fc72ba8eu, 0x734fa59fcffc5ceeu},
+    };
+    unsigned moved = 0;
+    std::uint32_t seed = 0;
+    char name[64];
+    std::vector<float> rgba;
+    for (const auto& f : encodes) {
+        const auto g = geometry(f.width, f.height, f.tier);
+        for (bool fp16 : {false, true}) {
+            const auto source = fixture_source(g, fp16, ++seed);
+            check(dlsslop::encode_proxy(source.data(), g, fp16, rgba), "golden encode_proxy");
+            std::snprintf(name, sizeof name, "encode_proxy %s %s", fp16 ? "FP16" : "RGBA8", f.name);
+            moved += !golden::check(name, rgba.data(), rgba.size() * sizeof(float), fp16 ? f.fp16 : f.rgba8);
+        }
+    }
+    for (const auto& f : feedbacks) {
+        const auto g = geometry(f.width, f.height, f.tier);
+        const auto neural = fixture_neural(g, ++seed);
+        for (bool precision16 : {false, true}) {
+            check(dlsslop::feedback_neural_rgb(neural.data(), g, rgba, precision16), "golden feedback_neural_rgb");
+            std::snprintf(name, sizeof name, "feedback_neural_rgb %s %s", precision16 ? "16-bit" : "8-bit", f.name);
+            moved += !golden::check(name, rgba.data(), rgba.size() * sizeof(float), precision16 ? f.fp16 : f.rgba8);
+        }
+    }
+    for (const auto& f : decodes) {
+        const auto g = geometry(f.width, f.height, f.tier);
+        const auto neural = fixture_neural(g, ++seed);
+        for (bool fp16 : {false, true}) {
+            const auto source = fixture_source(g, fp16, ++seed);
+            std::vector<std::uint8_t> decoded(source.size());
+            check(dlsslop::decode_neural_proxy(source.data(), g, fp16, neural.data(), decoded.data()),
+                  "golden decode_neural_proxy");
+            std::snprintf(name, sizeof name, "decode_neural_proxy %s %s", fp16 ? "FP16" : "RGBA8", f.name);
+            moved += !golden::check(name, decoded.data(), decoded.size(), fp16 ? f.fp16 : f.rgba8);
+        }
+    }
+    require(!moved, "a golden moved");
+}
+
 } // namespace
 
 int main()
@@ -413,6 +511,7 @@ int main()
     test_decode_invalid_samples();
     test_fp16_proxy();
     test_feedback_unorm8();
-    std::puts("codec: geometry, SDR/FP16 transport, reflection, round-trip, fitting, area-weighted downscale, composition, invalid-sample rejection and 8/16-bit multi-pass feedback passed");
+    test_goldens();
+    std::puts("codec: geometry, SDR/FP16 transport, reflection, round-trip, fitting, area-weighted downscale, composition, invalid-sample rejection, 8/16-bit multi-pass feedback and goldens passed");
     return EXIT_SUCCESS;
 }

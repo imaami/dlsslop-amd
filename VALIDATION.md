@@ -13,10 +13,12 @@ codec/tuning/temporal behaviour, color preservation, trace serialization,
 capture writing, color-diagnostic orchestration, offline imports with filtered
 dependency fetches and source preparation, the kernel build's compiler
 selection, and the model import's SHA-256 inventory, which
-`dlsslop-setup --check` verifies. It checks the HIP network's weight packing
-byte for byte against digests of upstream's packers on synthetic weights, and
-the weight sizes the network expects against the model import's manifest. It
-checks the Vulkan network's weight packing byte for byte against digests of
+`dlsslop-setup --check` verifies. It pins the outputs of the CPU codec, tuning
+and color preservation bit for bit, by FNV-1a 64 goldens of deterministic
+fixtures. It checks the HIP network's weight packing byte for byte against
+digests of upstream's packers on synthetic weights, and the weight sizes the
+network expects against the model import's manifest. It checks the Vulkan
+network's weight packing byte for byte against digests of
 what upstream's graph build packed from a synthetic model pack, and its model
 reader on damaged packs, and its audit of the exponent's upper clamp in the
 Swin attention on crafted layers. At 40 frame extents from 17x17 to 5120x2880

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 #include "../backend/tuning.hpp"
+#include "golden.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <cstdlib>
@@ -26,6 +28,58 @@ void tune(const std::vector<float>& input, const std::vector<float>& model, cons
 void close(float actual, float expected, const char* message)
 {
     require(std::fabs(actual - expected) < 1.0e-6f, message);
+}
+
+// The control self-test's states (control_selftest.hpp), the default one first.
+const dlsslop::NativeTuning kStates[] = {{}, {0, 1, 1, 0}, {1.75f, .25f, 2.5f, .375f}, {1, 0, 1, 0}, {1, 1, 0, 1}};
+
+// How many of the reference's outputs, one per state, moved from their goldens
+// (golden.hpp).
+unsigned moved_goldens(const char* fixture, const dlsslop::Geometry& g, const std::vector<float>& input,
+                       const std::vector<float>& model,
+                       const std::uint64_t (&goldens)[sizeof kStates / sizeof *kStates])
+{
+    unsigned moved = 0;
+    char name[64];
+    std::vector<float> output;
+    for (std::size_t i = 0; i < sizeof kStates / sizeof *kStates; ++i) {
+        tune(input, model, g, output, kStates[i]);
+        std::snprintf(name, sizeof name, "tune_neural_rgb %s state %zu", fixture, i);
+        moved += !golden::check(name, output.data(), output.size() * sizeof(float), goldens[i]);
+    }
+    return moved;
+}
+
+// The reference's output over the control self-test's fixture and over a
+// random one, bit for bit.
+void goldens()
+{
+    const dlsslop::Geometry self_test{7, 5, 7, 5, 5, 0, 0, 7, 5};
+    std::vector<float> input(35 * 4), model(35 * 3);
+    for (unsigned p = 0; p < 35; ++p) {
+        for (unsigned c = 0; c < 3; ++c) {
+            input[p * 4 + c] = float((p * 3 + c * 7) % 31) / 32.0f;
+            model[p * 3 + c] = input[p * 4 + c] + float(int((p + c) % 7) - 3) / 64.0f;
+        }
+        input[p * 4 + 3] = 1;
+    }
+    unsigned moved = moved_goldens("self-test", self_test, input, model, {
+        0xb72c2574ee5214f8u, 0x5b4b322ec30cbd50u, 0x5647251848209bf3u, 0xf65855719c16435fu, 0x6e618c8b4da1a9dbu});
+    // 640x480 at the 720 tier: pillarboxed, and padded below.
+    const dlsslop::Geometry pillarboxed{640, 480, 1280, 768, 720, 160, 0, 960, 720};
+    const std::size_t pixels = std::size_t(pillarboxed.width) * pillarboxed.height;
+    input.resize(pixels * 4);
+    model.resize(pixels * 3);
+    for (std::size_t p = 0; p < pixels; ++p) {
+        for (unsigned c = 0; c < 3; ++c) {
+            input[p * 4 + c] = golden::unit(1, p * 3 + c);
+            model[p * 3 + c] = input[p * 4 + c] + (golden::unit(2, p * 3 + c) - 0.5f) * 0.5f;
+        }
+        input[p * 4 + 3] = 1;
+    }
+    moved += moved_goldens("640x480 720", pillarboxed, input, model, {
+        0x1960f3736b489faeu, 0x024fa28c5f34afacu, 0x8215489abc32a561u, 0x5bc95d036f4a2798u, 0xa1d5a56f13f5c41cu});
+    require(!moved, "a golden moved");
 }
 }
 
@@ -96,6 +150,7 @@ int main()
     }
     const auto in_place = dlsslop::tune_neural_rgb(input.data(), model.data(), g, model, {});
     require(!in_place && !in_place.error().rejected, "in-place neighbourhood processing must fail");
-    std::puts("native tuning: defaults, intensity, tone, structure, sharpness, viewport and errors passed");
+    goldens();
+    std::puts("native tuning: defaults, intensity, tone, structure, sharpness, viewport, errors and goldens passed");
     return 0;
 }

@@ -1,5 +1,7 @@
 #include "../backend/color_preserve.hpp"
+#include "golden.hpp"
 #include <array>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
@@ -28,6 +30,33 @@ static std::array<float,3> uniform(const float* original_rgb, const float* model
     }
     preserve(original,raw,g,strength,result);
     return {result[27*3], result[27*3+1], result[27*3+2]};
+}
+// The reference's output at four strengths for a random letterboxed fixture, a
+// little outside 0..1, and a model that drifted from it, bit for bit
+// (golden.hpp). 3440x1440 at the 720 tier: letterboxed, and padded below.
+static void goldens()
+{
+    const dlsslop::Geometry g{3440,1440,1280,768,720,0,92,1280,536};
+    const std::size_t pixels=std::size_t(g.width)*g.height;
+    std::vector<float> original(pixels*4), model(pixels*3), result;
+    for (std::size_t p=0; p<pixels; ++p) {
+        for (unsigned c=0; c<3; ++c) {
+            original[p*4+c]=golden::unit(1,p*3+c)*1.25f-.125f;
+            model[p*3+c]=original[p*4+c]+(golden::unit(2,p*3+c)-.5f)*.25f;
+        }
+        original[p*4+3]=1;
+    }
+    const struct { float strength; std::uint64_t golden; } strengths[]={
+        {0,0xf44c4ac95f2260f1u}, {.25f,0x928f9929da24f922u},
+        {.5f,0xfadb9dc5a658363bu}, {1,0x57b4e5d13a255e46u}};
+    unsigned moved=0;
+    char name[32];
+    for (const auto& s : strengths) {
+        preserve(original,model,g,s.strength,result);
+        std::snprintf(name,sizeof name,"preserve_color %g",double(s.strength));
+        moved+=!golden::check(name,result.data(),result.size()*sizeof(float),s.golden);
+    }
+    check(!moved,"a golden moved");
 }
 int main()
 {
@@ -102,6 +131,7 @@ int main()
     const auto nan=dlsslop::preserve_color(original.data(),raw.data(),g,std::numeric_limits<float>::quiet_NaN(),result);
     check(!nan && !nan.error().rejected && nan.error().what=="color preservation must be finite and within 0..1",
           "NaN strength accepted");
+    goldens();
     std::puts("Color preservation: bypass, strength, luma, detail, padding, repeated bias, gamut, "
-              "model excursions, headroom and validation passed");
+              "model excursions, headroom, validation and goldens passed");
 }
