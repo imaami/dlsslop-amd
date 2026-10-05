@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import subprocess
 
+from shm_name import channel_name
+
 parser = argparse.ArgumentParser(description=__doc__, add_help=False)
 parser.add_argument('-h', '--help', action='help', help='show help and exit (default: off)')
 parser.add_argument('gui', type=Path, help='dlsslop-gui executable (required; no default)')
@@ -25,7 +27,7 @@ def run(*options, expected, env=headless):
 
 helptext = run('--help', expected=0).stdout
 assert run('-h', expected=0).stdout == helptext
-assert f'effective: /tmp/dlsslop-amd-{os.getuid()}/shm.bin)' in helptext, helptext
+assert f'effective: /tmp/dlsslop-amd-{os.getuid()}/{channel_name()})' in helptext, helptext
 assert 'numeric arrow step: 0.01;' in helptext, helptext
 assert 'effective: /tmp/dlsslop-amd-' in run('--help', expected=0, env=dict(headless, DLSSNR_SHM='')).stdout
 assert 'effective: /run/channel)' in run('--help', expected=0, env=dict(headless, DLSSNR_SHM='/run/channel')).stdout

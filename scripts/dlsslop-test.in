@@ -397,7 +397,7 @@ def parse_args(argv=None):
     parser.add_argument('-C', '--control', default=shutil.which('dlsslopctl') or 'dlsslopctl',
                         help='control executable (default: %(default)s)')
     parser.add_argument('-s', '--shm', type=Path,
-                        default=Path(os.environ.get('DLSSNR_SHM') or f'/tmp/dlsslop-amd-{os.getuid()}/shm.bin'),
+                        default=Path(os.environ.get('DLSSNR_SHM') or f'/tmp/dlsslop-amd-{os.getuid()}/@DLSSLOP_SHM_CHANNEL@'),
                         help='shared-memory channel (default: %(default)s)')
     parser.add_argument('-c', '--capture-dir', type=Path, default=None,
                         help='capture directory (default: unset; the layer\'s rule in the game environment, '

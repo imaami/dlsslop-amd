@@ -27,10 +27,11 @@ same target with `-DDLSSLOP_BUILD_GUI=ON` (default ON); use
 the installed Qt 6 libraries; it does not package a Qt runtime.
 
 Select another channel with `-s PATH` / `--shm PATH`. The default is nonempty
-`DLSSNR_SHM`, otherwise `/tmp/dlsslop-amd-UID/shm.bin`, using the current user's
-numeric ID. This native channel default is independent of the upstream
-`DLSSNR_UID` override for the shared `/tmp/dlssnr-UID/` directory. `-h` / `--help`
-works without a graphical session. `QT_QPA_PLATFORM=xcb` selects X11 when needed.
+`DLSSNR_SHM`, otherwise `/tmp/dlsslop-amd-UID/shm-vN.bin`, using the current
+user's numeric ID and the channel's protocol version `N`; `--help` shows it.
+This native channel default is independent of the upstream `DLSSNR_UID`
+override for the shared `/tmp/dlssnr-UID/` directory. `-h` / `--help` works
+without a graphical session. `QT_QPA_PLATFORM=xcb` selects X11 when needed.
 
 ## Controls
 

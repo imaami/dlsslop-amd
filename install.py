@@ -40,10 +40,13 @@ NATIVE_SOURCES = {
     LAYER_LIBRARY: "libVkLayer_DLSSLOP_amd.so",
     NETWORK_LIBRARY: "libdlsslop-network.so",
 }
+# What CMake makes, in the build directory, from scripts/*.in and packaging/*.in with the default
+# channel's file name, which names the protocol version (common/shm_protocol.h).
+GENERATED = frozenset(("dlsslop-run", "dlsslop-test", "dlsslop.socket"))
 # Destination: (source, required first line, installed mode).
 SCRIPT_SOURCES = {
-    "bin/dlsslop-run": ("scripts/dlsslop-run", b"#!/usr/bin/bash\n", 0o755),
-    "bin/dlsslop-test": ("scripts/dlsslop-test", b"#!/usr/bin/python3\n", 0o755),
+    "bin/dlsslop-run": ("dlsslop-run", b"#!/usr/bin/bash\n", 0o755),
+    "bin/dlsslop-test": ("dlsslop-test", b"#!/usr/bin/python3\n", 0o755),
     "bin/dlsslop-setup": ("scripts/fetch-assets.py", b"#!/usr/bin/python3\n", 0o755),
     "libexec/dlsslop-amd/color_metrics.py": ("scripts/color_metrics.py", b"", 0o644),
 }
@@ -59,7 +62,13 @@ LICENSE_SOURCES = {
 }
 DOCUMENT_SOURCES = {"README.md": "packaging/README.md", **LICENSE_SOURCES}
 # systemd finds user units here under ~/.local and /usr/local.
-UNIT_SOURCES = {f"share/systemd/user/{name}": f"packaging/{name}" for name in ("dlsslop.socket", "dlsslop.service")}
+UNIT_SOURCES = {"share/systemd/user/dlsslop.socket": "dlsslop.socket",
+                "share/systemd/user/dlsslop.service": "packaging/dlsslop.service"}
+
+
+def source_path(root, build, source):
+    """An installed file's source: in the build directory if CMake makes it, otherwise in the checkout."""
+    return build / source if source in GENERATED else root / source
 
 
 def require_file(path):
@@ -149,7 +158,7 @@ def runtime_files(root, build):
         # The Vulkan loader maps the layer, and the layer the network; nothing executes them.
         files[destination] = (path, 0o644 if library else 0o755)
     for destination, (source, first_line, mode) in SCRIPT_SOURCES.items():
-        path = root / source
+        path = source_path(root, build, source)
         require_file(path)
         if not path.read_bytes().startswith(first_line):
             raise ValueError(f"incorrect executable interpreter: {path}")
@@ -191,9 +200,9 @@ def tree(root, build, source_notice):
     """Every installed file relative to the prefix, as (content, mode); all inputs validated first."""
     files = runtime_files(root, build)
     for source in (*DOCUMENT_SOURCES.values(), *UNIT_SOURCES.values()):
-        require_file(root / source)
+        require_file(source_path(root, build, source))
     files.update((f"{DOC_DIRECTORY}/{name}", (root / source, 0o644)) for name, source in DOCUMENT_SOURCES.items())
-    files.update((name, (root / source, 0o644)) for name, source in UNIT_SOURCES.items())
+    files.update((name, (source_path(root, build, source), 0o644)) for name, source in UNIT_SOURCES.items())
     entries = {name: (path.read_bytes(), mode) for name, (path, mode) in files.items()}
     entries[f"{DOC_DIRECTORY}/licenses/SOURCES"] = (source_notice.encode(), 0o644)
     entries[LAYER_MANIFEST] = (layer_manifest().encode(), 0o644)

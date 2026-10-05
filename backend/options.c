@@ -300,7 +300,7 @@ usage (FILE         *out,
        struct error *e)
 {
 	// ShmNativeDefaultPath()'s path with the widest user ID.
-	char native[sizeof "/tmp/dlsslop-amd-4294967295/shm.bin"];
+	char native[sizeof "/tmp/dlsslop-amd-4294967295/" kShmChannelName];
 	int const n = ShmNativeDefaultPath(native, sizeof native);
 	if (n < 0 || n >= (int)sizeof native)
 		return error_fail(e, "cannot format the native channel's path");

@@ -13,6 +13,8 @@ import subprocess
 import tempfile
 import time
 
+from shm_name import channel_name
+
 
 parser = argparse.ArgumentParser(description=__doc__, add_help=False)
 parser.add_argument('-h', '--help', action='help', help='show help and exit (default: off)')
@@ -128,7 +130,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopd-cli-') as directory:
     assert default(helptext, 'modules') == str(installed_modules)
     no_channel = dict(env, DLSSNR_SHM='', DLSSNR_UID='12345')
     helptext = run(binary, '--help', env=no_channel, cwd=cwd).stdout
-    assert default(helptext, 'shm') == f'/tmp/dlsslop-amd-{os.getuid()}/shm.bin'
+    assert default(helptext, 'shm') == f'/tmp/dlsslop-amd-{os.getuid()}/{channel_name()}'
 
     # Explicit empty paths must override populated defaults and fail before HIP.
     for option in ('--assets', '-a', '--modules', '-m'):

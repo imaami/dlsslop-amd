@@ -99,14 +99,14 @@ int
 ShmDefaultPath (char   *buf,
                 size_t  size)
 {
-	return shm_runtime_path(buf, size, getenv("DLSSNR_UID"), "/shm.bin");
+	return shm_runtime_path(buf, size, getenv("DLSSNR_UID"), "/" kShmChannelName);
 }
 
 int
 ShmNativeDefaultPath (char   *buf,
                       size_t  size)
 {
-	return snprintf(buf, size, "/tmp/dlsslop-amd-%u/shm.bin", (unsigned)getuid());
+	return snprintf(buf, size, "/tmp/dlsslop-amd-%u/" kShmChannelName, (unsigned)getuid());
 }
 
 int

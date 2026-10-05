@@ -119,7 +119,7 @@ usage (char const *channel)
 	       "All arguments are validated before opening or changing the channel.\n"
 	       "\n"
 	       "  -s, --shm PATH          Channel path (default: nonempty $DLSSNR_SHM, otherwise\n"
-	       "                         /tmp/dlsslop-amd-UID/shm.bin; effective default: %s)\n"
+	       "                         /tmp/dlsslop-amd-UID/" kShmChannelName "; effective default: %s)\n"
 	       "  -S, --status            Print live transport/status values "
 	       "(default: on if no action/setting)\n"
 	       "  -l, --settings          Print live settings and reset defaults (default: off)\n"

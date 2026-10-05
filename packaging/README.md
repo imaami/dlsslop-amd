@@ -167,7 +167,7 @@ dlsslopd --tier 720 --self-test --output neural-test.ppm
 ```
 
 The socket enabled in step 5 of the installation listens beside the default
-channel, `/tmp/dlsslop-amd-UID/shm.bin`; nothing else runs. When no daemon serves, `dlsslop-run` connects there, which
+channel, `/tmp/dlsslop-amd-UID/shm-vN.bin`; nothing else runs. When no daemon serves, `dlsslop-run` connects there, which
 starts `dlsslop.service`, and waits until the daemon serves. The daemon stops
 after ten seconds without a frame, and the layer starts it again if a game is
 still running. Its log is in `journalctl --user -u dlsslop`. A channel chosen
@@ -252,10 +252,15 @@ as before, so keep the daemon available. It adds the network's features to the
 game's device and runs in the game's process: remove the option if a game
 misbehaves with it.
 
-The daemon, launcher and controllers use `/tmp/dlsslop-amd-UID/shm.bin`, where
-`UID` is your numeric user ID. The launcher writes the layer log beside that
-file. To run separate sessions, give each session's daemon, launcher and
-controllers the same distinct `DLSSNR_SHM` path inside a private directory.
+The daemon, launcher and controllers use `/tmp/dlsslop-amd-UID/shm-vN.bin`,
+where `UID` is your numeric user ID and `N` the version of the protocol between
+them; `dlsslopctl --help` shows the path. A new version uses a new file, so
+programs of different releases never share one. The daemon, the layer or a
+`dlsslopctl` setting, whichever comes first, creates the channel; a file of
+another protocol at a path that you choose is refused. The launcher writes the
+layer log beside that file. To run separate sessions, give each session's
+daemon, launcher and controllers the same distinct `DLSSNR_SHM` path inside a
+private directory.
 
 ## Capture and color checks
 

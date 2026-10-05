@@ -16,9 +16,11 @@ import sys
 import tempfile
 import unittest
 
+from shm_name import channel_name
 
-ROOT = Path(__file__).resolve().parents[1]
-PROGRAM = ROOT / "scripts" / "dlsslop-test"
+# The color diagnostic, as CMake makes it from scripts/dlsslop-test.in; the rest of the command line
+# is unittest's.
+PROGRAM = Path(sys.argv.pop(1)).resolve()
 INITIAL = {
     "enabled": "1", "hold": "0", "passes": "2", "mvec": "1",
     "intensity": "0.65", "local-tone": "0.8", "local-structure": "0.7",
@@ -356,9 +358,11 @@ class ColorOrchestratorTest(unittest.TestCase):
         self.assertFalse([call for call in state["calls"] if "--status" not in call])
 
     def test_help_states_each_default_once(self):
-        text = subprocess.run([sys.executable, str(PROGRAM), "--help"], env=dict(os.environ, COLUMNS="500"),
+        env = {key: value for key, value in os.environ.items() if key != "DLSSNR_SHM"}
+        text = subprocess.run([sys.executable, str(PROGRAM), "--help"], env=dict(env, COLUMNS="500"),
                               text=True, capture_output=True, check=True).stdout
         self.assertNotIn("None", text)
+        self.assertIn(f"(default: /tmp/dlsslop-amd-{os.getuid()}/{channel_name()})", text)
         self.assertEqual(text.count("(default:"), 8, text)
         self.assertIn("--trace-dir (default: unset; no raw tensors)", text)
         self.assertIn("else /tmp/dlssnr-captures)", text)

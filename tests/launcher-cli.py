@@ -12,9 +12,10 @@ import sys
 import threading
 import tempfile
 
+from shm_name import channel_name
 
-ROOT = Path(__file__).resolve().parents[1]
-LAUNCHER = ROOT / "scripts/dlsslop-run"
+# The launcher, as CMake makes it from scripts/dlsslop-run.in.
+LAUNCHER = Path(sys.argv[1]).resolve()
 BASH = "/usr/bin/bash"
 
 
@@ -35,7 +36,7 @@ def main():
         clean_env = {key: value for key, value in os.environ.items()
                      if not key.startswith(("DLSSLOP_", "DLSSNR_"))}
         env = dict(clean_env, DLSSNR_SHM=str(channel))
-        runtime_default = f"/tmp/dlsslop-amd-{os.getuid()}/shm.bin"
+        runtime_default = f"/tmp/dlsslop-amd-{os.getuid()}/{channel_name()}"
         default_help = run([BASH, str(LAUNCHER), "--help"], env=clean_env).stdout
         assert runtime_default in default_help
         assert "Usage: dlsslop-run" in default_help

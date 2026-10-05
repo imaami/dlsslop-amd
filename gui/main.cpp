@@ -434,7 +434,7 @@ int main(int argc, char** argv)
         if (code == 'h') {
             std::printf("Usage: dlsslop-gui [OPTION]...\n"
                 "  -s, --shm PATH  Existing control channel (default: nonempty DLSSNR_SHM,\n"
-                "                  otherwise /tmp/dlsslop-amd-UID/shm.bin; effective: %s)\n"
+                "                  otherwise /tmp/dlsslop-amd-UID/" kShmChannelName "; effective: %s)\n"
                 "  -h, --help      Show help (default: off)\n"
                 "Standalone Qt 6 Widgets client. Does not start or stop the worker on open/close.\n"
                 "Live changes: on; numeric arrow step: %g; exact entry: six decimals.\n"

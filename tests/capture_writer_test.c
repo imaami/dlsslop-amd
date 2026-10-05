@@ -371,9 +371,16 @@ check_channel_paths (void)
 	require(!inherited || original_channel, "out of memory");
 	unsigned const uid = (unsigned)getuid();
 	char *shared_dir = path_of(nullptr, "/tmp/dlssnr-%u", uid);
-	char *shared_path = path_of(nullptr, "/tmp/dlssnr-%u/shm.bin", uid);
-	char *native_path = path_of(nullptr, "/tmp/dlsslop-amd-%u/shm.bin", uid);
+	char *shared_path = path_of(nullptr, "/tmp/dlssnr-%u/" kShmChannelName, uid);
+	char *native_path = path_of(nullptr, "/tmp/dlsslop-amd-%u/" kShmChannelName, uid);
 	char small[8];
+
+	// The default channels' file names the protocol version.
+	char *name = path_of(nullptr, "shm-v%u.bin", (unsigned)kShmVersion);
+	require(!strcmp(name, kShmChannelName), "the channel's name %s does not name v%u", kShmChannelName,
+	        (unsigned)kShmVersion);
+	free(name);
+	name = nullptr;
 
 	require(!unsetenv("DLSSNR_UID"), "unsetenv failed");
 	expect_whole(ShmRuntimeDir, shared_dir, "shared runtime default changed");
@@ -381,7 +388,7 @@ check_channel_paths (void)
 	expect_whole(ShmNativeDefaultPath, native_path, "native channel default changed");
 	require(!setenv("DLSSNR_UID", "12345", 1), "setenv failed");
 	expect_whole(ShmRuntimeDir, "/tmp/dlssnr-12345", "shared runtime ignored DLSSNR_UID");
-	static char const uid_path[] = "/tmp/dlssnr-12345/shm.bin";
+	static char const uid_path[] = "/tmp/dlssnr-12345/" kShmChannelName;
 	expect_whole(ShmDefaultPath, uid_path, "shared channel ignored DLSSNR_UID");
 	check_truncation(ShmDefaultPath(small, sizeof small), small, uid_path, sizeof uid_path - 1,
 	                 "the shared channel's C form did not truncate as snprintf does");

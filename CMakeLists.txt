@@ -35,6 +35,26 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON CACHE BOOL "Link-time optimization")
 include(cmake/lto-compilers.cmake)
 # Project headers shared by the daemon and its tests.
 include_directories(common)
+# The default channels' file name, kShmChannelName of common/shm_protocol.h:
+# kShmChannelPrefix, SHM_PROTOCOL_VERSION and kShmChannelSuffix, and its socket's
+# with kShmTransportSuffix. The launcher, the color diagnostic and the socket
+# unit are made with them, so that each protocol version names files of its own.
+file(STRINGS common/shm_protocol.h SHM_NAME_DEFINES
+    REGEX "^#define (SHM_PROTOCOL_VERSION|kShmChannelPrefix|kShmChannelSuffix|kShmTransportSuffix) ")
+foreach(name SHM_PROTOCOL_VERSION kShmChannelPrefix kShmChannelSuffix kShmTransportSuffix)
+    if(NOT SHM_NAME_DEFINES MATCHES "#define ${name} \"?([^\";]+)\"?")
+        message(FATAL_ERROR "no ${name} in common/shm_protocol.h")
+    endif()
+    set(${name} ${CMAKE_MATCH_1})
+endforeach()
+set(DLSSLOP_SHM_CHANNEL ${kShmChannelPrefix}${SHM_PROTOCOL_VERSION}${kShmChannelSuffix})
+set(DLSSLOP_SHM_SOCKET ${DLSSLOP_SHM_CHANNEL}${kShmTransportSuffix})
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS common/shm_protocol.h)
+configure_file(scripts/dlsslop-run.in dlsslop-run @ONLY)
+configure_file(scripts/dlsslop-test.in dlsslop-test @ONLY)
+# The color diagnostic finds its metrics beside itself, as in scripts/.
+configure_file(scripts/color_metrics.py color_metrics.py COPYONLY)
+configure_file(packaging/dlsslop.socket.in dlsslop.socket @ONLY)
 find_package(Threads REQUIRED)
 include(CTest)
 
@@ -222,7 +242,7 @@ if(BUILD_TESTING)
     add_test(NAME control-cli COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/control-cli.py $<TARGET_FILE:dlssnr-shmctl>)
     add_test(NAME launcher-cli COMMAND ${Python3_EXECUTABLE}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/launcher-cli.py)
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/launcher-cli.py ${CMAKE_CURRENT_BINARY_DIR}/dlsslop-run)
     add_test(NAME kernels-cli COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/kernels-cli.py)
     add_test(NAME setup-cli COMMAND ${Python3_EXECUTABLE}
@@ -243,7 +263,7 @@ if(BUILD_TESTING)
     target_link_libraries(worker-channel-test PRIVATE dlsslop-common-c)
     add_test(NAME worker-channel COMMAND worker-channel-test $<TARGET_FILE:dlsslopd>)
     add_test(NAME packaging COMMAND ${Python3_EXECUTABLE}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging_test.py)
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging_test.py ${CMAKE_CURRENT_BINARY_DIR})
     add_executable(vulkan-storage-test tests/vulkan_storage_test.c)
     add_dependencies(vulkan-storage-test layer-shaders)
     target_include_directories(vulkan-storage-test PRIVATE ${SHADER_DIR} layer)
@@ -410,7 +430,7 @@ if(BUILD_TESTING)
     add_test(NAME color-metrics COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_metrics_test.py)
     add_test(NAME color-orchestrator COMMAND ${Python3_EXECUTABLE}
-        ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_orchestrator_test.py)
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_orchestrator_test.py ${CMAKE_CURRENT_BINARY_DIR}/dlsslop-test)
     add_test(NAME submodules COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/submodules.py)
     # Inspect the code objects from scripts/build-kernels.py; skip without them.

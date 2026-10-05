@@ -3,7 +3,7 @@
 
 usage_line='Usage: dlsslop-run [OPTIONS] [--] COMMAND [ARGUMENTS...]'
 declare -A option_variable=([-s]=channel [--shm]=channel [-l]=log [--log]=log)
-channel_default=${DLSSNR_SHM:-/tmp/dlsslop-amd-${UID}/shm.bin}
+channel_default=${DLSSNR_SHM:-/tmp/dlsslop-amd-${UID}/@DLSSLOP_SHM_CHANNEL@}
 [[ $channel_default == /* ]] || channel_default=$PWD/$channel_default
 channel=$channel_default
 log=${DLSSNR_LOG:-}
@@ -35,7 +35,7 @@ Options:
   --              End launcher options (default: first COMMAND ends options).
 
 Environment defaults:
-  DLSSNR_SHM      /tmp/dlsslop-amd-\$UID/shm.bin (UID=${UID}); --shm overrides it.
+  DLSSNR_SHM      /tmp/dlsslop-amd-\$UID/@DLSSLOP_SHM_CHANNEL@ (UID=${UID}); --shm overrides it.
   DLSSNR_LOG      <channel directory>/layer.log; --log overrides it.
 Relative paths are resolved against the launcher's working directory.
 

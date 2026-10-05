@@ -8,6 +8,8 @@ import struct
 import subprocess
 import tempfile
 
+from shm_name import channel_name
+
 parser = argparse.ArgumentParser(description=__doc__, add_help=False)
 parser.add_argument('-h', '--help', action='help', help='show help and exit (default: off)')
 parser.add_argument('control', type=Path, help='dlssnr-shmctl executable (required; no default)')
@@ -36,7 +38,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     default_env['DLSSNR_UID'] = '12345'
     default_help = subprocess.run([control, '--help'], env=default_env, text=True,
                                   capture_output=True, check=True).stdout
-    assert f'effective default: /tmp/dlsslop-amd-{os.getuid()}/shm.bin' in default_help
+    assert f'effective default: /tmp/dlsslop-amd-{os.getuid()}/{channel_name()})' in default_help
 
     helptext = run('--help')
     assert not channel.exists(), '--help created the channel'
@@ -48,7 +50,7 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     shared_header = Path(__file__).resolve().parent.parent / 'common/shm_protocol.h'
     tier = re.search(r'kNativeDefaultTier\s*=\s*(\d+)', shared_header.read_text())[1]
     max_passes = int(re.search(r'kMaxPasses\s*=\s*(\d+)', shared_header.read_text())[1])
-    version = int(re.search(r'kShmVersion\s*=\s*(\d+)', shared_header.read_text())[1])
+    version = int(re.search(r'#define SHM_PROTOCOL_VERSION (\d+)', shared_header.read_text())[1])
     magic = int(re.search(r'kShmMagic\s*=\s*(0x[0-9A-Fa-f]+)', shared_header.read_text())[1], 16)
     assert re.search(r'--tier\s+VALUE [^\n]*\n\s+Range: 720\.\.1080; default: ' + tier + '; steps of 180\n', helptext)
     assert run('-h') == helptext

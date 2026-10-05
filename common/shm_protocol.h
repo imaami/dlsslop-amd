@@ -51,6 +51,15 @@ extern "C" {
 # define STD(x) x
 #endif
 
+/** @brief kShmVersion as a preprocessor number, which kShmChannelName spells. */
+#define SHM_PROTOCOL_VERSION 31
+
+/** @brief A preprocessor number's digits, as a string literal. */
+#define SHM_STRING(number) SHM_STRING_(number)
+
+/** @brief SHM_STRING() of an expanded number. */
+#define SHM_STRING_(number) #number
+
 /** @brief The channel's identity. */
 enum : STD(uint32_t) {
 	/** @brief 'GNR2'.
@@ -77,8 +86,10 @@ enum : STD(uint32_t) {
 	 * v29: each frame count is one 64-bit atomic, and layerFrames moved to the end.
 	 * v30: the working scale is at most 1, and scalingDownscaler is retired.
 	 * v31: the retired and unused fields are gone, and the frame counts lead the header.
+	 *
+	 * The number is SHM_PROTOCOL_VERSION's, which names the default channels' file.
 	 */
-	kShmVersion = 31,
+	kShmVersion = SHM_PROTOCOL_VERSION,
 };
 
 /** @brief The frames that the channel carries. */
@@ -311,7 +322,21 @@ extern int
 ShmRuntimeDir (char        *buf,
                STD(size_t)  size);
 
-/** @brief The shared default channel: shm.bin in ShmRuntimeDir().
+/** @brief What a default channel's file name starts with: the protocol version follows. */
+#define kShmChannelPrefix "shm-v"
+
+/** @brief What a default channel's file name ends with, after the protocol version. */
+#define kShmChannelSuffix ".bin"
+
+/** @brief A default channel's file name, which names the protocol version: shm-v31.bin for v31.
+ *
+ * Each protocol version has a file of its own, so that programs of different versions never meet
+ * in a default channel. CMake spells the name from these macros too, for the launcher, the color
+ * diagnostic and the socket unit.
+ */
+#define kShmChannelName kShmChannelPrefix SHM_STRING(SHM_PROTOCOL_VERSION) kShmChannelSuffix
+
+/** @brief The shared default channel: kShmChannelName in ShmRuntimeDir().
  *
  * @param buf  Receives the path; may be nullptr if @a size is 0.
  * @param size The size of @a buf.
@@ -322,7 +347,8 @@ extern int
 ShmDefaultPath (char        *buf,
                 STD(size_t)  size);
 
-/** @brief The native tools' default channel, /tmp/dlsslop-amd-UID/shm.bin with the real user ID.
+/** @brief The native tools' default channel, /tmp/dlsslop-amd-UID/kShmChannelName with the real
+ *         user ID.
  *
  * Keep the native HIP tools on their own channel, including direct invocations
  * that do not pass through the installed Bash wrappers.

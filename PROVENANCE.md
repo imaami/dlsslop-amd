@@ -13,7 +13,9 @@ Inherited interfaces retain their upstream names, including `DLSSNR_SHM`,
 remains `dlssnr-shmctl`; installation copies its ELF executable directly to
 `bin/dlsslopctl` for the public command. The inherited shared
 runtime directory is `/tmp/dlssnr-UID` and honors `DLSSNR_UID`; the native
-tools' default channel is `/tmp/dlsslop-amd-UID/shm.bin`. Captures use
+tools' default channel is `/tmp/dlsslop-amd-UID/shm-vN.bin` for protocol version
+`N`, and the shared one `shm-vN.bin` in that runtime directory, where upstream's
+is `shm.bin`. Captures use
 `dlssnr/captures` under the state directory, with `/tmp/dlssnr-captures` as the
 final fallback. This distinction follows the origin of each identifier,
 including local additions and inherited interfaces in the same patched source

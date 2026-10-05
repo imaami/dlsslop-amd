@@ -14,8 +14,12 @@ import tempfile
 import time
 from unittest.mock import patch
 
+from shm_name import channel_name
+
 
 ROOT = Path(__file__).resolve().parents[1]
+# The build directory, where CMake made the files of INSTALLER.GENERATED.
+BUILD = Path(sys.argv[1]).resolve()
 
 
 def load_module(name, path):
@@ -42,11 +46,11 @@ def fixture(root):
              *(source for source, *_ in INSTALLER.SCRIPT_SOURCES.values()),
              "common/vulkan_plan.c", "common/vulkan_runtime.c",
              *(f"external/vulkan/linux/package/model-tools/{name}" for name in INSTALLER.MODEL_TOOLS)}
-    for name in paths:
-        target = root / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(ROOT / name, target)
     build = root / "build"
+    for name in paths:
+        target = INSTALLER.source_path(root, build, name)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(INSTALLER.source_path(ROOT, BUILD, name), target)
     for name in INSTALLER.NATIVE_SOURCES.values():
         target = build / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -95,6 +99,13 @@ def installed(prefix, runtime, env):
         run([prefix / "bin" / name], env)
     assert (prefix / "bin/dlsslop-run").read_bytes().startswith(b"#!/usr/bin/bash\n")
     run(["/usr/bin/bash", "-n", prefix / "bin/dlsslop-run"], env)
+    # The launcher, the color diagnostic and the socket name the default channel of this protocol.
+    name = channel_name()
+    assert f"channel_default=${{DLSSNR_SHM:-/tmp/dlsslop-amd-${{UID}}/{name}}}\n" in (
+        prefix / "bin/dlsslop-run").read_text()
+    assert f"/tmp/dlsslop-amd-{{os.getuid()}}/{name}'" in (prefix / "bin/dlsslop-test").read_text()
+    assert f"\nListenSequentialPacket=/tmp/dlsslop-amd-%U/{name}.sock\n" in (
+        prefix / "share/systemd/user/dlsslop.socket").read_text()
     for name in ("dlsslop-test", "dlsslop-setup"):
         assert (prefix / "bin" / name).read_bytes().startswith(b"#!/usr/bin/python3\n")
         assert "default:" in run([prefix / "bin" / name, "--help"], env)
@@ -180,9 +191,8 @@ def main():
         # A script whose first line is not exactly its interpreter line
         # (another interpreter, or a longer path sharing the prefix) is
         # refused before anything is installed.
-        for name, first_line in (("scripts/dlsslop-run", b"#!/bin/sh\n"),
-                                 ("scripts/dlsslop-test", b"#!/usr/bin/python3.99\n")):
-            script = source / name
+        for name, first_line in (("dlsslop-run", b"#!/bin/sh\n"), ("dlsslop-test", b"#!/usr/bin/python3.99\n")):
+            script = build / name
             original_script = script.read_bytes()
             script.write_bytes(first_line + original_script.partition(b"\n")[2])
             refuses_install(source, build, base, env, "wrong-interpreter")
@@ -223,7 +233,7 @@ def main():
         for name in ("install.py", "build", "scripts", "assets"):
             assert not (release / name).exists(), name
         units = [release / name for name in INSTALLER.UNIT_SOURCES]
-        assert all(unit.read_bytes() == (source / INSTALLER.UNIT_SOURCES[name]).read_bytes()
+        assert all(unit.read_bytes() == INSTALLER.source_path(source, build, INSTALLER.UNIT_SOURCES[name]).read_bytes()
                    for name, unit in zip(INSTALLER.UNIT_SOURCES, units))
         if shutil.which("systemd-analyze"):
             verified = subprocess.run(["systemd-analyze", "--user", "verify", *map(str, units)],
