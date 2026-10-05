@@ -1,6 +1,6 @@
 /** @file
  *
- * shm_channel_open() in C, in a private directory. Processes that open a missing channel at once,
+ * shm_channel_open() in C, in private directories. Processes that open a missing channel at once,
  * released together, all map the same file, which exactly one of them created and which holds the
  * native defaults; nothing else is left in the directory. That holds for each way of creating it:
  * an unnamed file that linkat(2) names by its descriptor or by its link in /proc, and a named
@@ -9,22 +9,33 @@
  * forces the other ways by defining openat() and linkat() itself, which the module's calls then
  * reach. A file of another protocol, size or type, a symbolic link and a directory that is not
  * private are refused and left as they were, and a directory replaced while a channel is created
- * receives nothing; an open that may not create finds nothing and creates nothing.
+ * receives nothing; an open that may not create finds nothing and creates nothing. A channel that
+ * a sweep of another version removes while a process opens it is not used. Opening a default
+ * channel removes, once a process, another protocol's files that have lain unused for a day, and
+ * nothing that is in use or not such a file: the native tools' default in a private /tmp of a user
+ * and mount namespace, and the shared default there too, or in /tmp under a DLSSNR_UID of the
+ * test's own where namespaces are not available.
  */
 // SPDX-License-Identifier: MIT
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <sched.h>
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/mman.h>
+#include <sys/mount.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/un.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "error.h"
@@ -62,11 +73,27 @@ static uint32_t unnamed_files, descriptor_links, proc_links, named_links;
  */
 static char const *replace;
 
+/** @brief The name of a channel that openat() removes as a sweep of another protocol's version
+ *         would, right after the module opens it; nullptr if none.
+ */
+static char const *sweep_name;
+
+/** @brief Whether that sweep still holds its write lock when the module locks the channel, and
+ *         removes it only when the module opens the name again.
+ */
+static bool sweep_holds;
+
+/** @brief That sweep's descriptor while it holds its write lock, or -1. */
+static int sweeper = -1;
+
 /** @brief The processes that open a missing channel at once. */
 static constexpr uint32_t RACERS = 32;
 
 /** @brief The races for each way of creating a channel. */
 static constexpr uint32_t ROUNDS = 8;
+
+/** @brief The test's own process, which alone removes the test's directory. */
+static pid_t owner;
 
 /** @brief The private directory that the test works in. */
 static char *root;
@@ -103,7 +130,7 @@ require (bool        condition,
 }
 
 /** @brief The test's openat(2), which the module's calls reach: counts the unnamed files asked for,
- *         and fails them as enum force says.
+ *         fails them as enum force says, and runs the sweep that sweep_name asks for.
  *
  * @param dir   The directory.
  * @param path  The path, relative to it.
@@ -131,7 +158,25 @@ openat (int         dir,
 			return -1;
 		}
 	}
-	return (int)syscall(SYS_openat, dir, path, flags, mode);
+	if (sweeper >= 0) {
+		// The sweep ends as one does: the name goes, then the lock.
+		require(!unlinkat(dir, sweep_name, 0) && !close(sweeper), "the sweep failed");
+		sweeper = -1;
+		sweep_name = nullptr;
+	}
+	int const fd = (int)syscall(SYS_openat, dir, path, flags, mode);
+	if (fd < 0 || !sweep_name || strcmp(path, sweep_name))
+		return fd;
+	// The sweep takes the channel after the module opened it, before the module locks it.
+	sweeper = (int)syscall(SYS_openat, dir, path, O_RDWR | O_CLOEXEC, 0);
+	struct flock lock = { .l_type = F_WRLCK, .l_whence = SEEK_SET, .l_len = 1 };
+	require(sweeper >= 0 && !fcntl(sweeper, F_OFD_SETLK, &lock), "the sweep cannot lock %s", path);
+	if (!sweep_holds) {
+		require(!unlinkat(dir, path, 0) && !close(sweeper), "the sweep failed");
+		sweeper = -1;
+		sweep_name = nullptr;
+	}
+	return fd;
 }
 
 /** @brief The test's linkat(2), which the module's calls reach: replaces the directory named by
@@ -622,6 +667,49 @@ check_replaced (void)
 	dir = nullptr;
 }
 
+/** @brief A channel that a sweep of another protocol's version removes while this process opens it
+ *         is not used, whether the sweep removed it before the module locked it or still held its
+ *         write lock then: a creator makes a new channel, and a reader finds none.
+ */
+static void
+check_swept (void)
+{
+	static struct {
+		uint32_t flags; //!< shm_channel_open()'s flags.
+		bool     holds; //!< sweep_holds.
+	} const opens[] = {
+		{ SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE, false },
+		{ SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE, true  },
+		{ 0,                                      false },
+	};
+	for (uint32_t i = 0; i < sizeof opens / sizeof *opens; ++i) {
+		char name[16];
+		snprintf(name, sizeof name, "swept-%u", i);
+		char *path = path_in(nullptr, name);
+		struct shm_channel channel;
+		open_channel(&channel, path, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
+		// A mark of the channel that the sweep removes.
+		uint32_t const passes = atomic_load(&defaults->passes);
+		atomic_store(&channel.h->passes, passes + 1);
+		shm_channel_fini(&channel);
+		sweep_name = name;
+		sweep_holds = opens[i].holds;
+		struct error e;
+		bool const opened = !shm_channel_open(&channel, path, strlen(path), kHeaderBytes, opens[i].flags, &e);
+		require(!sweep_name && sweeper < 0, "the sweep did not end");
+		struct stat st;
+		if (opens[i].flags)
+			require(opened && channel.flags & SHM_CHANNEL_CREATED && atomic_load(&channel.h->passes) == passes
+			        && !fstat(channel.fd, &st) && st.st_nlink == 1,
+			        "a channel that a sweep removed was used (open %u): %s", i, opened ? "opened" : e.what);
+		else
+			require(!opened && channel.flags == SHM_CHANNEL_MISSING, "a reader used a channel that a sweep removed");
+		shm_channel_fini(&channel);
+		free(path);
+		path = nullptr;
+	}
+}
+
 /** @brief An open that may not create finds no channel, says so, and creates nothing: neither the
  *         channel nor its directory. A bare name is a channel in the working directory.
  */
@@ -663,10 +751,325 @@ check_missing (void)
 	missing_dir = nullptr;
 }
 
+/** @brief What a file that a sweep finds is. */
+enum sweep_type {
+	SWEEP_FILE,      //!< A regular file.
+	SWEEP_LOCKED,    //!< A regular file that the test locks, as dlsslopd locks its channel.
+	SWEEP_HELD,      //!< A regular file that the test holds open, as every program its channel.
+	SWEEP_SOCKET,    //!< A socket, as a socket unit leaves one.
+	SWEEP_SYMLINK,   //!< A symbolic link to "target".
+	SWEEP_DIRECTORY, //!< A directory.
+	SWEEP_FIFO,      //!< A FIFO.
+};
+
+/** @brief A file that a sweep finds. */
+struct sweep_case {
+	char const *name;   //!< Its name.
+	uint32_t    hours;  //!< How long ago it was modified.
+	uint8_t     type;   //!< enum sweep_type.
+	bool        shared; //!< Whether it stays in the shared default's directory.
+	bool        native; //!< Whether it stays in the native tools' default's directory.
+};
+
+/** @brief What a sweep finds: another protocol's channel, its socket and producer lock, old or
+ *         young, missing, locked, held open or not a regular file; the legacy shm.bin; this
+ *         protocol's files; and other names, a creator's temporary name among them.
+ */
+static struct sweep_case const SWEEP_CASES[] = {
+	{"shm-v30.bin",                 25, SWEEP_FILE,      false, false},
+	{"shm-v30.bin.sock",            25, SWEEP_SOCKET,    false, false},
+	{"shm-v30.bin.producer.lock",   25, SWEEP_FILE,      false, false},
+	{"shm-v30.bin.Ab9xYz",          25, SWEEP_FILE,      true,  true },
+	{"shm-v30.bin.Ab9xY",           25, SWEEP_FILE,      true,  true },
+	{"shm-v30.bin.lock",            25, SWEEP_FILE,      true,  true },
+	{"shm-v30.binx",                25, SWEEP_FILE,      true,  true },
+	{"shm-v29.bin",                 23, SWEEP_FILE,      true,  true },
+	{"shm-v29.bin.sock",            25, SWEEP_SOCKET,    true,  true },
+	{"shm-v29.bin.producer.lock",   25, SWEEP_FILE,      true,  true },
+	{"shm-v28.bin",                 25, SWEEP_LOCKED,    true,  true },
+	{"shm-v28.bin.sock",            25, SWEEP_SOCKET,    true,  true },
+	{"shm-v23.bin",                 25, SWEEP_HELD,      true,  true },
+	{"shm-v23.bin.producer.lock",   25, SWEEP_FILE,      true,  true },
+	{"shm-v27.bin.producer.lock",   25, SWEEP_FILE,      false, false},
+	{"shm-v27.bin.sock",            23, SWEEP_SOCKET,    true,  true },
+	{"shm-v26.bin",                 25, SWEEP_SYMLINK,   true,  true },
+	{"target",                      25, SWEEP_FILE,      true,  true },
+	{"shm-v25.bin",                 25, SWEEP_DIRECTORY, true,  true },
+	{"shm-v24.bin",                 25, SWEEP_FIFO,      true,  true },
+	{"shm-v1.bin",                  99, SWEEP_FILE,      false, false},
+	{"shm-v.bin",                   25, SWEEP_FILE,      true,  true },
+	{"shm.bin",                     25, SWEEP_FILE,      true,  false},
+	{"shm.bin.sock",                25, SWEEP_SOCKET,    true,  false},
+	{"shm.bin.producer.lock",       25, SWEEP_FILE,      true,  false},
+	{kShmChannelName ".sock",       25, SWEEP_SOCKET,    true,  true },
+	{kShmChannelName ".backup",     25, SWEEP_FILE,      true,  true },
+	{".shm-channel-0123456789abcdef", 25, SWEEP_FILE,    true,  true },
+	{"layer.log",                   25, SWEEP_FILE,      true,  true },
+};
+
+/** @brief Makes a file of a sweep's directory, modified some hours ago.
+ *
+ * @param dir  The directory.
+ * @param c    The file.
+ * @param now  The time now.
+ */
+static void
+sweep_make (char const              *dir,
+            struct sweep_case const *c,
+            time_t                   now)
+{
+	size_t length;
+	char *path = support_format(&length, "%s/%s", dir, c->name);
+	require(path, "out of memory");
+	switch (c->type) {
+	case SWEEP_FILE:
+	case SWEEP_LOCKED:
+	case SWEEP_HELD:
+		write_file(path, "", 0, 0);
+		break;
+	case SWEEP_SOCKET: {
+		struct sockaddr_un address = { .sun_family = AF_UNIX };
+		require(length < sizeof address.sun_path, "%s is too long for a socket", path);
+		memcpy(address.sun_path, path, length + 1);
+		int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+		require(fd >= 0 && !bind(fd, (struct sockaddr const *)&address, sizeof address) && !close(fd),
+		        "cannot make the socket %s", path);
+		fd = -1;
+		break;
+	}
+	case SWEEP_SYMLINK:
+		require(!symlink("target", path), "symlink failed");
+		break;
+	case SWEEP_DIRECTORY:
+		require(!mkdir(path, 0700), "mkdir failed");
+		break;
+	case SWEEP_FIFO:
+		require(!mkfifo(path, 0600), "mkfifo failed");
+		break;
+	}
+	time_t const then = now - (time_t)c->hours * 3600;
+	struct timespec const times[2] = { { .tv_sec = then }, { .tv_sec = then } };
+	require(!utimensat(AT_FDCWD, path, times, AT_SYMLINK_NOFOLLOW), "cannot age %s", path);
+	free(path);
+	path = nullptr;
+}
+
+/** @brief Where sweep_open() opens a channel, which says what stays. */
+enum sweep_at {
+	SWEEP_AT_CHOSEN, //!< A chosen path: everything stays.
+	SWEEP_AT_SHARED, //!< The shared default: what struct sweep_case's shared says.
+	SWEEP_AT_NATIVE, //!< The native tools' default: what struct sweep_case's native says.
+	SWEEP_AT_AGAIN,  //!< A default whose directory this process has swept: everything stays.
+};
+
+/** @brief Opens a channel in a directory of SWEEP_CASES' files and ends the test unless exactly the
+ *         files that should go have gone.
+ *
+ * @param path The channel's path.
+ * @param at   Where that is.
+ */
+static void
+sweep_open (char const    *path,
+            enum sweep_at  at)
+{
+	char *dir = strdup(path);
+	require(dir, "out of memory");
+	*strrchr(dir, '/') = '\0';
+	time_t const now = time(nullptr);
+	require(now != (time_t)-1, "time failed");
+	char const *kept[sizeof SWEEP_CASES / sizeof *SWEEP_CASES + 1];
+	uint32_t count = 0;
+	// The files that the test locks and holds, by enum sweep_type from SWEEP_LOCKED.
+	int fds[] = { -1, -1 };
+	for (uint32_t i = 0; i < sizeof SWEEP_CASES / sizeof *SWEEP_CASES; ++i) {
+		struct sweep_case const *const c = &SWEEP_CASES[i];
+		sweep_make(dir, c, now);
+		if (at == SWEEP_AT_SHARED ? c->shared : at != SWEEP_AT_NATIVE || c->native)
+			kept[count++] = c->name;
+		if (c->type != SWEEP_LOCKED && c->type != SWEEP_HELD)
+			continue;
+		char *name = support_format(nullptr, "%s/%s", dir, c->name);
+		require(name, "out of memory");
+		int *const fd = &fds[c->type - SWEEP_LOCKED];
+		*fd = open(name, O_RDONLY | O_CLOEXEC);
+		struct flock lock = { .l_type = F_RDLCK, .l_whence = SEEK_SET, .l_len = 1 };
+		require(*fd >= 0 && (c->type == SWEEP_LOCKED ? !flock(*fd, LOCK_EX | LOCK_NB) : !fcntl(*fd, F_OFD_SETLK, &lock)),
+		        "cannot lock %s", name);
+		free(name);
+		name = nullptr;
+	}
+	kept[count++] = kShmChannelName;
+
+	struct shm_channel channel;
+	open_channel(&channel, path, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
+	require(channel.flags & SHM_CHANNEL_CREATED, "the sweep's channel was not created");
+	shm_channel_fini(&channel);
+	for (uint32_t i = 0; i < sizeof fds / sizeof *fds; ++i) {
+		require(!close(fds[i]), "close failed");
+		fds[i] = -1;
+	}
+
+	for (uint32_t i = 1; i < count; ++i)
+		for (uint32_t j = i; j && strcmp(kept[j - 1], kept[j]) > 0; --j) {
+			char const *const swap = kept[j];
+			kept[j] = kept[j - 1];
+			kept[j - 1] = swap;
+		}
+	struct support_text want = {};
+	for (uint32_t i = 0; i < count; ++i)
+		require(support_text_printf(&want, "%s%s", i ? " " : "", kept[i]), "out of memory");
+	char *names = listing(dir);
+	static char const *const AT[] = {
+		[SWEEP_AT_CHOSEN] = "a chosen path",
+		[SWEEP_AT_SHARED] = "the shared default",
+		[SWEEP_AT_NATIVE] = "the native default",
+		[SWEEP_AT_AGAIN]  = "a default swept before",
+	};
+	require(!strcmp(names, support_text_string(&want)), "opening %s at %s left\n  %s\nnot\n  %s", path,
+	        AT[at], names, support_text_string(&want));
+	free(names);
+	names = nullptr;
+	support_text_fini(&want);
+	require(support_remove_tree(dir), "cannot remove %s", dir);
+	free(dir);
+	dir = nullptr;
+}
+
+/** @brief Writes a file of /proc.
+ *
+ * @param path The file.
+ * @param text What to write.
+ * @return     true if it was written whole.
+ */
+static bool
+proc_write (char const *path,
+            char const *text)
+{
+	int fd = open(path, O_WRONLY | O_CLOEXEC);
+	if (fd < 0)
+		return false;
+	size_t const length = strlen(text);
+	bool const written = write(fd, text, length) == (ssize_t)length;
+	return !close(fd) && written;
+}
+
+/** @brief Gives this process a /tmp of its own: a tmpfs in a mount namespace of a user namespace
+ *         in which the user keeps its IDs.
+ *
+ * @return true if it did; false if the namespaces are not available.
+ */
+static bool
+private_tmp (void)
+{
+	unsigned const uid = (unsigned)getuid();
+	unsigned const gid = (unsigned)getgid();
+	if (unshare(CLONE_NEWUSER | CLONE_NEWNS))
+		return false;
+	char map[32];
+	snprintf(map, sizeof map, "%u %u 1\n", uid, uid);
+	if (!proc_write("/proc/self/setgroups", "deny\n") || !proc_write("/proc/self/uid_map", map))
+		return false;
+	snprintf(map, sizeof map, "%u %u 1\n", gid, gid);
+	return proc_write("/proc/self/gid_map", map) && !mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr)
+	       && !mount("tmpfs", "/tmp", "tmpfs", MS_NOSUID | MS_NODEV, "mode=1777");
+}
+
+/** @brief A default's path, made with its function, in a directory made private for the sweep.
+ *
+ * @param format ShmDefaultPath() or ShmNativeDefaultPath().
+ * @return       The path, which the caller frees.
+ */
+static char *
+default_in_private (int (*format)(char *, size_t))
+{
+	int const length = format(nullptr, 0);
+	require(length > 0, "cannot format a default path");
+	char *path = malloc((size_t)length + 1);
+	require(path && format(path, (size_t)length + 1) == length, "cannot format a default path");
+	char *const slash = strrchr(path, '/');
+	*slash = '\0';
+	require(!mkdir(path, 0700), "cannot make %s", path);
+	*slash = '/';
+	return path;
+}
+
+/** @brief Opens channels in directories of SWEEP_CASES' files: the default channels in a private
+ *         /tmp of the test's namespaces, the native one twice, a chosen path, and without namespaces
+ *         the shared default under a DLSSNR_UID of the test's own in /tmp.
+ *
+ * @return What was swept, for the summary.
+ */
+static char const *
+check_sweeps (void)
+{
+	char *chosen = path_in(nullptr, "chosen");
+	require(!mkdir(chosen, 0700), "mkdir failed");
+	char *chosen_path = support_format(nullptr, "%s/%s", chosen, kShmChannelName);
+	require(chosen_path, "out of memory");
+	sweep_open(chosen_path, SWEEP_AT_CHOSEN);
+	free(chosen_path);
+	chosen_path = nullptr;
+	free(chosen);
+	chosen = nullptr;
+
+	// The defaults in a /tmp of the child's own, which the user's real channels are not in.
+	require(!fflush(nullptr), "fflush failed");
+	pid_t const child = fork();
+	require(child >= 0, "fork failed");
+	if (!child) {
+		if (!private_tmp())
+			_exit(77);
+		require(!unsetenv("DLSSNR_UID"), "unsetenv failed");
+		static struct {
+			int         (*format)(char *, size_t);
+			enum sweep_at at;
+		} const opens[] = {
+			{ ShmDefaultPath,       SWEEP_AT_SHARED },
+			{ ShmNativeDefaultPath, SWEEP_AT_NATIVE },
+			// A process sweeps a default's directory once.
+			{ ShmNativeDefaultPath, SWEEP_AT_AGAIN  },
+		};
+		for (uint32_t i = 0; i < sizeof opens / sizeof *opens; ++i) {
+			char *path = default_in_private(opens[i].format);
+			sweep_open(path, opens[i].at);
+			free(path);
+			path = nullptr;
+		}
+		_exit(0);
+	}
+	int status;
+	require(waitpid(child, &status, 0) == child, "waitpid failed");
+	require(WIFEXITED(status) && (!WEXITSTATUS(status) || WEXITSTATUS(status) == 77),
+	        "a sweep of a default channel failed");
+	if (!WEXITSTATUS(status))
+		return "both defaults in a private /tmp, once a process, and a chosen path";
+
+	// No namespaces: the shared default in /tmp, in a directory that DLSSNR_UID names for the test.
+	char *dir = support_temp_dir("/tmp", "dlssnr-shm-channel-test", nullptr);
+	require(dir, "cannot make a temporary directory");
+	require(!setenv("DLSSNR_UID", dir + sizeof "/tmp/dlssnr-" - 1, 1), "setenv failed");
+	size_t length;
+	char *shared = support_format(&length, "%s/%s", dir, kShmChannelName);
+	require(shared, "out of memory");
+	char buf[256];
+	int const n = ShmDefaultPath(buf, sizeof buf);
+	require(n >= 0 && (size_t)n == length && !memcmp(buf, shared, length),
+	        "DLSSNR_UID did not name the test's directory");
+	sweep_open(shared, SWEEP_AT_SHARED);
+	free(shared);
+	shared = nullptr;
+	free(dir);
+	dir = nullptr;
+	require(!unsetenv("DLSSNR_UID"), "unsetenv failed");
+	return "the shared default under DLSSNR_UID and a chosen path; no namespaces for the native one";
+}
+
 /** @brief Removes the test's directory. */
 static void
 remove_root (void)
 {
+	if (getpid() != owner)
+		return;
 	if (root && !support_remove_tree(root))
 		fprintf(stderr, "shm-channel-test: cannot remove %s\n", root);
 	free(root);
@@ -676,6 +1079,7 @@ remove_root (void)
 int
 main (void)
 {
+	owner = getpid();
 	// Zeros, as a new file holds, until each atomic object's one initialization.
 	defaults = mmap(nullptr, sizeof *defaults, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	require(defaults != MAP_FAILED, "mmap failed");
@@ -688,10 +1092,13 @@ main (void)
 	check_create();
 	check_refusals();
 	check_replaced();
+	check_swept();
 	check_missing();
+	char const *const sweeps = check_sweeps();
 	if (printf("shm channel: %u races of %u processes for each of %u ways of creating a channel, half of "
-	           "them in a missing directory, refusals, a replaced directory and missing channels\n", ROUNDS,
-	           RACERS, (unsigned)FORCE_COUNT) < 0)
+	           "them in a missing directory, refusals, a replaced directory, channels that a sweep removes "
+	           "while they open, missing channels, and sweeps of %s\n", ROUNDS, RACERS, (unsigned)FORCE_COUNT,
+	           sweeps) < 0)
 		return 1;
 	return 0;
 }

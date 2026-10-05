@@ -3,6 +3,7 @@
  * The channel's file, opened and created in one place: shm_channel.h.
  */
 // SPDX-License-Identifier: MIT
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
@@ -11,9 +12,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/random.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "error.h"
@@ -86,13 +89,33 @@ refuse_size (int           fd,
 	                  "another channel", path, kShmVersion, (intmax_t)size, ShmTotalBytes());
 }
 
-/** @brief Maps an open channel file, if it holds a channel of this protocol.
+/** @brief Marks a channel as used for as long as its file is open: a read lock on its first byte
+ *         that belongs to the open file description (F_OFD_SETLK), apart from dlsslopd's flock(2).
+ *
+ * A sweep of another protocol's version (sweep_take()) removes a channel only under a write lock
+ * there, which no process that holds this lock lets it take. A file system without such locks
+ * leaves the channel unmarked.
+ *
+ * @param fd The channel's file.
+ * @return   false if a sweep holds the write lock, which it does only to remove the channel.
+ */
+static bool
+hold (int fd)
+{
+	struct flock lock = { .l_type = F_RDLCK, .l_whence = SEEK_SET, .l_len = 1 };
+	return !fcntl(fd, F_OFD_SETLK, &lock) || (errno != EAGAIN && errno != EACCES);
+}
+
+/** @brief Marks an open channel file as used (hold()) and maps it, if it holds a channel of this
+ *         protocol and a sweep has not removed it.
  *
  * @param fd    The file.
  * @param path  Its path.
  * @param bytes How much of it to map.
  * @param flags What shm_channel_open() was asked to do.
  * @param dest  Receives the channel, which then holds @a fd; untouched on a failure.
+ * @param gone  Receives whether a sweep has removed the file, or is removing it: then nothing is
+ *              mapped, and ERROR_NONE returned.
  * @param e     Receives the words for what stopped it, or nullptr.
  * @return      ERROR_NONE, or ERROR_FAILED.
  */
@@ -102,11 +125,17 @@ map_existing (int                 fd,
               size_t              bytes,
               uint32_t            flags,
               struct shm_channel *dest,
+              bool               *gone,
               struct error       *e)
 {
+	// A sweep unlinks the file before it lets go of its write lock.
+	bool const held = hold(fd);
 	struct stat st;
 	if (fstat(fd, &st))
 		return fail_errno(e, "inspect shared-memory file", path, errno);
+	*gone = !held || !st.st_nlink;
+	if (*gone)
+		return ERROR_NONE;
 	if (!S_ISREG(st.st_mode) || st.st_uid != getuid())
 		return error_fail(e, "shared-memory file must be regular and owned by the current user: %s",
 		                  path);
@@ -131,7 +160,7 @@ map_existing (int                 fd,
 }
 
 /** @brief Makes a new file that no other process can open yet a channel: mode 0600, the channel's
- *         size, mapped for writing, and the native defaults.
+ *         size, mapped for writing, the native defaults, and marked as used (hold()).
  *
  * @param fd    The file.
  * @param path  The channel's path, for the words.
@@ -157,6 +186,8 @@ prepare (int                fd,
 		return fail_errno(e, "map shared-memory file", path, errno);
 	// Each atomic object's one initialization, before any other process can see the file.
 	ShmInitNativeDefaults(mapping, false);
+	// Nobody else has the file to lock it.
+	hold(fd);
 	*h = mapping;
 	return ERROR_NONE;
 }
@@ -334,17 +365,20 @@ open_in (int                 dir,
 	// O_NONBLOCK: a FIFO in the channel's place would block a reader's open.
 	int const oflag = (flags & SHM_CHANNEL_WRITE ? O_RDWR : O_RDONLY) | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK;
 	// A channel that another process names between this one's open and its link is opened on the
-	// next turn, and one removed meanwhile is created again.
+	// next turn, and one removed meanwhile, as a sweep removes another protocol's, is created again.
 	for (uint32_t turn = 0; turn < 4; ++turn) {
 		int fd = openat(dir, name, oflag);
 		if (fd >= 0) {
-			enum error_code const code = map_existing(fd, path, bytes, flags, dest, e);
-			if (code) {
-				// Nothing was written through the descriptor: close() has nothing to report.
-				close(fd);
-				fd = -1;
-			}
-			return code;
+			bool gone;
+			enum error_code const code = map_existing(fd, path, bytes, flags, dest, &gone, e);
+			if (!code && !gone)
+				return ERROR_NONE;
+			// Nothing was written through the descriptor: close() has nothing to report.
+			close(fd);
+			fd = -1;
+			if (code)
+				return code;
+			continue;
 		}
 		int const err = errno;
 		if (err == ELOOP)
@@ -401,7 +435,7 @@ make_directory (char         *dir,
  * @param dir    The directory; make_directory() cuts it in place while it creates it.
  * @param length The length of its path.
  * @param create Whether to create the directory if it is missing.
- * @param fd     Receives the directory's descriptor, or -1 if it is missing and not created.
+ * @param dest   Receives the directory's descriptor, or -1 if it is missing and not created.
  * @param e      Receives the words for what stopped it, or nullptr.
  * @return       ERROR_NONE, also for a missing directory, or ERROR_FAILED.
  */
@@ -409,18 +443,18 @@ static enum error_code
 open_directory (char         *dir,
                 size_t        length,
                 bool          create,
-                int          *fd,
+                int          *dest,
                 struct error *e)
 {
 	static int const oflag = O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC;
-	int dirfd = open(dir, oflag);
-	if (dirfd < 0 && errno == ENOENT && create) {
+	int fd = open(dir, oflag);
+	if (fd < 0 && errno == ENOENT && create) {
 		enum error_code const code = make_directory(dir, length, e);
 		if (code)
 			return code;
-		dirfd = open(dir, oflag);
+		fd = open(dir, oflag);
 	}
-	if (dirfd < 0) {
+	if (fd < 0) {
 		int const err = errno;
 		if (err == ENOENT)
 			return ERROR_NONE;
@@ -433,23 +467,259 @@ open_directory (char         *dir,
 
 	struct stat st;
 	enum error_code code = ERROR_NONE;
-	if (fstat(dirfd, &st))
+	if (fstat(fd, &st))
 		code = fail_errno(e, "inspect shared-memory directory", dir, errno);
 	else if (!S_ISDIR(st.st_mode) || st.st_uid != getuid())
 		code = error_fail(e, "shared-memory directory must be owned by the current user and not a "
 		                  "symlink: %s", dir);
 	else if (st.st_mode & 077)
 		code = error_fail(e, "shared-memory directory must be private (mode 0700): %s", dir);
-	else if (create && (st.st_mode & 0700) != 0700 && fchmod(dirfd, 0700))
+	else if (create && (st.st_mode & 0700) != 0700 && fchmod(fd, 0700))
 		code = fail_errno(e, "give mode 0700 to shared-memory directory", dir, errno);
 	if (code) {
 		// Nothing was written through the descriptor: close() has nothing to report.
-		close(dirfd);
-		dirfd = -1;
+		close(fd);
+		fd = -1;
 		return code;
 	}
-	*fd = dirfd;
+	*dest = fd;
 	return ERROR_NONE;
+}
+
+/** @brief Which default channel a path names. */
+enum shm_default {
+	SHM_DEFAULT_NONE,   //!< None: the path was chosen.
+	SHM_DEFAULT_SHARED, //!< ShmDefaultPath().
+	SHM_DEFAULT_NATIVE, //!< ShmNativeDefaultPath().
+};
+
+/** @brief Which default channel a path names.
+ *
+ * @param path   The path.
+ * @param length The length of its path.
+ * @return       The default, or SHM_DEFAULT_NONE if it names none, or without memory to tell.
+ */
+static enum shm_default
+default_path (char const *path,
+              size_t      length)
+{
+	// The defaults, in enum shm_default's order after SHM_DEFAULT_NONE.
+	static int (*const formats[])(char *, size_t) = { ShmDefaultPath, ShmNativeDefaultPath };
+	char *buf = malloc(length + 1);
+	if (!buf)
+		return SHM_DEFAULT_NONE;
+	enum shm_default which = SHM_DEFAULT_NONE;
+	for (uint32_t i = 0; !which && i < sizeof formats / sizeof *formats; ++i) {
+		int const n = formats[i](buf, length + 1);
+		if (n >= 0 && (size_t)n == length && !memcmp(buf, path, length))
+			which = SHM_DEFAULT_SHARED + i;
+	}
+	free(buf);
+	buf = nullptr;
+	return which;
+}
+
+/** @brief How long another protocol's files lie unmodified before the sweep removes them: a day. */
+static constexpr time_t SWEEP_AGE = 24 * 60 * 60;
+
+/** @brief The defaults whose directories this process has swept, as bits 1 << enum shm_default: one
+ *         sweep a process is enough for files a day old.
+ */
+static _Atomic(uint32_t) swept;
+
+/** @brief A sweep of a default channel's directory. */
+struct sweep {
+	time_t before; //!< The files last modified at this time or before go, unless they are in use.
+	int    dir;    //!< The directory.
+	uid_t  uid;    //!< The user, who owns the files that go.
+};
+
+/** @brief What a file that the sweep may remove is. */
+enum sweep_kind {
+	SWEEP_NONE,    //!< None: it stays.
+	SWEEP_CHANNEL, //!< A channel.
+	SWEEP_SOCKET,  //!< A channel's transport socket (kShmTransportSuffix).
+	SWEEP_LOCK,    //!< A channel's producer lock (kShmProducerLockSuffix).
+};
+
+/** @brief The file type of each enum sweep_kind but SWEEP_NONE. */
+static mode_t const SWEEP_TYPES[] = {
+	[SWEEP_CHANNEL] = S_IFREG,
+	[SWEEP_SOCKET]  = S_IFSOCK,
+	[SWEEP_LOCK]    = S_IFREG,
+};
+
+/** @brief Whether a file is the sweep's to remove: this user's, of a type, and old.
+ *
+ * @param s    The sweep.
+ * @param st   The file's status, not following a symbolic link.
+ * @param type Its type, as S_IFMT masks it.
+ * @return     true if it is.
+ */
+static bool
+sweep_stale (struct sweep const *s,
+             struct stat const  *st,
+             mode_t              type)
+{
+	return (st->st_mode & S_IFMT) == type && st->st_uid == s->uid && st->st_mtim.tv_sec <= s->before;
+}
+
+/** @brief Takes an old channel that nobody uses: opens it and takes the lock that dlsslopd holds
+ *         for as long as it serves a channel, and the write lock that no process that has the
+ *         channel open lets anyone take (hold()).
+ *
+ * The file is the one that has the name once both locks are held: whoever removes the channel
+ * holds them, and nobody else names a file there while the name exists.
+ *
+ * @param s    The sweep.
+ * @param name The channel's name in the directory.
+ * @return     The channel's descriptor, which holds both locks, or -1 if it is missing, not the
+ *             sweep's or in use.
+ */
+static int
+sweep_take (struct sweep const *s,
+            char const         *name)
+{
+	// For writing, which a write lock needs.
+	int fd = openat(s->dir, name, O_RDWR | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+	if (fd < 0)
+		return -1;
+	struct flock lock = { .l_type = F_WRLCK, .l_whence = SEEK_SET, .l_len = 1 };
+	struct stat st, named;
+	if (fstat(fd, &st) || !sweep_stale(s, &st, S_IFREG) || flock(fd, LOCK_EX | LOCK_NB)
+	    || fcntl(fd, F_OFD_SETLK, &lock) || fstatat(s->dir, name, &named, AT_SYMLINK_NOFOLLOW)
+	    || named.st_dev != st.st_dev || named.st_ino != st.st_ino) {
+		// Nothing was written through the descriptor: close() has nothing to report.
+		close(fd);
+		fd = -1;
+	}
+	return fd;
+}
+
+/** @brief The length of the channel's name that a file's name starts with: kShmChannelName's
+ *         scheme of any version, or the legacy shm.bin.
+ *
+ * @param name   The file's name.
+ * @param legacy Whether shm.bin is a channel's name.
+ * @return       The length, or 0 if the name starts with no channel's.
+ */
+static size_t
+sweep_channel_length (char const *name,
+                      bool        legacy)
+{
+	static char const untagged[] = "shm.bin";
+	if (legacy && !strncmp(name, untagged, sizeof untagged - 1))
+		return sizeof untagged - 1;
+	static char const prefix[] = kShmChannelPrefix;
+	static char const suffix[] = kShmChannelSuffix;
+	if (strncmp(name, prefix, sizeof prefix - 1))
+		return 0;
+	size_t const digits = strspn(name + sizeof prefix - 1, "0123456789");
+	size_t const end = sizeof prefix - 1 + digits;
+	return digits && !strncmp(name + end, suffix, sizeof suffix - 1) ? end + sizeof suffix - 1 : 0;
+}
+
+/** @brief What a file is to the sweep, by what follows the channel's name in its name.
+ *
+ * @param rest What follows.
+ * @return     The kind.
+ */
+static enum sweep_kind
+sweep_kind (char const *rest)
+{
+	if (!*rest)
+		return SWEEP_CHANNEL;
+	if (!strcmp(rest, kShmTransportSuffix))
+		return SWEEP_SOCKET;
+	return strcmp(rest, kShmProducerLockSuffix) ? SWEEP_NONE : SWEEP_LOCK;
+}
+
+/** @brief Removes a file of a default channel's directory if it is another protocol's and the
+ *         sweep's: sweep().
+ *
+ * @param s      The sweep.
+ * @param name   The file's name.
+ * @param legacy Whether shm.bin is a channel's name.
+ */
+static void
+sweep_file (struct sweep const *s,
+            char const         *name,
+            bool                legacy)
+{
+	size_t const length = sweep_channel_length(name, legacy);
+	enum sweep_kind const kind = length ? sweep_kind(name + length) : SWEEP_NONE;
+	// This protocol's files are in use.
+	bool const ours = length == sizeof kShmChannelName - 1 && !memcmp(name, kShmChannelName, length);
+	if (kind == SWEEP_NONE || ours)
+		return;
+	// A failed removal leaves the file for the next sweep.
+	if (kind == SWEEP_CHANNEL) {
+		int fd = sweep_take(s, name);
+		if (fd < 0)
+			return;
+		unlinkat(s->dir, name, 0);
+		// Nothing was written through the descriptor: close() has nothing to report.
+		close(fd);
+		fd = -1;
+		return;
+	}
+	// A channel's socket and producer lock go with it: under its locks, or once it is missing.
+	char channel[sizeof ((struct dirent *)nullptr)->d_name];
+	memcpy(channel, name, length);
+	channel[length] = '\0';
+	struct stat st;
+	int fd = -1;
+	if (!fstatat(s->dir, channel, &st, AT_SYMLINK_NOFOLLOW)) {
+		fd = sweep_take(s, channel);
+		if (fd < 0)
+			return;
+	} else if (errno != ENOENT) {
+		return;
+	}
+	if (!fstatat(s->dir, name, &st, AT_SYMLINK_NOFOLLOW) && sweep_stale(s, &st, SWEEP_TYPES[kind]))
+		unlinkat(s->dir, name, 0);
+	if (fd >= 0) {
+		// Nothing was written through the descriptor: close() has nothing to report.
+		close(fd);
+		fd = -1;
+	}
+}
+
+/** @brief Removes other protocols' channels from a default channel's directory, with their
+ *         sockets and producer locks: each that this user owns and that has not been modified for
+ *         SWEEP_AGE, unless the channel it belongs to is younger or in use.
+ *
+ * A write through a mapping updates the modification time only on the first write after the time
+ * last changed, so an old time alone does not tell that nobody uses a channel: every process that
+ * has a channel open holds a read lock on it (hold()), and dlsslopd, also one of a protocol before
+ * these locks, holds its flock(2). Symbolic links are neither followed nor removed. The legacy name
+ * shm.bin is another protocol's only in the native tools' directory: in the shared one it can be
+ * upstream's.
+ *
+ * @param dir    The directory.
+ * @param legacy Whether shm.bin is a channel's name.
+ */
+static void
+sweep (int  dir,
+       bool legacy)
+{
+	time_t const now = time(nullptr);
+	if (now == (time_t)-1)
+		return;
+	struct sweep const s = { .before = now - SWEEP_AGE, .dir = dir, .uid = getuid() };
+	// readdir() reads a descriptor of its own, which closedir() closes.
+	int fd = openat(dir, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	if (fd < 0)
+		return;
+	DIR *const entries = fdopendir(fd);
+	if (!entries) {
+		close(fd);
+		fd = -1;
+		return;
+	}
+	for (struct dirent const *entry; (entry = readdir(entries));)
+		sweep_file(&s, entry->d_name, legacy);
+	closedir(entries);
 }
 
 enum error_code
@@ -471,26 +741,30 @@ shm_channel_open (struct shm_channel *dest,
 	while (dir_length > 1 && path[dir_length - 1] == '/')
 		--dir_length;
 	dir_length += !dir_length;
-	char *dir = malloc(dir_length + 1);
-	if (!dir)
+	char *directory = malloc(dir_length + 1);
+	if (!directory)
 		return error_fail(e, "out of memory");
-	memcpy(dir, slash ? path : ".", dir_length);
-	dir[dir_length] = '\0';
+	memcpy(directory, slash ? path : ".", dir_length);
+	directory[dir_length] = '\0';
 
-	int dirfd = -1;
-	enum error_code code = open_directory(dir, dir_length, flags & SHM_CHANNEL_CREATE, &dirfd, e);
-	if (!code && dirfd < 0) {
+	int dir = -1;
+	enum error_code code = open_directory(directory, dir_length, flags & SHM_CHANNEL_CREATE, &dir, e);
+	if (!code && dir < 0) {
 		dest->flags = SHM_CHANNEL_MISSING;
 		code = error_fail(e, "no channel at %s: its directory is missing", path);
 	}
 	if (!code) {
-		code = open_in(dirfd, name, path, bytes, flags, dest, e);
+		enum shm_default const which = default_path(path, length);
+		uint32_t const bit = 1u << which;
+		if (which && !(atomic_fetch_or_explicit(&swept, bit, memory_order_relaxed) & bit))
+			sweep(dir, which == SHM_DEFAULT_NATIVE);
+		code = open_in(dir, name, path, bytes, flags, dest, e);
 		// Nothing was written through the descriptor: close() has nothing to report.
-		close(dirfd);
-		dirfd = -1;
+		close(dir);
+		dir = -1;
 	}
-	free(dir);
-	dir = nullptr;
+	free(directory);
+	directory = nullptr;
 	return code;
 }
 
@@ -499,8 +773,8 @@ shm_channel_fini (struct shm_channel *channel)
 {
 	if (!channel)
 		return;
+	// Unmapping a mapping that this process made cannot fail.
 	if (channel->h)
-		// Unmapping a mapping that this process made cannot fail.
 		munmap(channel->h, channel->bytes);
 	if (channel->fd >= 0) {
 		// Nothing was written through the descriptor: close() has nothing to report.

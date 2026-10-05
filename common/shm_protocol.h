@@ -331,8 +331,9 @@ ShmRuntimeDir (char        *buf,
 /** @brief A default channel's file name, which names the protocol version: shm-v31.bin for v31.
  *
  * Each protocol version has a file of its own, so that programs of different versions never meet
- * in a default channel. CMake spells the name from these macros too, for the launcher, the color
- * diagnostic and the socket unit.
+ * in a default channel; shm_channel_open() removes another version's files that have lain unused
+ * for a day. CMake spells the name from these macros too, for the launcher, the color diagnostic
+ * and the socket unit.
  */
 #define kShmChannelName kShmChannelPrefix SHM_STRING(SHM_PROTOCOL_VERSION) kShmChannelSuffix
 
@@ -661,6 +662,9 @@ struct ShmTransportOffer {
 
 /** @brief What the transport's socket adds to the channel's path (ShmTransportPath()). */
 #define kShmTransportSuffix ".sock"
+
+/** @brief What the layer's producer lock adds to the channel's path. */
+#define kShmProducerLockSuffix ".producer.lock"
 
 /** @brief The socket on which the layer offers its transport.
  *

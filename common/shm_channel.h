@@ -11,8 +11,13 @@
  * difference.
  *
  * The directory must be a real directory that this user owns and that grants nothing to group or
- * others; a process that creates the channel gives it mode 0700. shm_channel.c defines the
- * functions.
+ * others; a process that creates the channel gives it mode 0700. Opening a channel at a default
+ * path (ShmNativeDefaultPath(), ShmDefaultPath()) also removes other protocols' channels that have
+ * lain unused in that directory for a day, once a process. A process marks each channel that it
+ * has open as used, with a read lock on the file's first byte that belongs to its open file
+ * description (F_OFD_SETLK); a sweep removes a channel only under a write lock there. That lock,
+ * and dlsslopd's flock(2) of the channel that it serves, tell every version that a channel is in
+ * use. shm_channel.c defines the functions.
  *
  * Plain C API, consumable from C++.
  */
@@ -52,7 +57,7 @@ enum shm_channel_flags : STD(uint32_t) {
 struct shm_channel {
 	struct ShmHeader *h;     //!< The mapping, which starts with the header; nullptr if none.
 	STD(size_t)       bytes; //!< The mapping's size.
-	int               fd;    //!< The channel file, or -1.
+	int               fd;    //!< The channel file, which holds its read lock, or -1.
 	STD(uint32_t)     flags; //!< enum shm_channel_flags: what was asked, and what happened.
 };
 

@@ -163,7 +163,7 @@ shm_map_lock_producer (struct shm_map *s)
 		return false;
 
 	if (s->producer_fd < 0) {
-		static constexpr char suffix[] = ".producer.lock";
+		static constexpr char suffix[] = kShmProducerLockSuffix;
 		char *lock = malloc(s->path_length + sizeof suffix);
 		if (!lock)
 			return false;

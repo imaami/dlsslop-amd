@@ -23,8 +23,8 @@ mapping_init (struct mapping *dest,
 	                                              SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE, e);
 	if (code)
 		return code;
-	// The lock lasts as long as the descriptor, and tells other daemons that this one serves the
-	// channel.
+	// The lock lasts as long as the descriptor, and tells other daemons, and the sweeps of other
+	// protocols' channels (shm_channel_open()), that this one serves the channel.
 	if (flock(dest->channel.fd, LOCK_EX | LOCK_NB)) {
 		shm_channel_fini(&dest->channel);
 		return error_fail(e, "another worker owns this shared-memory file");

@@ -255,12 +255,13 @@ misbehaves with it.
 The daemon, launcher and controllers use `/tmp/dlsslop-amd-UID/shm-vN.bin`,
 where `UID` is your numeric user ID and `N` the version of the protocol between
 them; `dlsslopctl --help` shows the path. A new version uses a new file, so
-programs of different releases never share one. The daemon, the layer or a
-`dlsslopctl` setting, whichever comes first, creates the channel; a file of
-another protocol at a path that you choose is refused. The launcher writes the
-layer log beside that file. To run separate sessions, give each session's
-daemon, launcher and controllers the same distinct `DLSSNR_SHM` path inside a
-private directory.
+programs of different releases never share one, and a program that opens the
+channel removes another version's files there, and the legacy `shm.bin`, once
+nobody has used them for a day. The daemon, the layer or a `dlsslopctl`
+setting, whichever comes first, creates the channel; a file of another protocol
+at a path that you choose is refused. The launcher writes the layer log beside
+that file. To run separate sessions, give each session's daemon, launcher and
+controllers the same distinct `DLSSNR_SHM` path inside a private directory.
 
 ## Capture and color checks
 
