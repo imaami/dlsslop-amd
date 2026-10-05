@@ -122,6 +122,12 @@ functions that write a string into the caller's buffer and that C++ calls:
 `ShmNativeDefaultPath`, `ShmNativeChannelPath`, `ShmTransportPath` and
 `ShmLoadString`.
 
+The layer re-initializes a channel only when its magic or its version is not
+this protocol's. Upstream also re-initialized one whose `passes` was 0, which
+marked a header whose initialization had stored the magic but not yet
+`passes`. Here initialization stores the magic last, and no process stores a
+`passes` of 0.
+
 The layer's composition shader `layer/dlssnr/dlssnr.comp` is a GLSL port of the
 layer fork's `layer_linux/src/dlssnr/dlssnr.hlsl` (AGPL-3.0). Its RenoDX-derived
 composition is MIT; the notice is

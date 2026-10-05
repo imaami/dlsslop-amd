@@ -383,7 +383,8 @@ shm_map_open (struct shm_map *s)
 			           "date, re-initialising it; update the layer, the helper and the GUI together",
 			           version, kShmVersion);
 	}
-	if (stale || atomic_load(&s->hdr->passes) == 0)
+	// A channel of this version is never initialised again: other processes may be using it.
+	if (stale)
 		ShmInitDefaults(s->hdr);
 	s->last_heartbeat = atomic_load(&s->hdr->heartbeat);
 	log_printf("[shm] attached %s seq_req=%u seq_resp=%u", s->path, atomic_load(&s->hdr->seq_req),
