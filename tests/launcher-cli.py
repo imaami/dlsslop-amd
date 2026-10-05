@@ -4,6 +4,8 @@ import fcntl
 import json
 import os
 from pathlib import Path
+import shlex
+import shutil
 import subprocess
 import socket
 import sys
@@ -81,6 +83,15 @@ def main():
         result = run([BASH, str(LAUNCHER), "/usr/bin/true"], expected=1,
                      env=dict(env, PATH=f"{base}:{os.environ['PATH']}"))
         assert "Could not inspect" in result.stderr
+        # A channel removed between the launcher's check and its lock probe is
+        # not made again: the probe locks a descriptor, never the path.
+        bad_flock.write_text(f"#!/usr/bin/bash\nrm -f -- {shlex.quote(str(channel))}\n"
+                             f"exec {shlex.quote(shutil.which('flock'))} \"$@\"\n")
+        result = run([BASH, str(LAUNCHER), "/usr/bin/true"], expected=1,
+                     env=dict(env, PATH=f"{base}:{os.environ['PATH']}"))
+        assert "No live native worker" in result.stderr, result.stderr
+        assert not channel.exists(), "the lock probe created the channel"
+        channel.touch(mode=0o600)
         bad_flock.unlink()
 
         # A filename beginning with '-' exercises the launcher's -- delimiter

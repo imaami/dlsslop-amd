@@ -73,9 +73,11 @@ log=${log:-${channel%/*}/layer.log}
 [[ $log == /* ]] || log=$PWD/$log
 command -v flock >/dev/null 2>&1 || fail 1 'dlsslop-run requires flock (Debian package util-linux).'
 # 73: a worker holds the channel's lock; 0: nobody does; 1: no channel yet.
+# The lock is probed through a descriptor that the shell opens without
+# creating: a channel removed meanwhile is not made again as an empty file.
 serving() {
     [[ -f $channel ]] || return 1
-    flock --nonblock --conflict-exit-code 73 "$channel" true
+    { flock --nonblock --conflict-exit-code 73 9; } 9<"$channel"
 }
 serving
 status=$?

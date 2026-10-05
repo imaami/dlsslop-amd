@@ -99,7 +99,7 @@ bool retire(ShmHeader* h, uint32_t request)
 template <Engine E>
 Result<bool> follow_tier(E& engine, const struct options& o, struct mapping& mapping, const std::string& ready)
 {
-    auto* h = mapping.h;
+    auto* h = mapping.channel.h;
     const unsigned wanted = h->nativeTier.load(), active = engine.tier();
     if (wanted == active) return false;
     if (!ShmNativeTier(wanted)) {
@@ -163,7 +163,7 @@ Result<Request> read_request(const struct options& o, ShmHeader* h, Request requ
 template <Engine E>
 Result<std::string> process(const Request& r, E& engine, struct mapping& mapping, struct frame_trace* trace)
 {
-    auto* h = mapping.h;
+    auto* h = mapping.channel.h;
     const struct processing_settings& settings = r.settings;
     // The request's frames: an imported device-local pair, or the channel's slots.
     Frames io{mapping.input, mapping.output};
@@ -244,7 +244,7 @@ template <Engine E>
 Result<void> serve_frames(const struct options& o, struct mapping& mapping, const struct transport_listener& transport,
                           struct trace_requests* traces, E& engine, struct frame_trace& pending)
 {
-    auto* h = mapping.h;
+    auto* h = mapping.channel.h;
     DLSSLOP_TRY(engine.prepare());
     // Only serving stops gracefully, from the ready announcement on.
     // Before it, and in every other mode, SIGINT and SIGTERM terminate.
@@ -370,7 +370,7 @@ Result<void> serve_engine(struct options& o, unsigned tier, struct mapping& mapp
 // run_worker() with the channel mapped and the trace directory, if any, taken.
 Result<void> run_traced(struct options& o, struct mapping& mapping, struct trace_requests* traces)
 {
-    auto* h = mapping.h;
+    auto* h = mapping.channel.h;
     // An explicit tier replaces the channel's; otherwise a usable live one stays.
     const unsigned live = h->nativeTier.load();
     const unsigned tier = o.tier ? o.tier : (ShmNativeTier(live) ? live : kNativeDefaultTier);

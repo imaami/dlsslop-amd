@@ -18,6 +18,7 @@
 #endif
 
 #include "error.h"
+#include "shm_channel.h"
 #include "shm_protocol.h"
 
 #ifdef __cplusplus
@@ -29,18 +30,16 @@ extern "C" {
 
 /** @brief The channel as this daemon maps it: mapping_init() maps it and mapping_fini() unmaps it. */
 struct mapping {
-	struct ShmHeader *h;      //!< The header, or nullptr while nothing is mapped.
-	STD(uint8_t)     *input;  //!< The frame slot of the layer's proxy.
-	STD(uint8_t)     *output; //!< The frame slot of the answer.
-	int               fd;     //!< The channel file, locked, or -1.
+	struct shm_channel channel; //!< The channel file, locked, mapped whole.
+	STD(uint8_t)      *input;   //!< The frame slot of the layer's proxy.
+	STD(uint8_t)      *output;  //!< The frame slot of the answer.
 };
 
 /** @brief Maps the channel file and takes the channel over.
  *
- * The file is created if it is missing, in a directory that files_private_directory() makes or
- * accepts. A header of another protocol is reset to the native defaults. A request left by a
- * previous daemon is answered as failed, so that the layer presents its own frame, and helperState
- * reads Starting.
+ * shm_channel_open() opens the channel, or creates it if it is missing; it refuses a channel of
+ * another protocol. A request left by a previous daemon is answered as failed, so that the layer
+ * presents its own frame, and helperState reads Starting.
  *
  * @param dest   Receives the mapping; nothing is mapped on a failure.
  * @param name   The channel file's path.
