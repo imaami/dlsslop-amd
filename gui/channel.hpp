@@ -2,6 +2,7 @@
 #pragma once
 #include "../common/control_settings.h"
 #include "../common/result.hpp"
+#include <array>
 #include <cerrno>
 #include <cstring>
 #include <fcntl.h>
@@ -75,10 +76,10 @@ public:
     }
     void reset()
     {
-        ShmHeader defaults{};
-        ShmInitNativeDefaults(&defaults, control_settings_worker_bypass(header_));
-        for (const auto& s : CONTROL_SETTINGS)
-            control_setting_store(header_, &s, control_setting_load(&defaults, &s));
+        std::array<std::uint32_t, CONTROL_SETTING_COUNT> defaults;
+        control_settings_defaults(defaults.data(), control_settings_worker_bypass(header_));
+        for (std::size_t i = 0; i < CONTROL_SETTING_COUNT; ++i)
+            control_setting_store(header_, &CONTROL_SETTINGS[i], defaults[i]);
         header_->tuningSeq.fetch_add(1);
         header_->controlSeq.fetch_add(1);
     }

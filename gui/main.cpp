@@ -163,8 +163,8 @@ class Window final : public QWidget {
         const auto channel = Channel::open(path.constData(), false);
         if (!channel) return failed(QString::fromStdString(channel.error().what));
         auto* h = channel->header();
-        ShmHeader defaults{};
-        ShmInitNativeDefaults(&defaults, control_settings_worker_bypass(h));
+        std::array<std::uint32_t, CONTROL_SETTING_COUNT> defaults;
+        control_settings_defaults(defaults.data(), control_settings_worker_bypass(h));
         // Reject invalid live values rather than displaying a silently clamped setting.
         std::array<double, CONTROL_SETTING_COUNT> values;
         for (std::size_t i = 0; i < values.size(); ++i) {
@@ -175,7 +175,7 @@ class Window final : public QWidget {
         for (std::size_t i = 0; i < editors_.size(); ++i) {
             auto& e = editors_[i];
             const auto& s = CONTROL_SETTINGS[i];
-            e.defaultValue = control_setting_value(&s, control_setting_load(&defaults, &s));
+            e.defaultValue = control_setting_value(&s, defaults[i]);
             e.reset->setToolTip(QString("Reset to %1").arg(e.defaultValue, 0, 'g', 9));
             display(i, values[i]);
         }

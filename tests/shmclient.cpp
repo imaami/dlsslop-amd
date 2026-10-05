@@ -16,6 +16,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <array>
 #include <cctype>
 #include <cerrno>
 #include <chrono>
@@ -87,8 +88,8 @@ int usage(const char* problem)
 
 void help()
 {
-    ShmHeader defaults{};
-    ShmInitNativeDefaults(&defaults, false);
+    std::array<uint32_t, CONTROL_SETTING_COUNT> defaults;
+    control_settings_defaults(defaults.data(), false);
     std::printf("%s", kUsage);
     std::printf(
         "Create the channel FILE, start DLSSLOPD, which must serve FILE (--shm FILE),\n"
@@ -124,11 +125,13 @@ void help()
         "before it sends that frame; a daemon that publishes none (--test-identity)\n"
         "is refused as a usage error.\n",
         kMaxW, kMaxH, kFlat[0], kFlat[1], kFlat[2], kFlat[3], kDefaultFrames, kDefaultLog);
-    for (const control_setting& s : CONTROL_SETTINGS)
+    for (size_t i = 0; i < CONTROL_SETTING_COUNT; ++i) {
+        const control_setting& s = CONTROL_SETTINGS[i];
         std::printf("      --%s [FRAME:]VALUE\n"
                     "                       %s\n"
                     "                       Range: %g..%g; default: %g\n",
-                    s.name, s.help, s.minimum, s.maximum, control_setting_value(&s, control_setting_load(&defaults, &s)));
+                    s.name, s.help, s.minimum, s.maximum, control_setting_value(&s, defaults[i]));
+    }
 }
 
 // The exit status a shell reports for the wait status STATUS.

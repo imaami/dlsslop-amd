@@ -2,9 +2,9 @@
  *
  * The settings that dlsslopctl and the GUI edit and that the tests' fake layer stores: for each one
  * its options, range, help and the offset of its word in struct ShmHeader. Their defaults are what
- * ShmInitNativeDefaults() writes there, read through the same offsets, so that the channel's
- * initialization, a reset and --help share one definition of each default. control_settings.c
- * defines the table and the functions.
+ * ShmInitNativeDefaults() writes there, read through the same offsets by
+ * control_settings_defaults(), so that the channel's initialization, a reset and --help share one
+ * definition of each default. control_settings.c defines the table and the functions.
  *
  * Plain C API, consumable from C++.
  */
@@ -103,6 +103,19 @@ control_setting_toggle (struct ShmHeader             *h,
 extern double
 control_setting_value (struct control_setting const *s,
                        STD(uint32_t)                 raw);
+
+/** @brief The settings' defaults: the words that ShmInitNativeDefaults() gives them, which a new
+ *         channel holds and a reset stores.
+ *
+ * C++ takes them here rather than from a header of its own: a header is initialized in C alone.
+ *
+ * @param dest   Receives each setting's default, in the order of CONTROL_SETTINGS.
+ * @param bypass ShmInitNativeDefaults()'s bypass, as control_settings_worker_bypass() gives it for a
+ *               channel.
+ */
+extern void
+control_settings_defaults (STD(uint32_t) dest[CONTROL_SETTING_COUNT],
+                           bool          bypass);
 
 #undef STD
 

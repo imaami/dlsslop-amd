@@ -226,6 +226,17 @@ control_setting_value (struct control_setting const *s,
 	return s && s->is_float ? (double)BitsToFloat(raw) : (double)raw;
 }
 
+void
+control_settings_defaults (uint32_t dest[CONTROL_SETTING_COUNT],
+                           bool     bypass)
+{
+	// A header of this call's own, initialized once.
+	struct ShmHeader defaults;
+	ShmInitNativeDefaults(&defaults, bypass);
+	for (uint32_t i = 0; i < CONTROL_SETTING_COUNT; ++i)
+		dest[i] = control_setting_load(&defaults, &CONTROL_SETTINGS[i]);
+}
+
 bool
 control_setting_in_range (struct control_setting const *s,
                           double                        v)

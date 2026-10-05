@@ -110,8 +110,8 @@ print_steps (FILE                         *stream,
 static void
 usage (char const *channel)
 {
-	struct ShmHeader defaults;
-	ShmInitNativeDefaults(&defaults, false);
+	uint32_t defaults[CONTROL_SETTING_COUNT];
+	control_settings_defaults(defaults, false);
 	printf("Usage: dlsslopctl [OPTION]...\n"
 	       "       dlssnr-shmctl [OPTION]...\n"
 	       "\n"
@@ -141,7 +141,7 @@ usage (char const *channel)
 		printf("  -%c, --%-18s VALUE  %s\n"
 		       "                                Range: %g..%g; default: %g",
 		       s->short_name, s->name, s->help, s->minimum, s->maximum,
-		       control_setting_value(s, control_setting_load(&defaults, s)));
+		       control_setting_value(s, defaults[i]));
 		print_steps(stdout, s);
 		putchar('\n');
 	}
@@ -573,8 +573,8 @@ attach (struct ShmHeader *h,
 static void
 print_settings (struct ShmHeader const *h)
 {
-	struct ShmHeader defaults;
-	ShmInitNativeDefaults(&defaults, control_settings_worker_bypass(h));
+	uint32_t defaults[CONTROL_SETTING_COUNT];
+	control_settings_defaults(defaults, control_settings_worker_bypass(h));
 	printf("# Live values; defaults are the initial/reset values for this worker mode.\n");
 	// Nine digits round-trip every binary32 and ten print every uint32 exactly.
 	for (uint32_t i = 0; i < CONTROL_SETTING_COUNT; ++i) {
@@ -582,7 +582,7 @@ print_settings (struct ShmHeader const *h)
 		int const digits = s->is_float ? 9 : 10;
 		printf("%s=%.*g default=%.*g\n", s->name,
 		       digits, control_setting_value(s, control_setting_load(h, s)),
-		       digits, control_setting_value(s, control_setting_load(&defaults, s)));
+		       digits, control_setting_value(s, defaults[i]));
 	}
 }
 
@@ -664,9 +664,9 @@ run (struct options const *options,
 	// value nobody asked for. Reset stores the controls alone, atomically, and never initialises the
 	// live header: other processes use it.
 	bool const reset = options->flags & OPTIONS_RESET;
-	struct ShmHeader defaults;
+	uint32_t defaults[CONTROL_SETTING_COUNT];
 	if (reset)
-		ShmInitNativeDefaults(&defaults, control_settings_worker_bypass(h));
+		control_settings_defaults(defaults, control_settings_worker_bypass(h));
 	bool tuning_changed = reset;
 	for (uint32_t i = 0; i < CONTROL_SETTING_COUNT; ++i) {
 		uint64_t const bit = UINT64_C(1) << i;
@@ -677,7 +677,7 @@ run (struct options const *options,
 			control_setting_store(h, s, options->values[i]);
 			tuning_changed |= s->tuning;
 		} else if (reset) {
-			control_setting_store(h, s, control_setting_load(&defaults, s) ^ flip);
+			control_setting_store(h, s, defaults[i] ^ flip);
 		} else if (flip) {
 			control_setting_toggle(h, s);
 		}
