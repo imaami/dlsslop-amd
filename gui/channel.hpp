@@ -2,52 +2,46 @@
 #pragma once
 #include "../common/control_settings.h"
 #include "../common/result.hpp"
+#include "../common/shm_channel.h"
 #include <array>
-#include <cerrno>
-#include <cstring>
-#include <fcntl.h>
 #include <map>
+#include <memory>
 #include <string>
-#include <sys/mman.h>
 #include <sys/stat.h>
-#include <unistd.h>
 #include <utility>
 
 namespace dlsslop_gui {
 using dlsslop::Result;
 
-// Short-lived mappings avoid retaining a channel replaced by a restarted worker.
-// A controller never creates, truncates, initializes or unlinks the channel.
+// The channel, opened as every program opens it (common/shm_channel.h): a file
+// of another protocol is refused. Short-lived mappings avoid retaining a
+// channel replaced by a restarted worker. A controller never creates,
+// truncates, initializes or unlinks the channel.
 class Channel {
-    int fd_ = -1;
+    shm_channel channel_{nullptr, 0, -1, 0};
     ShmHeader* header_ = nullptr;
     struct stat stat_ {};
 
-    explicit Channel(int fd) : fd_(fd) {}
+    Channel() = default;
 public:
     static Result<Channel> open(const std::string& path, bool writable)
     {
-        Channel channel(::open(path.c_str(), (writable ? O_RDWR : O_RDONLY) | O_CLOEXEC | O_NOFOLLOW));
-        if (channel.fd_ < 0 || fstat(channel.fd_, &channel.stat_)) return dlsslop::fail(std::strerror(errno));
-        if (!S_ISREG(channel.stat_.st_mode) || channel.stat_.st_uid != getuid() ||
-            channel.stat_.st_size < static_cast<off_t>(ShmTotalBytes()))
-            return dlsslop::fail("Channel must be an owned, full-size regular file");
-        void* base = mmap(nullptr, kHeaderBytes, PROT_READ | (writable ? PROT_WRITE : 0), MAP_SHARED, channel.fd_, 0);
-        if (base == MAP_FAILED) return dlsslop::fail(std::strerror(errno));
-        channel.header_ = static_cast<ShmHeader*>(base);
-        if (channel.header_->magic.load() != kShmMagic || channel.header_->version.load() != kShmVersion)
-            return dlsslop::fail("Channel protocol mismatch; use the matching controller version");
+        Channel channel;
+        error e;
+        if (const auto code = shm_channel_open(&channel.channel_, path.c_str(), path.size(), kHeaderBytes,
+                                               writable ? SHM_CHANNEL_WRITE : shm_channel_flags{}, &e))
+            return dlsslop::forward_c(code, e);
+        if (fstat(channel.channel_.fd, &channel.stat_)) return dlsslop::fail_errno("inspect the channel");
+        // C created the header's objects before the file had a name; they live in the mapping for C++ too.
+        channel.header_ = std::start_lifetime_as<ShmHeader>(channel.channel_.h);
         return channel;
     }
     Channel(Channel&& other) noexcept
-        : fd_(std::exchange(other.fd_, -1)), header_(std::exchange(other.header_, nullptr)), stat_(other.stat_)
+        : channel_(std::exchange(other.channel_, shm_channel{nullptr, 0, -1, 0})),
+          header_(std::exchange(other.header_, nullptr)), stat_(other.stat_)
     {
     }
-    ~Channel()
-    {
-        if (header_) munmap(header_, kHeaderBytes);
-        if (fd_ >= 0) close(fd_);
-    }
+    ~Channel() { shm_channel_fini(&channel_); }
     ShmHeader* header() const { return header_; }
     dev_t device() const { return stat_.st_dev; }
     ino_t inode() const { return stat_.st_ino; }

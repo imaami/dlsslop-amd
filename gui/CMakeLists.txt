@@ -22,7 +22,8 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 # The channel's and the settings' C functions: the full project's library, or
 # the GUI's own.
 if(NOT TARGET dlsslop-common-c)
-    add_library(dlsslop-common-c OBJECT ../common/shm_protocol.c ../common/control_settings.c)
+    add_library(dlsslop-common-c OBJECT ../common/shm_protocol.c ../common/shm_channel.c
+        ../common/control_settings.c ../common/error.c)
     # control_settings.c calls trunc().
     target_link_libraries(dlsslop-common-c PUBLIC m)
 endif()

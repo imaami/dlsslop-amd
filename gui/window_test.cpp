@@ -7,6 +7,7 @@
 #include <QScrollBar>
 #include <QTest>
 #include <cstdlib>
+#include <unistd.h>
 
 namespace {
 
@@ -14,12 +15,10 @@ namespace {
 struct Fixture {
     char directory[40] = "/tmp/dlsslop-amd-gui-window-test-XXXXXX";
     std::string path;
-    int fd = -1;
-    ShmHeader* header = nullptr;
+    shm_channel channel{nullptr, 0, -1, 0};
     ~Fixture()
     {
-        if (header) munmap(header, kHeaderBytes);
-        if (fd >= 0) close(fd);
+        shm_channel_fini(&channel);
         if (path.empty()) return;
         unlink(path.c_str());
         rmdir(directory);
@@ -286,15 +285,11 @@ int main(int argc, char** argv)
     if (!mkdtemp(fixture.directory)) return 1;
     fixture.path = std::string(fixture.directory) + "/channel";
     const std::string& path = fixture.path;
-    int& fd = fixture.fd;
-    ShmHeader*& header = fixture.header;
-    fd = open(path.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
-    require(fd >= 0, "create fixture");
-    require(!ftruncate(fd, static_cast<off_t>(ShmTotalBytes())), "size fixture");
-    void* memory = mmap(nullptr, kHeaderBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    require(memory != MAP_FAILED, "map fixture");
-    header = static_cast<ShmHeader*>(memory);
-    ShmInitNativeDefaults(header, false);
+    struct error e;
+    if (shm_channel_open(&fixture.channel, path.c_str(), path.size(), kHeaderBytes,
+                         SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE, &e))
+        failed(e.what);
+    ShmHeader* const header = std::start_lifetime_as<ShmHeader>(fixture.channel.h);
     QApplication application(argc, argv);
     QApplication::setStyle(QStyleFactory::create("Fusion"));
     QLocale::setDefault(QLocale::c());

@@ -4,20 +4,21 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <fcntl.h>
+#include <unistd.h>
 #include <vector>
 
 namespace {
 // The fixture's files, removed however the test ends.
 struct Fixture {
     char directory[33] = "/tmp/dlsslop-amd-gui-test-XXXXXX";
-    std::string path, link;
-    int fd = -1;
-    ShmHeader* header = nullptr;
+    std::string path, link, zeros;
+    shm_channel channel{nullptr, 0, -1, 0};
     ~Fixture()
     {
-        if (header) munmap(header, kHeaderBytes);
-        if (fd >= 0) close(fd);
+        shm_channel_fini(&channel);
         if (path.empty()) return;
+        unlink(zeros.c_str());
         unlink(link.c_str());
         unlink(path.c_str());
         rmdir(directory);
@@ -46,20 +47,32 @@ int main()
     if (!mkdtemp(fixture.directory)) return 1;
     fixture.path = std::string(fixture.directory) + "/channel";
     fixture.link = std::string(fixture.directory) + "/link";
+    fixture.zeros = std::string(fixture.directory) + "/zeros";
     const std::string& path = fixture.path;
     const std::string& link = fixture.link;
-    int& fd = fixture.fd;
-    ShmHeader*& header = fixture.header;
+    // A controller creates no channel, and initializes no file of a channel's size that holds none.
+    rejects(dlsslop_gui::Channel::open(path, false));
     rejects(dlsslop_gui::Channel::open(path, true));
     require(access(path.c_str(), F_OK) != 0, "controller created a channel");
-    fd = open(path.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
-    require(fd >= 0, "create fixture");
-    require(!ftruncate(fd, static_cast<off_t>(ShmTotalBytes())), "size fixture");
-    void* memory = mmap(nullptr, kHeaderBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    require(memory != MAP_FAILED, "map fixture");
-    header = static_cast<ShmHeader*>(memory);
-    rejects(dlsslop_gui::Channel::open(path, true));
-    ShmInitNativeDefaults(header, false);
+    {
+        const int fd = open(fixture.zeros.c_str(), O_CREAT | O_EXCL | O_RDWR | O_CLOEXEC, 0600);
+        require(fd >= 0 && !ftruncate(fd, static_cast<off_t>(ShmTotalBytes())), "create zeros");
+        rejects(dlsslop_gui::Channel::open(fixture.zeros, true));
+        char head[4096];
+        require(pread(fd, head, sizeof head, 0) == static_cast<ssize_t>(sizeof head) &&
+                    std::all_of(head, head + sizeof head, [](char c) { return !c; }) && !close(fd),
+                "a refused file was initialized");
+    }
+    // The channel as dlsslopd or the layer creates it, with the defaults.
+    struct error e;
+    if (shm_channel_open(&fixture.channel, path.c_str(), path.size(), kHeaderBytes,
+                         SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE, &e))
+        failed(e.what);
+    ShmHeader* const header = std::start_lifetime_as<ShmHeader>(fixture.channel.h);
+    std::array<std::uint32_t, CONTROL_SETTING_COUNT> defaults;
+    control_settings_defaults(defaults.data(), false);
+    for (std::size_t i = 0; i < CONTROL_SETTING_COUNT; ++i)
+        require(control_setting_load(header, &CONTROL_SETTINGS[i]) == defaults[i], "a created channel lacks a default");
     // Fixed settings admit only their reset default, only the native tuning
     // values are marked as such, and each label list names its range once.
     for (const auto& s : CONTROL_SETTINGS) {
@@ -145,6 +158,7 @@ int main()
     header->version.store(kShmVersion + 1);
     rejects(dlsslop_gui::Channel::open(path, true));
     require(header->version.load() == kShmVersion + 1, "mismatched channel reinitialized");
-    std::puts("GUI channel tests passed: precision, bounds, batching, generations, isolation, reset, actions, protocol and symlink checks");
+    std::puts("GUI channel tests passed: no creation, precision, bounds, batching, generations, isolation, reset, "
+              "actions, protocol, foreign file and symlink checks");
     return 0;
 }
