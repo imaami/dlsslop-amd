@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Drives `dlsslopd --test-identity` over its shared-memory channel the way the
 // layer's ShmProcessFrame does. Needs neither HIP nor model weights.
+#include "shm_channel.h"
 #include "shm_protocol.hpp"
 
 #include <atomic>
@@ -12,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <thread>
 #include <utility>
@@ -19,7 +21,6 @@
 #include <fcntl.h>
 #include <linux/futex.h>
 #include <signal.h>
-#include <sys/mman.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -56,10 +57,9 @@ void wake(std::atomic<uint32_t>& word)
     syscall(SYS_futex, reinterpret_cast<uint32_t*>(&word), FUTEX_WAKE, 1, nullptr, nullptr, 0);
 }
 
-// The layer's side of the channel, created before any worker exists.
+// The layer's side of the channel, created before any worker exists, as every program creates one.
 class Channel {
-    int fd_ = -1;
-    void* mapping_ = MAP_FAILED;
+    shm_channel channel_{nullptr, 0, -1, 0};
 public:
     const std::string path;
     ShmHeader* h = nullptr;
@@ -68,22 +68,18 @@ public:
 
     explicit Channel(std::string name) : path(std::move(name))
     {
-        fd_ = open(path.c_str(), O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
-        require(fd_ >= 0 && !ftruncate(fd_, off_t(ShmTotalBytes())), "create channel " + path);
-        mapping_ = mmap(nullptr, ShmTotalBytes(), PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
-        require(mapping_ != MAP_FAILED, "map channel");
-        h = static_cast<ShmHeader*>(mapping_);
-        ShmInitNativeDefaults(h, false);
-        input = static_cast<uint8_t*>(mapping_) + kHeaderBytes;
+        error e;
+        require(!shm_channel_open(&channel_, path.c_str(), path.size(), ShmTotalBytes(),
+                                  SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE, &e), "create channel: " + std::string(e.what));
+        require(channel_.flags & SHM_CHANNEL_CREATED, "channel " + path + " existed");
+        // C created the header's objects before the file had a name; they live in the mapping for C++ too.
+        h = std::start_lifetime_as<ShmHeader>(channel_.h);
+        input = static_cast<uint8_t*>(static_cast<void*>(channel_.h)) + kHeaderBytes;
         output = input + kMaxFrame;
     }
     Channel(const Channel&) = delete;
     Channel& operator=(const Channel&) = delete;
-    ~Channel()
-    {
-        if (mapping_ != MAP_FAILED) munmap(mapping_, ShmTotalBytes());
-        if (fd_ >= 0) close(fd_);
-    }
+    ~Channel() { shm_channel_fini(&channel_); }
     static size_t bytes(bool fp16) { return size_t(kWidth) * kHeight * (fp16 ? 8 : 4); }
     // Publish one request as the layer does and return its number. A WIDTH beyond kMaxW makes it
     // malformed.

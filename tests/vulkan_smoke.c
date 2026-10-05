@@ -33,6 +33,8 @@
 #include <unistd.h>
 #include <vulkan/vulkan.h>
 
+#include "error.h"
+#include "shm_channel.h"
 #include "shm_protocol.h"
 #include "support.h"
 
@@ -122,13 +124,12 @@ struct options {
  *         canonical path, and the X11 display unless the surfaces are headless.
  */
 struct context {
-	char const       *path;      //!< The channel's path, DLSSNR_SHM.
-	char             *canonical; //!< The channel's canonical path, as the kernel reports it, or nullptr.
-	char             *target;    //!< Room for a link as long as the canonical path, or nullptr.
-	struct ShmHeader *h;         //!< The channel, mapped, or nullptr.
-	Display          *display;   //!< The X11 display, or nullptr.
-	size_t            length;    //!< The canonical path's length.
-	int               fd;        //!< The channel's descriptor, or -1.
+	struct shm_channel channel;   //!< The channel, open and mapped whole, or empty.
+	char const        *path;      //!< The channel's path, DLSSNR_SHM.
+	char              *canonical; //!< The channel's canonical path, as the kernel reports it, or nullptr.
+	char              *target;    //!< Room for a link as long as the canonical path, or nullptr.
+	Display           *display;   //!< The X11 display, or nullptr.
+	size_t             length;    //!< The canonical path's length.
 };
 
 /** @brief Descriptor 0 as main() took it.
@@ -321,26 +322,19 @@ static void
 context_init (struct context       *dest,
               struct options const *o)
 {
-	*dest = (struct context){.fd = -1};
+	*dest = (struct context){ .channel = { .fd = -1 } };
 	dest->path = getenv("DLSSNR_SHM");
 	require(dest->path && *dest->path, "set DLSSNR_SHM to a running --test-identity worker's channel");
-	int const fd = open(dest->path, O_RDWR | O_CLOEXEC | O_NOFOLLOW);
-	require(fd >= 0, "open worker channel failed");
-	dest->fd = fd;
+	// The worker created the channel: the smoke opens it as the layer does, but never creates one.
+	struct error e;
+	if (shm_channel_open(&dest->channel, dest->path, strlen(dest->path), ShmTotalBytes(), SHM_CHANNEL_WRITE, &e))
+		fail("open worker channel: %s", e.what);
 	dest->canonical = realpath(dest->path, nullptr);
 	require(dest->canonical, "cannot resolve the channel path");
 	dest->length = strlen(dest->canonical);
 	dest->target = malloc(dest->length);
 	require(dest->target, "out of memory");
-	// The magic and the version from the file: the header's atomic objects have no valid state until
-	// the worker has initialized the channel (C23 7.17.2).
-	uint32_t head[offsetof(struct ShmHeader, version) / sizeof (uint32_t) + 1];
-	require(pread(dest->fd, head, sizeof head, 0) == (ssize_t)sizeof head, "read worker channel failed");
-	require(head[0] == kShmMagic && head[offsetof(struct ShmHeader, version) / sizeof *head] == kShmVersion,
-	        "worker protocol mismatch");
-	void *const mapping = mmap(nullptr, ShmTotalBytes(), PROT_READ | PROT_WRITE, MAP_SHARED, dest->fd, 0);
-	require(mapping != MAP_FAILED, "map worker channel failed");
-	struct ShmHeader *const h = dest->h = mapping;
+	struct ShmHeader *const h = dest->channel.h;
 	atomic_store(&h->enabled, 1);
 	atomic_store(&h->hdrMode, o->proxy16 ? kHdrForce : kHdrOff);
 	atomic_store(&h->colourMode, o->linear ? kColourLinearHdr : kColourAuto);
@@ -375,19 +369,12 @@ context_fini (struct context *c)
 		XCloseDisplay(c->display);
 		c->display = nullptr;
 	}
-	if (c->h) {
-		require(!munmap(c->h, ShmTotalBytes()), "cannot unmap the worker channel");
-		c->h = nullptr;
-	}
+	shm_channel_fini(&c->channel);
 	free(c->target);
 	c->target = nullptr;
 	free(c->canonical);
 	c->canonical = nullptr;
 	c->length = 0;
-	if (c->fd >= 0) {
-		require(!close(c->fd), "cannot close the worker channel");
-		c->fd = -1;
-	}
 	c->path = nullptr;
 }
 
@@ -1124,7 +1111,7 @@ check_answer (struct context const    *c,
               VkClearColorValue const *color,
               bool                     proxy16)
 {
-	struct ShmHeader const *const h = c->h;
+	struct ShmHeader const *const h = c->channel.h;
 	require(atomic_load_explicit(&h->seq_resp, memory_order_acquire) == request
 	        && atomic_load(&h->seq_ok) == request, "worker did not successfully answer frame");
 	require(atomic_load(&h->answeredW) == width && atomic_load(&h->answeredH) == height,
@@ -1166,7 +1153,7 @@ present (struct context const   *c,
          struct presented        p,
          struct swapchain const *composes)
 {
-	struct ShmHeader const *const h = c->h;
+	struct ShmHeader const *const h = c->channel.h;
 	uint32_t const previous = atomic_load(&h->seq_req);
 	uint64_t const frames = atomic_load(&h->layerFrames);
 	VkClearColorValue const color = frame_colour(d->presented);
@@ -1218,7 +1205,7 @@ smoke (struct context const *c,
 	if (o->reduced)
 		pattern_init(&pattern, &d, s.extent, format.format);
 
-	struct ShmHeader const *const h = c->h;
+	struct ShmHeader const *const h = c->channel.h;
 	uint64_t const initial_frames = atomic_load(&h->layerFrames);
 	struct contending_producer contender;
 	contending_producer_init(&contender, c->path, o->contention);

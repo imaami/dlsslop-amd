@@ -5,13 +5,13 @@
 // changes settings between frames as dlsslopctl does, and prints the FNV-1a
 // 64 of every input and answer. No device-local transport is offered.
 #include "control_settings.h"
+#include "shm_channel.h"
 #include "shm_protocol.hpp"
 
 #include <fcntl.h>
 #include <getopt.h>
 #include <linux/futex.h>
 #include <signal.h>
-#include <sys/mman.h>
 #include <sys/syscall.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -23,6 +23,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -254,21 +255,19 @@ int main(int argc, char** argv)
         if (c.frame >= frames.size()) return usage("a setting's FRAME is not one of --frames");
     if (optind >= argc) return usage("DLSSLOPD is required");
 
+    // A new channel, created as every program creates one.
     unlink(shm.c_str());
-    const int fd = open(shm.c_str(), O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
-    if (fd < 0 || ftruncate(fd, off_t(ShmTotalBytes()))) {
-        std::perror("create channel");
+    shm_channel channel{nullptr, 0, -1, 0};
+    error e;
+    if (shm_channel_open(&channel, shm.c_str(), shm.size(), ShmTotalBytes(), SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
+                         &e)) {
+        std::fprintf(stderr, "shmclient: %s\n", e.what);
         return 1;
     }
-    void* mapping = mmap(nullptr, ShmTotalBytes(), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-    if (mapping == MAP_FAILED) {
-        std::perror("map channel");
-        return 1;
-    }
-    auto* h = static_cast<ShmHeader*>(mapping);
-    ShmInitNativeDefaults(h, false);
+    // C created the header's objects before the file had a name; they live in the mapping for C++ too.
+    auto* h = std::start_lifetime_as<ShmHeader>(channel.h);
     apply(h, changes, 0);
-    uint8_t* const input = static_cast<uint8_t*>(mapping) + kHeaderBytes;
+    uint8_t* const input = static_cast<uint8_t*>(static_cast<void*>(channel.h)) + kHeaderBytes;
     const uint8_t* const output = input + kMaxFrame;
 
     const pid_t pid = fork();
@@ -393,8 +392,7 @@ int main(int argc, char** argv)
     }
     const int code = exit_code(status);
     std::printf("daemon exit=%d failures=%d\n", code, failures);
-    munmap(mapping, ShmTotalBytes());
-    close(fd);
+    shm_channel_fini(&channel);
     unlink(shm.c_str());
     return code || failures;
 }
