@@ -122,8 +122,7 @@ inline Rgb rgba8(const std::uint8_t* p)
 // The answer at source pixel (x, y) through the upstream FP16 surface. Like
 // the GPU codec, the decoder rejects it when a texel it reads is not a finite
 // binary16: it is then not finite either.
-// Out of line: inlined, it adds 3 KB (Clang) to 8 KB (GCC) of text.
-[[gnu::noinline]] Rgb answer(const float* neural_rgb, const struct geometry& g, unsigned x, unsigned y)
+Rgb answer(const float* neural_rgb, const struct geometry& g, unsigned x, unsigned y)
 {
     return sample_answer([&](unsigned px, unsigned py) {
         const float* p = neural_rgb + (std::size_t(py) * g.width + px) * 3;
