@@ -290,9 +290,10 @@ contending_producer_init (struct contending_producer *dest,
 		if (write(ready[1], &acquired, 1) != 1)
 			_exit(1);
 		close(ready[1]);
+		// Held until the parent writes or closes the pipe; a failed read fails the child.
 		uint8_t unused;
-		if (acquired)
-			(void)read(release[0], &unused, 1);
+		if (acquired && read(release[0], &unused, 1) < 0)
+			_exit(1);
 		if (fd >= 0)
 			close(fd);
 		_exit(acquired ? 0 : 1);
