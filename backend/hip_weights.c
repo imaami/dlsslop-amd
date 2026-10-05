@@ -602,12 +602,14 @@ pack_fp8_regions (float               *values,
 	uint8_t *const codes = (uint8_t *)values;
 	// Byte 4*first + i overwrites only values at or before first + i, which are read already.
 	for (size_t r = 0; r < count; ++r) {
-		for (size_t i = 0; i < regions[r].count; ++i) {
+		// A copy: the stores through codes could otherwise alias the region, which is reloaded.
+		struct region const region = regions[r];
+		for (size_t i = 0; i < region.count; ++i) {
 			uint8_t code;
-			enum hip_flaw const flaw = exact_fp8(values[regions[r].first + i], &code);
+			enum hip_flaw const flaw = exact_fp8(values[region.first + i], &code);
 			if (flaw)
-				return bad_element(regions[r].first + i, flaw, e);
-			codes[4 * regions[r].first + i] = code;
+				return bad_element(region.first + i, flaw, e);
+			codes[4 * region.first + i] = code;
 		}
 	}
 	return ERROR_NONE;
