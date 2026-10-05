@@ -179,6 +179,25 @@ openat (int         dir,
 	return fd;
 }
 
+/** @brief glibc's openat(2) for a call without a mode whose flags are not constant: with
+ *         _FORTIFY_SOURCE, as Ubuntu's GCC enables by default, the module's three-argument calls
+ *         reach this and not openat(), so it is the test's openat() too.
+ *
+ * @param dir   The directory.
+ * @param path  The path, relative to it.
+ * @param flags open(2)'s flags, which need no mode.
+ * @return      The descriptor, or -1 with errno set.
+ */
+int
+__openat_2 (int         dir,
+            char const *path,
+            int         flags)
+{
+	require(!(flags & O_CREAT) && (flags & O_TMPFILE) != O_TMPFILE, "an openat() without a mode asked for %#x",
+	        (unsigned)flags);
+	return openat(dir, path, flags);
+}
+
 /** @brief The test's linkat(2), which the module's calls reach: replaces the directory named by
  *         replace first, fails the links of unnamed files as enum force says, and counts the links
  *         made of each kind.
