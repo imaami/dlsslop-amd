@@ -31,16 +31,6 @@ static_assert(offsetof(ShmHeader, helperFrames) == 8 && offsetof(ShmHeader, laye
               "the header's layout differs from shm_protocol.c's");
 static_assert(sizeof(ShmTransportOffer) == 72, "the transport offer's layout differs from shm_protocol.c's");
 
-// ShmNativeDefaultPath(), or an empty string if it cannot be formatted.
-inline std::string ShmNativeDefaultPath()
-{
-    const int length = ShmNativeDefaultPath(nullptr, 0);
-    if (length < 0) return {};
-    std::string path(static_cast<std::size_t>(length), '\0');
-    ShmNativeDefaultPath(path.data(), path.size() + 1);
-    return path;
-}
-
 // ShmNativeChannelPath(), or an empty string if it cannot be formatted.
 inline std::string ShmNativeChannelPath()
 {

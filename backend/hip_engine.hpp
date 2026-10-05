@@ -19,10 +19,11 @@ namespace dlsslop {
 Result<int> select_device(const struct hip_api& api, int requested);
 // The HIP runtime for a HipEngine, with the gfx1201 device o.device names, or
 // the first, selected and recorded there.
-Result<struct hip_api> open_hip(Options& o);
+Result<struct hip_api> open_hip(struct options& o);
 
 class HipEngine : public EngineBase<HipEngine> {
-    Options options_;
+    // The options, which outlive the engine.
+    const struct options* options_;
     unsigned tier_;
     struct hip_api api_;
     // The one stream of the network and every kernel and copy of the daemon's,
@@ -45,7 +46,7 @@ class HipEngine : public EngineBase<HipEngine> {
     void* device_scratch_ = nullptr; // Tuning or colour: the other stage output.
     void* answer_ = nullptr;         // The latest frame's final network answer.
     std::vector<float> input_, neural_; // Host copies of a pass's input and answer.
-    ProcessingSettings previous_settings_;
+    struct processing_settings previous_settings_ = processing_settings();
     bool warned_conditioning_ = false;
     // Stream events: frame start, uploaded, evaluated, answered. Timing never
     // stalls the stream; the intervals are read once the answer is complete.
@@ -78,7 +79,7 @@ public:
     // A tier is a raster the network is built for.
     static constexpr bool rebuilds_for_tier = true;
 
-    HipEngine(Options o, unsigned tier, const struct hip_api& api);
+    HipEngine(const struct options& o, unsigned tier, const struct hip_api& api);
     HipEngine(const HipEngine&) = delete;
     ~HipEngine()
     {
@@ -87,7 +88,7 @@ public:
         hip_model_fini(&model_);
     }
     const char* name() const { return "HIP"; }
-    std::string device() const { return "device " + std::to_string(options_.device); }
+    std::string device() const { return "device " + std::to_string(options_->device); }
     unsigned tier() const { return tier_; }
     std::string processing() const
     {
@@ -119,11 +120,12 @@ public:
     {
         return check(api_.hipMemcpy(host, source, bytes, 4), "read diagnostic frame");
     }
-    Result<void> self_test(const Options& o) { return run_self_test(o, *this); }
+    Result<void> self_test(const struct options& o) { return run_self_test(o, *this); }
     // Proxy and answer are w * h RGBA8, or RGBA16F with settings.fp16: host
     // memory, or an import slot's device frames. verify checks the GPU codec
     // of host frames against the CPU reference inside the timed frame.
-    Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
+    Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned passes,
+                       const struct processing_settings& settings = processing_settings(),
                        struct frame_trace* trace = nullptr, bool verify = false);
     // The latest infer()'s raw network answer, read back outside its timing.
     Result<const std::vector<float>*> raw_result();

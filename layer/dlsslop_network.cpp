@@ -3,13 +3,14 @@
 #include "network_module.h"
 #include "files.hpp"
 #include "network_recorder.h"
-#include "options.hpp"
-#include "paths.hpp"
-#include "processing.hpp"
+#include "options.h"
+#include "paths.h"
+#include "processing.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <dlfcn.h>
 #include <new>
@@ -24,13 +25,37 @@ namespace {
 struct ModulePaths {
     std::string shaders, cache;
 };
-ModulePaths module_paths()
+dlsslop::Result<ModulePaths> module_paths(const struct paths_home& home)
 {
     Dl_info self{};
     dladdr(reinterpret_cast<void*>(&dlsslop_network_open), &self);
     const std::string directory = self.dli_fname ? dlsslop::parent_path(dlsslop::absolute(self.dli_fname)) : std::string();
-    return {dlsslop::vulkan_shaders(dlsslop::parent_path(dlsslop::parent_path(directory)), directory),
-            dlsslop::vulkan_cache()};
+    const std::string prefix = dlsslop::parent_path(dlsslop::parent_path(directory));
+    struct error e;
+    char* path;
+    size_t length;
+    if (const enum error_code code =
+            paths_vulkan_shaders_at(&path, &length, prefix.data(), prefix.size(), directory.data(), directory.size(), &e))
+        return dlsslop::forward_c(code, e);
+    ModulePaths found{std::string(path, length), std::string()};
+    std::free(path);
+    if (const enum error_code code = paths_vulkan_cache(&path, &length, &home, &e)) return dlsslop::forward_c(code, e);
+    if (path) found.cache.assign(path, length);
+    std::free(path);
+    return found;
+}
+
+// The model dlsslopd loads, as its config file names it, or why that is unknown.
+dlsslop::Result<std::string> configured_model(const struct paths_home& home)
+{
+    struct error e;
+    char* path;
+    size_t length;
+    if (const enum error_code code = options_configured_vulkan_model(&path, &length, &home, &e))
+        return dlsslop::forward_c(code, e);
+    std::string model = path ? std::string(path, length) : std::string();
+    std::free(path);
+    return model;
 }
 
 // The game's device, with the next layer's physical-device functions the build queries, looked
@@ -75,20 +100,25 @@ struct DlsslopNetwork {
     bool failed = false;
     std::string error;
 
-    DlsslopNetwork(const dlsslop_network_device& d) : model(dlsslop::configured_vulkan_model())
+    DlsslopNetwork(const dlsslop_network_device& d) : DlsslopNetwork(d, paths_home()) {}
+    // The model and the pipeline cache are found below one home.
+    DlsslopNetwork(const dlsslop_network_device& d, const struct paths_home& home) : model(configured_model(home))
     {
         // The recorder copies the paths, which borrow these strings.
         const std::string path = model.value_or(std::string());
-        const ModulePaths found = module_paths();
-        const struct vulkan_device device = network_device(d);
-        const struct vulkan_paths paths{.model = path.c_str(),
-                                        .shaders = found.shaders.c_str(),
-                                        .cache = found.cache.c_str(),
-                                        .model_length = path.size(),
-                                        .shaders_length = found.shaders.size(),
-                                        .cache_length = found.cache.size()};
-        struct error e;
-        if (network_recorder_init(&recorder, &device, &paths, true, &e) != ERROR_NONE) fail(e.what);
+        if (const auto found = module_paths(home); !found) {
+            fail(found.error().what);
+        } else {
+            const struct vulkan_device device = network_device(d);
+            const struct vulkan_paths paths{.model = path.c_str(),
+                                            .shaders = found->shaders.c_str(),
+                                            .cache = found->cache.c_str(),
+                                            .model_length = path.size(),
+                                            .shaders_length = found->shaders.size(),
+                                            .cache_length = found->cache.size()};
+            struct error e;
+            if (network_recorder_init(&recorder, &device, &paths, true, &e) != ERROR_NONE) fail(e.what);
+        }
         if (!model) fail(model.error().what);
     }
     DlsslopNetwork(const DlsslopNetwork&) = delete;
@@ -147,29 +177,28 @@ dlsslop_network_state dlsslop_network_prepare(DlsslopNetwork* n, const ShmHeader
         return n->fail("the network takes frames of RGBA8 or RGBA16F, not of format " +
                        std::to_string(int(images->format)));
     if (!images->generation) return n->fail("the composition's images have no generation");
-    auto settings = dlsslop::read_settings(channel);
-    if (!settings) {
-        n->error = std::move(settings).error().what;
+    struct processing_settings settings;
+    struct error e;
+    if (processing_read(channel, &settings, &e) != ERROR_NONE) {
+        n->error = e.what;
         return DLSSLOP_NETWORK_REJECTED;
     }
-    settings->fp16 = fp16;
+    settings.fp16 = fp16;
     const unsigned passes = std::min(ShmPasses(channel), NETWORK_RECORDER_MAX_PASSES);
-    const struct vulkan_frame frame = dlsslop::vulkan_frame(images->width, images->height, passes, *settings);
+    const struct vulkan_frame frame = processing_vulkan_frame(images->width, images->height, passes, &settings);
     // A frame of the network's extent: of its shape, or of another that it is reshaped for here,
     // between frames, with no GPU work, and in images that are bound here when they are new.
     if (network_recorder_has_extent(&n->recorder, &frame)) {
         const struct vulkan_frame_images surfaces{images->generation, images->input_view, images->answer,
                                                   images->answer_view};
         bool shaped = false;
-        struct error e;
         if (network_recorder_shape(&n->recorder, &frame, &surfaces, &shaped, &e) != ERROR_NONE) return n->fail(e.what);
         n->prepared = frame;
         return DLSSLOP_NETWORK_READY;
     }
-    if (auto model = dlsslop::require_vulkan_model(*n->model); !model) return n->fail(std::move(model).error().what);
+    if (paths_require_vulkan_model(n->model->c_str(), &e) != ERROR_NONE) return n->fail(e.what);
     // A new extent is planned here, so that one the network does not take on the device is
     // refused without a build; the build thread builds from that plan.
-    struct error e;
     if (const enum error_code code = network_recorder_plan(&n->recorder, &frame, &e)) {
         if (code == ERROR_FAILED) return n->fail(e.what);
         n->error = e.what;

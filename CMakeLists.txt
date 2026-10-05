@@ -190,8 +190,8 @@ target_link_libraries(dlsslop-hip PUBLIC ${CMAKE_DL_LIBS})
 # The in-layer network, in a module beside the layer that loads it on demand
 # (layer/network_module.h): the network and the libstdc++ it needs stay out of
 # the layer, which every game loads. It exports its C functions only.
-add_library(dlsslop-network MODULE layer/dlsslop_network.cpp backend/processing.cpp backend/options.cpp
-    backend/paths.cpp backend/files.c backend/tuning.c)
+add_library(dlsslop-network MODULE layer/dlsslop_network.cpp backend/processing.c backend/options.c
+    backend/paths.c backend/files.c backend/tuning.c)
 target_include_directories(dlsslop-network PRIVATE backend)
 target_link_libraries(dlsslop-network PRIVATE dlsslop-vulkan dlsslop-common-c ${CMAKE_DL_LIBS})
 target_link_options(dlsslop-network PRIVATE -static-libstdc++ -static-libgcc -Wl,-Bsymbolic
@@ -200,10 +200,10 @@ add_dependencies(dlsslop-network vulkan-nr-shaders)
 # The worker uses a small, versioned HIP ABI loaded with dlopen. The build itself
 # deliberately does not require ROCm headers or a GPU; real inference does.
 add_executable(dlsslopd
-    backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.c
+    backend/main.cpp backend/options.c backend/paths.c backend/serve.cpp backend/transport.c
     backend/open.cpp backend/hip_engine.cpp backend/self_test.cpp
     backend/channel.c backend/files.c backend/trace.c backend/vulkan_network.cpp
-    backend/processing.cpp)
+    backend/processing.c)
 target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip dlsslop-vulkan dlsslop-common-c Threads::Threads
     ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)
@@ -211,7 +211,7 @@ target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 # What runs once per start, per transport offer or per diagnostic is built for
 # size; the frame path (serving loop, engines, codec, networks) stays at -O3.
 # GCC does not inline -O3 code into these callers, so none of it slows down.
-set_source_files_properties(backend/main.cpp backend/options.cpp backend/paths.cpp backend/files.c
+set_source_files_properties(backend/main.cpp backend/options.c backend/paths.c backend/files.c
     backend/channel.c backend/transport.c backend/trace.c backend/open.cpp backend/self_test.cpp backend/hip.c
     backend/hip_plan.c backend/control_selftest.c common/error.c PROPERTIES COMPILE_OPTIONS -Os)
 

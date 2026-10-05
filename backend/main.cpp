@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 #include "offline.hpp"
 #include "open.hpp"
-#include "options.hpp"
+#include "options.h"
 #include "serve.hpp"
 
 #include <cstdio>
@@ -15,14 +15,11 @@ int status(const dlsslop::Result<void>& ran)
     std::fprintf(stderr, "dlsslopd: %s\n", ran.error().what.c_str());
     return 1;
 }
-} // namespace
 
-int main(int argc, char** argv)
+// What the options ask for, done.
+int run(struct options& o)
 {
-    auto parsed = dlsslop::parse(argc, argv);
-    if (!parsed) return status(std::unexpected(std::move(parsed).error()));
-    dlsslop::Options& o = *parsed;
-    const unsigned tier = o.tier.value_or(kNativeDefaultTier);
+    const unsigned tier = o.tier ? o.tier : kNativeDefaultTier;
     if (o.diagnose)
         return status(dlsslop::with_engine(o, tier, [](auto& engine) -> dlsslop::Result<void> {
             std::fprintf(stderr, "selected %s\n", engine.device().c_str());
@@ -37,10 +34,25 @@ int main(int argc, char** argv)
             else
                 return dlsslop::fail("--self-test requires the real network");
         }));
-    if (!o.input.empty())
+    if (o.input_length)
         return status(dlsslop::with_engine(o, tier, [&o](auto& engine) -> dlsslop::Result<void> {
             DLSSLOP_TRY(engine.prepare());
             return dlsslop::run_offline(o, engine);
         }));
     return status(dlsslop::run_worker(o));
+}
+} // namespace
+
+int main(int argc, char** argv)
+{
+    struct options o;
+    struct error e;
+    if (options_parse(&o, argc, argv, &e)) {
+        std::fprintf(stderr, "dlsslopd: %s\n", e.what);
+        return 1;
+    }
+    // --help is printed already.
+    const int code = o.help ? 0 : run(o);
+    options_fini(&o);
+    return code;
 }

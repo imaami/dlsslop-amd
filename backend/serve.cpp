@@ -3,6 +3,7 @@
 #include "channel.h"
 #include "geometry.h"
 #include "open.hpp"
+#include "processing.h"
 #include "trace.h"
 #include "transport.h"
 
@@ -35,7 +36,7 @@ void wake(std::atomic<uint32_t>& word)
 // Otherwise it mistakes a worker-upscaled answer for native-resolution output
 // and skips its detail-preserving composition branch. The identity mode
 // publishes none: the mapping may retain a preceding neural worker's.
-void publish_raster(const Options& o, ShmHeader* h, unsigned tier)
+void publish_raster(const struct options& o, ShmHeader* h, unsigned tier)
 {
     const bool neural = !o.test_identity;
     h->nativeModelMaxWidth.store(neural ? ShmNativeTier(tier)->width : 0);
@@ -96,7 +97,7 @@ bool retire(ShmHeader* h, uint32_t request)
 // rebuild ends the worker, leaving the active tier for the next one. True after
 // a rebuild.
 template <Engine E>
-Result<bool> follow_tier(E& engine, const Options& o, struct mapping& mapping, const std::string& ready)
+Result<bool> follow_tier(E& engine, const struct options& o, struct mapping& mapping, const std::string& ready)
 {
     auto* h = mapping.h;
     const unsigned wanted = h->nativeTier.load(), active = engine.tier();
@@ -133,18 +134,19 @@ struct Request {
     uint32_t control_sequence, tuning_sequence, held_input;
     unsigned width, height, passes;
     size_t bytes;
-    ProcessingSettings settings;
+    struct processing_settings settings = processing_settings();
 };
 
 // The request's settings, or its rejection. A pass count beyond what the engine
 // runs is replaced in the channel with the most it can, as an unusable tier is.
-Result<Request> read_request(const Options& o, ShmHeader* h, Request request, unsigned max_passes,
+Result<Request> read_request(const struct options& o, ShmHeader* h, Request request, unsigned max_passes,
                              unsigned& previous_passes)
 {
     const unsigned w = request.width, height = request.height;
     if (!w || !height || w > kMaxW || height > kMaxH) return reject("unsupported request dimensions");
-    request.settings = DLSSLOP_TRY(read_settings(h));
-    const ProcessingSettings& settings = request.settings;
+    struct error e;
+    if (const enum error_code code = processing_read(h, &request.settings, &e)) return forward_c(code, e);
+    const struct processing_settings& settings = request.settings;
     request.bytes = size_t(w) * height * (settings.fp16 ? 8 : 4);
     // A live control change takes effect on the next request;
     // never shorten or extend a chain partway through a frame.
@@ -162,7 +164,7 @@ template <Engine E>
 Result<std::string> process(const Request& r, E& engine, struct mapping& mapping, struct frame_trace* trace)
 {
     auto* h = mapping.h;
-    const ProcessingSettings& settings = r.settings;
+    const struct processing_settings& settings = r.settings;
     // The request's frames: an imported device-local pair, or the channel's slots.
     Frames io{mapping.input, mapping.output};
     if (const uint32_t generation = h->transportGen.load()) {
@@ -239,7 +241,7 @@ void accept_offers(const struct transport_listener& listener, E& engine)
 // it, as does any failure with --once: a HIP or engine fault is never silently
 // replaced by fake output. A request claimed for a trace is pending.
 template <Engine E>
-Result<void> serve_frames(const Options& o, struct mapping& mapping, const struct transport_listener& transport,
+Result<void> serve_frames(const struct options& o, struct mapping& mapping, const struct transport_listener& transport,
                           struct trace_requests* traces, E& engine, struct frame_trace& pending)
 {
     auto* h = mapping.h;
@@ -254,7 +256,7 @@ Result<void> serve_frames(const Options& o, struct mapping& mapping, const struc
                                               : std::string("native ") + engine.name() +
                                                     " ready; display-encoded RGBA8/FP16 proxy";
     mapping_reason(&mapping, ready.c_str());
-    std::fprintf(stderr, "worker ready: %s%s\n", o.shm.c_str(), o.test_identity ? " [IDENTITY TEST]" : "");
+    std::fprintf(stderr, "worker ready: %s%s\n", o.shm, o.test_identity ? " [IDENTITY TEST]" : "");
     if (!o.test_identity)
         std::fprintf(stderr, "neural tier=%u; %s; native-resolution Vulkan composition; live controls enabled\n",
                      engine.tier(), engine.processing().c_str());
@@ -343,7 +345,7 @@ Result<void> serve_frames(const Options& o, struct mapping& mapping, const struc
 
 // serve_frames(), with a request it claimed for a trace published however serving ends.
 template <Engine E>
-Result<void> serve(const Options& o, struct mapping& mapping, const struct transport_listener& transport,
+Result<void> serve(const struct options& o, struct mapping& mapping, const struct transport_listener& transport,
                    struct trace_requests* traces, E& engine)
 {
     struct frame_trace pending{};
@@ -353,11 +355,11 @@ Result<void> serve(const Options& o, struct mapping& mapping, const struct trans
 }
 
 // serve() with the engine --backend selects, on the transport's socket.
-Result<void> serve_engine(Options& o, unsigned tier, struct mapping& mapping, struct trace_requests* traces)
+Result<void> serve_engine(struct options& o, unsigned tier, struct mapping& mapping, struct trace_requests* traces)
 {
     struct transport_listener transport;
     struct error e;
-    if (const enum error_code code = transport_listener_init(&transport, o.shm.c_str(), o.shm.size(),
+    if (const enum error_code code = transport_listener_init(&transport, o.shm, o.shm_length,
                                                              !o.test_identity && !o.cpu_codec, &e))
         return forward_c(code, e);
     auto served = with_engine(o, tier, [&](auto& engine) { return serve(o, mapping, transport, traces, engine); });
@@ -366,14 +368,14 @@ Result<void> serve_engine(Options& o, unsigned tier, struct mapping& mapping, st
 }
 
 // run_worker() with the channel mapped and the trace directory, if any, taken.
-Result<void> run_traced(Options& o, struct mapping& mapping, struct trace_requests* traces)
+Result<void> run_traced(struct options& o, struct mapping& mapping, struct trace_requests* traces)
 {
     auto* h = mapping.h;
     // An explicit tier replaces the channel's; otherwise a usable live one stays.
     const unsigned live = h->nativeTier.load();
-    const unsigned tier = o.tier.value_or(ShmNativeTier(live) ? live : kNativeDefaultTier);
+    const unsigned tier = o.tier ? o.tier : (ShmNativeTier(live) ? live : kNativeDefaultTier);
     h->nativeTier.store(tier);
-    if (o.passes) h->passes.store(*o.passes);
+    if (o.passes) h->passes.store(o.passes);
     h->compositionBypass.store(o.test_identity ? 1 : 0);
     publish_raster(o, h, tier);
     Heartbeat heartbeat(h);
@@ -388,13 +390,13 @@ Result<void> run_traced(Options& o, struct mapping& mapping, struct trace_reques
 }
 
 // run_worker() with the channel mapped.
-Result<void> run_mapped(Options& o, struct mapping& mapping)
+Result<void> run_mapped(struct options& o, struct mapping& mapping)
 {
-    if (o.trace_dir.empty()) return run_traced(o, mapping, nullptr);
+    if (!o.trace_dir_length) return run_traced(o, mapping, nullptr);
     struct trace_requests traces;
     struct error e;
-    if (const enum error_code code = trace_requests_init(&traces, o.trace_dir.c_str(), o.trace_dir.size(),
-                                                         o.shm.c_str(), o.shm.size(), &e))
+    if (const enum error_code code = trace_requests_init(&traces, o.trace_dir, o.trace_dir_length, o.shm,
+                                                         o.shm_length, &e))
         return forward_c(code, e);
     auto served = run_traced(o, mapping, &traces);
     trace_requests_fini(&traces);
@@ -402,11 +404,11 @@ Result<void> run_mapped(Options& o, struct mapping& mapping)
 }
 } // namespace
 
-Result<void> run_worker(Options o)
+Result<void> run_worker(struct options& o)
 {
     struct mapping mapping;
     struct error e;
-    if (const enum error_code code = mapping_init(&mapping, o.shm.c_str(), o.shm.size(), &e)) return forward_c(code, e);
+    if (const enum error_code code = mapping_init(&mapping, o.shm, o.shm_length, &e)) return forward_c(code, e);
     auto served = run_mapped(o, mapping);
     mapping_fini(&mapping);
     return served;

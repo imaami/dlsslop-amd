@@ -3,8 +3,8 @@
 // dispatched at run time.
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "options.hpp"
-#include "processing.hpp"
+#include "options.h"
+#include "processing.h"
 #include "result.hpp"
 #include "shm_protocol.h"
 #include "trace.h"
@@ -78,9 +78,9 @@ public:
     // milliseconds to seconds that the caller reports as a start, not a slow
     // frame. admit, called before reshape, rejects a shape the engine does not
     // take; it builds nothing.
-    bool fits(unsigned, unsigned, unsigned, const ProcessingSettings&) const { return true; }
-    Result<void> admit(unsigned, unsigned, unsigned, const ProcessingSettings&) { return {}; }
-    Result<void> reshape(unsigned, unsigned, unsigned, const ProcessingSettings&) { return {}; }
+    bool fits(unsigned, unsigned, unsigned, const struct processing_settings&) const { return true; }
+    Result<void> admit(unsigned, unsigned, unsigned, const struct processing_settings&) { return {}; }
+    Result<void> reshape(unsigned, unsigned, unsigned, const struct processing_settings&) { return {}; }
     // Serving only: DMA the channel's frame slots directly.
     void pin(uint8_t*, uint8_t*, size_t) {}
     // Diagnostics: copies host or device memory, such as an imported frame, to the host.
@@ -94,7 +94,8 @@ protected:
 // What serving, the offline mode and --diagnose need of an engine.
 template <class E>
 concept Engine = std::derived_from<E, EngineBase<E>> && requires(E& engine, const E& view, unsigned n,
-                                                                 const ProcessingSettings& settings, struct frame_trace* trace) {
+                                                                 const struct processing_settings& settings,
+                                                                 struct frame_trace* trace) {
     { E::max_passes } -> std::convertible_to<unsigned>;
     // Whether a tier change rebuilds it, with the layer presenting its own frames meanwhile.
     { E::rebuilds_for_tier } -> std::convertible_to<bool>;
@@ -112,7 +113,7 @@ concept Engine = std::derived_from<E, EngineBase<E>> && requires(E& engine, cons
 
 class HipEngine;
 class VulkanEngine;
-Result<void> run_self_test(const Options& o, HipEngine& engine);
-Result<void> run_self_test(const Options& o, VulkanEngine& engine);
+Result<void> run_self_test(const struct options& o, HipEngine& engine);
+Result<void> run_self_test(const struct options& o, VulkanEngine& engine);
 
 } // namespace dlsslop

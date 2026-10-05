@@ -27,7 +27,8 @@ public:
         return {};
     }
     Result<void> prepare() { return {}; }
-    Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned, const ProcessingSettings& settings = {},
+    Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned,
+                       const struct processing_settings& settings = processing_settings(),
                        struct frame_trace* = nullptr)
     {
         std::memcpy(io.answer, io.proxy, size_t(w) * h * (settings.fp16 ? 8 : 4));

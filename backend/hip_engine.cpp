@@ -59,7 +59,7 @@ void HipEngine::release(Imported& slot)
     slot = {};
 }
 
-Result<struct hip_api> open_hip(Options& o)
+Result<struct hip_api> open_hip(struct options& o)
 {
     struct hip_api api;
     struct error e;
@@ -76,7 +76,8 @@ Result<struct hip_api> open_hip(Options& o)
 
 Result<void> HipEngine::fail_hip(int result, const char* what) const { return hip_error(api_, result, what); }
 
-HipEngine::HipEngine(Options o, unsigned tier, const struct hip_api& api) : options_(std::move(o)), tier_(tier), api_(api)
+HipEngine::HipEngine(const struct options& o, unsigned tier, const struct hip_api& api)
+    : options_(&o), tier_(tier), api_(api)
 {
     // Upstream's approximate ViT cache, which this variable selected, is not
     // part of the port.
@@ -103,14 +104,14 @@ void HipEngine::release()
     codec_gpu_fini(&gpu_codec_);
     native_kernels_fini(&kernels_);
     hip_network_fini(&network_);
-    previous_settings_ = {};
+    previous_settings_ = processing_settings();
 }
 
 Result<void> HipEngine::prepare()
 {
     const NativeTier& raster = *ShmNativeTier(tier_);
     // What follows is allocated on the device this thread selects.
-    DLSSLOP_TRY(check(api_.hipSetDevice(options_.device), "select the HIP device"));
+    DLSSLOP_TRY(check(api_.hipSetDevice(options_->device), "select the HIP device"));
     // With default flags, the stream's work stays in order with the null
     // stream's synchronous copies, which the CPU codec and diagnostics make.
     if (!stream_) DLSSLOP_TRY(check(api_.hipStreamCreate(&stream_), "create the HIP stream"));
@@ -126,31 +127,31 @@ Result<void> HipEngine::prepare()
     } planned;
     struct error e;
     if (const enum error_code code =
-            hip_plan_init(&planned.plan, raster.width, raster.networkHeight, options_.performance, &e))
+            hip_plan_init(&planned.plan, raster.width, raster.networkHeight, options_->performance, &e))
         return forward_c(code, e);
     if (const enum error_code code = hip_plan_place(&planned.placement, &planned.plan, &e)) return forward_c(code, e);
     // A model that failed to load is freed, so that no later network binds it.
     if (!model_.api)
         if (const enum error_code code =
-                hip_model_init(&model_, &api_, options_.modules.data(), options_.modules.size(), options_.assets.data(),
-                               options_.assets.size(), planned.plan.weights, planned.plan.weight_count, &e))
+                hip_model_init(&model_, &api_, options_->modules, options_->modules_length, options_->assets,
+                               options_->assets_length, planned.plan.weights, planned.plan.weight_count, &e))
             return forward_c(code, e);
     if (const enum error_code code =
             hip_network_init(&network_, &api_, &model_, stream_, &planned.plan, &planned.placement, &e))
         return forward_c(code, e);
     for (auto& event : marks_) DLSSLOP_TRY(check(api_.hipEventCreate(&event), "create timing event"));
     // Tuning, colour and motion use the module's kernels with the CPU codec too.
-    if (const enum error_code code =
-            native_kernels_init(&kernels_, &api_, stream_, (options_.modules + "/linux_native.hsaco").c_str(), &e))
+    const std::string native = std::string(options_->modules, options_->modules_length) + "/linux_native.hsaco";
+    if (const enum error_code code = native_kernels_init(&kernels_, &api_, stream_, native.c_str(), &e))
         return forward_c(code, e);
-    if (!options_.cpu_codec)
+    if (!options_->cpu_codec)
         if (const enum error_code code = codec_gpu_init(&gpu_codec_, &kernels_, &e)) return forward_c(code, e);
     temporal_ = temporal_gpu(&kernels_);
     const size_t pixels = size_t(raster.width) * raster.networkHeight;
     DLSSLOP_TRY(check(api_.hipMalloc(&device_input_, pixels * 16), "allocate network input"));
     DLSSLOP_TRY(check(api_.hipMalloc(&device_output_, pixels * 12), "allocate network output"));
     // The host copies of a pass's input and answer serve the CPU codec and the self-test's checks.
-    if (!gpu_codec_.kernels || options_.self_test) {
+    if (!gpu_codec_.kernels || options_->self_test) {
         input_.resize(pixels * 4);
         neural_.resize(pixels * 3);
     }
@@ -162,7 +163,7 @@ Result<void> HipEngine::prepare()
         return forward_c(code, e);
     DLSSLOP_TRY(synchronize());
     if (const enum error_code code = hip_network_print_memory(&network_, &e)) return forward_c(code, e);
-    if (!options_.self_test) return {};
+    if (!options_->self_test) return {};
     // The kernels on synthetic inputs, independent of model weights.
     if (const enum error_code code = control_selftest_run(&kernels_, &e)) return forward_c(code, e);
     return {};
@@ -210,7 +211,7 @@ Result<void> HipEngine::trace_image(struct frame_trace* trace, const struct geom
 }
 
 Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned passes,
-                              const ProcessingSettings& settings, struct frame_trace* trace, bool verify)
+                              const struct processing_settings& settings, struct frame_trace* trace, bool verify)
 {
     const uint8_t* const input = io.proxy;
     uint8_t* const output = io.answer;
@@ -256,7 +257,7 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
     DLSSLOP_TRY(mark(1));
     if (settings.motion) {
         // temporal_gpu_begin() itself drops the history for a new pass count, quality, grid or placement.
-        const bool reset = options_.self_test || !previous_settings_.motion ||
+        const bool reset = options_->self_test || !previous_settings_.motion ||
             previous_settings_.fp16 != settings.fp16 || previous_settings_.precision16 != settings.precision16 ||
             !(previous_settings_.tuning == settings.tuning) || previous_settings_.color_preserve != settings.color_preserve;
         previous_settings_.motion = false; // Until the frame completes: a failed one leaves no history.

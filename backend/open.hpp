@@ -17,13 +17,13 @@ struct OpenedEngine {
     std::optional<VulkanEngine> vulkan;
     std::optional<struct hip_api> hip;
 };
-Result<OpenedEngine> open_engine(Options& o, unsigned tier);
+Result<OpenedEngine> open_engine(struct options& o, unsigned tier);
 
 // RUN with the engine --backend selects. Everything RUN does is compiled for
 // each engine; which one runs is decided once, in open_engine(). RUN prepares
 // the HIP and identity engines.
 template <class Run>
-Result<void> with_engine(Options& o, unsigned tier, Run&& run)
+Result<void> with_engine(struct options& o, unsigned tier, Run&& run)
 {
     auto opened = DLSSLOP_TRY(open_engine(o, tier));
     if (opened.vulkan) return run(*opened.vulkan);

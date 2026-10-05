@@ -31,32 +31,38 @@ public:
         return {};
     }
     // Built before the daemon reports itself ready, for the raster's usual frame.
-    Result<void> prepare() { return network_.shape(vulkan_frame(ShmNativeTier(tier_)->width, tier_, 1, {})).transform([](bool) {}); }
-    bool fits(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings) const
+    Result<void> prepare()
     {
-        return !network_.shape_differs(vulkan_frame(w, h, passes, settings));
+        const struct processing_settings settings = processing_settings();
+        return network_.shape(processing_vulkan_frame(ShmNativeTier(tier_)->width, tier_, 1, &settings))
+            .transform([](bool) {});
     }
-    Result<void> admit(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings)
+    bool fits(unsigned w, unsigned h, unsigned passes, const struct processing_settings& settings) const
     {
-        return network_.plan(vulkan_frame(w, h, passes, settings));
+        return !network_.shape_differs(processing_vulkan_frame(w, h, passes, &settings));
     }
-    Result<void> reshape(unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings)
+    Result<void> admit(unsigned w, unsigned h, unsigned passes, const struct processing_settings& settings)
     {
-        return network_.shape(vulkan_frame(w, h, passes, settings)).transform([](bool) {});
+        return network_.plan(processing_vulkan_frame(w, h, passes, &settings));
+    }
+    Result<void> reshape(unsigned w, unsigned h, unsigned passes, const struct processing_settings& settings)
+    {
+        return network_.shape(processing_vulkan_frame(w, h, passes, &settings)).transform([](bool) {});
     }
     bool import_into(unsigned slot, const ShmTransportOffer& offer, int fds[2])
     {
         return network_.import(slot, offer, fds);
     }
-    Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
+    Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned passes,
+                       const struct processing_settings& settings = processing_settings(),
                        struct frame_trace* = nullptr)
     {
-        DLSSLOP_TRY(network_.infer(vulkan_frame(w, h, passes, settings), io.slot, io.proxy, io.answer));
+        DLSSLOP_TRY(network_.infer(processing_vulkan_frame(w, h, passes, &settings), io.slot, io.proxy, io.answer));
         upload_ms = network_.upload_ms;
         inference_ms = network_.inference_ms;
         readback_ms = network_.readback_ms;
         return {};
     }
-    Result<void> self_test(const Options& o) { return run_self_test(o, *this); }
+    Result<void> self_test(const struct options& o) { return run_self_test(o, *this); }
 };
 } // namespace dlsslop

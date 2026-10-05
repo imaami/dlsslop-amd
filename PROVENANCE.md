@@ -119,7 +119,7 @@ atomic, `helperFrames` or `layerFrames`, and `layerFrames` is at the end of the
 header, because its words do not start at a multiple of eight bytes.
 `common/shm_protocol.hpp` holds overloads that return a `std::string` of the
 functions that write a string into the caller's buffer and that C++ calls:
-`ShmNativeDefaultPath`, `ShmNativeChannelPath` and `ShmLoadString`.
+`ShmNativeChannelPath` and `ShmLoadString`.
 
 The layer re-initializes a channel only when its magic or its version is not
 this protocol's. Upstream also re-initialized one whose `passes` was 0, which
