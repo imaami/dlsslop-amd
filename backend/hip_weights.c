@@ -356,13 +356,44 @@ packed_floats (struct layout const *l,
 	return stem->elements + diagonals;
 }
 
+/** @brief hip_weights_exact_fp8(), which the packing loops inline: gcc does not inline the
+ *         public function. */
+static inline enum hip_flaw
+exact_fp8 (float    value,
+           uint8_t *code)
+{
+	uint32_t const a = bits(value) & 0x7fffffff;
+	uint8_t const sign = (uint8_t)(bits(value) >> 24 & 128);
+	if (!a) {
+		*code = sign;
+		return HIP_FLAW_NONE;
+	}
+	if (a >= 0x7f800000)
+		return HIP_FLAW_FP8_NONFINITE;
+	if (a < 0x3c800000) {
+		// Below 2^-6: an E4M3 subnormal, q * 2^-9 with q 1..7.
+		float const q = from_bits(a) * 512.f;
+		if (q < 1 || q > 7 || q != (float)(uint32_t)q)
+			return HIP_FLAW_FP8_SUBNORMAL;
+		*code = (uint8_t)(sign | (uint8_t)q);
+		return HIP_FLAW_NONE;
+	}
+	// The biased exponent is 121 or more here, so E4M3's is 1 or more.
+	uint32_t const exponent = (a >> 23) - 120, mantissa = a >> 20 & 7;
+	// Exponent 15 with mantissa 7 is NaN.
+	if (exponent > 15 || a & 0xfffff || (exponent == 15 && mantissa == 7))
+		return HIP_FLAW_FP8_INEXACT;
+	*code = (uint8_t)(sign | exponent << 3 | mantissa);
+	return HIP_FLAW_NONE;
+}
+
 /** @brief The E4M3 code of a value that hip_weights_saturate_fp8() or hip_weights_scale_piece()
  *         made: always exact. */
 static uint8_t
 fp8_code (float exact)
 {
 	uint8_t code = 0;
-	hip_weights_exact_fp8(exact, &code);
+	exact_fp8(exact, &code);
 	return code;
 }
 
@@ -573,7 +604,7 @@ pack_fp8_regions (float               *values,
 	for (size_t r = 0; r < count; ++r) {
 		for (size_t i = 0; i < regions[r].count; ++i) {
 			uint8_t code;
-			enum hip_flaw const flaw = hip_weights_exact_fp8(values[regions[r].first + i], &code);
+			enum hip_flaw const flaw = exact_fp8(values[regions[r].first + i], &code);
 			if (flaw)
 				return bad_element(regions[r].first + i, flaw, e);
 			codes[4 * regions[r].first + i] = code;
@@ -754,29 +785,7 @@ enum hip_flaw
 hip_weights_exact_fp8 (float    value,
                        uint8_t *code)
 {
-	uint32_t const a = bits(value) & 0x7fffffff;
-	uint8_t const sign = (uint8_t)(bits(value) >> 24 & 128);
-	if (!a) {
-		*code = sign;
-		return HIP_FLAW_NONE;
-	}
-	if (a >= 0x7f800000)
-		return HIP_FLAW_FP8_NONFINITE;
-	if (a < 0x3c800000) {
-		// Below 2^-6: an E4M3 subnormal, q * 2^-9 with q 1..7.
-		float const q = from_bits(a) * 512.f;
-		if (q < 1 || q > 7 || q != (float)(uint32_t)q)
-			return HIP_FLAW_FP8_SUBNORMAL;
-		*code = (uint8_t)(sign | (uint8_t)q);
-		return HIP_FLAW_NONE;
-	}
-	// The biased exponent is 121 or more here, so E4M3's is 1 or more.
-	uint32_t const exponent = (a >> 23) - 120, mantissa = a >> 20 & 7;
-	// Exponent 15 with mantissa 7 is NaN.
-	if (exponent > 15 || a & 0xfffff || (exponent == 15 && mantissa == 7))
-		return HIP_FLAW_FP8_INEXACT;
-	*code = (uint8_t)(sign | exponent << 3 | mantissa);
-	return HIP_FLAW_NONE;
+	return exact_fp8(value, code);
 }
 
 enum hip_flaw
