@@ -1195,9 +1195,9 @@ make_pipelines (struct vulkan_runtime     *rt,
 		.cache          = cache,
 		.shaders_length = paths->shaders_length,
 		.count          = n,
+		.next           = 0,
+		.failed         = false,
 	};
-	atomic_init(&pool.next, 0);
-	atomic_init(&pool.failed, false);
 	struct compiler workers[COMPILERS];
 	size_t const most = compilers();
 	size_t const threads = (n < most ? n : most) - 1;
