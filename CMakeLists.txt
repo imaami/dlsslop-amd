@@ -116,9 +116,9 @@ add_network_shader(common/network_fallback.comp network/network_fallback kNetwor
 add_custom_target(network-shaders DEPENDS ${NETWORK_SHADERS})
 
 # The C functions that common/'s headers declare for C and C++: the channel's,
-# the settings', the Vulkan network's requirements and the errors' words. The
-# layers, the network module, the programs and the tests link them.
-add_library(dlsslop-common-c OBJECT common/shm_protocol.c common/control_settings.c
+# its file's, the settings', the Vulkan network's requirements and the errors'
+# words. The layers, the network module, the programs and the tests link them.
+add_library(dlsslop-common-c OBJECT common/shm_protocol.c common/shm_channel.c common/control_settings.c
     common/network_requirements.c common/error.c)
 set_target_properties(dlsslop-common-c PROPERTIES POSITION_INDEPENDENT_CODE ON)
 # control_settings.c calls trunc().
@@ -213,7 +213,7 @@ target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 # GCC does not inline -O3 code into these callers, so none of it slows down.
 set_source_files_properties(backend/main.cpp backend/options.c backend/paths.c backend/files.c
     backend/channel.c backend/transport.c backend/trace.c backend/open.cpp backend/self_test.cpp backend/hip.c
-    backend/hip_plan.c backend/control_selftest.c common/error.c PROPERTIES COMPILE_OPTIONS -Os)
+    backend/hip_plan.c backend/control_selftest.c common/error.c common/shm_channel.c PROPERTIES COMPILE_OPTIONS -Os)
 
 if(BUILD_TESTING)
     # What several C tests need: a temporary directory removed with what it holds, a whole file and a
@@ -402,6 +402,11 @@ if(BUILD_TESTING)
     add_executable(shm-protocol-test tests/shm_protocol_test.c)
     target_link_libraries(shm-protocol-test PRIVATE dlsslop-common-c)
     add_test(NAME shm-protocol COMMAND shm-protocol-test)
+    # The channel's file: processes that create it at once, each way of creating it, and the files
+    # and directories it refuses, in C.
+    add_executable(shm-channel-test tests/shm_channel_test.c)
+    target_link_libraries(shm-channel-test PRIVATE dlsslop-common-c test-support)
+    add_test(NAME shm-channel COMMAND shm-channel-test)
     add_test(NAME color-metrics COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/color_metrics_test.py)
     add_test(NAME color-orchestrator COMMAND ${Python3_EXECUTABLE}
