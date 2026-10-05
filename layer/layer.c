@@ -26,14 +26,15 @@
 #include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/un.h>
 #include <unistd.h>
 #include <vulkan/vk_layer.h>
 #include <vulkan/vulkan.h>
 
+#include "../common/error.h"
 #include "../common/list.h"
+#include "../common/shm_channel.h"
 #include "../common/shm_protocol.h"
 #include "../common/util.h"
 #include "composition.h"
@@ -95,6 +96,7 @@ struct shm_map {
 	double            retry_after_ms;     //!< When a heartbeat may end SHM_MAP_DEAD (log_now_ms()).
 	double            start_after_ms;     //!< start_worker()'s rate limit (log_now_ms()).
 	double            open_after_ms;      //!< shm_map_open()'s rate limit (log_now_ms()).
+	uint64_t          open_failure;       //!< The FNV-1a of the failure shm_map_open() last logged, or 0.
 	uint32_t          timeouts;           //!< The requests in a row that the helper did not answer.
 	uint32_t          last_control_seq;   //!< The header's controlSeq, as last seen.
 	uint32_t          last_heartbeat;     //!< The header's heartbeat, as last seen.
@@ -147,8 +149,8 @@ shm_map_fini (struct shm_map *dest)
  * The channel has one pixel slot. A game can have a separate launcher or helper process with its own
  * Vulkan device, so the in-process primary-swapchain election is not sufficient. Contending processes
  * present untouched while another owns the slot. This is a separate file because the worker locks
- * the SHM file for its lifetime. Only this user can create it: shm_map_open()'s ensure_parent_dir()
- * admits nothing but a private directory. A failed open is retried on the next frame.
+ * the SHM file for its lifetime. Only this user can create it: shm_channel_open() admits nothing but
+ * a private directory. A failed open is retried on the next frame.
  *
  * @param s The map.
  * @return  true if this process now holds the slot; the caller releases it with
@@ -175,61 +177,6 @@ shm_map_lock_producer (struct shm_map *s)
 		s->producer_fd = fd;
 	}
 	return !flock(s->producer_fd, LOCK_EX | LOCK_NB);
-}
-
-/** @brief Creates a directory unless it exists.
- *
- * @param dir The directory.
- * @return    true if it exists now; otherwise why it could not be created is logged.
- */
-static bool
-make_dir (char const *dir)
-{
-	if (!mkdir(dir, 0700) || errno == EEXIST)
-		return true;
-	log_printf("[shm] cannot create %s: %s", dir, strerror(errno));
-	return false;
-}
-
-/** @brief Creates the directory of a file, and checks that it is this user's alone.
- *
- * The directory now lives under /tmp, which is world-writable, so it is worth checking that what we
- * are about to open really is ours: a directory, owned by this uid, with nothing granted to anyone
- * else. Anything else and we refuse rather than create the file inside it.
- *
- * @param path   The file's path, which the function cuts at each slash in turn and restores.
- * @param length The path's length.
- * @return       true if the file may be created there.
- */
-static bool
-ensure_parent_dir (char   *path,
-                   size_t  length)
-{
-	char *const slash = memrchr(path, '/', length);
-	if (!slash || slash == path)
-		return true;
-
-	// The directory: the path up to the file's name.
-	*slash = '\0';
-	// Each ancestor, then the directory itself, up to the first that cannot be created.
-	bool made = true;
-	for (char *end = strchr(path + 1, '/'); made && end; end = strchr(end + 1, '/')) {
-		*end = '\0';
-		made = make_dir(path);
-		*end = '/';
-	}
-	made = made && make_dir(path);
-
-	struct stat st;
-	bool const exists = made && lstat(path, &st) == 0;
-	bool const ours = exists && S_ISDIR(st.st_mode) && st.st_uid == getuid()
-	                  && (st.st_mode & (S_IRWXG | S_IRWXO)) == 0;
-	if (made && !exists)
-		log_printf("[shm] %s is missing", path);
-	else if (exists && !ours)
-		log_printf("[shm] refusing %s: it is not a private directory owned by this user", path);
-	*slash = '/';
-	return ours;
 }
 
 /** @brief Maps the two pixel regions at the size this frame needs, remapping when the size changes.
@@ -313,10 +260,11 @@ channel_path (size_t *length)
 	return path;
 }
 
-/** @brief Maps the channel's header, creating the file if it is not there.
+/** @brief Maps the channel's header, creating the channel if it is not there (shm_channel_open()).
  *
  * The channel is channel_path()'s, which the map keeps once the header is mapped. Every present asks
- * for it, so a failed attempt is not repeated, nor logged again, for two seconds.
+ * for it, so a failed attempt is not repeated for two seconds, and a failure is logged once for as
+ * long as it repeats: a refused file stays refused until someone removes it.
  *
  * @param s The map.
  * @return  true if the header is mapped.
@@ -337,73 +285,31 @@ shm_map_open (struct shm_map *s)
 		log_printf("[shm] cannot make the channel's path");
 		return false;
 	}
-	if (!ensure_parent_dir(p, length))
-		goto fail;
-	int fd = open(p, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
-	if (fd < 0) {
-		log_printf("[shm] open %s failed", p);
-		goto fail;
+	struct shm_channel channel;
+	struct error e;
+	if (shm_channel_open(&channel, p, length, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE, &e)) {
+		uint64_t failure = UINT64_C(0xcbf29ce484222325);
+		for (char const *c = e.what; *c; ++c)
+			failure = (failure ^ (uint8_t)*c) * UINT64_C(0x100000001b3);
+		if (failure != s->open_failure) {
+			s->open_failure = failure;
+			log_printf("[shm] %s", e.what);
+		}
+		free(p);
+		p = nullptr;
+		return false;
 	}
-	// The file still spans the whole protocol -- the offsets are fixed and both sides agree on them --
-	// but it is sparse, so the size on disk is what has actually been written.
-	off_t const total = (off_t)ShmTotalBytes();
-	struct stat st;
-	if ((fstat(fd, &st) != 0 || st.st_size < total) && ftruncate(fd, total) != 0) {
-		close(fd);
-		fd = -1;
-		goto fail;
-	}
-	// The magic and the version as the file holds them: the header's atomic objects have no valid
-	// state until a channel's initialisation gives them one (C23 7.17.2), so none is loaded before
-	// these two say that it has. Each word read once: another process may be rewriting them.
-	uint32_t head[offsetof(struct ShmHeader, version) / sizeof (uint32_t) + 1];
-	if (pread(fd, head, sizeof head, 0) != (ssize_t)sizeof head) {
-		log_printf("[shm] read of the header failed");
-		close(fd);
-		fd = -1;
-		goto fail;
-	}
-
-	void *const m = mmap(nullptr, kHeaderBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	if (m == MAP_FAILED) {
-		log_printf("[shm] mmap of the header failed");
-		close(fd);
-		fd = -1;
-		goto fail;
-	}
-	s->fd = fd;
-	s->hdr = m;
+	// The map owns the header's mapping and the descriptor from here on: shm_map_fini() unmaps and
+	// closes them.
+	s->fd = channel.fd;
+	s->hdr = channel.h;
 	s->path = p;
 	s->path_length = length;
-	// A mapping left by an older build has a different magic, a different version, or a header laid
-	// out differently; re-initialising is the only safe reading of any of those.
-	//
-	// But say so, loudly. A live process on the other side of the mismatch keeps re-initialising the
-	// other way, and the two then silently reset each other's settings forever -- the layer keeps
-	// composing with its old field set and every setting the newer side writes is invisible. That is
-	// indistinguishable from "the new feature does nothing", which is how a stale layer reads until
-	// someone checks the log.
-	bool stale = head[0] != kShmMagic;
-	if (!stale) {
-		uint32_t const version = head[offsetof(struct ShmHeader, version) / sizeof *head];
-		stale = version != kShmVersion;
-		if (stale)
-			log_printf("[shm] header is version %u but this layer is v%u -- another process is out of "
-			           "date, re-initialising it; update the layer, the helper and the GUI together",
-			           version, kShmVersion);
-	}
-	// A channel of this version is never initialised again: other processes may be using it.
-	if (stale)
-		ShmInitDefaults(s->hdr);
 	s->last_heartbeat = atomic_load(&s->hdr->heartbeat);
-	log_printf("[shm] attached %s seq_req=%u seq_resp=%u", s->path, atomic_load(&s->hdr->seq_req),
+	log_printf("[shm] attached %s%s seq_req=%u seq_resp=%u", s->path,
+	           channel.flags & SHM_CHANNEL_CREATED ? " (created)" : "", atomic_load(&s->hdr->seq_req),
 	           atomic_load(&s->hdr->seq_resp));
 	return true;
-
-fail:
-	free(p);
-	p = nullptr;
-	return false;
 }
 
 /** @brief Whether frames go to the helper: the channel asks for neural rendering, and the helper is

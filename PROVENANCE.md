@@ -121,11 +121,14 @@ header, because its words do not start at a multiple of eight bytes.
 functions that write a string into the caller's buffer and that C++ calls:
 `ShmNativeChannelPath` and `ShmLoadString`.
 
-The layer re-initializes a channel only when its magic or its version is not
-this protocol's. Upstream also re-initialized one whose `passes` was 0, which
-marked a header whose initialization had stored the magic but not yet
-`passes`. Here initialization stores the magic last, and no process stores a
-`passes` of 0.
+Upstream's layer created the channel under its name, initialized it there with
+`ShmInitDefaults`, the shared defaults, and re-initialized a channel whose magic
+or version was not this protocol's, or whose `passes` was 0, which marked a
+header whose initialization had stored the magic but not yet `passes`. Here the
+layer opens the channel with `shm_channel_open` from `common/shm_channel.c`, as
+every other program does: a missing channel is created whole, with
+`ShmInitNativeDefaults`, before the file has a name, and a channel of another
+protocol is refused. `ShmInitDefaults` is gone.
 
 The layer's composition shader `layer/dlssnr/dlssnr.comp` is a GLSL port of the
 layer fork's `layer_linux/src/dlssnr/dlssnr.hlsl` (AGPL-3.0). Its RenoDX-derived

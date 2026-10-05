@@ -468,14 +468,6 @@ check_read (void)
 	native_header(&daemon);
 	expect(composition_frame_settings_read(&daemon), native_defaults(), "the daemon's defaults");
 
-	// What the layer writes when it creates the channel.
-	struct ShmHeader layer;
-	ShmInitDefaults(&layer);
-	struct composition_frame_settings want = native_defaults();
-	want.transfer = 1;
-	want.composition_bypass = 1;
-	expect(composition_frame_settings_read(&layer), want, "the layer's defaults");
-
 	float const unusable[] = {NAN, INFINITY, -INFINITY};
 	for (uint32_t v = 0; v < sizeof unusable / sizeof *unusable; ++v)
 		for (uint32_t i = 0; i < sizeof HEADER_REALS / sizeof *HEADER_REALS; ++i)
@@ -511,7 +503,7 @@ check_read (void)
 		struct ShmHeader header;
 		native_header(&header);
 		atomic_store(header_word(&header, w->source), w->value);
-		want = native_defaults();
+		struct composition_frame_settings want = native_defaults();
 		*word_at(&want, w->field) = w->want;
 		expect(composition_frame_settings_read(&header), want, "word %u", w->value);
 	}
@@ -531,7 +523,7 @@ check_read (void)
 		struct ShmHeader header;
 		native_header(&header);
 		atomic_store(header_word(&header, p->source), p->value);
-		want = native_defaults();
+		struct composition_frame_settings want = native_defaults();
 		*real_at(&want, p->field) = p->want;
 		expect(composition_frame_settings_read(&header), want, "percent %u", p->value);
 	}
@@ -554,7 +546,7 @@ check_read (void)
 		native_header(&header);
 		atomic_store(&header.nativeModelMaxWidth, m->width);
 		atomic_store(&header.nativeModelMaxHeight, m->height);
-		want = native_defaults();
+		struct composition_frame_settings want = native_defaults();
 		want.native_model_max_width = m->want_width;
 		want.native_model_max_height = m->want_height;
 		expect(composition_frame_settings_read(&header), want, "maxima %ux%u", m->width, m->height);

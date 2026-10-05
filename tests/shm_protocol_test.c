@@ -61,31 +61,26 @@ require (bool        condition,
 	exit(1);
 }
 
-/** @brief Initializes headers filled with PATTERN, as a new file or another version's channel is
- *         filled with something, and ends the test if a word of one is left as it was.
+/** @brief Initializes a header filled with PATTERN, as storage is filled with something, and ends
+ *         the test if a word of it is left as it was.
  */
 static void
 check_init (void)
 {
 	uint32_t pattern;
 	memset(&pattern, PATTERN, sizeof pattern);
-	for (uint32_t native = 0; native < 2; ++native) {
-		struct ShmHeader header;
-		// No atomic object of the header is valid after this, until the header is initialized.
-		memset(&header, PATTERN, sizeof header);
-		if (native)
-			ShmInitNativeDefaults(&header, false);
-		else
-			ShmInitDefaults(&header);
-		unsigned char const *const bytes = (unsigned char const *)&header;
-		for (size_t offset = 0; offset < sizeof header; offset += sizeof pattern) {
-			uint32_t word;
-			memcpy(&word, bytes + offset, sizeof word);
-			if (word == pattern) {
-				fprintf(stderr, "shm-protocol-test: %s left the word at offset %zu as it was\n",
-				        native ? "ShmInitNativeDefaults()" : "ShmInitDefaults()", offset);
-				exit(1);
-			}
+	struct ShmHeader header;
+	// No atomic object of the header is valid after this, until the header is initialized.
+	memset(&header, PATTERN, sizeof header);
+	ShmInitNativeDefaults(&header, false);
+	unsigned char const *const bytes = (unsigned char const *)&header;
+	for (size_t offset = 0; offset < sizeof header; offset += sizeof pattern) {
+		uint32_t word;
+		memcpy(&word, bytes + offset, sizeof word);
+		if (word == pattern) {
+			fprintf(stderr, "shm-protocol-test: ShmInitNativeDefaults() left the word at offset %zu as "
+			        "it was\n", offset);
+			exit(1);
 		}
 	}
 }
@@ -156,7 +151,7 @@ check_counts (void)
 	struct ShmHeader *const h = mmap(nullptr, sizeof *h, PROT_READ | PROT_WRITE,
 	                                 MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	require(h != MAP_FAILED, "mmap failed");
-	ShmInitDefaults(h);
+	ShmInitNativeDefaults(h, false);
 	require(!fflush(nullptr), "fflush failed");
 	pid_t const reader = getpid();
 	pid_t const child = fork();

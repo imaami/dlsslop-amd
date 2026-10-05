@@ -208,24 +208,16 @@ ShmLoadString (struct ShmHeader const *h,
 	return false;
 }
 
-/** @brief Gives each atomic object of a header its default with atomic_init(), and zeroes the text
- *         fields.
- *
- * Every member once, in the header's order, but for the version and the magic, which come last,
- * after a release fence. The fence keeps the compiler and the processor from moving the stores
- * across it, so in practice a header that holds this protocol's magic and version has finished its
- * initialization. C does not guarantee that: atomic_init() is an initialization, not an atomic
- * operation (C23 7.17.2.1), and a fence orders memory only through atomic operations (7.17.4).
- *
- * @param h      The header.
- * @param native Whether the defaults are the native channel's.
- * @param bypass The default of compositionBypass.
- */
-static void
-shm_init (struct ShmHeader *h,
-          bool              native,
-          bool              bypass)
+void
+ShmInitNativeDefaults (struct ShmHeader *h,
+                       bool              bypass)
 {
+	// Every member once, in the header's order, but for the version and the magic, which come last,
+	// after a release fence. The fence keeps the compiler and the processor from moving the stores
+	// across it, so in practice a header that holds this protocol's magic and version has finished
+	// its initialization. C does not guarantee that: atomic_init() is an initialization, not an
+	// atomic operation (C23 7.17.2.1), and a fence orders memory only through atomic operations
+	// (7.17.4).
 	atomic_init(&h->helperFrames, 0);
 	atomic_init(&h->layerFrames, 0);
 	atomic_init(&h->seq_req, 0);
@@ -238,7 +230,7 @@ shm_init (struct ShmHeader *h,
 	atomic_init(&h->tuningSeq, 0);
 
 	atomic_init(&h->enabled, 1);
-	atomic_init(&h->passes, native ? kNativeDefaultPasses : 1);
+	atomic_init(&h->passes, kNativeDefaultPasses);
 	atomic_init(&h->preset, 0);
 	atomic_init(&h->style, 0);
 	atomic_init(&h->autoMask, 1);
@@ -251,7 +243,7 @@ shm_init (struct ShmHeader *h,
 	atomic_init(&h->transferStrengthBits, FloatToBits(1.0f));
 	atomic_init(&h->colourStrengthBits, FloatToBits(1.0f));
 	atomic_init(&h->maxRatioBits, FloatToBits(2.0f));
-	atomic_init(&h->transfer, native ? 2 : 1);
+	atomic_init(&h->transfer, 2);
 	atomic_init(&h->debugView, 0);
 	atomic_init(&h->debugScaleBits, FloatToBits(1.0f));
 	atomic_init(&h->whitePointBits, FloatToBits(1.0f));
@@ -305,44 +297,31 @@ shm_init (struct ShmHeader *h,
 		atomic_init(&pass->autoMask, 1);
 	}
 
-	atomic_init(&h->mvecEnabled, !native);
+	atomic_init(&h->mvecEnabled, 0);
 	atomic_init(&h->mvecQuality, kMVecBalanced);
 	atomic_init(&h->seq_ok, 0);
 	atomic_init(&h->compositionBypass, bypass);
 	atomic_init(&h->answeredW, 0);
 	atomic_init(&h->answeredH, 0);
-	atomic_init(&h->hdrMode, native ? kHdrOff : kHdrAuto);
+	atomic_init(&h->hdrMode, kHdrOff);
 	atomic_init(&h->hdrDetected, kHdrNone);
 	atomic_init(&h->hdrActive, 0);
 	atomic_init(&h->proxyFormat, kProxyRgba8);
 	atomic_init(&h->hdrEncode, 0);
 	atomic_init(&h->colourTrustPercent, 200);
 	atomic_init(&h->ratioSmoothPercent, 100);
-	atomic_init(&h->sdr16Multipass, native);
+	atomic_init(&h->sdr16Multipass, 1);
 	atomic_init(&h->mvecPixelSize, kMVecPixels4);
 	atomic_init(&h->nativeModelMaxWidth, 0);
 	atomic_init(&h->nativeModelMaxHeight, 0);
 	atomic_init(&h->colorPreserveBits, 0);
 	atomic_init(&h->transportGen, 0);
 	atomic_init(&h->transportMiss, 0);
-	atomic_init(&h->nativeTier, native ? kNativeDefaultTier : 0);
+	atomic_init(&h->nativeTier, kNativeDefaultTier);
 
 	atomic_thread_fence(memory_order_release);
 	atomic_init(&h->version, kShmVersion);
 	atomic_init(&h->magic, kShmMagic);
-}
-
-void
-ShmInitDefaults (struct ShmHeader *h)
-{
-	shm_init(h, false, true);
-}
-
-void
-ShmInitNativeDefaults (struct ShmHeader *h,
-                       bool              bypass)
-{
-	shm_init(h, true, bypass);
 }
 
 struct NativeTier const *
