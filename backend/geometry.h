@@ -2,8 +2,6 @@
  *
  * Where a source picture sits in the network's padded raster: struct geometry (kernel_args.h) for a
  * source extent and a tier, and the checks of one. geometry.c defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_GEOMETRY_H_
@@ -11,10 +9,6 @@
 
 #include "error.h"
 #include "kernel_args.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /** @brief The geometry of a source picture at a tier: the picture fitted, aspect kept and centered,
  *         into the tier's viewport.
@@ -53,9 +47,5 @@ geometry_validate (struct geometry const *g,
  */
 extern bool
 geometry_fits (struct geometry const *g);
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_GEOMETRY_H_ */

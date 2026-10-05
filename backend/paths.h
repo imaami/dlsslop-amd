@@ -3,32 +3,19 @@
  * Where dlsslopd and the in-layer network find the model, the HIP modules, the Vulkan network's
  * shaders and pipeline cache, and dlsslopd's settings. A path is a heap string, which the caller
  * frees. paths.c defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_PATHS_H_
 #define DLSSLOP_AMD_BACKEND_PATHS_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-#else
-# include <stddef.h>
-#endif
+#include <stddef.h>
 
 #include "error.h"
 
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
-
 /** @brief The user's home directory, which the default paths below it share. */
 struct paths_home {
-	char const  *path;   //!< Nonempty HOME, otherwise the account's; nullptr if there is none.
-	STD(size_t)  length; //!< Its length; 0 without a home.
+	char const *path;   //!< Nonempty HOME, otherwise the account's; nullptr if there is none.
+	size_t      length; //!< Its length; 0 without a home.
 };
 
 /** @brief Finds the user's home directory, once for every path that a caller makes below it.
@@ -50,7 +37,7 @@ paths_home (void);
  */
 extern enum error_code
 paths_default_assets (char                    **dest,
-                      STD(size_t)              *length,
+                      size_t                   *length,
                       struct paths_home const  *home,
                       struct error             *e);
 
@@ -65,7 +52,7 @@ paths_default_assets (char                    **dest,
  */
 extern enum error_code
 paths_default_vulkan_model (char                    **dest,
-                            STD(size_t)              *length,
+                            size_t                   *length,
                             struct paths_home const  *home,
                             struct error             *e);
 
@@ -80,7 +67,7 @@ paths_default_vulkan_model (char                    **dest,
  */
 extern enum error_code
 paths_default_config (char                    **dest,
-                      STD(size_t)              *length,
+                      size_t                   *length,
                       struct paths_home const  *home,
                       struct error             *e);
 
@@ -94,7 +81,7 @@ paths_default_config (char                    **dest,
  */
 extern enum error_code
 paths_executable (char         **dest,
-                  STD(size_t)   *length,
+                  size_t        *length,
                   struct error  *e);
 
 /** @brief The native gfx1201 HIP modules' default directory.
@@ -113,9 +100,9 @@ paths_executable (char         **dest,
  */
 extern enum error_code
 paths_default_modules (char         **dest,
-                       STD(size_t)   *length,
+                       size_t        *length,
                        char const    *binary,
-                       STD(size_t)    binary_length,
+                       size_t         binary_length,
                        struct error  *e);
 
 /** @brief The Vulkan network's SPIR-V for a binary installed under a prefix, or a source build's in
@@ -133,11 +120,11 @@ paths_default_modules (char         **dest,
  */
 extern enum error_code
 paths_vulkan_shaders_at (char         **dest,
-                         STD(size_t)   *length,
+                         size_t        *length,
                          char const    *prefix,
-                         STD(size_t)    prefix_length,
+                         size_t         prefix_length,
                          char const    *build,
-                         STD(size_t)    build_length,
+                         size_t         build_length,
                          struct error  *e);
 
 /** @brief dlsslopd's Vulkan network SPIR-V: paths_vulkan_shaders_at() of the prefix its binary is
@@ -153,9 +140,9 @@ paths_vulkan_shaders_at (char         **dest,
  */
 extern enum error_code
 paths_vulkan_shaders (char         **dest,
-                      STD(size_t)   *length,
+                      size_t        *length,
                       char const    *binary,
-                      STD(size_t)    binary_length,
+                      size_t         binary_length,
                       struct error  *e);
 
 /** @brief The Vulkan network's writable pipeline cache: nonempty
@@ -171,7 +158,7 @@ paths_vulkan_shaders (char         **dest,
  */
 extern enum error_code
 paths_vulkan_cache (char                    **dest,
-                    STD(size_t)              *length,
+                    size_t                   *length,
                     struct paths_home const  *home,
                     struct error             *e);
 
@@ -184,11 +171,5 @@ paths_vulkan_cache (char                    **dest,
 extern enum error_code
 paths_require_vulkan_model (char const   *model,
                             struct error *e);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_PATHS_H_ */

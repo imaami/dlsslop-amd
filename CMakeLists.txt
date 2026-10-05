@@ -18,11 +18,11 @@ set(CMAKE_SKIP_RPATH TRUE)
 # never fuse a multiply and an add.
 add_compile_options(-ffp-contract=off)
 add_compile_options(-Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
-# Section GC and a stripped Release drop the unreached parts of the statically
-# linked libstdc++ and the symbol tables from every binary.
+# Section GC and a stripped Release drop unreached code and the symbol tables
+# from every binary.
 add_compile_options(-ffunction-sections -fdata-sections)
-# The project's code reports errors as Results: it throws, catches and asks for
-# types at run time nowhere. GCC warns about -fno-rtti for C.
+# The project's C++ throws, catches and asks for types at run time nowhere: the
+# GUI reports errors as Results. GCC warns about -fno-rtti for C.
 add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
 add_link_options(-Wl,--gc-sections $<$<CONFIG:Release>:-s>)
 # A program that the C driver links gets no C++ standard library, even where
@@ -218,20 +218,26 @@ target_link_options(dlsslop-network PRIVATE -static-libgcc -Wl,-Bsymbolic
 add_dependencies(dlsslop-network vulkan-nr-shaders)
 # The worker uses a small, versioned HIP ABI loaded with dlopen. The build itself
 # deliberately does not require ROCm headers or a GPU; real inference does.
+# Each engine's serving, offline mode and --diagnose are run_engine.inc compiled
+# for it: run_vulkan.c, run_hip.c and run_identity.c.
 add_executable(dlsslopd
-    backend/main.cpp backend/options.c backend/paths.c backend/serve.cpp backend/transport.c
-    backend/open.cpp backend/hip_engine.cpp backend/self_test.cpp
+    backend/main.c backend/options.c backend/paths.c backend/serve.c backend/transport.c
+    backend/open.c backend/hip_engine.c backend/vulkan_engine.c backend/self_test.c
+    backend/run_vulkan.c backend/run_hip.c backend/run_identity.c
     backend/channel.c backend/files.c backend/trace.c backend/vulkan_network.c
     backend/processing.c)
 target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip dlsslop-vulkan dlsslop-common-c Threads::Threads
     ${CMAKE_DL_LIBS})
 add_dependencies(dlsslopd vulkan-nr-shaders)
-target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
+# C, with kernel_math.cpp its one C++ object: the C driver links it without a
+# C++ runtime, so a dependency on one fails the link.
+set_target_properties(dlsslopd PROPERTIES LINKER_LANGUAGE C)
+target_link_options(dlsslopd PRIVATE -static-libgcc)
 # What runs once per start, per transport offer or per diagnostic is built for
 # size; the frame path (serving loop, engines, codec, networks) stays at -O3.
 # GCC does not inline -O3 code into these callers, so none of it slows down.
-set_source_files_properties(backend/main.cpp backend/options.c backend/paths.c backend/files.c
-    backend/channel.c backend/transport.c backend/trace.c backend/open.cpp backend/self_test.cpp backend/hip.c
+set_source_files_properties(backend/main.c backend/options.c backend/paths.c backend/files.c
+    backend/channel.c backend/transport.c backend/trace.c backend/open.c backend/self_test.c backend/hip.c
     backend/hip_plan.c backend/control_selftest.c common/error.c common/shm_channel.c PROPERTIES COMPILE_OPTIONS -Os)
 
 if(BUILD_TESTING)

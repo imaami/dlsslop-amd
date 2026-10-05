@@ -6,29 +6,15 @@
  * of DLSSNR-AMD's linux/src/core (MIT): the layer table and walk of nr_native_plan.cpp, and
  * NrSession::build in nr_graph.cpp up to the device. vulkan_plan.c and vulkan_schedule.c define the
  * functions and the tables.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_COMMON_VULKAN_PLAN_H_
 #define DLSSLOP_AMD_COMMON_VULKAN_PLAN_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-# include <cstdint>
-#else
-# include <stddef.h>
-# include <stdint.h>
-#endif
+#include <stddef.h>
+#include <stdint.h>
 
 #include "error.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /* The shader build's constants that the plan's arithmetic depends on (upstream:
  * linux/build/arch/rdna4.sh, and nr_graph.cpp's defaults for those it leaves unset). The SPIR-V
@@ -108,8 +94,8 @@ extern char const VULKAN_PLAN_MANIFEST[];
 
 /** @brief A line of shader-constants.txt after VULKAN_PLAN_MANIFEST: a constant's key and value. */
 struct vulkan_shader_constant {
-	char const    *key;   //!< The constant's key.
-	STD(uint32_t)  value; //!< Its value.
+	char const *key;   //!< The constant's key.
+	uint32_t    value; //!< Its value.
 };
 
 /** @brief The number of VULKAN_PLAN_SHADER_CONSTANTS. */
@@ -120,25 +106,25 @@ struct vulkan_shader_constant {
  * The SPIR-V that the plan's kernels load must carry them exactly; the fixed paths that the plan
  * takes (weight layout 3, math profile 3 and the fusions) are among them.
  */
-extern struct vulkan_shader_constant const VULKAN_PLAN_SHADER_CONSTANTS[VULKAN_PLAN_SHADER_CONSTANT_COUNT];
+extern struct vulkan_shader_constant const VULKAN_PLAN_SHADER_CONSTANTS[];
 
 /** @brief A marker beside the SPIR-V: a file of one line. */
 struct vulkan_marker {
-	char const  *file;        //!< The file's name.
-	char const  *line;        //!< Its line.
-	STD(size_t)  file_length; //!< The name's length.
-	STD(size_t)  line_length; //!< The line's length.
+	char const *file;        //!< The file's name.
+	char const *line;        //!< Its line.
+	size_t      file_length; //!< The name's length.
+	size_t      line_length; //!< The line's length.
 };
 
 /** @brief The number of VULKAN_PLAN_MARKERS. */
 #define VULKAN_PLAN_MARKER_COUNT 3
 
 /** @brief The markers beside the SPIR-V other than shader-constants.txt. */
-extern struct vulkan_marker const VULKAN_PLAN_MARKERS[VULKAN_PLAN_MARKER_COUNT];
+extern struct vulkan_marker const VULKAN_PLAN_MARKERS[];
 
 /** @brief The network's pipelines: those that the plan's steps run, and the noise field that the
  *         build fills the weight blob's noise region with. Each is the SPIR-V g_STEM.spv. */
-enum vulkan_kernel : STD(uint8_t) {
+enum vulkan_kernel : uint8_t {
 	VULKAN_KERNEL_FSWIN32,
 	VULKAN_KERNEL_FSWIN_IMAGE_PREDS32,
 	VULKAN_KERNEL_FSWIN_DSP32,
@@ -175,7 +161,7 @@ enum vulkan_kernel : STD(uint8_t) {
 };
 
 /** @brief The images that a kernel binds after its buffers. */
-enum vulkan_images : STD(uint8_t) {
+enum vulkan_images : uint8_t {
 	VULKAN_IMAGES_NONE,   //!< None.
 	VULKAN_IMAGES_INPUT,  //!< The input, sampled.
 	VULKAN_IMAGES_OUTPUT, //!< The answer and the second output as storage, then the input, sampled.
@@ -190,14 +176,14 @@ struct vulkan_kernel_info {
 	char const         *stem;    //!< Its SPIR-V's stem.
 	char const         *buffers; //!< Its storage buffers in binding order.
 	enum vulkan_images  images;  //!< Its images after them.
-	STD(uint8_t)        push;    //!< The bytes of its push-constant range.
+	uint8_t             push;    //!< The bytes of its push-constant range.
 };
 
 /** @brief The most bindings, buffers and images, that a kernel of VULKAN_PLAN_KERNELS takes. */
 #define VULKAN_KERNEL_MOST_BINDINGS 8
 
 /** @brief Each kernel's bindings and push range, by enum vulkan_kernel. */
-extern struct vulkan_kernel_info const VULKAN_PLAN_KERNELS[VULKAN_KERNEL_COUNT];
+extern struct vulkan_kernel_info const VULKAN_PLAN_KERNELS[];
 
 /** @brief A C=32 kernel and its twin built without the upper clamp of the Swin attention's exponent
  *         (upstream: the "nh" pipelines of NR_EXP_NOHI), which takes the same push block and
@@ -211,7 +197,7 @@ struct vulkan_unclamped {
 #define VULKAN_PLAN_UNCLAMPED_COUNT 4
 
 /** @brief The kernels that have a twin without the upper clamp. */
-extern struct vulkan_unclamped const VULKAN_PLAN_UNCLAMPED[VULKAN_PLAN_UNCLAMPED_COUNT];
+extern struct vulkan_unclamped const VULKAN_PLAN_UNCLAMPED[];
 
 /* The push blocks, as upstream's host declares them (nr_graph.cpp:144 and 776-858) and the GLSL
  * does: the SPIR-V's contract, field for field. A fused kernel's block is several of them in a row.
@@ -221,86 +207,86 @@ extern struct vulkan_unclamped const VULKAN_PLAN_UNCLAMPED[VULKAN_PLAN_UNCLAMPED
 
 /** @brief A Swin body's block (upstream: PushFSwin). */
 struct push_f_swin {
-	STD(uint32_t) x_off, o_off, e_off, ct_off, qkv_off, op_off, b_off, rs_off, ars_off, s_off;
-	STD(uint32_t) rsd_off, ard_off, mid_off, tiles_x, tiles_y;
-	STD(int32_t)  shift, shift_y;
-	STD(uint32_t) pool_off, pool_tiles_x, pool_tiles_y;
+	uint32_t x_off, o_off, e_off, ct_off, qkv_off, op_off, b_off, rs_off, ars_off, s_off;
+	uint32_t rsd_off, ard_off, mid_off, tiles_x, tiles_y;
+	int32_t  shift, shift_y;
+	uint32_t pool_off, pool_tiles_x, pool_tiles_y;
 };
 
 /** @brief A downsampling body's resample projection, fswindsp (upstream: PushDsProj). */
 struct push_ds_proj {
-	STD(uint32_t) w_off, o_off, otx, raster, crow, rows, mode, writer_rows, n, clear_x, clear_y;
+	uint32_t w_off, o_off, otx, raster, crow, rows, mode, writer_rows, n, clear_x, clear_y;
 };
 
 /** @brief An upsampling body's blend of the skip, fswinfusedup and fswinimagepost (upstream:
  *         PushUps). */
 struct push_ups {
-	STD(uint32_t) p_off, s_off, o_off, g_off, tiles_x, tiles_y, itiles_x, itiles_y, mode, stiles_x;
+	uint32_t p_off, s_off, o_off, g_off, tiles_x, tiles_y, itiles_x, itiles_y, mode, stiles_x;
 };
 
 /** @brief The pre block's image features, fswinimagepreds32 (upstream: PushPreImage). */
 struct push_pre_image {
-	STD(uint32_t) lift, source_W, source_H, seed;
-	float         style, tone, structure, skin, other, noise, constant;
-	STD(uint32_t) noise_off;
+	uint32_t lift, source_W, source_H, seed;
+	float    style, tone, structure, skin, other, noise, constant;
+	uint32_t noise_off;
 };
 
 /** @brief The post block's output projection, fswinimagepost32 (upstream: PushImageTail). */
 struct push_image_tail {
-	STD(uint32_t) w_off;
-	float         intensity;
+	uint32_t w_off;
+	float    intensity;
 };
 
 /** @brief A persistent run of layers, fswinpds and fswinpup: its persist_rec array, sync region,
  *         dependency tables and DS or UPS table, as u32 indices (upstream: PushPersist). */
 struct push_persist {
-	STD(uint32_t) layers_off, sync_off, n_layers, spin_limit, total_windows, df_off, df_n0, ds_off;
+	uint32_t layers_off, sync_off, n_layers, spin_limit, total_windows, df_off, df_n0, ds_off;
 };
 
 /** @brief A layer of a persistent run, in the weight blob (upstream: PersistRec). */
 struct persist_rec {
 	struct push_f_swin p;
-	STD(uint32_t)      gx, gy, windows, flag_base;
+	uint32_t           gx, gy, windows, flag_base;
 };
 
 /** @brief A GEMM's block (upstream: PushGemm). */
 struct push_gemm {
-	STD(uint32_t) gd_off, x_off, r_off, o_off, d_off, w_off, g_off, M, N, K, p_off, W;
-	STD(uint32_t) otx, raster, crow, rows, ds_raster, writer_rows, clear_x, clear_y, remap;
+	uint32_t gd_off, x_off, r_off, o_off, d_off, w_off, g_off, M, N, K, p_off, W;
+	uint32_t otx, raster, crow, rows, ds_raster, writer_rows, clear_x, clear_y, remap;
 };
 
 /** @brief The C=512 FFN's block (upstream: PushFfwd3). */
 struct push_ffwd3 {
-	STD(uint32_t) x_off, o_off, a_off, q0_off, q2_off, M, C;
+	uint32_t x_off, o_off, a_off, q0_off, q2_off, M, C;
 };
 
 /** @brief The C=512 windowed attention's block (upstream: PushAttn). */
 struct push_attn {
-	STD(uint32_t) x_off, o_off, w_off, b_off, s_off, C, wins_x, tiles_x, tiles_y;
-	STD(int32_t)  shift, shift_y;
+	uint32_t x_off, o_off, w_off, b_off, s_off, C, wins_x, tiles_x, tiles_y;
+	int32_t  shift, shift_y;
 };
 
 /** @brief The ViT's attention's block (upstream: PushVAttn). */
 struct push_v_attn {
-	STD(uint32_t) x_off, o_off, tokens, s_off, mode;
+	uint32_t x_off, o_off, tokens, s_off, mode;
 };
 
 /** @brief The decoder's upsample's block (upstream: PushDecoderUps). */
 struct push_decoder_ups {
-	STD(uint32_t) src, skip, dst, gain_off, IW, OW, OH;
+	uint32_t src, skip, dst, gain_off, IW, OW, OH;
 };
 
 /** @brief The post block's input when it is not its predecessor's raster, upsview (upstream:
  *         PushUpsView). */
 struct push_ups_view {
-	STD(uint32_t) x_off, o_off, M, C, W, H, RW, RH;
+	uint32_t x_off, o_off, M, C, W, H, RW, RH;
 };
 
 /** @brief The noise field's region of the weight blob, noisefield's push block (upstream:
  *         NoiseJob). */
 struct noise_job {
-	STD(uint32_t) off, width, height, seed;
-	float         noise;
+	uint32_t off, width, height, seed;
+	float    noise;
 };
 
 static_assert(sizeof (struct push_f_swin) == 80 && offsetof(struct push_f_swin, shift) == 60 &&
@@ -324,7 +310,7 @@ static_assert(sizeof (struct push_f_swin) + sizeof (struct push_ds_proj) + 4 == 
 static_assert(sizeof (struct push_f_swin) + sizeof (struct push_ups) + 4 + 4 == 128);
 
 /** @brief A directory of the model pack (upstream: the tree under --unpacked). */
-enum vulkan_directory : STD(uint8_t) {
+enum vulkan_directory : uint8_t {
 	VULKAN_DIRECTORY_UNPACKED,
 	VULKAN_DIRECTORY_PREBLOCK,
 	VULKAN_DIRECTORY_POSTBLOCK,
@@ -334,7 +320,7 @@ enum vulkan_directory : STD(uint8_t) {
 };
 
 /** @brief What follows a layer's name in the names of its entries; a record has none. */
-enum vulkan_suffix : STD(uint8_t) {
+enum vulkan_suffix : uint8_t {
 	VULKAN_SUFFIX_NONE,
 	VULKAN_SUFFIX_MLP_EXPAND,
 	VULKAN_SUFFIX_MLP_CONTRACT,
@@ -359,8 +345,8 @@ enum vulkan_suffix : STD(uint8_t) {
 /** @brief A model entry: one of a layer's weights, or the layer's record. */
 struct vulkan_source {
 	enum vulkan_directory directory; //!< Its directory.
-	STD(uint8_t)          block;     //!< The layer's block.
-	STD(uint8_t)          layer;     //!< The layer in its block.
+	uint8_t               block;     //!< The layer's block.
+	uint8_t               layer;     //!< The layer in its block.
 	enum vulkan_suffix    suffix;    //!< The weight; none for the record.
 };
 
@@ -369,7 +355,7 @@ struct vulkan_source {
  * Each recipe is one of the put() paths of upstream's NrSession::build (nr_graph.cpp:1700-3259,
  * 3525-3600 and 3966-4221) as the network takes it.
  */
-enum vulkan_recipe : STD(uint8_t) {
+enum vulkan_recipe : uint8_t {
 	/** @brief Zeros: the noise field that the build fills on the GPU, and the post block's unread
 	 *         gain. */
 	VULKAN_RECIPE_ZEROS,
@@ -390,7 +376,7 @@ enum vulkan_recipe : STD(uint8_t) {
 };
 
 /** @brief What a recipe does besides, in a segment's flags. */
-enum vulkan_segment_flag : STD(uint8_t) {
+enum vulkan_segment_flag : uint8_t {
 	VULKAN_SEGMENT_REQUANTISE = 1,  //!< MATRIX: each E4M3 code through upstream's round trip.
 	/** @brief MATRIX, FFWD, VIT_QKV: pairs of 16-row tiles interleaved in 8-byte runs (weight
 	 *         layout 3). */
@@ -410,18 +396,18 @@ enum vulkan_segment_flag : STD(uint8_t) {
  * HALF and 32 for DIAGONAL.
  */
 struct vulkan_segment {
-	STD(uint32_t)         offset; //!< Where in the blob it starts.
-	STD(uint32_t)         bytes;  //!< Its bytes.
-	STD(uint32_t)         index;  //!< TABLE's first word; FFWD's part.
-	STD(uint16_t)         rows;   //!< MATRIX's and VIT_QKV's rows.
-	STD(uint16_t)         cols;   //!< Their columns.
-	struct vulkan_source  source; //!< The entry it is made of.
-	enum vulkan_recipe    recipe; //!< How.
-	STD(uint8_t)          flags;  //!< enum vulkan_segment_flag bits.
+	uint32_t             offset; //!< Where in the blob it starts.
+	uint32_t             bytes;  //!< Its bytes.
+	uint32_t             index;  //!< TABLE's first word; FFWD's part.
+	uint16_t             rows;   //!< MATRIX's and VIT_QKV's rows.
+	uint16_t             cols;   //!< Their columns.
+	struct vulkan_source source; //!< The entry it is made of.
+	enum vulkan_recipe   recipe; //!< How.
+	uint8_t              flags;  //!< enum vulkan_segment_flag bits.
 };
 
 /** @brief What orders a step before the next one. */
-enum vulkan_after : STD(uint8_t) {
+enum vulkan_after : uint8_t {
 	VULKAN_AFTER_NOTHING,    //!< Nothing, where tile counters do.
 	/** @brief A barrier that makes the arena's writes visible to the next step (upstream: compute
 	 *         to compute, source access 0, destination shader reads and writes, which gfx1201's
@@ -437,15 +423,15 @@ enum vulkan_after : STD(uint8_t) {
  * layer of block block.
  */
 struct vulkan_step {
-	STD(uint32_t)      groups[3]; //!< Its workgroups.
-	STD(uint16_t)      push;      //!< Its first push word.
+	uint32_t           groups[3]; //!< Its workgroups.
+	uint16_t           push;      //!< Its first push word.
 	enum vulkan_kernel kernel;    //!< Its kernel.
 	enum vulkan_after  after;     //!< What orders it before the next step.
-	STD(uint8_t)       words;     //!< Its push words.
-	STD(uint8_t)       block;     //!< The block of its first layer.
-	STD(uint8_t)       layer;     //!< Its first layer in that block.
-	STD(uint8_t)       first;     //!< Its first layer in the layer table.
-	STD(uint8_t)       last;      //!< Its last.
+	uint8_t            words;     //!< Its push words.
+	uint8_t            block;     //!< The block of its first layer.
+	uint8_t            layer;     //!< Its first layer in that block.
+	uint8_t            first;     //!< Its first layer in the layer table.
+	uint8_t            last;      //!< Its last.
 };
 
 /** @brief A value in the activation arena: its bytes and those its readers reach past them, which
@@ -455,10 +441,10 @@ struct vulkan_step {
  * upsampled input (5), pooled output (6) or skip output (7).
  */
 struct vulkan_value {
-	STD(uint64_t) offset;   //!< Where it is.
-	STD(uint64_t) bytes;    //!< Its bytes.
-	STD(uint64_t) overread; //!< The bytes its readers reach.
-	STD(uint64_t) key;      //!< Its key.
+	uint64_t offset;   //!< Where it is.
+	uint64_t bytes;    //!< Its bytes.
+	uint64_t overread; //!< The bytes its readers reach.
+	uint64_t key;      //!< Its key.
 };
 
 /** @brief The network at one frame extent, which the working extent pads.
@@ -478,27 +464,27 @@ struct vulkan_value {
  */
 struct vulkan_plan {
 	struct vulkan_step    *steps;         //!< The dispatches.
-	STD(uint32_t)         *push;          //!< Their push words.
+	uint32_t              *push;          //!< Their push words.
 	struct vulkan_segment *segments;      //!< The weight blob's segments in offset order.
-	STD(uint32_t)         *tables;        //!< The words that TABLE segments copy.
+	uint32_t              *tables;        //!< The words that TABLE segments copy.
 	struct vulkan_value   *values;        //!< The activation arena's values.
-	STD(uint32_t)         *timeouts;      //!< The arena's words that a frame's waits set when they give up.
-	STD(size_t)            step_count;    //!< The number of steps.
-	STD(size_t)            push_count;    //!< The number of push words.
-	STD(size_t)            segment_count; //!< The number of segments.
-	STD(size_t)            table_count;   //!< The number of table words.
-	STD(size_t)            value_count;   //!< The number of values.
-	STD(size_t)            timeout_count; //!< The number of timeouts.
-	STD(uint64_t)          values_end;    //!< Where the values end in the arena.
-	STD(uint64_t)          arena_bytes;   //!< The arena's bytes.
-	STD(uint32_t)          width;         //!< The frames' width.
-	STD(uint32_t)          height;        //!< Their height.
-	STD(uint32_t)          work_width;    //!< The working extent's width.
-	STD(uint32_t)          work_height;   //!< Its height.
-	STD(uint32_t)          blob_bytes;    //!< The weight blob's bytes.
-	STD(uint32_t)          counter_words; //!< The tile counters' words after the sync regions.
+	uint32_t              *timeouts;      //!< The arena's words that a frame's waits set when they give up.
+	size_t                 step_count;    //!< The number of steps.
+	size_t                 push_count;    //!< The number of push words.
+	size_t                 segment_count; //!< The number of segments.
+	size_t                 table_count;   //!< The number of table words.
+	size_t                 value_count;   //!< The number of values.
+	size_t                 timeout_count; //!< The number of timeouts.
+	uint64_t               values_end;    //!< Where the values end in the arena.
+	uint64_t               arena_bytes;   //!< The arena's bytes.
+	uint32_t               width;         //!< The frames' width.
+	uint32_t               height;        //!< Their height.
+	uint32_t               work_width;    //!< The working extent's width.
+	uint32_t               work_height;   //!< Its height.
+	uint32_t               blob_bytes;    //!< The weight blob's bytes.
+	uint32_t               counter_words; //!< The tile counters' words after the sync regions.
 	struct noise_job       noise;         //!< The noise field, which the build writes on the GPU.
-	STD(uint32_t)          chained;       //!< The steps that tile counters order instead of a barrier.
+	uint32_t               chained;       //!< The steps that tile counters order instead of a barrier.
 };
 
 /** @brief Each block's Swin heads, bit h for head h, whose attention never reaches the upper clamp
@@ -508,7 +494,7 @@ struct vulkan_plan {
  * with s the head's scale, is at most 1.5693359375. vulkan_weights_clamp_free() audits a model.
  */
 struct vulkan_clamp_free {
-	STD(uint32_t) heads[VULKAN_PLAN_BLOCKS]; //!< The free heads by block.
+	uint32_t heads[VULKAN_PLAN_BLOCKS]; //!< The free heads by block.
 };
 
 /** @brief Plans the network for frames of an extent.
@@ -530,9 +516,9 @@ struct vulkan_clamp_free {
  */
 extern enum error_code
 vulkan_plan_init (struct vulkan_plan *dest,
-                  STD(uint32_t)       width,
-                  STD(uint32_t)       height,
-                  STD(uint64_t)       storage,
+                  uint32_t            width,
+                  uint32_t            height,
+                  uint64_t            storage,
                   struct error       *e);
 
 /** @brief Frees what a plan holds and zeroes it.
@@ -565,11 +551,5 @@ vulkan_plan_unclamp (struct vulkan_plan             *plan,
  */
 extern bool
 vulkan_plan_persistent (enum vulkan_kernel kernel);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_COMMON_VULKAN_PLAN_H_ */

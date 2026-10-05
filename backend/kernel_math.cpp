@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
-// The CPU references' pixel loops over the kernels' own math, and the motion
-// kernels' sampler: kernel_math.h.
+// The CPU references' pixel loops over the kernels' own math, the motion
+// kernels' sampler and the tuning's predicates: kernel_math.h.
 // It uses nothing of the C++ runtime (no allocation, exceptions, RTTI or
 // dynamic initialization), so the C programs that link it link with the C
 // driver.
@@ -296,4 +296,14 @@ bool kernel_math_preserve_color(const float* original_rgba, const float* model_r
 float kernel_math_temporal_sample(const float* image, struct temporal_extent e, float x, float y)
 {
     return dlsslop_temporal::sample(image, e, x, y);
+}
+
+bool kernel_math_tuning_is_default(const struct native_tuning* tuning)
+{
+    return dlsslop::native_tuning_is_default(*tuning);
+}
+
+bool kernel_math_tuning_equal(const struct native_tuning* a, const struct native_tuning* b)
+{
+    return dlsslop::operator==(*a, *b);
 }

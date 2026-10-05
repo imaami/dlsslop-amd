@@ -1,8 +1,6 @@
-// Errors without exceptions: every fallible function of ours returns a Result.
+// Errors without exceptions: every fallible function of the GUI returns a Result.
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "error.h"
-
 #include <cerrno>
 #include <cstring>
 #include <expected>
@@ -11,12 +9,9 @@
 
 namespace dlsslop {
 
-// What went wrong, in words for the log and the channel's status. A rejected
-// request was at fault, not the daemon: the frame fails and serving goes on.
-// Anything else ends the daemon.
+// What went wrong, in words for the user.
 struct Error {
     std::string what;
-    bool rejected = false;
 };
 
 template <class T = void>
@@ -30,22 +25,19 @@ using Result = std::expected<T, Error>;
 template <class Words>
 struct Failure {
     Words what;
-    bool rejected;
     template <class T>
     [[gnu::cold, gnu::noinline]] operator Result<T>() &&
     {
-        return std::unexpected(Error{std::string(std::forward<Words>(what)), rejected});
+        return std::unexpected(Error{std::string(std::forward<Words>(what))});
     }
 };
 
-[[nodiscard]] inline Failure<const char*> fail(const char* what) { return {what, false}; }
-[[nodiscard]] inline Failure<std::string&&> fail(std::string&& what) { return {std::move(what), false}; }
-[[nodiscard]] inline Failure<const char*> reject(const char* what) { return {what, true}; }
+[[nodiscard]] inline Failure<const char*> fail(const char* what) { return {what}; }
 // ACTION: strerror(errno).
 [[nodiscard, gnu::cold, gnu::noinline]] inline Failure<std::string> fail_errno(const char* action)
 {
     const int error = errno;
-    return {std::string(action) + ": " + std::strerror(error), false};
+    return {std::string(action) + ": " + std::strerror(error)};
 }
 
 // An error passed on to the enclosing function's Result, out of line like a Failure.
@@ -59,14 +51,6 @@ struct Forward {
     }
 };
 template <class E> Forward<E> forward(E&& error) { return {std::forward<E>(error)}; }
-
-// A C function's error, CODE with the words in E, passed on to the enclosing
-// function's Result like a Failure: a rejection or a dropped frame is
-// rejected, a fault is not. Return one at once, while E holds the words.
-[[nodiscard]] inline Failure<const char*> forward_c(enum error_code code, const struct error& e)
-{
-    return {e.what, code != ERROR_FAILED};
-}
 
 } // namespace dlsslop
 

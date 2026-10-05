@@ -1,9 +1,10 @@
 /** @file
  *
  * The CPU references' pixel loops: the HIP kernels' own math (codec_math.hpp, tuning_math.hpp,
- * color_preserve_math.hpp) run on the host, and the motion kernels' sampler (temporal_math.hpp).
- * kernel_math.cpp, which includes that math, defines the functions; reference.h checks the loops'
- * arguments and words their failures.
+ * color_preserve_math.hpp) run on the host, the motion kernels' sampler (temporal_math.hpp), and
+ * the tuning's predicates, which decide on the host whether the tuning kernel runs and whether the
+ * HIP engine's motion history restarts. kernel_math.cpp, which includes that math, defines the
+ * functions; reference.h checks the loops' arguments and words their failures.
  *
  * A loop writes into a caller's buffer of the size its function states, which must not overlap its
  * inputs. It returns false at the first sample that is not finite, its output then incomplete.
@@ -134,6 +135,25 @@ kernel_math_temporal_sample (float const            *image,
                              struct temporal_extent  e,
                              float                   x,
                              float                   y);
+
+/** @brief Whether a tuning is the default one, with which the kernels leave the answer as it is
+ *         (tuning_math.hpp's native_tuning_is_default()).
+ *
+ * @param tuning The tuning.
+ * @return       true if it is.
+ */
+extern bool
+kernel_math_tuning_is_default (struct native_tuning const *tuning);
+
+/** @brief Whether two tunings are equal, as the kernels' math compares them.
+ *
+ * @param a A tuning.
+ * @param b Another.
+ * @return  true if each control is equal.
+ */
+extern bool
+kernel_math_tuning_equal (struct native_tuning const *a,
+                          struct native_tuning const *b);
 
 #undef STD
 

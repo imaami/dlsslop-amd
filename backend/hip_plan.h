@@ -3,33 +3,19 @@
  * The HIP network's launch plan: upstream's production RunGraph turned into data once per tier and
  * preset, with the buffers its pool settles on. A port of the production path of lmxxf's
  * hip_reference_network.h (MIT). hip_plan.c defines the functions and the tables.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_HIP_PLAN_H_
 #define DLSSLOP_AMD_BACKEND_HIP_PLAN_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-# include <cstdint>
-#else
-# include <stddef.h>
-# include <stdint.h>
-#endif
+#include <stddef.h>
+#include <stdint.h>
 
 #include "error.h"
 #include "hip_weights.h"
 
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
-
 /** @brief The code objects the network launches kernels from. */
-enum hip_module : STD(uint8_t) {
+enum hip_module : uint8_t {
 	HIP_MODULE_MH_REFERENCE,   //!< multihead-reference.
 	HIP_MODULE_DEEP_REFERENCE, //!< deep_reference.
 	HIP_MODULE_C32_FUSED,      //!< c32_fused_ffn_attention-packed.
@@ -43,7 +29,7 @@ enum hip_module : STD(uint8_t) {
 extern char const *const HIP_PLAN_MODULE_FILES[];
 
 /** @brief How upstream's Run() makes a launch's groups of the count it is given. */
-enum hip_grid : STD(uint8_t) {
+enum hip_grid : uint8_t {
 	HIP_GRID_GROUPS,     //!< The count is of groups: windows.
 	HIP_GRID_DEFAULT,    //!< A group per 256 elements, rounded up, whatever the group's size.
 	HIP_GRID_512,        //!< A group per 512 elements.
@@ -55,7 +41,7 @@ enum hip_grid : STD(uint8_t) {
 };
 
 /** @brief Every kernel the network can launch at dlsslopd's tiers. */
-enum hip_kernel : STD(uint8_t) {
+enum hip_kernel : uint8_t {
 	HIP_KERNEL_C32_PREFIX,
 	HIP_KERNEL_C32_MAPPED,
 	HIP_KERNEL_C32_CHAIN,
@@ -110,7 +96,7 @@ enum hip_kernel : STD(uint8_t) {
 /** @brief A kernel: its symbol, its module, its groups' size and how its grid is made. */
 struct hip_kernel_info {
 	char const      *name;    //!< Its symbol.
-	STD(uint16_t)    threads; //!< The threads of a group.
+	uint16_t         threads; //!< The threads of a group.
 	enum hip_module  module;  //!< Its module.
 	enum hip_grid    grid;    //!< How a launch's count becomes its groups.
 };
@@ -119,7 +105,7 @@ struct hip_kernel_info {
 extern struct hip_kernel_info const HIP_PLAN_KERNELS[];
 
 /** @brief What a kernel argument is. The frame's own ones are known only as it is queued. */
-enum hip_arg_kind : STD(uint8_t) {
+enum hip_arg_kind : uint8_t {
 	HIP_ARG_U32,      //!< The value.
 	HIP_ARG_F32,      //!< The float with the value's bits.
 	HIP_ARG_NULL,     //!< A null pointer.
@@ -134,7 +120,7 @@ enum hip_arg_kind : STD(uint8_t) {
 
 /** @brief A kernel argument. */
 struct hip_arg {
-	STD(uint32_t)     value; //!< Its value, as its kind says.
+	uint32_t          value; //!< Its value, as its kind says.
 	enum hip_arg_kind kind;  //!< Its kind.
 };
 
@@ -145,8 +131,8 @@ struct hip_arg {
  *         arguments, each passed as a 4-byte value or an 8-byte pointer. */
 struct hip_launch {
 	struct hip_arg  args[HIP_LAUNCH_ARGS]; //!< The arguments; those after count are zeroed.
-	STD(uint32_t)   grid;                  //!< The groups.
-	STD(uint16_t)   count;                 //!< The arguments it passes.
+	uint32_t        grid;                  //!< The groups.
+	uint16_t        count;                 //!< The arguments it passes.
 	enum hip_kernel kernel;                //!< The kernel.
 };
 
@@ -157,16 +143,16 @@ struct hip_launch {
  */
 struct hip_plan {
 	struct hip_launch      *launches;     //!< The launches, in order.
-	STD(uint32_t)          *floats;       //!< The floats of each tensor, by its id (upstream's New(n)).
-	STD(int32_t)           *events;       //!< Tensors taken from the pool (id) and returned (~id), in order.
+	uint32_t               *floats;       //!< The floats of each tensor, by its id (upstream's New(n)).
+	int32_t                *events;       //!< Tensors taken from the pool (id) and returned (~id), in order.
 	struct hip_weight_spec *weights;      //!< The weights the launches read, in the order upstream uploads them.
-	STD(size_t)             launch_count; //!< The number of launches.
-	STD(size_t)             tensor_count; //!< The number of tensors.
-	STD(size_t)             event_count;  //!< The number of events.
-	STD(size_t)             weight_count; //!< The number of weights.
-	STD(uint32_t)           tokens;       //!< The ViT's tokens; each gather map holds 1024 of them.
-	STD(uint16_t)           width;        //!< The geometry's width.
-	STD(uint16_t)           height;       //!< Its height.
+	size_t                  launch_count; //!< The number of launches.
+	size_t                  tensor_count; //!< The number of tensors.
+	size_t                  event_count;  //!< The number of events.
+	size_t                  weight_count; //!< The number of weights.
+	uint32_t                tokens;       //!< The ViT's tokens; each gather map holds 1024 of them.
+	uint16_t                width;        //!< The geometry's width.
+	uint16_t                height;       //!< Its height.
 };
 
 /** @brief Plans the network at one of its padded tiers.
@@ -201,9 +187,9 @@ hip_plan_fini (struct hip_plan *plan);
  * @param inverse Whether to map back.
  */
 extern void
-hip_plan_gather_map (STD(uint32_t) *map,
-                     unsigned       tokens,
-                     bool           inverse);
+hip_plan_gather_map (uint32_t *map,
+                     unsigned  tokens,
+                     bool      inverse);
 
 /** @brief The pool buffers a plan's tensors live in, as upstream's allocator assigns them: the
  *         smallest free buffer that holds a tensor, the earliest of equal ones, or a new buffer of
@@ -213,10 +199,10 @@ hip_plan_gather_map (STD(uint32_t) *map,
  * them free and settles on another assignment.
  */
 struct hip_placement {
-	STD(size_t)   *buffers;      //!< Each buffer's bytes, in creation order.
-	STD(uint16_t) *first;        //!< Each tensor's buffer in the first frame.
-	STD(uint16_t) *later;        //!< Each tensor's buffer in later frames.
-	STD(size_t)    buffer_count; //!< The number of buffers.
+	size_t   *buffers;      //!< Each buffer's bytes, in creation order.
+	uint16_t *first;        //!< Each tensor's buffer in the first frame.
+	uint16_t *later;        //!< Each tensor's buffer in later frames.
+	size_t    buffer_count; //!< The number of buffers.
 };
 
 /** @brief Places a plan's tensors in the pool's buffers.
@@ -238,11 +224,5 @@ hip_plan_place (struct hip_placement  *dest,
  */
 extern void
 hip_placement_fini (struct hip_placement *placement);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_HIP_PLAN_H_ */

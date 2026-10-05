@@ -49,6 +49,10 @@ struct vulkan_shader_constant const VULKAN_PLAN_SHADER_CONSTANTS[] = {
 	{"tchain", 1},
 };
 
+static_assert(sizeof VULKAN_PLAN_SHADER_CONSTANTS / sizeof *VULKAN_PLAN_SHADER_CONSTANTS
+              == VULKAN_PLAN_SHADER_CONSTANT_COUNT,
+              "VULKAN_PLAN_SHADER_CONSTANT_COUNT is not the number of VULKAN_PLAN_SHADER_CONSTANTS");
+
 /** @brief A marker of a file named by a literal and of a literal line, with their lengths. */
 #define MARKER(file, line) {file, line, sizeof (file) - 1, sizeof (line) - 1}
 
@@ -59,6 +63,9 @@ struct vulkan_marker const VULKAN_PLAN_MARKERS[] = {
 };
 
 #undef MARKER
+
+static_assert(sizeof VULKAN_PLAN_MARKERS / sizeof *VULKAN_PLAN_MARKERS == VULKAN_PLAN_MARKER_COUNT,
+              "VULKAN_PLAN_MARKER_COUNT is not the number of VULKAN_PLAN_MARKERS");
 
 struct vulkan_kernel_info const VULKAN_PLAN_KERNELS[] = {
 	[VULKAN_KERNEL_FSWIN32]              = {"fswin32", "aawwwa", VULKAN_IMAGES_NONE, 84},
@@ -95,12 +102,18 @@ struct vulkan_kernel_info const VULKAN_PLAN_KERNELS[] = {
 	[VULKAN_KERNEL_NOISE_FIELD]          = {"noisefield", "w", VULKAN_IMAGES_NONE, 20},
 };
 
+static_assert(sizeof VULKAN_PLAN_KERNELS / sizeof *VULKAN_PLAN_KERNELS == VULKAN_KERNEL_COUNT,
+              "VULKAN_KERNEL_COUNT is not the number of VULKAN_PLAN_KERNELS");
+
 struct vulkan_unclamped const VULKAN_PLAN_UNCLAMPED[] = {
 	{VULKAN_KERNEL_FSWIN32, VULKAN_KERNEL_FSWIN32_NH},
 	{VULKAN_KERNEL_FSWIN_IMAGE_PREDS32, VULKAN_KERNEL_FSWIN_IMAGE_PREDS32_NH},
 	{VULKAN_KERNEL_FSWIN_DSP32, VULKAN_KERNEL_FSWIN_DSP32_NH},
 	{VULKAN_KERNEL_FSWIN_FUSED_UP32, VULKAN_KERNEL_FSWIN_FUSED_UP32_NH},
 };
+
+static_assert(sizeof VULKAN_PLAN_UNCLAMPED / sizeof *VULKAN_PLAN_UNCLAMPED == VULKAN_PLAN_UNCLAMPED_COUNT,
+              "VULKAN_PLAN_UNCLAMPED_COUNT is not the number of VULKAN_PLAN_UNCLAMPED");
 
 bool
 vulkan_plan_persistent (enum vulkan_kernel kernel)

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "../common/control_settings.h"
-#include "../common/result.hpp"
 #include "../common/shm_channel.h"
+#include "result.hpp"
 #include <array>
 #include <map>
 #include <memory>
@@ -28,9 +28,9 @@ public:
     {
         Channel channel;
         error e;
-        if (const auto code = shm_channel_open(&channel.channel_, path.c_str(), path.size(), kHeaderBytes,
-                                               writable ? SHM_CHANNEL_WRITE : shm_channel_flags{}, &e))
-            return dlsslop::forward_c(code, e);
+        if (shm_channel_open(&channel.channel_, path.c_str(), path.size(), kHeaderBytes,
+                             writable ? SHM_CHANNEL_WRITE : shm_channel_flags{}, &e))
+            return dlsslop::fail(e.what);
         if (fstat(channel.channel_.fd, &channel.stat_)) return dlsslop::fail_errno("inspect the channel");
         // C created the header's objects before the file had a name; they live in the mapping for C++ too.
         channel.header_ = std::start_lifetime_as<ShmHeader>(channel.channel_.h);

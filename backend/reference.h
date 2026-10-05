@@ -7,28 +7,15 @@
  *
  * Each writes into a caller's buffer of the size it states, which must not overlap its inputs. On
  * failure the buffer's contents are unspecified.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_REFERENCE_H_
 #define DLSSLOP_AMD_BACKEND_REFERENCE_H_
 
-#ifdef __cplusplus
-# include <cstdint>
-#else
-# include <stdint.h>
-#endif
+#include <stdint.h>
 
 #include "error.h"
 #include "kernel_args.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief Encodes a source picture into the network's padded proxy (kernel_math_encode_proxy()).
  *
@@ -42,7 +29,7 @@ extern "C" {
  *               ERROR_REJECTED for an FP16 source with a sample that is not finite.
  */
 extern enum error_code
-reference_encode_proxy (STD(uint8_t) const    *source,
+reference_encode_proxy (uint8_t const         *source,
                         struct geometry const *g,
                         bool                   fp16,
                         float                 *rgba,
@@ -81,11 +68,11 @@ reference_feedback_neural_rgb (float const           *neural_rgb,
  *                   a finite binary16.
  */
 extern enum error_code
-reference_decode_neural_proxy (STD(uint8_t) const    *original,
+reference_decode_neural_proxy (uint8_t const         *original,
                                struct geometry const *g,
                                bool                   fp16,
                                float const           *neural_rgb,
-                               STD(uint8_t)          *output,
+                               uint8_t               *output,
                                struct error          *e);
 
 /** @brief Tunes a pass's answer (kernel_math_tune_neural_rgb()).
@@ -130,11 +117,5 @@ reference_preserve_color (float const           *original_rgba,
                           float                  strength,
                           float                 *output,
                           struct error          *e);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_REFERENCE_H_ */

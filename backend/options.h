@@ -1,34 +1,20 @@
 /** @file
  *
  * dlsslopd's command line and config file. options.c defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_OPTIONS_H_
 #define DLSSLOP_AMD_BACKEND_OPTIONS_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-# include <cstdint>
-#else
-# include <stddef.h>
-# include <stdint.h>
-#endif
+#include <stddef.h>
+#include <stdint.h>
 
 #include "error.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 struct paths_home;
 
 /** @brief Where the network runs (--backend). */
-enum options_backend : STD(uint8_t) {
+enum options_backend : uint8_t {
 	OPTIONS_BACKEND_AUTO,   //!< Vulkan when its model is there and a device can run it, else HIP.
 	OPTIONS_BACKEND_VULKAN, //!< The Vulkan network.
 	OPTIONS_BACKEND_HIP,    //!< The HIP network.
@@ -50,23 +36,23 @@ struct options {
 	char                 *input;               //!< --input: the offline mode's input file.
 	char                 *output;              //!< --output: the offline or self-test output file.
 	char                 *trace_dir;           //!< --trace-dir: the trace directory; never empty.
-	STD(size_t)           assets_length;       //!< The length of assets.
-	STD(size_t)           modules_length;      //!< The length of modules.
-	STD(size_t)           shm_length;          //!< The length of shm.
-	STD(size_t)           vulkan_model_length; //!< The length of vulkan_model.
-	STD(size_t)           shaders_length;      //!< The length of shaders.
-	STD(size_t)           input_length;        //!< The length of input.
-	STD(size_t)           output_length;       //!< The length of output.
-	STD(size_t)           trace_dir_length;    //!< The length of trace_dir.
-	STD(uint32_t)         width;               //!< --width: the offline image's width; 0 when unset.
-	STD(uint32_t)         height;              //!< --height: the offline image's height; 0 when unset.
-	STD(uint32_t)         self_test_runs;      //!< --self-test-runs.
-	STD(uint32_t)         self_test_drops;     //!< --self-test-drops.
-	STD(uint32_t)         idle_exit;           //!< --idle-exit: seconds; 0 for never.
+	size_t                assets_length;       //!< The length of assets.
+	size_t                modules_length;      //!< The length of modules.
+	size_t                shm_length;          //!< The length of shm.
+	size_t                vulkan_model_length; //!< The length of vulkan_model.
+	size_t                shaders_length;      //!< The length of shaders.
+	size_t                input_length;        //!< The length of input.
+	size_t                output_length;       //!< The length of output.
+	size_t                trace_dir_length;    //!< The length of trace_dir.
+	uint32_t              width;               //!< --width: the offline image's width; 0 when unset.
+	uint32_t              height;              //!< --height: the offline image's height; 0 when unset.
+	uint32_t              self_test_runs;      //!< --self-test-runs.
+	uint32_t              self_test_drops;     //!< --self-test-drops.
+	uint32_t              idle_exit;           //!< --idle-exit: seconds; 0 for never.
 	/** @brief --tier; 0 when unset: then a serving daemon keeps the channel's live tier. */
-	STD(uint32_t)         tier;
+	uint32_t              tier;
 	/** @brief --passes; 0 when unset: then a serving daemon keeps the channel's live count. */
-	STD(uint32_t)         passes;
+	uint32_t              passes;
 	int                   device;              //!< --device: the device's index, or -1 for the first.
 	enum options_backend  backend;             //!< --backend.
 	bool                  diagnose;            //!< --diagnose.
@@ -136,14 +122,8 @@ options_hip_only (struct options const *options);
  */
 extern enum error_code
 options_configured_vulkan_model (char                    **dest,
-                                 STD(size_t)              *length,
+                                 size_t                   *length,
                                  struct paths_home const  *home,
                                  struct error             *e);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_OPTIONS_H_ */

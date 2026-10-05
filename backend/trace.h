@@ -7,31 +7,17 @@
  * once by an atomic rename, writes each stage as DIR/TOKEN/NAME.pfm, then DIR/TOKEN/summary.json,
  * and last the marker DIR/TOKEN.done. Only one daemon serves a trace directory, and its
  * DIR/owner.json says which. The files' formats are independent of the shared-memory protocol.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_TRACE_H_
 #define DLSSLOP_AMD_BACKEND_TRACE_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-# include <cstdint>
-#else
-# include <stddef.h>
-# include <stdint.h>
-#endif
+#include <stddef.h>
+#include <stdint.h>
 
 #include "error.h"
 #include "kernel_args.h"
 #include "shm_protocol.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief The schema of a frame's metadata.
  *
@@ -52,21 +38,21 @@ extern "C" {
 
 /** @brief What a traced frame's summary says of the frame. */
 struct trace_metadata {
-	STD(uint64_t)   source_proxy_hash; //!< FNV-1a of the proxy as the engine read it.
+	uint64_t        source_proxy_hash; //!< FNV-1a of the proxy as the engine read it.
 	struct geometry geometry;          //!< Where the source sits in the network's raster.
-	STD(uint32_t)   frame_seq;         //!< The request's sequence number.
-	STD(uint32_t)   control_seq;       //!< controlSeq before any setting was read.
-	STD(uint32_t)   tuning_seq;        //!< tuningSeq then.
-	STD(uint32_t)   control_seq_end;   //!< controlSeq after inference.
-	STD(uint32_t)   tuning_seq_end;    //!< tuningSeq then.
-	STD(uint32_t)   held_input;        //!< holdFrame before the request was read.
-	STD(uint32_t)   held_input_end;    //!< holdFrame after inference.
+	uint32_t        frame_seq;         //!< The request's sequence number.
+	uint32_t        control_seq;       //!< controlSeq before any setting was read.
+	uint32_t        tuning_seq;        //!< tuningSeq then.
+	uint32_t        control_seq_end;   //!< controlSeq after inference.
+	uint32_t        tuning_seq_end;    //!< tuningSeq then.
+	uint32_t        held_input;        //!< holdFrame before the request was read.
+	uint32_t        held_input_end;    //!< holdFrame after inference.
 	float           intensity;         //!< The tuning's intensity.
 	float           local_tone;        //!< Its tone.
 	float           local_structure;   //!< Its structure.
 	float           sharpness;         //!< Its sharpness.
 	float           color_preserve;    //!< The color preservation.
-	STD(uint8_t)    passes;            //!< The passes run, at most kMaxPasses.
+	uint8_t         passes;            //!< The passes run, at most kMaxPasses.
 	bool            fp16_proxy;        //!< Whether the proxy is RGBA16F.
 	bool            fp16_feedback;     //!< Whether later passes take 16-bit feedback.
 	bool            motion;            //!< Whether motion vectors were used.
@@ -79,9 +65,9 @@ struct trace_metadata {
  */
 struct frame_trace {
 	char         *path;         //!< DIR/TOKEN, then room for a file's name; nullptr for none.
-	STD(size_t)   length;       //!< The length of DIR/TOKEN.
-	STD(size_t)   token_length; //!< The token's: DIR/TOKEN ends in it.
-	STD(size_t)   stage_count;  //!< The stages written.
+	size_t        length;       //!< The length of DIR/TOKEN.
+	size_t        token_length; //!< The token's: DIR/TOKEN ends in it.
+	size_t        stage_count;  //!< The stages written.
 	struct error  error;        //!< Why a stage failed; empty while none did.
 	char          stages[TRACE_MAX_STAGES][TRACE_STAGE_BYTES]; //!< The stages' names, in order.
 };
@@ -90,12 +76,12 @@ struct frame_trace {
  *         trace_requests_fini() leaves it.
  */
 struct trace_requests {
-	char        *directory; //!< DIR, absolute; nullptr for none.
-	char        *owner;     //!< DIR/owner.json, which this daemon wrote and removes; nullptr before.
-	char        *request;   //!< DIR/request, which a client writes.
-	char        *claimed;   //!< DIR/.request-PID, to which this daemon renames a request it claims.
-	STD(size_t)  length;    //!< DIR's length.
-	int          lock;      //!< DIR/.worker-lock, locked while this daemon serves, or -1.
+	char   *directory; //!< DIR, absolute; nullptr for none.
+	char   *owner;     //!< DIR/owner.json, which this daemon wrote and removes; nullptr before.
+	char   *request;   //!< DIR/request, which a client writes.
+	char   *claimed;   //!< DIR/.request-PID, to which this daemon renames a request it claims.
+	size_t  length;    //!< DIR's length.
+	int     lock;      //!< DIR/.worker-lock, locked while this daemon serves, or -1.
 };
 
 /** @brief Formats a frame's metadata as JSON.
@@ -118,8 +104,8 @@ trace_metadata_json (struct trace_metadata const *m,
  * @return       true if it is.
  */
 extern bool
-trace_valid_token (char const  *token,
-                   STD(size_t)  length);
+trace_valid_token (char const *token,
+                   size_t      length);
 
 /** @brief Writes a stage's fitted picture as a PFM image: bottom-up RGB float32, a negative scale
  *         for little-endian data.
@@ -154,7 +140,7 @@ trace_write_pfm (char const            *file,
 extern void
 frame_trace_image (struct frame_trace    *t,
                    char const            *name,
-                   STD(size_t)            length,
+                   size_t                 length,
                    float const           *data,
                    struct geometry const *g,
                    unsigned               channels);
@@ -195,9 +181,9 @@ frame_trace_fini (struct frame_trace *t);
 extern enum error_code
 trace_requests_init (struct trace_requests *dest,
                      char const            *path,
-                     STD(size_t)            length,
+                     size_t                 length,
                      char const            *shm,
-                     STD(size_t)            shm_length,
+                     size_t                 shm_length,
                      struct error          *e);
 
 /** @brief Removes the trace directory's owner.json and unlocks the directory.
@@ -218,11 +204,5 @@ extern enum error_code
 trace_requests_take (struct trace_requests const *r,
                      struct frame_trace          *dest,
                      struct error                *e);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_TRACE_H_ */

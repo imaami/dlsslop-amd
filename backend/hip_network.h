@@ -3,32 +3,18 @@
  * The HIP network run by dlsslopd's own host code: the model's code objects and packed weights, and
  * a tier's pool buffers with every launch of its plan bound once, so that a frame is its kernel
  * launches alone. hip_network.c defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_HIP_NETWORK_H_
 #define DLSSLOP_AMD_BACKEND_HIP_NETWORK_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-# include <cstdint>
-#else
-# include <stddef.h>
-# include <stdint.h>
-#endif
+#include <stddef.h>
+#include <stdint.h>
 
 #include "error.h"
 #include "hip.h"
 #include "hip_plan.h"
 #include "hip_weights.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief The network's code objects, every kernel of HIP_PLAN_KERNELS, and the weights of a plan,
  *         packed and uploaded in its order.
@@ -40,8 +26,8 @@ struct hip_model {
 	void                 *modules[HIP_MODULE_COUNT];   //!< Each module, by enum hip_module.
 	void                 *functions[HIP_KERNEL_COUNT]; //!< Each kernel, by enum hip_kernel.
 	void                **weights;                     //!< Each weight's image, by its index in the plan.
-	STD(size_t)           count;                       //!< The weights uploaded.
-	STD(size_t)           bytes;                       //!< The device memory they take.
+	size_t                count;                       //!< The weights uploaded.
+	size_t                bytes;                       //!< The device memory they take.
 };
 
 /** @brief Loads the modules with their kernels, then reads, packs and uploads each weight.
@@ -61,11 +47,11 @@ extern enum error_code
 hip_model_init (struct hip_model             *dest,
                 struct hip_api const         *api,
                 char const                   *modules,
-                STD(size_t)                   modules_length,
+                size_t                        modules_length,
                 char const                   *assets,
-                STD(size_t)                   assets_length,
+                size_t                        assets_length,
                 struct hip_weight_spec const *weights,
-                STD(size_t)                   count,
+                size_t                        count,
                 struct error                 *e);
 
 /** @brief Frees a model's weights, unloads its modules and zeroes it; no stream may still use it.
@@ -81,10 +67,10 @@ struct hip_network_launch;
 /** @brief A frame's own arguments, which the bound arguments point to. HIP copies each argument as
  *         a launch is queued, so the next frame may change them. */
 struct hip_network_frame {
-	void         *rgba;     //!< The frame's input.
-	void         *history;  //!< Its history, or its input when it has none.
-	void         *output;   //!< Its RGB output.
-	STD(uint64_t) temporal; //!< 1 when it has a history, else 0; 8 bytes, as every argument's value.
+	void    *rgba;     //!< The frame's input.
+	void    *history;  //!< Its history, or its input when it has none.
+	void    *output;   //!< Its RGB output.
+	uint64_t temporal; //!< 1 when it has a history, else 0; 8 bytes, as every argument's value.
 };
 
 /** @brief A tier's network: its pool buffers and gather maps, and each launch of its plan with the
@@ -109,14 +95,14 @@ struct hip_network {
 	void                      *stream;       //!< The stream every launch is queued on.
 	void                     **buffers;      //!< The pool's buffers.
 	struct hip_network_launch *launches;     //!< The plan's launches, bound.
-	STD(uint64_t)             *values;       //!< Each argument's value, 8 bytes whatever its size.
+	uint64_t                  *values;       //!< Each argument's value, 8 bytes whatever its size.
 	void                     **argv;         //!< Each argument's address: in values, or in frame.
 	void                      *gather[2];    //!< The ViT's gather map, and its inverse.
-	STD(size_t)                buffer_count; //!< The buffers allocated.
-	STD(size_t)                launch_count; //!< The launches.
-	STD(size_t)                bytes;        //!< The device memory of the buffers and maps.
+	size_t                     buffer_count; //!< The buffers allocated.
+	size_t                     launch_count; //!< The launches.
+	size_t                     bytes;        //!< The device memory of the buffers and maps.
 	struct hip_network_frame   frame;        //!< The latest frame's own arguments.
-	STD(size_t)                warm;         //!< Which argv of a launch a frame uses: 0 for the first, then 1.
+	size_t                     warm;         //!< Which argv of a launch a frame uses: 0 for the first, then 1.
 };
 
 /** @brief Allocates a plan's pool buffers as its placement sizes them, uploads the gather maps and
@@ -172,11 +158,5 @@ hip_network_enqueue (struct hip_network *network,
 extern enum error_code
 hip_network_print_memory (struct hip_network const *network,
                           struct error             *e);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_HIP_NETWORK_H_ */

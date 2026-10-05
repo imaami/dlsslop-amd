@@ -6,30 +6,17 @@
  *
  * A frame is temporal_gpu_begin(), then for each pass temporal_gpu_history() right before the
  * pass's network evaluation and temporal_gpu_target() after it, then temporal_gpu_end().
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_TEMPORAL_GPU_H_
 #define DLSSLOP_AMD_BACKEND_TEMPORAL_GPU_H_
 
-#ifdef __cplusplus
-# include <cstdint>
-#else
-# include <stdint.h>
-#endif
+#include <stdint.h>
 
 #include "error.h"
 #include "kernel_args.h"
 #include "native_kernels.h"
 #include "shm_protocol.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief The most levels of the luma pyramid: three, and one more for each step of quality. */
 #define TEMPORAL_GPU_MAX_LEVELS (3 + kMVecQuality)
@@ -61,7 +48,7 @@ struct temporal_gpu {
 	unsigned                     completed;                       //!< The frame's passes done so far.
 	bool                         valid;                           //!< Whether the previous frame is a history.
 	bool                         pending;                         //!< Whether a frame is in progress.
-	STD(uint16_t)                level_count;                     //!< The levels allocated; 0 without buffers.
+	uint16_t                     level_count;                     //!< The levels allocated; 0 without buffers.
 };
 
 /** @brief Makes a temporal state with no buffers.
@@ -167,11 +154,5 @@ temporal_gpu_target (struct temporal_gpu  *temporal,
 extern enum error_code
 temporal_gpu_end (struct temporal_gpu *temporal,
                   struct error        *e);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_TEMPORAL_GPU_H_ */

@@ -6,31 +6,17 @@
  *
  * The caller keeps the HIP device current and the stream alive and idle between frames: a frame
  * ends before codec_gpu_encode() or after codec_gpu_finish().
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_CODEC_GPU_H_
 #define DLSSLOP_AMD_BACKEND_CODEC_GPU_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-# include <cstdint>
-#else
-# include <stddef.h>
-# include <stdint.h>
-#endif
+#include <stddef.h>
+#include <stdint.h>
 
 #include "error.h"
 #include "kernel_args.h"
 #include "native_kernels.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief The codec's buffers and the latest encode.
  *
@@ -40,14 +26,14 @@ struct codec_gpu {
 	struct native_kernels const *kernels;      //!< The kernels and their stream; nullptr for none.
 	void                        *proxy;        //!< A host frame's upload, which decode overwrites, then reads back.
 	void const                  *source;       //!< The latest encode's proxy: proxy, or the caller's frame.
-	STD(uint32_t)               *invalid;      //!< Pinned host status word; kernels only ever store 1.
-	STD(uint8_t)                *pinned[2];    //!< The channel's input and output slots, page-locked.
-	STD(size_t)                  capacity;     //!< The bytes of proxy.
-	STD(size_t)                  pinned_bytes; //!< The bytes locked in each slot; 0 for none.
+	uint32_t                    *invalid;      //!< Pinned host status word; kernels only ever store 1.
+	uint8_t                     *pinned[2];    //!< The channel's input and output slots, page-locked.
+	size_t                       capacity;     //!< The bytes of proxy.
+	size_t                       pinned_bytes; //!< The bytes locked in each slot; 0 for none.
 	struct geometry              uploaded;     //!< The latest encode's geometry.
 	bool                         fp16;         //!< The latest encode's proxy is RGBA16F, not RGBA8.
 	bool                         device;       //!< The latest encode's frames are device memory.
-	STD(uint16_t)                pinning;      //!< 1 while the runtime can page-lock the slots, else 0.
+	uint16_t                     pinning;      //!< 1 while the runtime can page-lock the slots, else 0.
 };
 
 /** @brief Makes a codec: its status word.
@@ -82,9 +68,9 @@ codec_gpu_fini (struct codec_gpu *codec);
  */
 extern void
 codec_gpu_pin (struct codec_gpu *codec,
-               STD(uint8_t)     *input,
-               STD(uint8_t)     *output,
-               STD(size_t)       bytes);
+               uint8_t          *input,
+               uint8_t          *output,
+               size_t            bytes);
 
 /** @brief Queues a frame's upload and encode on the stream.
  *
@@ -103,7 +89,7 @@ codec_gpu_pin (struct codec_gpu *codec,
  */
 extern enum error_code
 codec_gpu_encode (struct codec_gpu      *codec,
-                  STD(uint8_t) const    *input,
+                  uint8_t const         *input,
                   struct geometry const *g,
                   void                  *device_rgba,
                   bool                   fp16,
@@ -143,7 +129,7 @@ codec_gpu_feedback (struct codec_gpu *codec,
 extern enum error_code
 codec_gpu_decode (struct codec_gpu *codec,
                   void             *neural_rgb,
-                  STD(uint8_t)     *output,
+                  uint8_t          *output,
                   struct error     *e);
 
 /** @brief Waits for the stream. Nonfinite or FP16-overflow samples anywhere since the latest
@@ -156,11 +142,5 @@ codec_gpu_decode (struct codec_gpu *codec,
 extern enum error_code
 codec_gpu_finish (struct codec_gpu *codec,
                   struct error     *e);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_CODEC_GPU_H_ */

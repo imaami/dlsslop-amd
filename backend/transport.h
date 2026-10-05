@@ -4,28 +4,15 @@
  * exported frames (ShmTransportOffer). systemd's socket unit hands it over already bound
  * (LISTEN_FDS), and connecting to it is then how a client starts the daemon; otherwise the daemon
  * binds it itself, only when its engine can import frames. transport.c defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_TRANSPORT_H_
 #define DLSSLOP_AMD_BACKEND_TRANSPORT_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-#else
-# include <stddef.h>
-#endif
+#include <stddef.h>
 
 #include "error.h"
 #include "shm_protocol.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief The socket on which offers arrive: transport_listener_init() opens it and
  *         transport_listener_fini() closes it.
@@ -54,7 +41,7 @@ struct transport_listener {
 extern enum error_code
 transport_listener_init (struct transport_listener *dest,
                          char const                *channel,
-                         STD(size_t)                channel_length,
+                         size_t                     channel_length,
                          bool                       wanted,
                          struct error              *e);
 
@@ -92,11 +79,5 @@ transport_receive_offer (int                       peer,
 extern void
 transport_answer (int  peer,
                   bool imported);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_TRANSPORT_H_ */

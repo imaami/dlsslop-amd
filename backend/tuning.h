@@ -2,8 +2,6 @@
  *
  * The check of a native tuning (kernel_args.h) that a frame asks for, which dlsslopd and the
  * in-layer network's module both make. tuning.c defines it.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_TUNING_H_
@@ -11,10 +9,6 @@
 
 #include "error.h"
 #include "kernel_args.h"
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 /** @brief Checks that a tuning is inside the controls' ranges.
  *
@@ -26,9 +20,5 @@ extern "C" {
 extern enum error_code
 tuning_validate (struct native_tuning const *tuning,
                  struct error               *e);
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_TUNING_H_ */

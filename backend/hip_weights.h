@@ -4,36 +4,22 @@
  * read, byte for byte as upstream packs it. A port of the production path of lmxxf's
  * packed_weights.h and the weight loaders of hip_reference_network.h (MIT). hip_weights.c defines
  * the functions and the tables.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_HIP_WEIGHTS_H_
 #define DLSSLOP_AMD_BACKEND_HIP_WEIGHTS_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-# include <cstdint>
-#else
-# include <stddef.h>
-# include <stdint.h>
-#endif
+#include <stddef.h>
+#include <stdint.h>
 
 #include "error.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief How a weight file becomes its image: each is one of upstream's loaders.
  *
  * Their other arguments follow from the stem: the channel count, whether a C32 weight is attention
  * or FFN, and a ViT weight's shape.
  */
-enum hip_recipe : STD(uint8_t) {
+enum hip_recipe : uint8_t {
 	HIP_RECIPE_RAW,               //!< Weight: the values as read.
 	HIP_RECIPE_C32,               //!< PackedC32Weight.
 	HIP_RECIPE_DS_CAST,           //!< PackedDsWeightCast, at 32 channels.
@@ -73,7 +59,7 @@ struct hip_weight_spec {
  * @param spec The weight.
  * @return     The count, or 0 for a stem that upstream does not know.
  */
-extern STD(size_t)
+extern size_t
 hip_weights_file_elements (struct hip_weight_spec const *spec);
 
 /** @brief The channel count of a weight's stem, which upstream passes the recipe's loader.
@@ -90,16 +76,16 @@ hip_weights_channels (struct hip_weight_spec const *spec);
  * @param spec The weight.
  * @return     The bytes.
  */
-extern STD(size_t)
+extern size_t
 hip_weights_packed_bytes (struct hip_weight_spec const *spec);
 
 /** @brief A weight file's values, and then the image they are packed into, which
  *         hip_weight_file_fini() frees. */
 struct hip_weight_file {
-	char       *path;     //!< The file's path, or nullptr.
-	float      *values;   //!< Its values, binary16 ones widened; then the image. Or nullptr.
-	STD(size_t) count;    //!< The floats that the values or the image take.
-	STD(size_t) capacity; //!< The floats that their memory holds.
+	char  *path;     //!< The file's path, or nullptr.
+	float *values;   //!< Its values, binary16 ones widened; then the image. Or nullptr.
+	size_t count;    //!< The floats that the values or the image take.
+	size_t capacity; //!< The floats that their memory holds.
 };
 
 /** @brief Loads a weight: reads its file, ASSETS/STEM.f32 or ASSETS/STEM.f16 when there is no
@@ -122,7 +108,7 @@ struct hip_weight_file {
 extern enum error_code
 hip_weights_load (struct hip_weight_file       *dest,
                   char const                   *assets,
-                  STD(size_t)                   assets_length,
+                  size_t                        assets_length,
                   struct hip_weight_spec const *spec,
                   struct error                 *e);
 
@@ -154,7 +140,7 @@ hip_weights_pack (struct hip_weight_spec const *spec,
 
 /** @brief Why a value has no exact encoding. The encodings of single values return one, so that
  *         their loops build no words. */
-enum hip_flaw : STD(uint8_t) {
+enum hip_flaw : uint8_t {
 	HIP_FLAW_NONE,           //!< The value has an exact encoding.
 	HIP_FLAW_FP8_NONFINITE,  //!< NaN or infinity, for E4M3.
 	HIP_FLAW_FP8_SUBNORMAL,  //!< Below E4M3's normals and not one of its subnormals.
@@ -176,7 +162,7 @@ extern char const *const HIP_WEIGHTS_FLAW_WORDS[];
  * @return     The value.
  */
 extern float
-hip_weights_widen_half (STD(uint16_t) half);
+hip_weights_widen_half (uint16_t half);
 
 /** @brief E4M3 of an exactly representable value (upstream: ExactWeightFp8).
  *
@@ -185,8 +171,8 @@ hip_weights_widen_half (STD(uint16_t) half);
  * @return      HIP_FLAW_NONE, or why the value has no code.
  */
 extern enum hip_flaw
-hip_weights_exact_fp8 (float         value,
-                       STD(uint8_t) *code);
+hip_weights_exact_fp8 (float    value,
+                       uint8_t *code);
 
 /** @brief Binary16 of an exactly representable value (upstream: ExactWeightHalf).
  *
@@ -195,8 +181,8 @@ hip_weights_exact_fp8 (float         value,
  * @return      HIP_FLAW_NONE, or why the value has no binary16.
  */
 extern enum hip_flaw
-hip_weights_exact_half (float          value,
-                        STD(uint16_t) *half);
+hip_weights_exact_half (float     value,
+                        uint16_t *half);
 
 /** @brief Binary16 rounded to nearest even, subnormals included, overflow made infinity and NaN
  *         0x7e00 with its sign (upstream: RoundWeightHalf).
@@ -204,7 +190,7 @@ hip_weights_exact_half (float          value,
  * @param value The value.
  * @return      The binary16 bits.
  */
-extern STD(uint16_t)
+extern uint16_t
 hip_weights_round_half (float value);
 
 /** @brief A value rounded to nearest even E4M3 and saturated at ±448, NaN and infinity included
@@ -236,9 +222,9 @@ hip_weights_scale_piece (float value);
  */
 extern enum error_code
 hip_weights_fragment_tiles (float        *values,
-                            STD(size_t)   start,
-                            STD(size_t)   rows,
-                            STD(size_t)   columns,
+                            size_t        start,
+                            size_t        rows,
+                            size_t        columns,
                             struct error *e);
 
 /** @brief The floats of a C32 FFN weight's file. */
@@ -264,9 +250,9 @@ hip_weights_append_c32_diagonals (float *values);
  * @param c      Its channels.
  */
 extern void
-hip_weights_append_mh_diagonals (float       *values,
-                                 STD(size_t)  count,
-                                 unsigned     c);
+hip_weights_append_mh_diagonals (float    *values,
+                                 size_t    count,
+                                 unsigned  c);
 
 /** @brief Checks that an FFN weight contracts in groups only, which its kernels assume (upstream:
  *         ValidateGroupedMhContract).
@@ -280,11 +266,5 @@ extern enum error_code
 hip_weights_check_grouped_contract (float const  *values,
                                     unsigned      c,
                                     struct error *e);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_HIP_WEIGHTS_H_ */

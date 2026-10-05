@@ -3,27 +3,15 @@
  * The network on Vulkan: DLSSNR-AMD's network (external/vulkan/linux/) on a device of the daemon's
  * own. The network is opaque: this header names no recorder, runtime or plan type. vulkan_network.c
  * defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_VULKAN_NETWORK_H_
 #define DLSSLOP_AMD_BACKEND_VULKAN_NETWORK_H_
 
-#ifdef __cplusplus
-# include <cstdint>
-#else
-# include <stdint.h>
-#endif
+#include <stddef.h>
+#include <stdint.h>
 
 #include "error.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 struct ShmTransportOffer;
 struct vulkan_frame;
@@ -91,7 +79,7 @@ vulkan_network_device_name (struct vulkan_network const *n);
  * @param n The network, or nullptr.
  * @return  The index, or UINT32_MAX for no network.
  */
-extern STD(uint32_t)
+extern uint32_t
 vulkan_network_device_index (struct vulkan_network const *n);
 
 /** @brief Whether vulkan_network_shape() would build for a frame.
@@ -143,7 +131,7 @@ vulkan_network_plan (struct vulkan_network     *n,
  */
 extern bool
 vulkan_network_import (struct vulkan_network          *n,
-                       STD(uint32_t)                   slot,
+                       ptrdiff_t                       slot,
                        struct ShmTransportOffer const *offer,
                        int                             fds[2]);
 
@@ -162,12 +150,10 @@ vulkan_network_import (struct vulkan_network          *n,
 extern enum error_code
 vulkan_network_infer (struct vulkan_network     *n,
                       struct vulkan_frame const *frame,
-                      int                        slot,
-                      STD(uint8_t) const        *input,
-                      STD(uint8_t)              *output,
+                      ptrdiff_t                  slot,
+                      uint8_t const             *input,
+                      uint8_t                   *output,
                       struct error              *e);
-
-#undef STD
 
 /** @brief The GPU times of the last frame whose timestamps the device gave; all 0 before the first.
  *
@@ -176,9 +162,5 @@ vulkan_network_infer (struct vulkan_network     *n,
  */
 extern struct vulkan_network_times
 vulkan_network_frame_times (struct vulkan_network const *n);
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_VULKAN_NETWORK_H_ */

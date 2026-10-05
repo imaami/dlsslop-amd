@@ -3,34 +3,20 @@
  * Paths and whole files through POSIX calls. Paths are null-terminated; a function that builds on a
  * path or a part of one also takes its length, and a path it makes is a heap string, which the
  * caller frees. files.c defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_FILES_H_
 #define DLSSLOP_AMD_BACKEND_FILES_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-# include <cstdint>
-#else
-# include <stddef.h>
-# include <stdint.h>
-#endif
+#include <stddef.h>
+#include <stdint.h>
 
 #include "error.h"
 
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
-
 /** @brief A whole file's bytes, which files_data_fini() frees. */
 struct files_data {
-	STD(uint8_t) *bytes; //!< The bytes and a null byte after them, or nullptr.
-	STD(size_t)   size;  //!< The number of bytes, without the null.
+	uint8_t *bytes; //!< The bytes and a null byte after them, or nullptr.
+	size_t   size;  //!< The number of bytes, without the null.
 };
 
 /** @brief Whether a path names a directory, following symbolic links.
@@ -56,9 +42,9 @@ files_is_regular_file (char const *path);
  * @return       The length of the path without its last component: 0 for a bare name, 1 for a
  *               name at the root.
  */
-extern STD(size_t)
-files_parent (char const  *path,
-              STD(size_t)  length);
+extern size_t
+files_parent (char const *path,
+              size_t      length);
 
 /** @brief Joins two paths by one slash; the second alone when the first is empty.
  *
@@ -70,11 +56,11 @@ files_parent (char const  *path,
  * @return         The joined path, or nullptr without memory for it.
  */
 extern char *
-files_join (char const  *a,
-            STD(size_t)  a_length,
-            char const  *b,
-            STD(size_t)  b_length,
-            STD(size_t) *length);
+files_join (char const *a,
+            size_t      a_length,
+            char const *b,
+            size_t      b_length,
+            size_t     *length);
 
 /** @brief A path, relative to the working directory unless it is absolute.
  *
@@ -86,9 +72,9 @@ files_join (char const  *a,
  *                        for it.
  */
 extern char *
-files_absolute (char const  *path,
-                STD(size_t)  length,
-                STD(size_t) *absolute_length);
+files_absolute (char const *path,
+                size_t      length,
+                size_t     *absolute_length);
 
 /** @brief Reads a whole file.
  *
@@ -120,7 +106,7 @@ files_data_fini (struct files_data *data);
 extern enum error_code
 files_read_all (int           fd,
                 void         *data,
-                STD(size_t)   size,
+                size_t        size,
                 struct error *e);
 
 /** @brief Reads bytes from a descriptor at an offset, leaving its position as it was: a file that
@@ -134,11 +120,11 @@ files_read_all (int           fd,
  * @return       ERROR_NONE, or ERROR_FAILED.
  */
 extern enum error_code
-files_read_at (int            fd,
-               STD(uint64_t)  offset,
-               void          *data,
-               STD(size_t)    size,
-               struct error  *e);
+files_read_at (int           fd,
+               uint64_t      offset,
+               void         *data,
+               size_t        size,
+               struct error *e);
 
 /** @brief Writes bytes to a descriptor, all of them.
  *
@@ -151,7 +137,7 @@ files_read_at (int            fd,
 extern enum error_code
 files_write_all (int           fd,
                  void const   *data,
-                 STD(size_t)   size,
+                 size_t        size,
                  struct error *e);
 
 /** @brief Writes bytes as a file, created or truncated.
@@ -165,7 +151,7 @@ files_write_all (int           fd,
 extern enum error_code
 files_write (char const   *path,
              void const   *data,
-             STD(size_t)   size,
+             size_t        size,
              struct error *e);
 
 /** @brief Writes bytes as a file through a new file beside it, which rename(2) then puts in the
@@ -184,9 +170,9 @@ files_write (char const   *path,
  */
 extern enum error_code
 files_replace (char const   *path,
-               STD(size_t)   length,
+               size_t        length,
                void const   *data,
-               STD(size_t)   size,
+               size_t        size,
                struct error *e);
 
 /** @brief Creates a directory and any missing parents.
@@ -199,7 +185,7 @@ files_replace (char const   *path,
  */
 extern enum error_code
 files_make_directories (char const   *path,
-                        STD(size_t)   length,
+                        size_t        length,
                         bool         *created,
                         struct error *e);
 
@@ -215,14 +201,8 @@ files_make_directories (char const   *path,
  */
 extern enum error_code
 files_private_directory (char const   *path,
-                         STD(size_t)   length,
+                         size_t        length,
                          char const   *what,
                          struct error *e);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_FILES_H_ */

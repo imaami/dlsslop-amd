@@ -2,30 +2,17 @@
  *
  * What a frame is processed with, as the channel states it, for dlsslopd and the in-layer network.
  * processing.c defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_PROCESSING_H_
 #define DLSSLOP_AMD_BACKEND_PROCESSING_H_
 
-#ifdef __cplusplus
-# include <cstdint>
-#else
-# include <stdint.h>
-#endif
+#include <stdint.h>
 
 #include "error.h"
 #include "kernel_args.h"
 #include "shm_protocol.h"
 #include "vulkan_frame.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief A frame's settings: processing_settings() makes the defaults, processing_read() reads a
  *         frame's from the channel. */
@@ -35,9 +22,9 @@ struct processing_settings {
 	 *         The HIP network has only the defaults of the model's own conditioning. */
 	float                skin_structure;
 	float                color_preserve; //!< Color preservation after every pass, 0..1.
-	STD(uint32_t)        style;          //!< The Vulkan model's style, 0..2.
-	STD(uint32_t)        motion_quality; //!< The motion estimate's quality: kMVecFast and the rest.
-	STD(uint32_t)        motion_grid;    //!< The motion estimate's spacing: kMVecPixels1 and the rest.
+	uint32_t             style;          //!< The Vulkan model's style, 0..2.
+	uint32_t             motion_quality; //!< The motion estimate's quality: kMVecFast and the rest.
+	uint32_t             motion_grid;    //!< The motion estimate's spacing: kMVecPixels1 and the rest.
 	bool                 auto_mask;      //!< The Vulkan model's automatic mask.
 	bool                 fp16;           //!< The frame is RGBA16F, not RGBA8.
 	bool                 precision16;    //!< Passes after the first take float16 feedback.
@@ -79,15 +66,9 @@ processing_read (struct ShmHeader const     *h,
  *                 @a settings say.
  */
 extern struct vulkan_frame
-processing_vulkan_frame (STD(uint32_t)                     width,
-                         STD(uint32_t)                     height,
-                         STD(uint32_t)                     passes,
+processing_vulkan_frame (uint32_t                          width,
+                         uint32_t                          height,
+                         uint32_t                          passes,
                          struct processing_settings const *settings);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_PROCESSING_H_ */

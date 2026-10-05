@@ -43,7 +43,7 @@ void wake(std::atomic<uint32_t>& word)
     syscall(SYS_futex, reinterpret_cast<uint32_t*>(&word), FUTEX_WAKE, 1, nullptr, nullptr, 0);
 }
 
-// The self-test's gradient (backend/self_test.cpp), varied per letter.
+// The self-test's gradient (backend/self_test.c), varied per letter.
 void gradient(uint8_t* rgba, unsigned w, unsigned h, unsigned letter)
 {
     const uint8_t on = uint8_t(192 + 8 * letter), off = uint8_t(64 - 8 * letter);

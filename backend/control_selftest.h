@@ -3,28 +3,15 @@
  * The HIP self-test's checks of the linux_native module's kernels on synthetic inputs, independent
  * of the model's weights: each kernel against its CPU reference, bit for bit, and the motion
  * history's behaviour. control_selftest.c defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_CONTROL_SELFTEST_H_
 #define DLSSLOP_AMD_BACKEND_CONTROL_SELFTEST_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-#else
-# include <stddef.h>
-#endif
+#include <stddef.h>
 
 #include "error.h"
 #include "native_kernels.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief Runs the checks of the native tuning, the motion history and the codec, printing a line
  *         to stdout for each that passes.
@@ -50,7 +37,7 @@ extern enum error_code
 control_selftest_read (struct native_kernels const *kernels,
                        void const                  *pointer,
                        float                       *samples,
-                       STD(size_t)                  count,
+                       size_t                       count,
                        struct error                *e);
 
 /** @brief Compares a kernel's floats with its CPU reference's, bit for bit: both compute the same
@@ -67,14 +54,8 @@ control_selftest_read (struct native_kernels const *kernels,
 extern enum error_code
 control_selftest_compare (float const  *actual,
                           float const  *expected,
-                          STD(size_t)   count,
+                          size_t        count,
                           char const   *name,
                           struct error *e);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_CONTROL_SELFTEST_H_ */

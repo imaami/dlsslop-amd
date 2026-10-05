@@ -569,11 +569,11 @@ import_buffer (struct vulkan_network        *n,
 
 bool
 vulkan_network_import (struct vulkan_network          *n,
-                       uint32_t                        slot,
+                       ptrdiff_t                       slot,
                        struct ShmTransportOffer const *offer,
                        int                             fds[2])
 {
-	if (slot >= VULKAN_NETWORK_IMPORT_SLOTS)
+	if (slot < 0 || slot >= VULKAN_NETWORK_IMPORT_SLOTS)
 		return false;
 	static_assert(sizeof offer->deviceUuid == VK_UUID_SIZE && sizeof offer->driverUuid == VK_UUID_SIZE);
 	if (memcmp(offer->deviceUuid, n->ids.deviceUUID, VK_UUID_SIZE) ||
@@ -617,7 +617,7 @@ milliseconds (uint64_t from,
 enum error_code
 vulkan_network_infer (struct vulkan_network     *n,
                       struct vulkan_frame const *frame,
-                      int                        slot,
+                      ptrdiff_t                  slot,
                       uint8_t const             *input,
                       uint8_t                   *output,
                       struct error              *e)
@@ -629,7 +629,7 @@ vulkan_network_infer (struct vulkan_network     *n,
 	VkBuffer target;
 	if (exported) {
 		if (slot >= VULKAN_NETWORK_IMPORT_SLOTS || !n->imported[slot].frame[0].buffer)
-			return error_fail(e, "import slot %d holds no frames", slot);
+			return error_fail(e, "import slot %td holds no frames", slot);
 		source = n->imported[slot].frame[0].buffer;
 		target = n->imported[slot].frame[1].buffer;
 	} else {

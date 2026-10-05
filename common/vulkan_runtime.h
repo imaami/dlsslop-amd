@@ -4,32 +4,18 @@
  * built with its GPU work in one submission, and the commands of a frame. A port of the production
  * path of DLSSNR-AMD's linux/src/core (MIT): nr_runtime.cpp, the device part of NrSession::build in
  * nr_graph.cpp and nrvk.hpp. vulkan_runtime.c defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_COMMON_VULKAN_RUNTIME_H_
 #define DLSSLOP_AMD_COMMON_VULKAN_RUNTIME_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-# include <cstdint>
-#else
-# include <stddef.h>
-# include <stdint.h>
-#endif
+#include <stddef.h>
+#include <stdint.h>
 
 #include <vulkan/vulkan.h>
 
 #include "error.h"
 #include "vulkan_plan.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief Where the Vulkan network finds what it loads, with each path's length.
  *
@@ -39,9 +25,9 @@ struct vulkan_paths {
 	char const *model;          //!< dlssnr.bin, extracted from the user's nvngx_dlssnr.dll.
 	char const *shaders;        //!< The network's SPIR-V and markers, with runtime/ and temporal/ below.
 	char const *cache;          //!< A writable pipeline cache; none when cache_length is 0.
-	STD(size_t) model_length;   //!< The model's path's length.
-	STD(size_t) shaders_length; //!< The shaders' path's length.
-	STD(size_t) cache_length;   //!< The cache's path's length: 0 for none.
+	size_t      model_length;   //!< The model's path's length.
+	size_t      shaders_length; //!< The shaders' path's length.
+	size_t      cache_length;   //!< The cache's path's length: 0 for none.
 };
 
 /** @brief A function that a build calls with the device's context around its submission.
@@ -84,7 +70,7 @@ struct vulkan_device {
 	vulkan_device_log_fn            *log;       //!< Where the runtime's log lines go, or nullptr: nowhere.
 	struct vulkan_physical_functions functions; //!< The physical-device queries.
 	VkPhysicalDeviceMemoryProperties memory;    //!< The physical device's memory.
-	STD(uint32_t)                    family;    //!< The queue's family.
+	uint32_t                         family;    //!< The queue's family.
 };
 
 /** @brief What a runtime is built for.
@@ -94,13 +80,13 @@ struct vulkan_device {
  * vulkan_frame_images) instead of buffers.
  */
 struct vulkan_shape {
-	STD(uint32_t) width;    //!< The frames' width.
-	STD(uint32_t) height;   //!< Their height.
-	STD(uint32_t) passes;   //!< The chained evaluations.
-	bool          fp16;     //!< RGBA16F frames, not RGBA8.
-	bool          motion;   //!< With motion history.
-	bool          stages;   //!< With the pass stages.
-	bool          external; //!< In a caller's images.
+	uint32_t width;    //!< The frames' width.
+	uint32_t height;   //!< Their height.
+	uint32_t passes;   //!< The chained evaluations.
+	bool     fp16;     //!< RGBA16F frames, not RGBA8.
+	bool     motion;   //!< With motion history.
+	bool     stages;   //!< With the pass stages.
+	bool     external; //!< In a caller's images.
 };
 
 /** @brief The caller's images that frames go through, for a runtime built for an external shape.
@@ -111,24 +97,24 @@ struct vulkan_shape {
  * shape's extent and frame format.
  */
 struct vulkan_frame_images {
-	STD(uint64_t) generation;  //!< Nonzero, and new whenever a handle may have changed.
-	VkImageView   frame;       //!< The frame, sampled.
-	VkImage       answer;      //!< The answer.
-	VkImageView   answer_view; //!< The answer's view.
+	uint64_t    generation;  //!< Nonzero, and new whenever a handle may have changed.
+	VkImageView frame;       //!< The frame, sampled.
+	VkImage     answer;      //!< The answer.
+	VkImageView answer_view; //!< The answer's view.
 };
 
 /** @brief A frame's controls (upstream: nr::Controls, whose pass count is the shape's here), in the
  *         ranges that dlsslopd's settings allow. */
 struct vulkan_controls {
-	STD(uint32_t) style;          //!< DLSSNR.Style.
-	float         intensity;      //!< DLSSNR.Intensity.
-	float         tone;           //!< LocalToneStrength.
-	float         structure;      //!< LocalStructureStrength.
+	uint32_t style;          //!< DLSSNR.Style.
+	float    intensity;      //!< DLSSNR.Intensity.
+	float    tone;           //!< LocalToneStrength.
+	float    structure;      //!< LocalStructureStrength.
 	/** @brief The skin's local structure under the automatic mask; below 0 it follows structure. */
-	float         skin;
-	float         sharpness;      //!< dlsslop-amd's sharpening stage after every pass, 0..1; 0 skips it.
-	float         color_preserve; //!< Its color preservation stage, 0..1; 0 skips it.
-	bool          auto_mask;      //!< The automatic mask.
+	float    skin;
+	float    sharpness;      //!< dlsslop-amd's sharpening stage after every pass, 0..1; 0 skips it.
+	float    color_preserve; //!< Its color preservation stage, 0..1; 0 skips it.
+	bool     auto_mask;      //!< The automatic mask.
 };
 
 /** @brief A runtime's image, null until made, and what it was made as. */
@@ -136,8 +122,8 @@ struct vulkan_runtime_image {
 	VkImage           image;  //!< The image.
 	VkDeviceMemory    memory; //!< Its memory.
 	VkImageView       view;   //!< Its view, when it is sampled or stored into.
-	STD(uint32_t)     width;  //!< Its width.
-	STD(uint32_t)     height; //!< Its height.
+	uint32_t          width;  //!< Its width.
+	uint32_t          height; //!< Its height.
 	VkFormat          format; //!< Its format; VK_FORMAT_UNDEFINED for none.
 	VkImageUsageFlags usage;  //!< Its usage.
 };
@@ -157,7 +143,7 @@ struct vulkan_runtime_pipeline {
 
 /** @brief The runtime's pipelines after the network's kernels' (upstream: the adapters of
  *         nr_runtime.cpp and the temporal variants of the pre and post blocks). */
-enum vulkan_runtime_adapter : STD(uint8_t) {
+enum vulkan_runtime_adapter : uint8_t {
 	/** @brief The alpha pass, which restores the frame's alpha when later passes overwrote the
 	 *         input. */
 	VULKAN_RUNTIME_ALPHA = VULKAN_KERNEL_COUNT,
@@ -185,7 +171,7 @@ struct vulkan_runtime_objects {
 	struct vulkan_runtime_buffer   params;                                   //!< The motion parameters.
 	/** @brief The verdict: the fallback's grid, which the host reads mapped at grid. */
 	struct vulkan_runtime_buffer   verdict;
-	STD(uint32_t)                 *grid;                                     //!< The verdict, mapped.
+	uint32_t                      *grid;                                     //!< The verdict, mapped.
 	/** @brief The network's input, sampled. In image mode the caller's frame stands in for the first
 	 *         pass's input. */
 	struct vulkan_runtime_image    input;
@@ -228,35 +214,35 @@ struct vulkan_runtime_objects {
 
 /** @brief How a runtime records frames. */
 struct vulkan_runtime_state {
-	STD(uint32_t) level_width[VULKAN_RUNTIME_LEVELS];  //!< The pyramid's levels' widths.
-	STD(uint32_t) level_height[VULKAN_RUNTIME_LEVELS]; //!< Their heights.
-	STD(uint32_t) width;                               //!< The frames' width.
-	STD(uint32_t) height;                              //!< Their height.
-	STD(uint32_t) passes;                              //!< The passes, 1..VULKAN_RUNTIME_MAX_PASSES.
-	bool          motion;                              //!< With motion history.
-	bool          stages;                              //!< With the pass stages.
-	bool          rgba8;                               //!< RGBA8 frames.
-	bool          external;                            //!< In the caller's images.
-	bool          input_direct;                        //!< The proxy is copied into the input, not blitted.
+	uint32_t level_width[VULKAN_RUNTIME_LEVELS];  //!< The pyramid's levels' widths.
+	uint32_t level_height[VULKAN_RUNTIME_LEVELS]; //!< Their heights.
+	uint32_t width;                               //!< The frames' width.
+	uint32_t height;                              //!< Their height.
+	uint32_t passes;                              //!< The passes, 1..VULKAN_RUNTIME_MAX_PASSES.
+	bool     motion;                              //!< With motion history.
+	bool     stages;                              //!< With the pass stages.
+	bool     rgba8;                               //!< RGBA8 frames.
+	bool     external;                            //!< In the caller's images.
+	bool     input_direct;                        //!< The proxy is copied into the input, not blitted.
 	/** @brief The post block stores the answer in the frame's format, which is then copied out, or
 	 *         in image mode is the caller's answer. */
-	bool          answer_direct;
-	bool          post_alpha;                          //!< The post block restores the frame's alpha itself.
+	bool     answer_direct;
+	bool     post_alpha;                          //!< The post block restores the frame's alpha itself.
 	/** @brief One pass with motion: the post block writes the history the next frame reads, in turn
 	 *         into history[0] and history[1]. */
-	bool          pingpong;
+	bool     pingpong;
 	/** @brief More passes with motion: each pass's post block writes its history into the second
 	 *         output, which that pass's history_store keeps. */
-	bool          stored;
+	bool     stored;
 };
 
 /** @brief The motion history that a frame reads. */
 struct vulkan_runtime_history {
-	STD(uint32_t) parity;  //!< This frame's luma pyramid.
-	STD(uint32_t) current; //!< The history it reads.
+	uint32_t parity;  //!< This frame's luma pyramid.
+	uint32_t current; //!< The history it reads.
 	/** @brief The pre block's noise seed for the frame, unless it starts the history over. */
-	STD(uint32_t) seed;
-	bool          latch;   //!< There is a last frame to follow.
+	uint32_t seed;
+	bool     latch;   //!< There is a last frame to follow.
 };
 
 /** @brief The network built for one frame extent on a device, for one shape of that extent at a time.
@@ -284,11 +270,11 @@ struct vulkan_runtime {
 	/** @brief The device, borrowed: it must outlive the runtime. nullptr: none is built. */
 	struct vulkan_device const   *device;
 	struct vulkan_step           *steps;         //!< The plan's steps, which the runtime frees.
-	STD(uint32_t)                *push;          //!< Their push words, which the runtime frees.
-	STD(uint32_t)                *timeouts;      //!< The plan's timeouts, which the runtime frees.
-	STD(size_t)                   step_count;    //!< The number of steps.
-	STD(size_t)                   timeout_count; //!< The number of timeouts.
-	STD(uint64_t)                 values_end;    //!< The plan's values_end.
+	uint32_t                     *push;          //!< Their push words, which the runtime frees.
+	uint32_t                     *timeouts;      //!< The plan's timeouts, which the runtime frees.
+	size_t                        step_count;    //!< The number of steps.
+	size_t                        timeout_count; //!< The number of timeouts.
+	uint64_t                      values_end;    //!< The plan's values_end.
 	/** @brief In image mode, the caller's images bound; none: generation 0. */
 	struct vulkan_frame_images    images;
 	struct vulkan_runtime_objects objects;       //!< Every object the runtime owns.
@@ -324,9 +310,9 @@ vulkan_check (VkResult      result,
  */
 extern enum error_code
 vulkan_memory_type (VkPhysicalDeviceMemoryProperties const *memory,
-                    STD(uint32_t)                           bits,
+                    uint32_t                                bits,
                     VkMemoryPropertyFlags                   want,
-                    STD(uint32_t)                          *type,
+                    uint32_t                               *type,
                     struct error                           *e);
 
 /** @brief The most bytes one of a device's storage buffers holds bound whole, as vulkan_plan_init()
@@ -336,7 +322,7 @@ vulkan_memory_type (VkPhysicalDeviceMemoryProperties const *memory,
  * @return       The smaller of its maxStorageBufferRange and maxMemoryAllocationSize; UINT64_MAX
  *               when the device cannot say, which fails its build.
  */
-extern STD(uint64_t)
+extern uint64_t
 vulkan_storage_limit (struct vulkan_device const *device);
 
 /** @brief Builds the network for a shape on a device, from a plan of the shape's extent.
@@ -419,7 +405,7 @@ vulkan_runtime_record_buffers (struct vulkan_runtime        *runtime,
                                struct vulkan_controls const *controls,
                                bool                          reset,
                                VkQueryPool                   queries,
-                               STD(uint32_t)                 query);
+                               uint32_t                      query);
 
 /** @brief Records a frame of the runtime's shape in image mode, from the frame image that
  *         vulkan_runtime_reshape() bound into its answer image.
@@ -464,13 +450,7 @@ vulkan_runtime_timed_out (struct vulkan_runtime const *runtime);
  * @param runtime The runtime.
  * @return        The generation; 0 for none.
  */
-extern STD(uint64_t)
+extern uint64_t
 vulkan_runtime_bound (struct vulkan_runtime const *runtime);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_COMMON_VULKAN_RUNTIME_H_ */

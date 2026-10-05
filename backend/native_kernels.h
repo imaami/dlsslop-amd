@@ -3,32 +3,19 @@
  * The linux_native module's kernels, from codec_gpu.hip, tuning_gpu.hip, color_gpu.hip and
  * temporal_gpu.hip: the module, loaded once, and its kernels, launched on one stream (the HIP
  * network's) as one-dimensional grids of 256-thread groups. native_kernels.c defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_NATIVE_KERNELS_H_
 #define DLSSLOP_AMD_BACKEND_NATIVE_KERNELS_H_
 
-#ifdef __cplusplus
-# include <cstdint>
-#else
-# include <stdint.h>
-#endif
+#include <stdint.h>
 
 #include "error.h"
 #include "hip.h"
 #include "kernel_args.h"
 
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
-
 /** @brief The module's kernels. */
-enum native_kernel : STD(uint8_t) {
+enum native_kernel : uint8_t {
 	NATIVE_KERNEL_ENCODE_RGBA8,     //!< dlsslop_encode_rgba8.
 	NATIVE_KERNEL_ENCODE_RGBA16F,   //!< dlsslop_encode_rgba16f.
 	NATIVE_KERNEL_FEEDBACK_RGB,     //!< dlsslop_feedback_rgb.
@@ -137,11 +124,5 @@ native_kernels_preserve_color (struct native_kernels const *kernels,
                                void                        *output_rgb,
                                float                        strength,
                                struct error                *e);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_NATIVE_KERNELS_H_ */
