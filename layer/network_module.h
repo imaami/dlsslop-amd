@@ -1,8 +1,8 @@
 /** @file
  *
  * The in-layer network's module, libdlsslop-network.so, beside the layer. The layer loads it for a
- * device whose ledger enabled the network, and reaches it through these C functions only: the
- * network's code and the C++ runtime it links stay out of the layer.
+ * device whose ledger enabled the network, and reaches it through these functions only: the
+ * network's code stays out of the layer.
  *
  * The functions' names, network_module.map, the layouts of struct dlsslop_network_device and struct
  * dlsslop_network_images and the values of enum dlsslop_network_state are the contract between the
@@ -10,28 +10,15 @@
  * pointer to it. The module exports DLSSLOP_NETWORK_INTERFACE as dlsslop_network_interface, and the
  * layer puts it first in struct dlsslop_network_device: each side refuses the other's of another
  * interface, and a change to any part of the contract takes a new DLSSLOP_NETWORK_INTERFACE.
- * dlsslop_network.cpp is the module's source, and network_module.c is the layer's loader of it.
- *
- * Plain C API, consumable from C++.
+ * dlsslop_network.c is the module's source, and network_module.c is the layer's loader of it.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_LAYER_NETWORK_MODULE_H_
 #define DLSSLOP_AMD_LAYER_NETWORK_MODULE_H_
 
-#ifdef __cplusplus
-# include <cstdint>
-#else
-# include <stdint.h>
-#endif
+#include <stdint.h>
 
 #include <vulkan/vulkan.h>
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 struct DlsslopNetwork;
 struct ShmHeader;
@@ -46,7 +33,7 @@ struct ShmHeader;
 
 /** @brief The module's DLSSLOP_NETWORK_INTERFACE, which network_module_load() requires to equal the
  *         layer's. */
-extern STD(uint64_t) const dlsslop_network_interface;
+extern uint64_t const dlsslop_network_interface;
 
 /** @brief A function that the module calls with the device's context around a submit.
  *
@@ -70,12 +57,12 @@ dlsslop_network_log_fn (char const *line);
  * and the module looks up its functions only in dlsslop_network_open().
  */
 struct dlsslop_network_device {
-	STD(uint64_t)                     interface;         //!< DLSSLOP_NETWORK_INTERFACE.
+	uint64_t                          interface;         //!< DLSSLOP_NETWORK_INTERFACE.
 	VkInstance                        instance;          //!< The game's instance.
 	VkPhysicalDevice                  physical;          //!< The device's physical device.
 	VkDevice                          device;            //!< The device.
 	VkQueue                           queue;             //!< The queue that takes the build's uploads.
-	STD(uint32_t)                     family;            //!< The queue's family.
+	uint32_t                          family;            //!< The queue's family.
 	dlsslop_network_queue_fn         *lock_queue;        //!< Called before each submit of the build.
 	dlsslop_network_queue_fn         *unlock_queue;      //!< Called after each submit of the build.
 	void                             *context;           //!< What lock_queue and unlock_queue take.
@@ -92,16 +79,14 @@ struct dlsslop_network_device {
  * 64-bit height would only fill with casts.
  */
 struct dlsslop_network_images {
-	STD(uint64_t) generation;  //!< The composition's build of these images.
-	VkImageView   input_view;  //!< The frame that the network samples.
-	VkImage       answer;      //!< Takes the answer; storage and transfer-target usage.
-	VkImageView   answer_view; //!< The answer's view.
-	VkFormat      format;      //!< Both images' format.
-	STD(uint32_t) width;       //!< Both images' width.
-	STD(uint32_t) height;      //!< Both images' height.
+	uint64_t    generation;  //!< The composition's build of these images.
+	VkImageView input_view;  //!< The frame that the network samples.
+	VkImage     answer;      //!< Takes the answer; storage and transfer-target usage.
+	VkImageView answer_view; //!< The answer's view.
+	VkFormat    format;      //!< Both images' format.
+	uint32_t    width;       //!< Both images' width.
+	uint32_t    height;      //!< Both images' height.
 };
-
-#undef STD
 
 /** @brief What dlsslop_network_prepare() says of the next frame. */
 enum dlsslop_network_state {
@@ -216,9 +201,5 @@ struct network_module {
 extern bool
 network_module_load (struct network_module *m,
                      char const            *path);
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_LAYER_NETWORK_MODULE_H_ */

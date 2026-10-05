@@ -208,13 +208,13 @@ add_library(dlsslop-hip OBJECT backend/hip.c backend/hip_weights.c backend/hip_p
     backend/native_kernels.c backend/codec_gpu.c backend/temporal_gpu.c backend/control_selftest.c)
 target_link_libraries(dlsslop-hip PUBLIC ${CMAKE_DL_LIBS})
 # The in-layer network, in a module beside the layer that loads it on demand
-# (layer/network_module.h): the network and the libstdc++ it needs stay out of
-# the layer, which every game loads. It exports its C functions only.
-add_library(dlsslop-network MODULE layer/dlsslop_network.cpp backend/processing.c backend/options.c
+# (layer/network_module.h): the network stays out of the layer, which every
+# game loads. It exports its functions only.
+add_library(dlsslop-network MODULE layer/dlsslop_network.c backend/processing.c backend/options.c
     backend/paths.c backend/files.c backend/tuning.c)
 target_include_directories(dlsslop-network PRIVATE backend)
 target_link_libraries(dlsslop-network PRIVATE dlsslop-vulkan dlsslop-common-c ${CMAKE_DL_LIBS})
-target_link_options(dlsslop-network PRIVATE -static-libstdc++ -static-libgcc -Wl,-Bsymbolic
+target_link_options(dlsslop-network PRIVATE -static-libgcc -Wl,-Bsymbolic
     "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/layer/network_module.map")
 add_dependencies(dlsslop-network vulkan-nr-shaders)
 # The worker uses a small, versioned HIP ABI loaded with dlopen. The build itself

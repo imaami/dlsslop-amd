@@ -25,24 +25,12 @@ inline std::string take_path(char* text, size_t length)
 
 inline bool is_directory(const std::string& path) { return files_is_directory(path.c_str()); }
 inline bool is_regular_file(const std::string& path) { return files_is_regular_file(path.c_str()); }
-// PATH without its last component: empty for a bare name, "/" for one at the root.
-inline std::string parent_path(std::string_view path)
-{
-    return std::string(path.substr(0, files_parent(path.data(), path.size())));
-}
 // A and B joined by one slash; B alone when A is empty.
 inline std::string join(std::string_view a, std::string_view b)
 {
     size_t length = 0;
     char* const joined = files_join(a.data(), a.size(), b.data(), b.size(), &length);
     return take_path(joined, length);
-}
-// PATH, relative to the working directory unless it is absolute.
-inline std::string absolute(const std::string& path)
-{
-    size_t length = 0;
-    char* const made = files_absolute(path.c_str(), path.size(), &length);
-    return take_path(made, length);
 }
 // The whole file, or the words for what stopped it.
 inline Result<std::string> read_file(const std::string& path)
