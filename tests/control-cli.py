@@ -52,8 +52,9 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     magic = int(re.search(r'kShmMagic\s*=\s*(0x[0-9A-Fa-f]+)', shared_header.read_text())[1], 16)
     assert re.search(r'--tier\s+VALUE [^\n]*\n\s+Range: 720\.\.1080; default: ' + tier + '; steps of 180\n', helptext)
     assert run('-h') == helptext
-    run('--settings', expected=1)
-    run('--status', expected=1)
+    for options in (('--settings',), ('--status',)):
+        error = run(*options, expected=1, errors=True)
+        assert f'no channel at {channel}; ' in error, (options, error)
     assert not channel.exists(), 'read-only operation created the channel'
     run('--working-scale', '0.5', '--enabled', '2', expected=2)
     assert not channel.exists(), 'invalid later argument created the channel'
@@ -252,23 +253,20 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     reset = settings(run('-r', '-l'))
     assert all(current == default for current, default in reset.values()), reset
 
-    # Explicit path wins over the environment; reads never initialise bad headers.
+    # Explicit path wins over the environment. Readers and writers refuse a file
+    # that holds no channel, of a channel's size or not, say so and leave it
+    # untouched: nobody initialises a file that exists.
     other = Path(directory) / 'another channel.bin'
     with other.open('wb') as stream:
         stream.truncate(channel.stat().st_size)
     stat = other.stat()
-    run('--shm', str(other), '--settings', expected=1)
-    run('-s', str(other), '-S', expected=1)
+    for options in (('--settings',), ('-S',), ('-r',), ('--enabled', '1'), ('--quit',)):
+        error = run('-s', str(other), *options, expected=1, errors=True)
+        assert f'{other} holds no channel (magic 0, version 0; ' in error, (options, error)
     assert other.stat().st_mtime_ns == stat.st_mtime_ns
     with other.open('rb') as stream:
         assert not any(stream.read(8192))
-    assert run('-s', str(other), '-r', errors=True) == ''
-    assert 'initialised=1\n' in run('-s', str(other))
 
-    # Writers refuse a file that is not a channel, even one that starts with
-    # four zero bytes, and a header whose initialisation stopped before the
-    # magic, which comes last (here after enabled, at offset 56); they say so
-    # and leave it untouched.
     notes = Path(directory) / 'notes.txt'
     unfinished = bytes(56) + (1).to_bytes(4, 'little')
     for text in (b'not a channel\n' * 300, b'\0\0\0\0important data\n', unfinished):
@@ -277,9 +275,13 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
         for options in (('--enabled', '1'), ('--reset',), ('--quit',), ('--status',)):
             error = run('--shm', str(notes), *options, expected=1, errors=True)
             assert notes.read_bytes() == text and notes.stat().st_mode & 0o777 == 0o644, (text[:20], options)
-            refused = (f"'{notes}' is not a dlsslop channel, or one whose initialisation has not finished; "
-                       "refusing to modify it\n") in error
-            assert refused == (options != ('--status',)), (text[:20], options, error)
+            assert f'{notes} holds no v{version} channel: it has {len(text)} bytes, not {stat.st_size}; ' in error, \
+                (text[:20], options, error)
+
+    # A change creates a missing channel and its private directory.
+    created = Path(directory) / 'new directory' / 'channel.bin'
+    assert 'enabled=0 default=1\n' in run('--shm', str(created), '--enabled', '0', '--settings')
+    assert created.parent.stat().st_mode & 0o777 == 0o700 and created.stat().st_mode & 0o777 == 0o600
 
     # --status prints each frame count whole: helperFrames at offset 8, layerFrames at 16.
     counts = bytearray(header())
@@ -291,17 +293,17 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     status = run('-S')
     assert f'\nhelper_frames={helper_frames}\n' in status and f'\nlayer_frames={layer_frames}\n' in status, status
 
-    # A writer re-initialises another protocol version's channel and warns
-    # about the stale process; a reader only reports it.
+    # Readers and writers refuse another protocol version's channel, name both
+    # versions, and leave it as it was.
+    assert f'magic={magic:#x}\nversion={version}\n' in run('-S')
     stale = bytearray(header())
     stale[4:8] = (version - 1).to_bytes(4, 'little')
     with channel.open('r+b') as stream:
         stream.write(stale)
-    error = run('-S', expected=1, errors=True)
-    assert f'magic {magic:#x} version {version - 1}, expected {magic:#x} version {version}' in error, error
-    assert header() == stale
-    warning = run('--reset', errors=True)
-    assert f"'{channel}' held protocol v{version - 1} and is re-initialised as v{version};" in warning, warning
-    assert f'version={version}\n' in run('-S')
+    for options in (('-S',), ('--reset',), ('--enabled', '1'), ('--quit',)):
+        error = run(*options, expected=1, errors=True)
+        assert f"the channel {channel} holds protocol v{version - 1}, and this build's is v{version}: " in error, \
+            (options, error)
+        assert header() == stale, options
 
 print('control CLI: defaults, getopt syntax, read-only access, validation and reset checks passed')

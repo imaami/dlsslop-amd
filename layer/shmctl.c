@@ -4,7 +4,6 @@
  */
 #include <ctype.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <getopt.h>
 #include <inttypes.h>
 #include <stdatomic.h>
@@ -13,11 +12,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include "control_settings.h"
+#include "error.h"
+#include "shm_channel.h"
 #include "shm_protocol.h"
 
 /** @brief --capture's range: its count parses like an integer setting's value. */
@@ -149,9 +147,10 @@ usage (char const *channel)
 	      "Actions run after parsing: reset, explicit settings, toggle, stop/resume, capture;\n"
 	      "requested status/settings are printed last. Repeated settings use the last value.\n"
 	      "--quit and --resume conflict. A setting cannot be both assigned and toggled.\n"
-	      "Changes require an existing channel parent directory; the default private\n"
-	      "directory is created automatically. Settings persist in the shared-memory\n"
-	      "channel, not a configuration file; worker startup may reapply its own settings.\n"
+	      "Changes create a missing channel with the defaults, and its private (0700)\n"
+	      "directory; reads and a lone --quit never create one. A file of another protocol\n"
+	      "is refused. Settings persist in the shared-memory channel, not a configuration\n"
+	      "file; worker startup may reapply its own settings.\n"
 	      "\n"
 	      "dlsslopd supports SDR, HDR and successive neural passes; --passes changes the next\n"
 	      "frame's inference chain. Each added pass adds another network evaluation.\n"
@@ -382,188 +381,26 @@ native_default_path (size_t *p_length)
  *
  * Says so on stderr if the path cannot be made.
  *
- * @return The path, which the caller frees, or nullptr if it cannot be made.
+ * @param p_length Receives the path's length.
+ * @return         The path, which the caller frees, or nullptr if it cannot be made.
  */
 static char *
-native_channel_path (void)
+native_channel_path (size_t *p_length)
 {
 	char const *const env = getenv("DLSSNR_SHM");
-	size_t length;
-	char *const path = env && *env ? strdup(env) : native_default_path(&length);
+	char *path;
+	if (env && *env) {
+		size_t const length = strlen(env);
+		path = malloc(length + 1);
+		if (path)
+			memcpy(path, env, length + 1);
+		*p_length = length;
+	} else {
+		path = native_default_path(p_length);
+	}
 	if (!path)
 		fprintf(stderr, "cannot make the native channel's path\n");
 	return path;
-}
-
-/** @brief Creates the native default channel's private directory, if a path names that channel.
- *
- * Says on stderr why the directory could not be created.
- *
- * @param path The channel.
- * @return     true if @a path names another channel, or if the directory now exists, is this
- *             user's and grants nothing to anyone else.
- */
-static bool
-create_default_directory (char const *path)
-{
-	size_t length;
-	char *directory = native_default_path(&length);
-	if (!directory) {
-		fprintf(stderr, "cannot make the native channel's path\n");
-		return false;
-	}
-	int error = 0;
-	if (!strcmp(path, directory)) {
-		// The directory: the path up to its last slash.
-		char *const slash = memrchr(directory, '/', length);
-		if (slash)
-			*slash = '\0';
-		struct stat st;
-		if (mkdir(directory, 0700) && errno != EEXIST)
-			error = errno;
-		else if (lstat(directory, &st))
-			error = errno;
-		else if (!S_ISDIR(st.st_mode) || st.st_uid != getuid() || (st.st_mode & (S_IRWXG | S_IRWXO)))
-			error = EACCES;
-	}
-	free(directory);
-	directory = nullptr;
-	if (error)
-		fprintf(stderr, "cannot create private channel directory: %s\n", strerror(error));
-	return !error;
-}
-
-/** @brief Maps the header of the channel that a descriptor holds.
- *
- * @param fd        The channel's descriptor.
- * @param path      The channel, for the message about a file that is not one.
- * @param create    Whether to grow a file that is shorter than a channel.
- * @param writable  Whether to map the header for writing; the file must then hold a channel or
- *                  nothing but zeros.
- * @param p_header  Receives the header.
- * @param p_magic   Receives the magic that the file holds.
- * @param p_version Receives the version that the file holds.
- * @return          0, or an errno value.
- */
-static int
-map_descriptor (int                fd,
-                char const        *path,
-                bool               create,
-                bool               writable,
-                struct ShmHeader **p_header,
-                uint32_t          *p_magic,
-                uint32_t          *p_version)
-{
-	struct stat st;
-	if (fstat(fd, &st))
-		return errno;
-	if (!S_ISREG(st.st_mode) || st.st_uid != getuid())
-		return EACCES;
-	// The header as the file holds it: its atomic objects have no valid state until a channel's
-	// initialisation gives them one (C23 7.17.2), so none is loaded before the magic and the version
-	// say that it has had one. A file shorter than a header reads as zero past its end.
-	uint32_t head[sizeof (struct ShmHeader) / sizeof (uint32_t)] = {0};
-	if (pread(fd, head, sizeof head, 0) < 0)
-		return errno;
-	if (writable) {
-		// Never chmod, grow or initialise a file that is not a channel. A new or grown file reads as
-		// zero, and initialisation writes the magic last: a header that is not zero and has no magic
-		// is not a channel, or one whose initialisation has not finished.
-		uint32_t bits = 0;
-		for (size_t i = 0; i < sizeof head / sizeof *head; ++i)
-			bits |= head[i];
-		if (head[0] != kShmMagic && bits) {
-			fprintf(stderr, "'%s' is not a dlsslop channel, or one whose initialisation has not finished; "
-			        "refusing to modify it\n", path);
-			return EINVAL;
-		}
-		if (fchmod(fd, 0600))
-			return errno;
-	}
-	off_t const total = (off_t)ShmTotalBytes();
-	if (st.st_size < total) {
-		if (!create)
-			return EINVAL;
-		if (ftruncate(fd, total))
-			return errno;
-	}
-	void *const mapping = mmap(nullptr, kHeaderBytes, PROT_READ | (writable ? PROT_WRITE : 0), MAP_SHARED,
-	                           fd, 0);
-	if (mapping == MAP_FAILED)
-		return errno;
-	*p_header = mapping;
-	*p_magic = head[0];
-	*p_version = head[offsetof(struct ShmHeader, version) / sizeof *head];
-	return 0;
-}
-
-/** @brief Maps a channel's header.
- *
- * Readers never create, resize, initialise or write the channel. The mapping outlives the
- * descriptor and lasts until the process exits.
- *
- * @param path      The channel.
- * @param create    Whether to create the file if it is missing, and grow it if it is shorter than a
- *                  channel.
- * @param writable  Whether to map the header for writing.
- * @param p_header  Receives the header, or nullptr if it is not mapped.
- * @param p_magic   Receives the magic that the file holds, if the header is mapped.
- * @param p_version Receives the version that the file holds, if the header is mapped.
- * @return          0, or an errno value.
- */
-static int
-map_header (char const        *path,
-            bool               create,
-            bool               writable,
-            struct ShmHeader **p_header,
-            uint32_t          *p_magic,
-            uint32_t          *p_version)
-{
-	*p_header = nullptr;
-	int fd = open(path, (writable ? O_RDWR : O_RDONLY) | O_CLOEXEC | O_NOFOLLOW | (create ? O_CREAT : 0),
-	              0600);
-	if (fd < 0)
-		return errno;
-	int const error = map_descriptor(fd, path, create, writable, p_header, p_magic, p_version);
-	// The descriptor wrote no data, so its close has no write error to report.
-	close(fd);
-	fd = -1;
-	return error;
-}
-
-/** @brief Makes sure that a header holds a channel of this protocol version.
- *
- * Writers initialise a new channel and, like the worker and the layer, re-initialise one left by
- * another protocol version. A process still on that version misreads the new layout and
- * re-initialises it back when it next attaches, so say so.
- *
- * @param h       The header.
- * @param magic   The magic that map_header() read from the file.
- * @param version The version that map_header() read from the file.
- * @param create  Whether to initialise a header that does not hold one.
- * @param path    The channel, for the messages.
- * @return        true if the header holds a channel of this version now.
- */
-static bool
-attach (struct ShmHeader *h,
-        uint32_t          magic,
-        uint32_t          version,
-        bool              create,
-        char const       *path)
-{
-	bool const channel = magic == kShmMagic;
-	if (channel && version == kShmVersion)
-		return true;
-	if (!create) {
-		fprintf(stderr, "channel '%s' is uninitialised or incompatible: magic %#x version %u, "
-		        "expected %#x version %u\n", path, magic, version, kShmMagic, kShmVersion);
-		return false;
-	}
-	if (channel)
-		fprintf(stderr, "channel '%s' held protocol v%u and is re-initialised as v%u; restart any "
-		        "dlsslopd, game or GUI still using it\n", path, version, kShmVersion);
-	ShmInitNativeDefaults(h, false);
-	return true;
 }
 
 /** @brief Prints the live settings and their defaults.
@@ -593,13 +430,8 @@ print_settings (struct ShmHeader const *h)
 static void
 print_status (struct ShmHeader const *h)
 {
-	// Each word read once: another process may be rewriting them.
-	uint32_t const magic = atomic_load(&h->magic);
-	uint32_t const version = atomic_load(&h->version);
-	bool const initialised = magic == kShmMagic && version == kShmVersion;
-	printf("initialised=%d\nmagic=%#x\nversion=%u\n", initialised, magic, version);
-	if (!initialised)
-		return;
+	// shm_channel_open() refuses any other magic and version.
+	printf("initialised=1\nmagic=%#x\nversion=%u\n", atomic_load(&h->magic), atomic_load(&h->version));
 	printf("seq_req=%u\nseq_resp=%u\n", atomic_load(&h->seq_req), atomic_load(&h->seq_resp));
 	printf("width=%u\nheight=%u\n", atomic_load(&h->width), atomic_load(&h->height));
 	printf("neural_max_width=%u\nneural_max_height=%u\n", atomic_load(&h->nativeModelMaxWidth),
@@ -633,32 +465,34 @@ print_status (struct ShmHeader const *h)
 
 /** @brief Carries out a parsed command line on a channel.
  *
+ * Changes create a missing channel (shm_channel_open()); reads and a quit alone do not.
+ *
  * @param options The command line, which does not ask for help.
  * @param path    The channel.
+ * @param length  The length of its path.
  * @return        The exit status: 0, or 1 if the channel cannot be used.
  */
 static int
 run (struct options const *options,
-     char const           *path)
+     char const           *path,
+     size_t                length)
 {
 	bool const writable = options_changes_header(options);
+	// A quit has no worker or layer to stop on a missing channel.
 	bool const create = writable && !(options->flags & OPTIONS_QUIT);
-	if (create && !create_default_directory(path))
-		return 1;
-	struct ShmHeader *h;
-	uint32_t magic;
-	uint32_t version;
-	int const error = map_header(path, create, writable, &h, &magic, &version);
-	if (error) {
+	uint32_t const flags = (writable ? SHM_CHANNEL_WRITE : 0) | (create ? SHM_CHANNEL_CREATE : 0);
+	struct shm_channel channel;
+	struct error e;
+	if (shm_channel_open(&channel, path, length, kHeaderBytes, flags, &e)) {
+		bool const missing = channel.flags & SHM_CHANNEL_MISSING;
 		// An absent channel has no worker or layer for a quit alone to stop.
-		if (error == ENOENT && options->flags == OPTIONS_QUIT && !options->assigned
-		    && !options->toggled)
+		if (missing && options->flags == OPTIONS_QUIT && !options->assigned && !options->toggled)
 			return 0;
-		fprintf(stderr, "cannot access channel '%s': %s\n", path, strerror(error));
+		fprintf(stderr, "%s%s\n", e.what, missing ? "; dlsslopd, the layer and setting options create it"
+		        : "");
 		return 1;
 	}
-	if (!attach(h, magic, version, create, path))
-		return 1;
+	struct ShmHeader *const h = channel.h;
 
 	// Store each setting once: readers never wait on controlSeq, so a second store would show them a
 	// value nobody asked for. Reset stores the controls alone, atomically, and never initialises the
@@ -702,6 +536,7 @@ run (struct options const *options,
 	}
 	if (options->flags & OPTIONS_SETTINGS)
 		print_settings(h);
+	shm_channel_fini(&channel);
 	return 0;
 }
 
@@ -717,18 +552,19 @@ main (int    argc,
 	// Only --help and a command without --shm need the native channel.
 	int status = 1;
 	char *channel = nullptr;
+	size_t length;
 	if (options.flags & OPTIONS_HELP) {
-		channel = native_channel_path();
+		channel = native_channel_path(&length);
 		if (channel) {
 			usage(channel);
 			status = 0;
 		}
 	} else if (options.path) {
-		status = run(&options, options.path);
+		status = run(&options, options.path, strlen(options.path));
 	} else {
-		channel = native_channel_path();
+		channel = native_channel_path(&length);
 		if (channel)
-			status = run(&options, channel);
+			status = run(&options, channel, length);
 	}
 	free(channel);
 	channel = nullptr;
