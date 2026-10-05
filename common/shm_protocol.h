@@ -668,11 +668,12 @@ BitsToFloat (STD(uint32_t) u);
 /** @brief Initializes a header with the defaults: those of a new channel, which shm_channel_open()
  *         gives it whichever process creates it.
  *
- * Gives each atomic object of the header its default with atomic_init(), the version and the magic
- * last, and zeroes the text fields. The atomic objects of a new file, of allocated storage or of an
- * automatic header declared without an initializer have no valid state until they are initialized
- * (C23 7.17.2), and they are initialized once: a channel is never initialized again, and a reset of
- * its settings stores the defaults of a header initialized here.
+ * Gives each atomic object of the header its default with atomic_init(), and zeroes the text fields.
+ * The atomic objects of a new file, of allocated storage or of an automatic header declared without
+ * an initializer have no valid state until they are initialized (C23 7.17.2), and they are
+ * initialized once: a channel is never initialized again, and a reset of its settings stores the
+ * defaults of a header initialized here. No process can open a channel before its initialization
+ * has finished: shm_channel_open() names the file only then.
  *
  * This is the single source of startup/reset/help defaults for the Linux HIP
  * backend. The CPU-composition and identity worker modes already return a final

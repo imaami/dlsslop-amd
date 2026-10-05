@@ -212,12 +212,9 @@ void
 ShmInitNativeDefaults (struct ShmHeader *h,
                        bool              bypass)
 {
-	// Every member once, in the header's order, but for the version and the magic, which come last,
-	// after a release fence. The fence keeps the compiler and the processor from moving the stores
-	// across it, so in practice a header that holds this protocol's magic and version has finished
-	// its initialization. C does not guarantee that: atomic_init() is an initialization, not an
-	// atomic operation (C23 7.17.2.1), and a fence orders memory only through atomic operations
-	// (7.17.4).
+	// Every member once, in the header's order.
+	atomic_init(&h->magic, kShmMagic);
+	atomic_init(&h->version, kShmVersion);
 	atomic_init(&h->helperFrames, 0);
 	atomic_init(&h->layerFrames, 0);
 	atomic_init(&h->seq_req, 0);
@@ -318,10 +315,6 @@ ShmInitNativeDefaults (struct ShmHeader *h,
 	atomic_init(&h->transportGen, 0);
 	atomic_init(&h->transportMiss, 0);
 	atomic_init(&h->nativeTier, kNativeDefaultTier);
-
-	atomic_thread_fence(memory_order_release);
-	atomic_init(&h->version, kShmVersion);
-	atomic_init(&h->magic, kShmMagic);
 }
 
 struct NativeTier const *
