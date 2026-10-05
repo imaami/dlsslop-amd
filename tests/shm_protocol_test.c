@@ -1,6 +1,7 @@
 /** @file
  *
- * The channel's text fields and frame counts, in C. A store to a text field bumps that field's
+ * The channel's initialization, text fields and frame counts, in C. Initialization gives every word
+ * of a header a value, whatever its bytes held before. A store to a text field bumps that field's
  * sequence number alone, and a load takes the string: cut to the field's size or to the reader's
  * buffer, or an empty one for a null string. A frame count is read whole: while a child process adds
  * to one count and stores the other in a shared mapping, this process never reads either torn.
@@ -40,6 +41,11 @@ static constexpr uint64_t COUNT_STEP = UINT64_C(0x100000001);
  */
 static constexpr uint64_t COUNT_STEPS = UINT64_C(1) << 20;
 
+/** @brief The byte that fills a header before it is initialized; no word of an initialized header is
+ *         four of it.
+ */
+static constexpr unsigned char PATTERN = 0xa5;
+
 /** @brief Ends the test with a message unless a condition holds.
  *
  * @param condition The condition.
@@ -53,6 +59,35 @@ require (bool        condition,
 		return;
 	fprintf(stderr, "shm-protocol-test: %s\n", message);
 	exit(1);
+}
+
+/** @brief Initializes headers filled with PATTERN, as a new file or another version's channel is
+ *         filled with something, and ends the test if a word of one is left as it was.
+ */
+static void
+check_init (void)
+{
+	uint32_t pattern;
+	memset(&pattern, PATTERN, sizeof pattern);
+	for (uint32_t native = 0; native < 2; ++native) {
+		struct ShmHeader header;
+		// No atomic object of the header is valid after this, until the header is initialized.
+		memset(&header, PATTERN, sizeof header);
+		if (native)
+			ShmInitNativeDefaults(&header, false);
+		else
+			ShmInitDefaults(&header);
+		unsigned char const *const bytes = (unsigned char const *)&header;
+		for (size_t offset = 0; offset < sizeof header; offset += sizeof pattern) {
+			uint32_t word;
+			memcpy(&word, bytes + offset, sizeof word);
+			if (word == pattern) {
+				fprintf(stderr, "shm-protocol-test: %s left the word at offset %zu as it was\n",
+				        native ? "ShmInitNativeDefaults()" : "ShmInitDefaults()", offset);
+				exit(1);
+			}
+		}
+	}
 }
 
 /** @brief Steps the frame counts until the reader stores quit: adds COUNT_STEP to helperFrames, as
@@ -121,6 +156,7 @@ check_counts (void)
 	struct ShmHeader *const h = mmap(nullptr, sizeof *h, PROT_READ | PROT_WRITE,
 	                                 MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	require(h != MAP_FAILED, "mmap failed");
+	ShmInitDefaults(h);
 	require(!fflush(nullptr), "fflush failed");
 	pid_t const reader = getpid();
 	pid_t const child = fork();
@@ -199,8 +235,9 @@ main (void)
 		        "a null string did not empty a text field");
 	}
 
+	check_init();
 	check_counts();
-	if (puts("shm protocol: text fields and frame counts in C") == EOF)
+	if (puts("shm protocol: initialization, text fields and frame counts in C") == EOF)
 		return 1;
 	return 0;
 }

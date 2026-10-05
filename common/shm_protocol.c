@@ -208,82 +208,141 @@ ShmLoadString (struct ShmHeader const *h,
 	return false;
 }
 
+/** @brief Gives each atomic object of a header its default with atomic_init(), and zeroes the text
+ *         fields.
+ *
+ * Every member once, in the header's order, but for the version and the magic, which come last,
+ * after a release fence. The fence keeps the compiler and the processor from moving the stores
+ * across it, so in practice a header that holds this protocol's magic and version has finished its
+ * initialization. C does not guarantee that: atomic_init() is an initialization, not an atomic
+ * operation (C23 7.17.2.1), and a fence orders memory only through atomic operations (7.17.4).
+ *
+ * @param h      The header.
+ * @param native Whether the defaults are the native channel's.
+ * @param bypass The default of compositionBypass.
+ */
+static void
+shm_init (struct ShmHeader *h,
+          bool              native,
+          bool              bypass)
+{
+	atomic_init(&h->helperFrames, 0);
+	atomic_init(&h->layerFrames, 0);
+	atomic_init(&h->seq_req, 0);
+	atomic_init(&h->seq_resp, 0);
+	atomic_init(&h->width, 0);
+	atomic_init(&h->height, 0);
+	atomic_init(&h->quit, 0);
+	atomic_init(&h->heartbeat, 0);
+	atomic_init(&h->controlSeq, 0);
+	atomic_init(&h->tuningSeq, 0);
+
+	atomic_init(&h->enabled, 1);
+	atomic_init(&h->passes, native ? kNativeDefaultPasses : 1);
+	atomic_init(&h->preset, 0);
+	atomic_init(&h->style, 0);
+	atomic_init(&h->autoMask, 1);
+	atomic_init(&h->intensityBits, FloatToBits(1.0f));
+	atomic_init(&h->localToneBits, FloatToBits(1.0f));
+	atomic_init(&h->localStructureBits, FloatToBits(1.0f));
+	atomic_init(&h->skinStructureBits, FloatToBits(-1.0f));
+	atomic_init(&h->sharpnessBits, FloatToBits(0.0f));
+
+	atomic_init(&h->transferStrengthBits, FloatToBits(1.0f));
+	atomic_init(&h->colourStrengthBits, FloatToBits(1.0f));
+	atomic_init(&h->maxRatioBits, FloatToBits(2.0f));
+	atomic_init(&h->transfer, native ? 2 : 1);
+	atomic_init(&h->debugView, 0);
+	atomic_init(&h->debugScaleBits, FloatToBits(1.0f));
+	atomic_init(&h->whitePointBits, FloatToBits(1.0f));
+	atomic_init(&h->whitePointScaleBits, FloatToBits(1.0f));
+	atomic_init(&h->whitePointSource, kWhitePointManual);
+	atomic_init(&h->whitePointTrimBits, FloatToBits(1.0f));
+	atomic_init(&h->workingScaleBits, FloatToBits(1.0f));
+	atomic_init(&h->compareMode, 0);
+	atomic_init(&h->compareSplitBits, FloatToBits(0.5f));
+	atomic_init(&h->compareZoomBits, FloatToBits(1.0f));
+	atomic_init(&h->compareSwap, 0);
+	atomic_init(&h->colourMode, kColourAuto);
+	atomic_init(&h->captureRequest, 0);
+	atomic_init(&h->toggleKey, 0);
+	atomic_init(&h->reversibleMode, kReversibleKnee);
+	atomic_init(&h->applyModel, 1);
+	atomic_init(&h->holdFrame, 0);
+
+	atomic_init(&h->helperState, kHelperStopped);
+	atomic_init(&h->modelUp, 0);
+	atomic_init(&h->helperEvalMsBits, 0);
+	atomic_init(&h->helperUploadMsBits, 0);
+	atomic_init(&h->helperReadbackMsBits, 0);
+
+	atomic_init(&h->layerPid, 0);
+	atomic_init(&h->layerWidth, 0);
+	atomic_init(&h->layerHeight, 0);
+	atomic_init(&h->layerCompositionUp, 0);
+	atomic_init(&h->layerMsBits, 0);
+	atomic_init(&h->layerMeasuredWhiteBits, 0);
+
+	atomic_init(&h->helperReasonSeq, 0);
+	memset(h->helperReason, 0, sizeof h->helperReason);
+	atomic_init(&h->layerReasonSeq, 0);
+	memset(h->layerReason, 0, sizeof h->layerReason);
+	atomic_init(&h->gameNameSeq, 0);
+	memset(h->gameName, 0, sizeof h->gameName);
+
+	for (uint32_t i = 0; i < kMaxPasses; ++i) {
+		struct PassControl *const pass = &h->pass[i];
+		atomic_init(&pass->overrideMask, 0);
+		atomic_init(&pass->intensityBits, FloatToBits(1.0f));
+		atomic_init(&pass->localToneBits, FloatToBits(1.0f));
+		atomic_init(&pass->localStructureBits, FloatToBits(1.0f));
+		atomic_init(&pass->skinStructureBits, FloatToBits(-1.0f));
+		atomic_init(&pass->sharpnessBits, FloatToBits(0.0f));
+		// Inert until overrideMask names them, but initialised to the global defaults so a pass that
+		// is switched on later starts from what the rest of the frame is already doing.
+		atomic_init(&pass->style, 0);
+		atomic_init(&pass->preset, 0);
+		atomic_init(&pass->autoMask, 1);
+	}
+
+	atomic_init(&h->mvecEnabled, !native);
+	atomic_init(&h->mvecQuality, kMVecBalanced);
+	atomic_init(&h->seq_ok, 0);
+	atomic_init(&h->compositionBypass, bypass);
+	atomic_init(&h->answeredW, 0);
+	atomic_init(&h->answeredH, 0);
+	atomic_init(&h->hdrMode, native ? kHdrOff : kHdrAuto);
+	atomic_init(&h->hdrDetected, kHdrNone);
+	atomic_init(&h->hdrActive, 0);
+	atomic_init(&h->proxyFormat, kProxyRgba8);
+	atomic_init(&h->hdrEncode, 0);
+	atomic_init(&h->colourTrustPercent, 200);
+	atomic_init(&h->ratioSmoothPercent, 100);
+	atomic_init(&h->sdr16Multipass, native);
+	atomic_init(&h->mvecPixelSize, kMVecPixels4);
+	atomic_init(&h->nativeModelMaxWidth, 0);
+	atomic_init(&h->nativeModelMaxHeight, 0);
+	atomic_init(&h->colorPreserveBits, 0);
+	atomic_init(&h->transportGen, 0);
+	atomic_init(&h->transportMiss, 0);
+	atomic_init(&h->nativeTier, native ? kNativeDefaultTier : 0);
+
+	atomic_thread_fence(memory_order_release);
+	atomic_init(&h->version, kShmVersion);
+	atomic_init(&h->magic, kShmMagic);
+}
+
 void
 ShmInitDefaults (struct ShmHeader *h)
 {
-	memset(h, 0, sizeof *h);
-	atomic_store(&h->magic, kShmMagic);
-	atomic_store(&h->version, kShmVersion);
-	atomic_store(&h->helperState, kHelperStopped);
-	atomic_store(&h->passes, 1);
-	atomic_store(&h->enabled, 1);
-	atomic_store(&h->autoMask, 1);
-	atomic_store(&h->intensityBits, FloatToBits(1.0f));
-	atomic_store(&h->localToneBits, FloatToBits(1.0f));
-	atomic_store(&h->localStructureBits, FloatToBits(1.0f));
-	atomic_store(&h->skinStructureBits, FloatToBits(-1.0f));
-	atomic_store(&h->sharpnessBits, FloatToBits(0.0f));
-
-	atomic_store(&h->transferStrengthBits, FloatToBits(1.0f));
-	atomic_store(&h->colourStrengthBits, FloatToBits(1.0f));
-	atomic_store(&h->maxRatioBits, FloatToBits(2.0f));
-	atomic_store(&h->transfer, 1);
-	atomic_store(&h->debugScaleBits, FloatToBits(1.0f));
-	atomic_store(&h->whitePointBits, FloatToBits(1.0f));
-	atomic_store(&h->whitePointScaleBits, FloatToBits(1.0f));
-	atomic_store(&h->whitePointTrimBits, FloatToBits(1.0f));
-	atomic_store(&h->whitePointSource, kWhitePointManual);
-	atomic_store(&h->workingScaleBits, FloatToBits(1.0f));
-	atomic_store(&h->compareSplitBits, FloatToBits(0.5f));
-	atomic_store(&h->compareZoomBits, FloatToBits(1.0f));
-	atomic_store(&h->colourMode, kColourAuto);
-	atomic_store(&h->reversibleMode, kReversibleKnee);
-	atomic_store(&h->applyModel, 1);
-	atomic_store(&h->holdFrame, 0);
-
-	atomic_store(&h->hdrMode, kHdrAuto);
-	atomic_store(&h->hdrDetected, kHdrNone);
-	atomic_store(&h->hdrActive, 0);
-	atomic_store(&h->proxyFormat, kProxyRgba8);
-
-	atomic_store(&h->mvecEnabled, 1);
-	atomic_store(&h->mvecQuality, kMVecBalanced);
-	atomic_store(&h->mvecPixelSize, kMVecPixels4);
-	atomic_store(&h->seq_ok, 0);
-	atomic_store(&h->compositionBypass, 1);
-	atomic_store(&h->colourTrustPercent, 200);
-
-	atomic_store(&h->ratioSmoothPercent, 100);
-	atomic_store(&h->sdr16Multipass, 0);
-
-	for (uint32_t i = 0; i < kMaxPasses; ++i) {
-		struct PassControl *pass = &h->pass[i];
-		atomic_store(&pass->overrideMask, 0);
-		atomic_store(&pass->intensityBits, FloatToBits(1.0f));
-		atomic_store(&pass->localToneBits, FloatToBits(1.0f));
-		atomic_store(&pass->localStructureBits, FloatToBits(1.0f));
-		atomic_store(&pass->skinStructureBits, FloatToBits(-1.0f));
-		atomic_store(&pass->sharpnessBits, FloatToBits(0.0f));
-		// Inert until overrideMask names them, but initialised to the global defaults so a pass that
-		// is switched on later starts from what the rest of the frame is already doing.
-		atomic_store(&pass->style, 0);
-		atomic_store(&pass->preset, 0);
-		atomic_store(&pass->autoMask, 1);
-	}
+	shm_init(h, false, true);
 }
 
 void
 ShmInitNativeDefaults (struct ShmHeader *h,
                        bool              bypass)
 {
-	ShmInitDefaults(h);
-	atomic_store(&h->hdrMode, kHdrOff);
-	atomic_store(&h->mvecEnabled, 0);
-	atomic_store(&h->sdr16Multipass, 1);
-	atomic_store(&h->passes, kNativeDefaultPasses);
-	atomic_store(&h->nativeTier, kNativeDefaultTier);
-	atomic_store(&h->transfer, 2);
-	atomic_store(&h->compositionBypass, bypass);
+	shm_init(h, true, bypass);
 }
 
 struct NativeTier const *

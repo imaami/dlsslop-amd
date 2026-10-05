@@ -262,15 +262,19 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
     assert 'initialised=1\n' in run('-s', str(other))
 
     # Writers refuse a file that is not a channel, even one that starts with
-    # four zero bytes, say so and leave it untouched.
+    # four zero bytes, and a header whose initialisation stopped before the
+    # magic, which comes last (here after enabled, at offset 56); they say so
+    # and leave it untouched.
     notes = Path(directory) / 'notes.txt'
-    for text in (b'not a channel\n' * 300, b'\0\0\0\0important data\n'):
+    unfinished = bytes(56) + (1).to_bytes(4, 'little')
+    for text in (b'not a channel\n' * 300, b'\0\0\0\0important data\n', unfinished):
         notes.write_bytes(text)
         notes.chmod(0o644)
         for options in (('--enabled', '1'), ('--reset',), ('--quit',), ('--status',)):
             error = run('--shm', str(notes), *options, expected=1, errors=True)
             assert notes.read_bytes() == text and notes.stat().st_mode & 0o777 == 0o644, (text[:20], options)
-            refused = f"'{notes}' is not a dlsslop channel; refusing to modify it\n" in error
+            refused = (f"'{notes}' is not a dlsslop channel, or one whose initialisation has not finished; "
+                       "refusing to modify it\n") in error
             assert refused == (options != ('--status',)), (text[:20], options, error)
 
     # --status prints each frame count whole: helperFrames at offset 8, layerFrames at 16.

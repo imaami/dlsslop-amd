@@ -665,20 +665,27 @@ FloatToBits (float f);
 extern float
 BitsToFloat (STD(uint32_t) u);
 
-/** @brief Resets a header to the defaults of the shared channel.
+/** @brief Initializes a header with the defaults of the shared channel.
  *
- * @param h The header; every byte of it is written.
+ * Gives each atomic object of the header its default with atomic_init(), the version and the magic
+ * last, and zeroes the text fields. The atomic objects of a new file, of another version's channel,
+ * of allocated storage or of an automatic header declared without an initializer have no valid
+ * state until they are initialized (C23 7.17.2), and they are initialized once: a channel of this
+ * version is never initialized again, and a reset of its settings stores the defaults of a header
+ * initialized here. Nothing keeps two processes from initializing a new channel at once.
+ *
+ * @param h The header, which holds no channel of this version; every byte of it is written.
  */
 extern void
 ShmInitDefaults (struct ShmHeader *h);
 
-/** @brief Resets a header to the defaults of the native channel.
+/** @brief Initializes a header with the defaults of the native channel, as ShmInitDefaults() does.
  *
  * This is the single source of startup/reset/help defaults for the Linux HIP
  * backend. The CPU-composition and identity worker modes already return a final
  * image, so their compositor bypass default is one.
  *
- * @param h      The header; every byte of it is written.
+ * @param h      The header, which holds no channel of this version; every byte of it is written.
  * @param bypass The default of compositionBypass: true for the worker modes that return a final
  *               image, otherwise false.
  */

@@ -216,12 +216,11 @@ expect (struct composition_frame_settings  got,
 
 /** @brief Makes a header as the daemon creates it.
  *
- * @param h The header.
+ * @param h The header, not yet initialized.
  */
 static void
 native_header (struct ShmHeader *h)
 {
-	*h = (struct ShmHeader){};
 	ShmInitNativeDefaults(h, false);
 }
 
@@ -464,17 +463,18 @@ check_read (void)
 {
 	expect(composition_frame_settings(), initial(), "the defaults");
 	expect(composition_frame_settings_read(nullptr), initial(), "no header");
-	struct ShmHeader header;
-	native_header(&header);
-	expect(composition_frame_settings_read(&header), native_defaults(), "the daemon's defaults");
+	// Each header is initialized once, so each case has its own.
+	struct ShmHeader daemon;
+	native_header(&daemon);
+	expect(composition_frame_settings_read(&daemon), native_defaults(), "the daemon's defaults");
 
 	// What the layer writes when it creates the channel.
-	header = (struct ShmHeader){};
-	ShmInitDefaults(&header);
+	struct ShmHeader layer;
+	ShmInitDefaults(&layer);
 	struct composition_frame_settings want = native_defaults();
 	want.transfer = 1;
 	want.composition_bypass = 1;
-	expect(composition_frame_settings_read(&header), want, "the layer's defaults");
+	expect(composition_frame_settings_read(&layer), want, "the layer's defaults");
 
 	float const unusable[] = {NAN, INFINITY, -INFINITY};
 	for (uint32_t v = 0; v < sizeof unusable / sizeof *unusable; ++v)
@@ -508,6 +508,7 @@ check_read (void)
 	};
 	for (uint32_t i = 0; i < sizeof words / sizeof *words; ++i) {
 		struct word_case const *const w = &words[i];
+		struct ShmHeader header;
 		native_header(&header);
 		atomic_store(header_word(&header, w->source), w->value);
 		want = native_defaults();
@@ -527,6 +528,7 @@ check_read (void)
 #undef ROW
 	for (uint32_t i = 0; i < sizeof percents / sizeof *percents; ++i) {
 		struct percent_case const *const p = &percents[i];
+		struct ShmHeader header;
 		native_header(&header);
 		atomic_store(header_word(&header, p->source), p->value);
 		want = native_defaults();
@@ -548,6 +550,7 @@ check_read (void)
 	};
 	for (uint32_t i = 0; i < sizeof maxima / sizeof *maxima; ++i) {
 		struct maxima_case const *const m = &maxima[i];
+		struct ShmHeader header;
 		native_header(&header);
 		atomic_store(&header.nativeModelMaxWidth, m->width);
 		atomic_store(&header.nativeModelMaxHeight, m->height);

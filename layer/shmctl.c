@@ -456,8 +456,8 @@ map_descriptor (int                fd,
 		return EACCES;
 	if (writable) {
 		// Never chmod, grow or initialise a file that is not a channel. A new or grown file reads as
-		// zero, and initialisation clears the header before it stores the magic, so a channel's
-		// header has the magic or is zero.
+		// zero, and initialisation writes the magic last: a header that is not zero and has no magic
+		// is not a channel, or one whose initialisation has not finished.
 		uint32_t head[sizeof (struct ShmHeader) / sizeof (uint32_t)] = {0};
 		if (pread(fd, head, sizeof head, 0) < 0)
 			return errno;
@@ -465,7 +465,8 @@ map_descriptor (int                fd,
 		for (size_t i = 0; i < sizeof head / sizeof *head; ++i)
 			bits |= head[i];
 		if (head[0] != kShmMagic && bits) {
-			fprintf(stderr, "'%s' is not a dlsslop channel; refusing to modify it\n", path);
+			fprintf(stderr, "'%s' is not a dlsslop channel, or one whose initialisation has not finished; "
+			        "refusing to modify it\n", path);
 			return EINVAL;
 		}
 		if (fchmod(fd, 0600))
