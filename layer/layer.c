@@ -353,6 +353,16 @@ shm_map_open (struct shm_map *s)
 		fd = -1;
 		goto fail;
 	}
+	// The magic and the version as the file holds them: the header's atomic objects have no valid
+	// state until a channel's initialisation gives them one (C23 7.17.2), so none is loaded before
+	// these two say that it has. Each word read once: another process may be rewriting them.
+	uint32_t head[offsetof(struct ShmHeader, version) / sizeof (uint32_t) + 1];
+	if (pread(fd, head, sizeof head, 0) != (ssize_t)sizeof head) {
+		log_printf("[shm] read of the header failed");
+		close(fd);
+		fd = -1;
+		goto fail;
+	}
 
 	void *const m = mmap(nullptr, kHeaderBytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (m == MAP_FAILED) {
@@ -373,10 +383,9 @@ shm_map_open (struct shm_map *s)
 	// composing with its old field set and every setting the newer side writes is invisible. That is
 	// indistinguishable from "the new feature does nothing", which is how a stale layer reads until
 	// someone checks the log.
-	// Each word read once: another process may be rewriting them.
-	bool stale = atomic_load(&s->hdr->magic) != kShmMagic;
+	bool stale = head[0] != kShmMagic;
 	if (!stale) {
-		uint32_t const version = atomic_load(&s->hdr->version);
+		uint32_t const version = head[offsetof(struct ShmHeader, version) / sizeof *head];
 		stale = version != kShmVersion;
 		if (stale)
 			log_printf("[shm] header is version %u but this layer is v%u -- another process is out of "

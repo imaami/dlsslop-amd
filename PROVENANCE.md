@@ -105,7 +105,7 @@ These upstream names do not follow the rule:
 | `g_phys` in layer.cpp | none; `struct instance_chain` holds `physical` and `physical_count` | an instance's physical devices are freed with the instance |
 | `ShmOpen`, `ShmProcessFrame` and the `ShmNeuralEnabled(ShmMap&)` overload in layer.cpp | `shm_map_open`, `shm_map_process_frame` and `shm_map_neural_enabled` | they work on a `struct shm_map`; `shm_open` is POSIX's, and `ShmNeuralEnabled` is the channel header's |
 | `ShmMap::seq` and `firstHeartbeat`, `InstanceChain::next_gipa` and `DeviceChain::next_dpa` | none; the chains call their tables' `next_gipa` and `next_dpa` | nothing read the first two, and the others repeated their tables' members |
-| `Initialised` in shmctl.cpp | none; `attach` and `print_status` compare the magic and the version that they read | each word of the header is read once |
+| `Initialised` in shmctl.cpp | none; `attach` compares the magic and the version that `map_header` reads from the file, and `print_status` those that it loads | each word of the header is read once |
 
 `common/shm_protocol.h` declares the channel for C and C++, and
 `common/shm_protocol.c` defines its functions, which both languages call.

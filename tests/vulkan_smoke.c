@@ -332,11 +332,15 @@ context_init (struct context       *dest,
 	dest->length = strlen(dest->canonical);
 	dest->target = malloc(dest->length);
 	require(dest->target, "out of memory");
+	// The magic and the version from the file: the header's atomic objects have no valid state until
+	// the worker has initialized the channel (C23 7.17.2).
+	uint32_t head[offsetof(struct ShmHeader, version) / sizeof (uint32_t) + 1];
+	require(pread(dest->fd, head, sizeof head, 0) == (ssize_t)sizeof head, "read worker channel failed");
+	require(head[0] == kShmMagic && head[offsetof(struct ShmHeader, version) / sizeof *head] == kShmVersion,
+	        "worker protocol mismatch");
 	void *const mapping = mmap(nullptr, ShmTotalBytes(), PROT_READ | PROT_WRITE, MAP_SHARED, dest->fd, 0);
 	require(mapping != MAP_FAILED, "map worker channel failed");
 	struct ShmHeader *const h = dest->h = mapping;
-	require(atomic_load(&h->magic) == kShmMagic && atomic_load(&h->version) == kShmVersion,
-	        "worker protocol mismatch");
 	atomic_store(&h->enabled, 1);
 	atomic_store(&h->hdrMode, o->proxy16 ? kHdrForce : kHdrOff);
 	atomic_store(&h->colourMode, o->linear ? kColourLinearHdr : kColourAuto);

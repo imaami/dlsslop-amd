@@ -8,6 +8,7 @@
 #include <getopt.h>
 #include <inttypes.h>
 #include <stdatomic.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -434,33 +435,40 @@ create_default_directory (char const *path)
 
 /** @brief Maps the header of the channel that a descriptor holds.
  *
- * @param fd       The channel's descriptor.
- * @param path     The channel, for the message about a file that is not one.
- * @param create   Whether to grow a file that is shorter than a channel.
- * @param writable Whether to map the header for writing; the file must then hold a channel or
- *                 nothing but zeros.
- * @param p_header Receives the header.
- * @return         0, or an errno value.
+ * @param fd        The channel's descriptor.
+ * @param path      The channel, for the message about a file that is not one.
+ * @param create    Whether to grow a file that is shorter than a channel.
+ * @param writable  Whether to map the header for writing; the file must then hold a channel or
+ *                  nothing but zeros.
+ * @param p_header  Receives the header.
+ * @param p_magic   Receives the magic that the file holds.
+ * @param p_version Receives the version that the file holds.
+ * @return          0, or an errno value.
  */
 static int
 map_descriptor (int                fd,
                 char const        *path,
                 bool               create,
                 bool               writable,
-                struct ShmHeader **p_header)
+                struct ShmHeader **p_header,
+                uint32_t          *p_magic,
+                uint32_t          *p_version)
 {
 	struct stat st;
 	if (fstat(fd, &st))
 		return errno;
 	if (!S_ISREG(st.st_mode) || st.st_uid != getuid())
 		return EACCES;
+	// The header as the file holds it: its atomic objects have no valid state until a channel's
+	// initialisation gives them one (C23 7.17.2), so none is loaded before the magic and the version
+	// say that it has had one. A file shorter than a header reads as zero past its end.
+	uint32_t head[sizeof (struct ShmHeader) / sizeof (uint32_t)] = {0};
+	if (pread(fd, head, sizeof head, 0) < 0)
+		return errno;
 	if (writable) {
 		// Never chmod, grow or initialise a file that is not a channel. A new or grown file reads as
 		// zero, and initialisation writes the magic last: a header that is not zero and has no magic
 		// is not a channel, or one whose initialisation has not finished.
-		uint32_t head[sizeof (struct ShmHeader) / sizeof (uint32_t)] = {0};
-		if (pread(fd, head, sizeof head, 0) < 0)
-			return errno;
 		uint32_t bits = 0;
 		for (size_t i = 0; i < sizeof head / sizeof *head; ++i)
 			bits |= head[i];
@@ -484,6 +492,8 @@ map_descriptor (int                fd,
 	if (mapping == MAP_FAILED)
 		return errno;
 	*p_header = mapping;
+	*p_magic = head[0];
+	*p_version = head[offsetof(struct ShmHeader, version) / sizeof *head];
 	return 0;
 }
 
@@ -492,25 +502,29 @@ map_descriptor (int                fd,
  * Readers never create, resize, initialise or write the channel. The mapping outlives the
  * descriptor and lasts until the process exits.
  *
- * @param path     The channel.
- * @param create   Whether to create the file if it is missing, and grow it if it is shorter than a
- *                 channel.
- * @param writable Whether to map the header for writing.
- * @param p_header Receives the header, or nullptr if it is not mapped.
- * @return         0, or an errno value.
+ * @param path      The channel.
+ * @param create    Whether to create the file if it is missing, and grow it if it is shorter than a
+ *                  channel.
+ * @param writable  Whether to map the header for writing.
+ * @param p_header  Receives the header, or nullptr if it is not mapped.
+ * @param p_magic   Receives the magic that the file holds, if the header is mapped.
+ * @param p_version Receives the version that the file holds, if the header is mapped.
+ * @return          0, or an errno value.
  */
 static int
 map_header (char const        *path,
             bool               create,
             bool               writable,
-            struct ShmHeader **p_header)
+            struct ShmHeader **p_header,
+            uint32_t          *p_magic,
+            uint32_t          *p_version)
 {
 	*p_header = nullptr;
 	int fd = open(path, (writable ? O_RDWR : O_RDONLY) | O_CLOEXEC | O_NOFOLLOW | (create ? O_CREAT : 0),
 	              0600);
 	if (fd < 0)
 		return errno;
-	int const error = map_descriptor(fd, path, create, writable, p_header);
+	int const error = map_descriptor(fd, path, create, writable, p_header, p_magic, p_version);
 	// The descriptor wrote no data, so its close has no write error to report.
 	close(fd);
 	fd = -1;
@@ -523,19 +537,20 @@ map_header (char const        *path,
  * another protocol version. A process still on that version misreads the new layout and
  * re-initialises it back when it next attaches, so say so.
  *
- * @param h      The header.
- * @param create Whether to initialise a header that does not hold one.
- * @param path   The channel, for the messages.
- * @return       true if the header holds a channel of this version now.
+ * @param h       The header.
+ * @param magic   The magic that map_header() read from the file.
+ * @param version The version that map_header() read from the file.
+ * @param create  Whether to initialise a header that does not hold one.
+ * @param path    The channel, for the messages.
+ * @return        true if the header holds a channel of this version now.
  */
 static bool
 attach (struct ShmHeader *h,
+        uint32_t          magic,
+        uint32_t          version,
         bool              create,
         char const       *path)
 {
-	// Each word read once: another process may be rewriting them.
-	uint32_t const magic = atomic_load(&h->magic);
-	uint32_t const version = atomic_load(&h->version);
 	bool const channel = magic == kShmMagic;
 	if (channel && version == kShmVersion)
 		return true;
@@ -631,7 +646,9 @@ run (struct options const *options,
 	if (create && !create_default_directory(path))
 		return 1;
 	struct ShmHeader *h;
-	int const error = map_header(path, create, writable, &h);
+	uint32_t magic;
+	uint32_t version;
+	int const error = map_header(path, create, writable, &h, &magic, &version);
 	if (error) {
 		// An absent channel has no worker or layer for a quit alone to stop.
 		if (error == ENOENT && options->flags == OPTIONS_QUIT && !options->assigned
@@ -640,11 +657,12 @@ run (struct options const *options,
 		fprintf(stderr, "cannot access channel '%s': %s\n", path, strerror(error));
 		return 1;
 	}
-	if (!attach(h, create, path))
+	if (!attach(h, magic, version, create, path))
 		return 1;
 
 	// Store each setting once: readers never wait on controlSeq, so a second store would show them a
-	// value nobody asked for. Reset copies controls only and never memsets a live transport header.
+	// value nobody asked for. Reset stores the controls alone, atomically, and never initialises the
+	// live header: other processes use it.
 	bool const reset = options->flags & OPTIONS_RESET;
 	struct ShmHeader defaults;
 	if (reset)
