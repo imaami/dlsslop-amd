@@ -240,13 +240,17 @@ with tempfile.TemporaryDirectory(prefix='dlsslopctl-cli-') as directory:
 
     # Every setting takes its short option too: set a bound that is not the
     # default (a fixed setting has only its default) and read it back by name.
+    held = {}
     for name, (_, default) in values.items():
         option = re.search(r'-(\w), --' + re.escape(name) + r'\s+VALUE[^\n]*\n\s*Range: (\S+?)\.\.([^;]+);', helptext)
         assert option, name
         bound = option[3] if float(option[3]) != default else option[2]
-        stored = struct.unpack('f', struct.pack('f', float(bound)))[0]
-        assert settings(run('-' + option[1], bound, '-l'))[name][0] == stored, (name, option[1], bound)
-    run('-r')
+        held[name] = struct.unpack('f', struct.pack('f', float(bound)))[0]
+        assert settings(run('-' + option[1], bound, '-l'))[name][0] == held[name], (name, option[1], bound)
+    # Then every setting holds its bound at once, and a reset restores each one's default.
+    assert {name: current for name, (current, _) in settings(run('-l')).items()} == held
+    reset = settings(run('-r', '-l'))
+    assert all(current == default for current, default in reset.values()), reset
 
     # Explicit path wins over the environment; reads never initialise bad headers.
     other = Path(directory) / 'another channel.bin'
