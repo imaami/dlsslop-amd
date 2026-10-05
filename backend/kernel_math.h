@@ -1,8 +1,9 @@
 /** @file
  *
  * The CPU references' pixel loops: the HIP kernels' own math (codec_math.hpp, tuning_math.hpp,
- * color_preserve_math.hpp) run on the host. kernel_math.cpp, which includes that math, defines the
- * functions; reference.h checks their arguments and words their failures.
+ * color_preserve_math.hpp) run on the host, and the motion kernels' sampler (temporal_math.hpp).
+ * kernel_math.cpp, which includes that math, defines the functions; reference.h checks the loops'
+ * arguments and words their failures.
  *
  * A loop writes into a caller's buffer of the size its function states, which must not overlap its
  * inputs. It returns false at the first sample that is not finite, its output then incomplete.
@@ -118,6 +119,21 @@ kernel_math_preserve_color (float const           *original_rgba,
                             struct geometry const *g,
                             float                  strength,
                             float                 *output);
+
+/** @brief Samples a luma image bilinearly, its point clamped into the image, as temporal_gpu.hip
+ *         samples a pyramid level.
+ *
+ * @param image The image: e.width x e.height floats.
+ * @param e     Its extent.
+ * @param x     The point's column, in pixels.
+ * @param y     Its row.
+ * @return      The sample.
+ */
+extern float
+kernel_math_temporal_sample (float const            *image,
+                             struct temporal_extent  e,
+                             float                   x,
+                             float                   y);
 
 #undef STD
 

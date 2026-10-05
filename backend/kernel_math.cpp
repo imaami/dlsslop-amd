@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// The CPU references' pixel loops over the kernels' own math: kernel_math.h.
+// The CPU references' pixel loops over the kernels' own math, and the motion
+// kernels' sampler: kernel_math.h.
 // It uses nothing of the C++ runtime (no allocation, exceptions, RTTI or
 // dynamic initialization), so the C programs that link it link with the C
 // driver.
@@ -29,6 +30,7 @@
 #include "kernel_math.h"
 #include "codec_math.hpp"
 #include "color_preserve_math.hpp"
+#include "temporal_math.hpp"
 #include "tuning_math.hpp"
 
 #include <cmath>
@@ -289,4 +291,9 @@ bool kernel_math_preserve_color(const float* original_rgba, const float* model_r
                                 float strength, float* output)
 {
     return dlsslop::preserve_color(original_rgba, model_rgb, *g, strength, output);
+}
+
+float kernel_math_temporal_sample(const float* image, struct temporal_extent e, float x, float y)
+{
+    return dlsslop_temporal::sample(image, e, x, y);
 }

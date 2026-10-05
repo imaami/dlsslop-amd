@@ -34,7 +34,7 @@ https://github.com/KhronosGroup/Vulkan-Headers
 
 HIP runtime type layouts from ROCm HIP
 --------------------------------------
-backend/hip.hpp lays out the HIP types that dlsslopd passes to the runtime as
+backend/hip.h lays out the HIP types that dlsslopd passes to the runtime as
 include/hip/hip_runtime_api.h of ROCm/HIP rocm-7.1.1 declares them.
 https://github.com/ROCm/HIP
 

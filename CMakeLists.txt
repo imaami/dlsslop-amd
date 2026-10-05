@@ -184,8 +184,8 @@ add_library(dlsslop-codec OBJECT backend/kernel_math.cpp backend/reference.c bac
 set_source_files_properties(backend/kernel_math.cpp PROPERTIES
     COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:Clang>:-fno-lto;-fno-tree-slp-vectorize>")
 # The HIP backend: the runtime, the network and the daemon's own kernels.
-add_library(dlsslop-hip OBJECT backend/hip.cpp backend/hip_weights.c backend/hip_plan.c backend/hip_network.cpp
-    backend/native_kernels.cpp)
+add_library(dlsslop-hip OBJECT backend/hip.c backend/hip_weights.c backend/hip_plan.c backend/hip_network.c
+    backend/native_kernels.c backend/codec_gpu.c backend/temporal_gpu.c backend/control_selftest.c)
 target_link_libraries(dlsslop-hip PUBLIC ${CMAKE_DL_LIBS})
 # The in-layer network, in a module beside the layer that loads it on demand
 # (layer/network_module.h): the network and the libstdc++ it needs stay out of
@@ -212,8 +212,8 @@ target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 # size; the frame path (serving loop, engines, codec, networks) stays at -O3.
 # GCC does not inline -O3 code into these callers, so none of it slows down.
 set_source_files_properties(backend/main.cpp backend/options.cpp backend/paths.cpp backend/files.c
-    backend/channel.cpp backend/transport.cpp backend/trace.cpp backend/open.cpp backend/self_test.cpp backend/hip.cpp
-    backend/hip_plan.c common/error.c PROPERTIES COMPILE_OPTIONS -Os)
+    backend/channel.cpp backend/transport.cpp backend/trace.cpp backend/open.cpp backend/self_test.cpp backend/hip.c
+    backend/hip_plan.c backend/control_selftest.c common/error.c PROPERTIES COMPILE_OPTIONS -Os)
 
 if(BUILD_TESTING)
     # What several C tests need: a temporary directory removed with what it holds, a whole file and a
@@ -228,13 +228,13 @@ if(BUILD_TESTING)
     add_test(NAME setup-cli COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/setup-cli.py)
     # No RPATH is recorded, so a copied stub cannot find its dependency.
-    add_library(hip-loader-stub-dependency SHARED tests/hip_loader_stub.cpp)
+    add_library(hip-loader-stub-dependency SHARED tests/hip_loader_stub.c)
     target_compile_definitions(hip-loader-stub-dependency PRIVATE HIP_LOADER_STUB_DEPENDENCY)
-    add_library(hip-loader-stub SHARED tests/hip_loader_stub.cpp)
+    add_library(hip-loader-stub SHARED tests/hip_loader_stub.c)
     target_link_libraries(hip-loader-stub PRIVATE hip-loader-stub-dependency)
-    add_library(hip-fake-runtime SHARED tests/hip_loader_stub.cpp)
+    add_library(hip-fake-runtime SHARED tests/hip_loader_stub.c)
     target_compile_definitions(hip-fake-runtime PRIVATE HIP_FAKE_RUNTIME)
-    add_library(hip-fake-incomplete SHARED tests/hip_loader_stub.cpp)
+    add_library(hip-fake-incomplete SHARED tests/hip_loader_stub.c)
     target_compile_definitions(hip-fake-incomplete PRIVATE HIP_FAKE_RUNTIME HIP_FAKE_INCOMPLETE)
     add_test(NAME worker-cli COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/worker-cli.py $<TARGET_FILE:dlsslopd>
@@ -286,8 +286,10 @@ if(BUILD_TESTING)
         set_target_properties(${test}-test PROPERTIES LINKER_LANGUAGE C)
         add_test(NAME ${test} COMMAND ${test}-test)
     endforeach()
-    add_executable(color-gpu-test tests/color_gpu_test.cpp backend/hip.cpp backend/native_kernels.cpp backend/files.c)
+    # The colour kernel against its CPU reference on the GPU, in C.
+    add_executable(color-gpu-test tests/color_gpu_test.c backend/hip.c backend/native_kernels.c backend/files.c)
     target_link_libraries(color-gpu-test PRIVATE dlsslop-codec dlsslop-common-c ${CMAKE_DL_LIBS})
+    set_target_properties(color-gpu-test PROPERTIES LINKER_LANGUAGE C)
     # Uses the GPU when the HIP runtime, a gfx1201 device and the module exist.
     set(HIP_MODULES ${CMAKE_CURRENT_SOURCE_DIR}/assets/HIP/gfx1201)
     add_test(NAME color-gpu COMMAND color-gpu-test --module ${HIP_MODULES}/linux_native.hsaco)

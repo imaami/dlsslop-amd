@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
 #include "hip_engine.hpp"
-#include "control_selftest.hpp"
+#include "control_selftest.h"
 #include "geometry.h"
 #include "reference.h"
+#include "tuning_math.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -12,19 +13,30 @@
 #include <utility>
 
 namespace dlsslop {
-
-namespace selftest = control_selftest;
-
-Result<int> select_device(const hip::Api& api, int requested)
+namespace {
+// A HIP call's RESULT: nothing, or hip_fail()'s words for WHAT.
+[[gnu::cold, gnu::noinline]] Result<void> hip_error(const struct hip_api& api, int result, const char* what)
 {
-    DLSSLOP_TRY(api.check(api.hipInit(0), "hipInit (check /dev/kfd permissions and ROCm userspace)"));
+    struct error e;
+    return forward_c(hip_fail(&e, &api, result, "%s", what), e);
+}
+Result<void> check(const struct hip_api& api, int result, const char* what)
+{
+    if (!result) return {};
+    return hip_error(api, result, what);
+}
+} // namespace
+
+Result<int> select_device(const struct hip_api& api, int requested)
+{
+    DLSSLOP_TRY(check(api, api.hipInit(0), "hipInit (check /dev/kfd permissions and ROCm userspace)"));
     int count = 0, version = 0, selected = -1;
-    DLSSLOP_TRY(api.check(api.hipRuntimeGetVersion(&version), "HIP runtime version"));
-    DLSSLOP_TRY(api.check(api.hipGetDeviceCount(&count), "HIP device count"));
+    DLSSLOP_TRY(check(api, api.hipRuntimeGetVersion(&version), "HIP runtime version"));
+    DLSSLOP_TRY(check(api, api.hipGetDeviceCount(&count), "HIP device count"));
     std::fprintf(stderr, "HIP runtime=%d, visible devices=%d\n", version, count);
     for (int i = 0; i < count; ++i) {
-        hip::DeviceProperties p{};
-        DLSSLOP_TRY(api.check(api.hipGetDevicePropertiesR0600(&p, i), "device properties"));
+        struct hip_device_properties p{};
+        DLSSLOP_TRY(check(api, api.hipGetDevicePropertiesR0600(&p, i), "device properties"));
         std::fprintf(stderr, "  device %d: %s; arch=%s; PCI=%04x:%02x:%02x; VRAM=%.0f MiB\n",
                      i, p.name, p.gcnArchName, p.pciDomainID, p.pciBusID, p.pciDeviceID,
                      p.totalGlobalMem / 1048576.0);
@@ -47,20 +59,24 @@ void HipEngine::release(Imported& slot)
     slot = {};
 }
 
-Result<hip::Api> open_hip(Options& o)
+Result<struct hip_api> open_hip(Options& o)
 {
-    const auto api = DLSSLOP_TRY(hip::load());
+    struct hip_api api;
+    struct error e;
+    if (const enum error_code code = hip_load(&api, &e)) return forward_c(code, e);
     o.device = DLSSLOP_TRY(select_device(api, o.device));
     // Wait for the device asleep, not spinning a core per waiting thread
     // (hipDeviceScheduleBlockingSync), before the device's context exists.
     if (api.hipSetDeviceFlags) {
-        DLSSLOP_TRY(api.check(api.hipSetDevice(o.device), "select the HIP device"));
-        DLSSLOP_TRY(api.check(api.hipSetDeviceFlags(4), "wait for the device without spinning"));
+        DLSSLOP_TRY(check(api, api.hipSetDevice(o.device), "select the HIP device"));
+        DLSSLOP_TRY(check(api, api.hipSetDeviceFlags(4), "wait for the device without spinning"));
     }
     return api;
 }
 
-HipEngine::HipEngine(Options o, unsigned tier, const hip::Api& api) : options_(std::move(o)), tier_(tier), api_(api)
+Result<void> HipEngine::fail_hip(int result, const char* what) const { return hip_error(api_, result, what); }
+
+HipEngine::HipEngine(Options o, unsigned tier, const struct hip_api& api) : options_(std::move(o)), tier_(tier), api_(api)
 {
     // Upstream's approximate ViT cache, which this variable selected, is not
     // part of the port.
@@ -83,10 +99,10 @@ void HipEngine::release()
         *buffer = nullptr;
     }
     answer_ = nullptr;
-    temporal_.reset();
-    gpu_codec_.reset();
-    kernels_.reset();
-    network_.reset();
+    temporal_gpu_fini(&temporal_);
+    codec_gpu_fini(&gpu_codec_);
+    native_kernels_fini(&kernels_);
+    hip_network_fini(&network_);
     previous_settings_ = {};
 }
 
@@ -94,10 +110,10 @@ Result<void> HipEngine::prepare()
 {
     const NativeTier& raster = *ShmNativeTier(tier_);
     // What follows is allocated on the device this thread selects.
-    DLSSLOP_TRY(api_.check(api_.hipSetDevice(options_.device), "select the HIP device"));
+    DLSSLOP_TRY(check(api_.hipSetDevice(options_.device), "select the HIP device"));
     // With default flags, the stream's work stays in order with the null
     // stream's synchronous copies, which the CPU codec and diagnostics make.
-    if (!stream_) DLSSLOP_TRY(api_.check(api_.hipStreamCreate(&stream_), "create the HIP stream"));
+    if (!stream_) DLSSLOP_TRY(check(api_.hipStreamCreate(&stream_), "create the HIP stream"));
     // The plan and its placement, which the model and the network read, freed on return.
     struct Planned {
         hip_plan plan{};
@@ -113,57 +129,55 @@ Result<void> HipEngine::prepare()
             hip_plan_init(&planned.plan, raster.width, raster.networkHeight, options_.performance, &e))
         return forward_c(code, e);
     if (const enum error_code code = hip_plan_place(&planned.placement, &planned.plan, &e)) return forward_c(code, e);
-    if (!model_) {
-        // A model that failed to load is freed, so that no later network binds it.
-        if (auto loaded = model_.emplace(api_).load(options_.modules, options_.assets, planned.plan.weights,
-                                                     planned.plan.weight_count);
-            !loaded) {
-            model_.reset();
-            return loaded;
-        }
-    }
-    DLSSLOP_TRY(network_.emplace(api_, *model_, stream_).build(planned.plan, planned.placement));
-    for (auto& event : marks_) DLSSLOP_TRY(api_.check(api_.hipEventCreate(&event), "create timing event"));
+    // A model that failed to load is freed, so that no later network binds it.
+    if (!model_.api)
+        if (const enum error_code code =
+                hip_model_init(&model_, &api_, options_.modules.data(), options_.modules.size(), options_.assets.data(),
+                               options_.assets.size(), planned.plan.weights, planned.plan.weight_count, &e))
+            return forward_c(code, e);
+    if (const enum error_code code =
+            hip_network_init(&network_, &api_, &model_, stream_, &planned.plan, &planned.placement, &e))
+        return forward_c(code, e);
+    for (auto& event : marks_) DLSSLOP_TRY(check(api_.hipEventCreate(&event), "create timing event"));
     // Tuning, colour and motion use the module's kernels with the CPU codec too.
-    kernels_.emplace(api_, stream_);
-    DLSSLOP_TRY(kernels_->load(options_.modules + "/linux_native.hsaco"));
-    if (!options_.cpu_codec) {
-        gpu_codec_.emplace(*kernels_);
-        DLSSLOP_TRY(gpu_codec_->init());
-    }
-    temporal_.emplace(*kernels_);
+    if (const enum error_code code =
+            native_kernels_init(&kernels_, &api_, stream_, (options_.modules + "/linux_native.hsaco").c_str(), &e))
+        return forward_c(code, e);
+    if (!options_.cpu_codec)
+        if (const enum error_code code = codec_gpu_init(&gpu_codec_, &kernels_, &e)) return forward_c(code, e);
+    temporal_ = temporal_gpu(&kernels_);
     const size_t pixels = size_t(raster.width) * raster.networkHeight;
-    DLSSLOP_TRY(api_.check(api_.hipMalloc(&device_input_, pixels * 16), "allocate network input"));
-    DLSSLOP_TRY(api_.check(api_.hipMalloc(&device_output_, pixels * 12), "allocate network output"));
+    DLSSLOP_TRY(check(api_.hipMalloc(&device_input_, pixels * 16), "allocate network input"));
+    DLSSLOP_TRY(check(api_.hipMalloc(&device_output_, pixels * 12), "allocate network output"));
     // The host copies of a pass's input and answer serve the CPU codec and the self-test's checks.
-    if (!gpu_codec_ || options_.self_test) {
+    if (!gpu_codec_.kernels || options_.self_test) {
         input_.resize(pixels * 4);
         neural_.resize(pixels * 3);
     }
     // One evaluation, without a history, before the daemon reports itself
     // ready, so that a kernel that cannot launch fails here. It is the
     // network's first frame, which has a buffer assignment of its own.
-    DLSSLOP_TRY(api_.check(api_.hipMemsetAsync(device_input_, 0, pixels * 16, stream_), "warm input"));
-    DLSSLOP_TRY(network_->enqueue(device_input_, nullptr, device_output_));
+    DLSSLOP_TRY(check(api_.hipMemsetAsync(device_input_, 0, pixels * 16, stream_), "warm input"));
+    if (const enum error_code code = hip_network_enqueue(&network_, device_input_, nullptr, device_output_, &e))
+        return forward_c(code, e);
     DLSSLOP_TRY(synchronize());
-    DLSSLOP_TRY(network_->print_memory());
+    if (const enum error_code code = hip_network_print_memory(&network_, &e)) return forward_c(code, e);
     if (!options_.self_test) return {};
     // The kernels on synthetic inputs, independent of model weights.
-    DLSSLOP_TRY(selftest::check_tuning(*kernels_));
-    DLSSLOP_TRY(selftest::check_temporal(*kernels_));
-    return selftest::check_codec(*kernels_);
+    if (const enum error_code code = control_selftest_run(&kernels_, &e)) return forward_c(code, e);
+    return {};
 }
 
 bool HipEngine::import_into(unsigned slot, const ShmTransportOffer& offer, Descriptor (&fds)[2])
 {
-    if (!gpu_codec_) return false;
+    if (!gpu_codec_.kernels) return false;
     Imported next;
     for (unsigned i = 0; i < 2; ++i) {
-        hip::MemoryDesc memory{};
+        struct hip_memory_desc memory{};
         memory.type = 1; // hipExternalMemoryHandleTypeOpaqueFd
         memory.handle.fd = fds[i].fd;
         memory.size = offer.allocation[i];
-        hip::BufferDesc buffer{};
+        struct hip_buffer_desc buffer{};
         buffer.size = offer.allocation[i];
         if (api_.hipImportExternalMemory(&next.memory[i], &memory)) {
             release(next);
@@ -186,8 +200,8 @@ Result<void> HipEngine::trace_image(FrameTrace* trace, const struct geometry& g,
     if (!trace) return {};
     DLSSLOP_TRY(synchronize());
     std::vector<float> buffer(std::size_t(g.width) * g.height * channels);
-    DLSSLOP_TRY(api_.check(api_.hipMemcpy(buffer.data(), pointer, buffer.size() * sizeof(float), 2),
-                           "read diagnostic neural stage"));
+    DLSSLOP_TRY(check(api_.hipMemcpy(buffer.data(), pointer, buffer.size() * sizeof(float), 2),
+                      "read diagnostic neural stage"));
     char name[32];
     std::snprintf(name, sizeof name, "pass-%02u-%s", pass + 1, stage);
     trace->image(name, buffer.data(), g, channels);
@@ -209,65 +223,79 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
     const bool tuned = !native_tuning_is_default(settings.tuning);
     const bool colored = settings.color_preserve > 0;
     if ((tuned || colored) && !device_scratch_)
-        DLSSLOP_TRY(api_.check(api_.hipMalloc(&device_scratch_, size_t(g.width) * g.height * 12),
-                               "allocate post-processing output"));
+        DLSSLOP_TRY(check(api_.hipMalloc(&device_scratch_, size_t(g.width) * g.height * 12),
+                          "allocate post-processing output"));
     if (passes > 1 && !device_feedback_)
-        DLSSLOP_TRY(api_.check(api_.hipMalloc(&device_feedback_, size_t(g.width) * g.height * 16),
-                               "allocate inter-pass feedback"));
+        DLSSLOP_TRY(check(api_.hipMalloc(&device_feedback_, size_t(g.width) * g.height * 16),
+                          "allocate inter-pass feedback"));
     DLSSLOP_TRY(mark(0));
-    if (gpu_codec_) {
-        DLSSLOP_TRY(gpu_codec_->encode(input, g, device_input_, settings.fp16, io.slot >= 0));
+    if (gpu_codec_.kernels) {
+        if (const enum error_code code =
+                codec_gpu_encode(&gpu_codec_, input, &g, device_input_, settings.fp16, io.slot >= 0, &e))
+            return forward_c(code, e);
         if (verify) {
-            std::vector<float> reference(size_t(g.width) * g.height * 4);
+            std::vector<float> reference(size_t(g.width) * g.height * 4), actual(reference.size());
             if (const enum error_code code = reference_encode_proxy(input, &g, settings.fp16, reference.data(), &e))
                 return forward_c(code, e);
-            DLSSLOP_TRY(selftest::compare(
-                DLSSLOP_TRY(selftest::Buffer::read_pointer(api_, stream_, device_input_, reference.size())), reference,
-                "GPU encoder"));
+            if (const enum error_code code =
+                    control_selftest_read(&kernels_, device_input_, actual.data(), actual.size(), &e))
+                return forward_c(code, e);
+            if (const enum error_code code =
+                    control_selftest_compare(actual.data(), reference.data(), reference.size(), "GPU encoder", &e))
+                return forward_c(code, e);
             std::printf("GPU encode vs CPU reference: FP32 bit-identical\n");
             std::fflush(stdout);
         }
     } else {
         if (const enum error_code code = reference_encode_proxy(input, &g, settings.fp16, input_.data(), &e))
             return forward_c(code, e);
-        DLSSLOP_TRY(api_.check(api_.hipMemcpy(device_input_, input_.data(), input_.size() * sizeof(float), 1),
-                               "upload encoded frame"));
+        DLSSLOP_TRY(check(api_.hipMemcpy(device_input_, input_.data(), input_.size() * sizeof(float), 1),
+                          "upload encoded frame"));
     }
     DLSSLOP_TRY(mark(1));
     if (settings.motion) {
-        // GpuTemporal itself drops the history for a new pass count, quality, grid or placement.
+        // temporal_gpu_begin() itself drops the history for a new pass count, quality, grid or placement.
         const bool reset = options_.self_test || !previous_settings_.motion ||
             previous_settings_.fp16 != settings.fp16 || previous_settings_.precision16 != settings.precision16 ||
             !(previous_settings_.tuning == settings.tuning) || previous_settings_.color_preserve != settings.color_preserve;
         previous_settings_.motion = false; // Until the frame completes: a failed one leaves no history.
         // Until end(), reject nothing: the worker would serve on with the
         // history still pending, and the next begin() would fail.
-        DLSSLOP_TRY(temporal_->begin(device_input_, g, settings.motion_quality, settings.motion_grid, passes, reset));
+        if (const enum error_code code = temporal_gpu_begin(&temporal_, device_input_, &g, settings.motion_quality,
+                                                            settings.motion_grid, passes, reset, &e))
+            return forward_c(code, e);
     } else {
-        temporal_->reset();
+        temporal_gpu_reset(&temporal_);
     }
     void* answer = device_output_;
     for (unsigned pass = 0; pass < passes; ++pass) {
         void* const pass_input = pass ? device_feedback_ : device_input_;
         if (pass) {
-            if (gpu_codec_) {
-                DLSSLOP_TRY(gpu_codec_->feedback(answer, pass_input, settings.precision16));
+            if (gpu_codec_.kernels) {
+                if (const enum error_code code =
+                        codec_gpu_feedback(&gpu_codec_, answer, pass_input, settings.precision16, &e))
+                    return forward_c(code, e);
                 if (verify) {
                     if (const enum error_code code = reference_feedback_neural_rgb(neural_.data(), &g,
                                                                                    settings.precision16,
                                                                                    input_.data(), &e))
                         return forward_c(code, e);
-                    DLSSLOP_TRY(selftest::compare(
-                        DLSSLOP_TRY(selftest::Buffer::read_pointer(api_, stream_, pass_input, input_.size())),
-                        input_, "GPU inter-pass feedback"));
+                    std::vector<float> actual(input_.size());
+                    if (const enum error_code code =
+                            control_selftest_read(&kernels_, pass_input, actual.data(), actual.size(), &e))
+                        return forward_c(code, e);
+                    if (const enum error_code code = control_selftest_compare(actual.data(), input_.data(),
+                                                                              input_.size(),
+                                                                              "GPU inter-pass feedback", &e))
+                        return forward_c(code, e);
                     std::printf("GPU feedback for pass %u/%u vs CPU reference: FP32 bit-identical\n", pass + 1, passes);
                 }
             } else {
                 if (const enum error_code code = reference_feedback_neural_rgb(neural_.data(), &g, settings.precision16,
                                                                                input_.data(), &e))
                     return forward_c(code, e);
-                DLSSLOP_TRY(api_.check(api_.hipMemcpy(pass_input, input_.data(), input_.size() * sizeof(float), 1),
-                                       "upload inter-pass feedback"));
+                DLSSLOP_TRY(check(api_.hipMemcpy(pass_input, input_.data(), input_.size() * sizeof(float), 1),
+                                  "upload inter-pass feedback"));
             }
         }
         DLSSLOP_TRY(trace_image(trace, g, pass, "input", pass_input, 4));
@@ -276,35 +304,42 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
         void* history = nullptr;
         void* stages[] = {device_output_, device_scratch_, device_output_};
         if (settings.motion) {
-            history = DLSSLOP_TRY(temporal_->history(pass, pass_input));
-            stages[tuned + colored] = DLSSLOP_TRY(temporal_->target(pass));
+            if (const enum error_code code = temporal_gpu_history(&temporal_, pass, pass_input, &history, &e))
+                return forward_c(code, e);
+            if (const enum error_code code = temporal_gpu_target(&temporal_, pass, &stages[tuned + colored], &e))
+                return forward_c(code, e);
         }
-        DLSSLOP_TRY(network_->enqueue(pass_input, history, stages[0]));
+        if (const enum error_code code = hip_network_enqueue(&network_, pass_input, history, stages[0], &e))
+            return forward_c(code, e);
         DLSSLOP_TRY(trace_image(trace, g, pass, "raw", stages[0], 3));
         if (tuned) {
-            DLSSLOP_TRY(gpu_tune(*kernels_, g, pass_input, stages[0], stages[1], settings.tuning));
+            if (const enum error_code code =
+                    native_kernels_tune(&kernels_, g, pass_input, stages[0], stages[1], settings.tuning, &e))
+                return forward_c(code, e);
             DLSSLOP_TRY(trace_image(trace, g, pass, "tuned", stages[1], 3));
         }
         if (colored) {
-            DLSSLOP_TRY(gpu_preserve_color(*kernels_, g, device_input_, stages[tuned], stages[1 + tuned],
-                                           settings.color_preserve));
+            if (const enum error_code code = native_kernels_preserve_color(
+                    &kernels_, g, device_input_, stages[tuned], stages[1 + tuned], settings.color_preserve, &e))
+                return forward_c(code, e);
             DLSSLOP_TRY(trace_image(trace, g, pass, "color", stages[1 + tuned], 3));
         }
         answer = stages[tuned + colored];
         // The CPU codec, like the GPU one, rejects the nonfinite samples it reads.
-        if (!gpu_codec_ || verify) {
+        if (!gpu_codec_.kernels || verify) {
             DLSSLOP_TRY(synchronize());
-            DLSSLOP_TRY(api_.check(api_.hipMemcpy(neural_.data(), answer, neural_.size() * sizeof(float), 2),
-                                   "read neural answer"));
+            DLSSLOP_TRY(check(api_.hipMemcpy(neural_.data(), answer, neural_.size() * sizeof(float), 2),
+                              "read neural answer"));
         }
     }
     answer_ = answer;
-    if (settings.motion) DLSSLOP_TRY(temporal_->end());
+    if (settings.motion)
+        if (const enum error_code code = temporal_gpu_end(&temporal_, &e)) return forward_c(code, e);
     DLSSLOP_TRY(mark(2));
-    if (gpu_codec_) {
-        DLSSLOP_TRY(gpu_codec_->decode(answer, output));
+    if (gpu_codec_.kernels) {
+        if (const enum error_code code = codec_gpu_decode(&gpu_codec_, answer, output, &e)) return forward_c(code, e);
         DLSSLOP_TRY(mark(3));
-        DLSSLOP_TRY(gpu_codec_->finish());
+        if (const enum error_code code = codec_gpu_finish(&gpu_codec_, &e)) return forward_c(code, e);
         if (verify) {
             const size_t bpp = settings.fp16 ? 8 : 4;
             std::vector<uint8_t> reference(size_t(w) * h * bpp);
@@ -328,18 +363,18 @@ Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned
         DLSSLOP_TRY(mark(3));
     }
     previous_settings_ = settings;
-    // finish() waited for the GPU codec's stream already.
-    if (!gpu_codec_) DLSSLOP_TRY(api_.check(api_.hipEventSynchronize(marks_[3]), "timing event completion"));
-    DLSSLOP_TRY(api_.check(api_.hipEventElapsedTime(&upload_ms, marks_[0], marks_[1]), "upload interval"));
-    DLSSLOP_TRY(api_.check(api_.hipEventElapsedTime(&inference_ms, marks_[1], marks_[2]), "inference interval"));
-    return api_.check(api_.hipEventElapsedTime(&readback_ms, marks_[2], marks_[3]), "readback interval");
+    // codec_gpu_finish() waited for the GPU codec's stream already.
+    if (!gpu_codec_.kernels) DLSSLOP_TRY(check(api_.hipEventSynchronize(marks_[3]), "timing event completion"));
+    DLSSLOP_TRY(check(api_.hipEventElapsedTime(&upload_ms, marks_[0], marks_[1]), "upload interval"));
+    DLSSLOP_TRY(check(api_.hipEventElapsedTime(&inference_ms, marks_[1], marks_[2]), "inference interval"));
+    return check(api_.hipEventElapsedTime(&readback_ms, marks_[2], marks_[3]), "readback interval");
 }
 
 Result<const std::vector<float>*> HipEngine::raw_result()
 {
-    if (gpu_codec_)
-        DLSSLOP_TRY(api_.check(api_.hipMemcpy(neural_.data(), answer_, neural_.size() * sizeof(float), 2),
-                               "read raw network answer"));
+    if (gpu_codec_.kernels)
+        DLSSLOP_TRY(check(api_.hipMemcpy(neural_.data(), answer_, neural_.size() * sizeof(float), 2),
+                          "read raw network answer"));
     return &neural_;
 }
 

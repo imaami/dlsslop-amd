@@ -2,41 +2,43 @@
 // color and motion kernels, on a gfx1201 device.
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "codec_gpu.hpp"
+#include "codec_gpu.h"
 #include "engine.hpp"
-#include "hip.hpp"
-#include "hip_network.hpp"
-#include "native_kernels.hpp"
-#include "temporal_gpu.hpp"
+#include "hip.h"
+#include "hip_network.h"
+#include "native_kernels.h"
+#include "temporal_gpu.h"
 
 #include <array>
-#include <optional>
 #include <vector>
 
 namespace dlsslop {
 
 // The gfx1201 device that --device names, or the first one; every visible
 // device is listed on the way.
-Result<int> select_device(const hip::Api& api, int requested);
+Result<int> select_device(const struct hip_api& api, int requested);
 // The HIP runtime for a HipEngine, with the gfx1201 device o.device names, or
 // the first, selected and recorded there.
-Result<hip::Api> open_hip(Options& o);
+Result<struct hip_api> open_hip(Options& o);
 
 class HipEngine : public EngineBase<HipEngine> {
     Options options_;
     unsigned tier_;
-    hip::Api api_;
+    struct hip_api api_;
     // The one stream of the network and every kernel and copy of the daemon's,
     // from the first prepare() on.
-    hip::Handle stream_ = nullptr;
-    // The network's code objects and weights, from the first prepare() on.
-    // Every tier's plan reads the same weights (hip-plan checks it), and they
-    // differ only with --performance, which is fixed for the engine's life.
-    std::optional<hip::Model> model_;
-    std::optional<hip::Network> network_;
-    std::optional<NativeKernels> kernels_;
-    std::optional<GpuCodec> gpu_codec_;
-    std::optional<GpuTemporal> temporal_;
+    void* stream_ = nullptr;
+    // The network's code objects and weights, from the first prepare() on; not
+    // loaded while its api is null. Every tier's plan reads the same weights
+    // (hip-plan checks it), and they differ only with --performance, which is
+    // fixed for the engine's life.
+    struct hip_model model_{};
+    // What prepare() makes: none of them while zeroed. The codec stays zeroed
+    // with the CPU codec.
+    struct hip_network network_{};
+    struct native_kernels kernels_{};
+    struct codec_gpu gpu_codec_{};
+    struct temporal_gpu temporal_{};
     void* device_input_ = nullptr;    // The encoded frame, unchanged until the next one.
     void* device_feedback_ = nullptr; // Later passes' input, allocated for multi-pass.
     void* device_output_ = nullptr;
@@ -47,10 +49,10 @@ class HipEngine : public EngineBase<HipEngine> {
     bool warned_conditioning_ = false;
     // Stream events: frame start, uploaded, evaluated, answered. Timing never
     // stalls the stream; the intervals are read once the answer is complete.
-    hip::Handle marks_[4]{};
+    void* marks_[4]{};
     // The pair in each import slot.
     struct Imported {
-        hip::Handle memory[2]{};
+        void* memory[2]{};
         void* frame[2]{}; // proxy, answer
     };
     std::array<Imported, kSlots> imported_{};
@@ -58,8 +60,15 @@ class HipEngine : public EngineBase<HipEngine> {
     void release(Imported& slot);
     // Everything prepare() made but the stream and the model, and every import.
     void release();
-    Result<void> mark(unsigned i) { return api_.check(api_.hipEventRecord(marks_[i], stream_), "record timing event"); }
-    Result<void> synchronize() { return api_.check(api_.hipStreamSynchronize(stream_), "network completion"); }
+    // Nothing unless RESULT is an error: then hip_fail()'s "WHAT: <its name> (RESULT)".
+    Result<void> check(int result, const char* what) const
+    {
+        if (!result) return {};
+        return fail_hip(result, what);
+    }
+    [[gnu::cold, gnu::noinline]] Result<void> fail_hip(int result, const char* what) const;
+    Result<void> mark(unsigned i) { return check(api_.hipEventRecord(marks_[i], stream_), "record timing event"); }
+    Result<void> synchronize() { return check(api_.hipStreamSynchronize(stream_), "network completion"); }
     // A pass's stage, read back into the trace.
     Result<void> trace_image(FrameTrace* trace, const struct geometry& g, unsigned pass, const char* stage,
                              const void* pointer, unsigned channels);
@@ -69,12 +78,13 @@ public:
     // A tier is a raster the network is built for.
     static constexpr bool rebuilds_for_tier = true;
 
-    HipEngine(Options o, unsigned tier, const hip::Api& api);
+    HipEngine(Options o, unsigned tier, const struct hip_api& api);
     HipEngine(const HipEngine&) = delete;
     ~HipEngine()
     {
         release();
         if (stream_) api_.hipStreamDestroy(stream_);
+        hip_model_fini(&model_);
     }
     const char* name() const { return "HIP"; }
     std::string device() const { return "device " + std::to_string(options_.device); }
@@ -94,10 +104,10 @@ public:
         tier_ = tier;
         return prepare();
     }
-    // See GpuCodec::pin.
+    // See codec_gpu_pin().
     void pin(uint8_t* input, uint8_t* output, size_t bytes)
     {
-        if (gpu_codec_) gpu_codec_->pin(input, output, bytes);
+        if (gpu_codec_.kernels) codec_gpu_pin(&gpu_codec_, input, output, bytes);
     }
     bool import_into(unsigned slot, const ShmTransportOffer& offer, Descriptor (&fds)[2]);
     Frames frames_of(unsigned slot) const
@@ -107,7 +117,7 @@ public:
     }
     Result<void> read_back(void* host, const void* source, size_t bytes)
     {
-        return api_.check(api_.hipMemcpy(host, source, bytes, 4), "read diagnostic frame");
+        return check(api_.hipMemcpy(host, source, bytes, 4), "read diagnostic frame");
     }
     Result<void> self_test(const Options& o) { return run_self_test(o, *this); }
     // Proxy and answer are w * h RGBA8, or RGBA16F with settings.fp16: host

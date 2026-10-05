@@ -17,7 +17,7 @@
 #include "reference.h"
 #include "tuning.h"
 
-/** @brief The control self-test's states (control_selftest.hpp), the default one first. */
+/** @brief The control self-test's states (control_selftest.c), the default one first. */
 static struct native_tuning const states[] = {
 	NATIVE_TUNING_DEFAULTS, {0, 1, 1, 0}, {1.75f, .25f, 2.5f, .375f}, {1, 0, 1, 0}, {1, 1, 0, 1},
 };

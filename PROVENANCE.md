@@ -189,12 +189,12 @@ c512 blocks read. The port reads a weight's `.f16` file only when there is no
 `.f32` file, and only files of the exact size that `dlsslop-setup` imports.
 Upstream reads the `.f16` file whenever the `.f32` file does not open, and it
 accepts any downsample or decoder file that holds at least the weight matrix.
-`backend/hip.hpp` declares the HIP runtime entry points dlsslopd calls and the
+`backend/hip.h` declares the HIP runtime entry points dlsslopd calls and the
 layouts of the types it passes to them. It takes those layouts from ROCm's
 `include/hip/hip_runtime_api.h` as the fork's `hip_api.h` and
 `hip_device_properties.h` copy them from rocm-7.1.1 (MIT, Copyright (c)
-2015 - 2023 Advanced Micro Devices, Inc.; `backend/hip.hpp` carries the notice,
-and `packaging/THIRD-PARTY.txt` repeats it for binary releases). `backend/hip.cpp` loads the runtime
+2015 - 2023 Advanced Micro Devices, Inc.; `backend/hip.h` carries the notice,
+and `packaging/THIRD-PARTY.txt` repeats it for binary releases). `backend/hip.c` loads the runtime
 (`libamdhip64.so.7`, `.so.6` or the unversioned soname, also from
 `/opt/rocm/lib` or an explicit `DLSSLOP_HIP_LIBRARY` path) with
 `dlopen`/`dlsym`. Of the 30 modules that upstream's `hip/build-modules.ps1`

@@ -15,7 +15,7 @@ namespace dlsslop {
 // not before taking HIP.
 struct OpenedEngine {
     std::optional<VulkanEngine> vulkan;
-    std::optional<hip::Api> hip;
+    std::optional<struct hip_api> hip;
 };
 Result<OpenedEngine> open_engine(Options& o, unsigned tier);
 

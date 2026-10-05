@@ -2,7 +2,7 @@
 // A tracing HIP runtime for dlsslopd: DLSSLOP_HIP_LIBRARY=libhiptrace.so
 // (tests/hiptrace/trace.sh; VALIDATION.md describes the procedure).
 //
-// Exports every entry point dlsslopd's loader (backend/hip.hpp) resolves, and
+// Exports every entry point dlsslopd's loader (backend/hip.h) resolves, and
 // those upstream's host code resolved, so that builds from before the port
 // trace too. Forwards each call to the real runtime and logs it to
 // HIPTRACE_FILE (no file: forward only). Device and host pointers are logged
@@ -27,7 +27,7 @@
 //                          deep=invalid in the log
 //   HIPTRACE_DEEP_KERNELS  comma-separated kernel names deep-hashed always;
 //                          unset or empty: none
-#include "../../backend/hip.hpp"
+#include "../../backend/hip.h"
 
 #include <dirent.h>
 #include <dlfcn.h>
@@ -70,7 +70,7 @@ uint64_t fnv(const void* data, size_t n, uint64_t h = kFnvBasis)
 // Every entry point that dlsslopd or upstream's host code resolves, as ROCm 7
 // (and 6.4) declare them.
 #define HIPTRACE_FUNCTIONS(X)                                                                                        \
-    X(int, hipGetDevicePropertiesR0600, (dlsslop::hip::DeviceProperties*, int))                                      \
+    X(int, hipGetDevicePropertiesR0600, (struct hip_device_properties*, int))                                         \
     X(int, hipModuleLoadData, (Handle*, const void*))                                                                 \
     X(int, hipInit, (unsigned))                                                                                       \
     X(int, hipRuntimeGetVersion, (int*))                                                                              \
@@ -97,8 +97,8 @@ uint64_t fnv(const void* data, size_t n, uint64_t h = kFnvBasis)
     X(int, hipStreamCreate, (Handle*))                                                                                \
     X(int, hipStreamSynchronize, (Handle))                                                                            \
     X(int, hipStreamDestroy, (Handle))                                                                                \
-    X(int, hipImportExternalMemory, (Handle*, const dlsslop::hip::MemoryDesc*))                                      \
-    X(int, hipExternalMemoryGetMappedBuffer, (void**, Handle, const dlsslop::hip::BufferDesc*))                      \
+    X(int, hipImportExternalMemory, (Handle*, const struct hip_memory_desc*))                                         \
+    X(int, hipExternalMemoryGetMappedBuffer, (void**, Handle, const struct hip_buffer_desc*))                         \
     X(int, hipDestroyExternalMemory, (Handle))                                                                        \
     X(int, hipImportExternalSemaphore, (Handle*, const void*))                                                        \
     X(int, hipSignalExternalSemaphoresAsync, (const Handle*, const void*, unsigned, Handle))                          \
@@ -553,7 +553,7 @@ void load_module_files(State& s, const char* directory)
 __attribute__((constructor)) void initialize()
 {
     State& s = state();
-    // HIPTRACE_REAL, else backend/hip.cpp's candidates.
+    // HIPTRACE_REAL, else backend/hip.c's candidates.
     const char* candidates[] = {std::getenv("HIPTRACE_REAL"), "libamdhip64.so.7", "libamdhip64.so.6", "libamdhip64.so",
                                 "/opt/rocm/lib/libamdhip64.so.7", "/opt/rocm/lib/libamdhip64.so.6",
                                 "/opt/rocm/lib/libamdhip64.so"};
@@ -777,7 +777,7 @@ HIPTRACE_EXPORT int hipGetDeviceCount(int* count)
     return rc;
 }
 
-HIPTRACE_EXPORT int hipGetDevicePropertiesR0600(dlsslop::hip::DeviceProperties* p, int device)
+HIPTRACE_EXPORT int hipGetDevicePropertiesR0600(struct hip_device_properties* p, int device)
 {
     const int rc = HIPTRACE_REAL(hipGetDevicePropertiesR0600, p, device);
     State& s = state();
@@ -1042,7 +1042,7 @@ HIPTRACE_EXPORT int hipStreamDestroy(Handle stream)
     return HIPTRACE_REAL(hipStreamDestroy, stream);
 }
 
-HIPTRACE_EXPORT int hipImportExternalMemory(Handle* memory, const dlsslop::hip::MemoryDesc* d)
+HIPTRACE_EXPORT int hipImportExternalMemory(Handle* memory, const struct hip_memory_desc* d)
 {
     const int rc = HIPTRACE_REAL(hipImportExternalMemory, memory, d);
     State& s = state();
@@ -1054,7 +1054,7 @@ HIPTRACE_EXPORT int hipImportExternalMemory(Handle* memory, const dlsslop::hip::
     return rc;
 }
 
-HIPTRACE_EXPORT int hipExternalMemoryGetMappedBuffer(void** pointer, Handle memory, const dlsslop::hip::BufferDesc* d)
+HIPTRACE_EXPORT int hipExternalMemoryGetMappedBuffer(void** pointer, Handle memory, const struct hip_buffer_desc* d)
 {
     const int rc = HIPTRACE_REAL(hipExternalMemoryGetMappedBuffer, pointer, memory, d);
     State& s = state();
