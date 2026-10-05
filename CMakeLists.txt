@@ -90,8 +90,7 @@ add_layer_shader(layer/dlssnr/dlssnr.comp dlssnr/DlssNr_Shader_Vk dlssnr_spv)
 # Project GLSL that a program embeds: SOURCE's SPIR-V for the target
 # environment ENV, validated, as the uint32_t array SYMBOL in HEADER below the
 # shader directory. No file of its own is loaded at run time. The header
-# defines the array: HEADER ends in .hpp where C++ includes it and in .h where
-# one C file does.
+# defines the array, so one C file includes it.
 function(embed_shader source header symbol env)
     set(header ${SHADER_DIR}/${header})
     cmake_path(REPLACE_EXTENSION header LAST_ONLY .spv OUTPUT_VARIABLE spirv)
@@ -461,8 +460,8 @@ if(BUILD_TESTING)
     # A bounded compute load from a process of its own, for the hardware check
     # of the Vulkan network's waits (VALIDATION.md); its options are checked
     # without a GPU.
-    embed_shader(tests/vulkan_contention.comp tests/vulkan_contention.hpp kContentionSpv vulkan1.3)
-    add_executable(vulkan-contention tests/vulkan_contention.cpp ${SHADER_DIR}/tests/vulkan_contention.hpp)
+    embed_shader(tests/vulkan_contention.comp tests/vulkan_contention.h kContentionSpv vulkan1.3)
+    add_executable(vulkan-contention tests/vulkan_contention.c ${SHADER_DIR}/tests/vulkan_contention.h)
     target_include_directories(vulkan-contention PRIVATE ${SHADER_DIR})
     target_link_libraries(vulkan-contention PRIVATE ${VULKAN_LOADER})
     add_test(NAME contention-cli COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/contention-cli.py
