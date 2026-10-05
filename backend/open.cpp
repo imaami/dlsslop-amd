@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 #include "open.hpp"
 #include "paths.h"
+#include "vulkan_runtime.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -23,11 +24,12 @@ Result<VulkanEngine> open_vulkan(const struct options& o, unsigned tier)
                                     .model_length = o.vulkan_model_length,
                                     .shaders_length = o.shaders_length,
                                     .cache_length = cache_length};
-    auto network = VulkanNetwork::create(paths, o.device);
+    struct vulkan_network* network;
+    const enum error_code code = vulkan_network_create(&network, &paths, o.device, &e);
     std::free(cache);
-    if (!network) return forward(std::move(network).error());
-    std::fprintf(stderr, "Vulkan network on %s\n", network->device_name().c_str());
-    VulkanEngine engine(*std::move(network), tier);
+    if (code) return forward_c(code, e);
+    std::fprintf(stderr, "Vulkan network on %s\n", vulkan_network_device_name(network));
+    VulkanEngine engine(network, tier);
     DLSSLOP_TRY(engine.prepare());
     return engine;
 }

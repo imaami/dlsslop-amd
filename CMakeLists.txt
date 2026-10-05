@@ -222,7 +222,7 @@ add_dependencies(dlsslop-network vulkan-nr-shaders)
 add_executable(dlsslopd
     backend/main.cpp backend/options.c backend/paths.c backend/serve.cpp backend/transport.c
     backend/open.cpp backend/hip_engine.cpp backend/self_test.cpp
-    backend/channel.c backend/files.c backend/trace.c backend/vulkan_network.cpp
+    backend/channel.c backend/files.c backend/trace.c backend/vulkan_network.c
     backend/processing.c)
 target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip dlsslop-vulkan dlsslop-common-c Threads::Threads
     ${CMAKE_DL_LIBS})

@@ -323,7 +323,7 @@ Result<void> serve_frames(const struct options& o, struct mapping& mapping, cons
                                    error.what.c_str());
             // Report a persistent rejection once, not every frame. A frame that the Vulkan network
             // dropped is not serving's failure: the network logs drops, at most every 10 s.
-            if (failure != error.what && error.what != VulkanNetwork::kDropped) {
+            if (failure != error.what && error.what != VULKAN_NETWORK_DROPPED) {
                 failure = error.what;
                 mapping_reason(&mapping, failure.c_str());
                 std::fprintf(stderr, "frame %u failed: %s\n", number, error.what.c_str());

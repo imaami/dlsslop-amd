@@ -3,18 +3,12 @@
  * DLSSNR-AMD's Vulkan network, run by the project's runtime (vulkan_runtime.h) and recorded into a
  * caller's command buffers on a caller's device: dlsslopd's own device, or a game's device in the
  * layer. Vulkan calls go through the loader. network_recorder.c defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_COMMON_NETWORK_RECORDER_H_
 #define DLSSLOP_AMD_COMMON_NETWORK_RECORDER_H_
 
-#ifdef __cplusplus
-# include <cstdint>
-#else
-# include <stdint.h>
-#endif
+#include <stdint.h>
 
 #include <vulkan/vulkan.h>
 
@@ -22,13 +16,6 @@
 #include "vulkan_frame.h"
 #include "vulkan_plan.h"
 #include "vulkan_runtime.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief The most passes a frame chains; more count as this many. */
 #define NETWORK_RECORDER_MAX_PASSES UINT32_C(16)
@@ -49,15 +36,15 @@ struct network_recorder {
 	struct vulkan_device  device;      //!< The device, whose queue takes the runtime's build.
 	struct vulkan_paths   paths;       //!< Where the network's files are, in copies.
 	char                 *copies;      //!< The paths' copies, one after another in one heap block.
-	STD(uint64_t)         storage;     //!< The device's storage buffers' limit.
+	uint64_t              storage;     //!< The device's storage buffers' limit.
 	/** @brief When the next line about a wait that ran out may be logged, in nanoseconds of
 	 *         CLOCK_MONOTONIC. */
-	STD(uint64_t)         next_log;
+	uint64_t              next_log;
 	/** @brief The history's last frame submitted; width 0 for none since a build. */
 	struct vulkan_frame   last;
 	struct vulkan_frame   recorded;    //!< The last frame recorded; width 0 for none since a build.
 	struct vulkan_shape   shape;       //!< The shape that the runtime has.
-	STD(uint32_t)         rejected[2]; //!< The last extent rejected.
+	uint32_t              rejected[2]; //!< The last extent rejected.
 	struct error          rejection;   //!< Why it was; empty for none.
 	bool                  external;    //!< Frames go through a caller's images instead of buffers.
 };
@@ -169,10 +156,10 @@ network_recorder_record_buffers (struct network_recorder   *recorder,
                                  VkBuffer                   proxy,
                                  VkBuffer                   answer,
                                  struct vulkan_frame const *frame,
-                                 STD(uint32_t)              family,
+                                 uint32_t                   family,
                                  bool                       exported,
                                  VkQueryPool                queries,
-                                 STD(uint32_t)              query);
+                                 uint32_t                   query);
 
 /** @brief Records one frame of the shape it has in image mode, from the frame image that
  *         network_recorder_shape() bound through the network into its answer image, or the frame
@@ -207,11 +194,5 @@ network_recorder_submitted (struct network_recorder *recorder);
  */
 extern bool
 network_recorder_timed_out (struct network_recorder const *recorder);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_COMMON_NETWORK_RECORDER_H_ */

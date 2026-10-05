@@ -88,17 +88,13 @@ struct network_feature const NETWORK_FEATURES[] = {
 	NETWORK_FEATURES_ROWS(NETWORK_FEATURE)
 };
 
+static_assert(sizeof NETWORK_FEATURES / sizeof *NETWORK_FEATURES == NETWORK_FEATURE_COUNT,
+              "NETWORK_FEATURE_COUNT is not the number of rows of NETWORK_FEATURES");
+
 #undef NETWORK_FEATURE
 #undef NETWORK_FEATURE_ALONE
 #undef NETWORK_FEATURE_CORE
 #undef NETWORK_FEATURE_NONE
-
-// The header declares NETWORK_FEATURES with NETWORK_FEATURE_COUNT rows, and C pads a shorter table
-// with zeroed rows without a diagnostic.
-#define NETWORK_FEATURE_ROW(...) + 1
-static_assert(0 NETWORK_FEATURES_ROWS(NETWORK_FEATURE_ROW) == NETWORK_FEATURE_COUNT,
-              "NETWORK_FEATURE_COUNT is not the number of rows of NETWORK_FEATURES");
-#undef NETWORK_FEATURE_ROW
 #undef NETWORK_FEATURES_ROWS
 
 /** @brief A structure of struct network_feature_chain. */

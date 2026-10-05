@@ -2,27 +2,14 @@
  *
  * What DLSSNR-AMD's Vulkan network needs of a device: one table for dlsslopd's own device and for a
  * game's device the layer adds it to. network_requirements.c defines the table and the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_COMMON_NETWORK_REQUIREMENTS_H_
 #define DLSSLOP_AMD_COMMON_NETWORK_REQUIREMENTS_H_
 
-#ifdef __cplusplus
-# include <cstdint>
-#else
-# include <stdint.h>
-#endif
+#include <stdint.h>
 
 #include <vulkan/vulkan.h>
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief A feature bit that the network's SPIR-V uses.
  *
@@ -32,9 +19,9 @@ struct network_feature {
 	char const      *name;        //!< The bit's name.
 	char const      *extension;   //!< The extension that provides it; nullptr in core Vulkan 1.3.
 	VkStructureType  type;        //!< The structure that carries the bit alone.
-	STD(uint32_t)    offset;      //!< The bit's offset in that structure.
+	uint32_t         offset;      //!< The bit's offset in that structure.
 	VkStructureType  core;        //!< The VkPhysicalDeviceVulkan1xFeatures that carries it too.
-	STD(uint32_t)    core_offset; //!< The bit's offset in that structure.
+	uint32_t         core_offset; //!< The bit's offset in that structure.
 };
 
 /** @brief The core type of a bit that no VkPhysicalDeviceVulkan1xFeatures carries. */
@@ -43,8 +30,8 @@ struct network_feature {
 /** @brief The number of NETWORK_FEATURES, the rows of network_requirements.c's table. */
 #define NETWORK_FEATURE_COUNT UINT32_C(13)
 
-/** @brief The feature bits that the network's SPIR-V uses. */
-extern struct network_feature const NETWORK_FEATURES[NETWORK_FEATURE_COUNT];
+/** @brief The feature bits that the network's SPIR-V uses, NETWORK_FEATURE_COUNT of them. */
+extern struct network_feature const NETWORK_FEATURES[];
 
 /** @brief One structure of each type that NETWORK_FEATURES names, zeroed and chained behind a
  *         VkPhysicalDeviceFeatures2: for a support query or a vkCreateDevice.
@@ -106,7 +93,7 @@ network_feature_chain_bit (struct network_feature_chain *c,
  */
 extern bool
 network_requirements_listed (char const *const *list,
-                             STD(uint32_t)      count,
+                             uint32_t           count,
                              char const        *name);
 
 /** @brief Appends the network's extensions that a list lacks.
@@ -115,11 +102,9 @@ network_requirements_listed (char const *const *list,
  * @param count The names in it.
  * @return      The names in it now: more than @a count if any was appended.
  */
-extern STD(uint32_t)
-network_requirements_append_extensions (char const    **list,
-                                        STD(uint32_t)   count);
-
-#undef STD
+extern uint32_t
+network_requirements_append_extensions (char const **list,
+                                        uint32_t     count);
 
 /** @brief What stops the network running on a device.
  *
@@ -142,9 +127,5 @@ network_requirements_unsupported (VkPhysicalDevice                              
                                   PFN_vkEnumerateDeviceExtensionProperties               extensions,
                                   PFN_vkGetPhysicalDeviceCooperativeMatrixPropertiesKHR  matrices,
                                   char const                                            *also);
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_COMMON_NETWORK_REQUIREMENTS_H_ */

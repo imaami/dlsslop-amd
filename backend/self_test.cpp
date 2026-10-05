@@ -50,17 +50,17 @@ Result<void> run_self_test(const struct options& o, VulkanEngine& engine)
     unsigned dropped = 0;
     for (unsigned run = 0; run < o.self_test_runs; ++run) {
         if (auto inferred = engine.infer({input.data(), output.data()}, w, h, passes); !inferred) {
-            if (inferred.error().what != VulkanNetwork::kDropped) return forward(std::move(inferred).error());
+            if (inferred.error().what != VULKAN_NETWORK_DROPPED) return forward(std::move(inferred).error());
             if (++dropped > o.self_test_drops)
                 return fail("self-test run " + std::to_string(run + 1) + " dropped, one more than --self-test-drops " +
-                            std::to_string(o.self_test_drops) + " allows: " + VulkanNetwork::kDropped);
+                            std::to_string(o.self_test_drops) + " allows: " + VULKAN_NETWORK_DROPPED);
         } else if (first.empty()) {
             first = output;
         } else if (output != first) {
             return fail("self-test run " + std::to_string(run + 1) + " differs from the first that was not dropped");
         }
     }
-    if (first.empty()) return fail(std::string("self-test: every run was dropped: ") + VulkanNetwork::kDropped);
+    if (first.empty()) return fail("self-test: every run was dropped: " VULKAN_NETWORK_DROPPED);
     size_t changed = 0;
     for (size_t i = 0; i < input.size(); ++i) changed += (i % 4 != 3) && input[i] != output[i];
     if (!changed) return fail("self-test: the network left the input unchanged");
