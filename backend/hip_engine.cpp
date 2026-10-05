@@ -168,14 +168,14 @@ Result<void> HipEngine::prepare()
     return {};
 }
 
-bool HipEngine::import_into(unsigned slot, const ShmTransportOffer& offer, Descriptor (&fds)[2])
+bool HipEngine::import_into(unsigned slot, const ShmTransportOffer& offer, int fds[2])
 {
     if (!gpu_codec_.kernels) return false;
     Imported next;
     for (unsigned i = 0; i < 2; ++i) {
         struct hip_memory_desc memory{};
         memory.type = 1; // hipExternalMemoryHandleTypeOpaqueFd
-        memory.handle.fd = fds[i].fd;
+        memory.handle.fd = fds[i];
         memory.size = offer.allocation[i];
         struct hip_buffer_desc buffer{};
         buffer.size = offer.allocation[i];
@@ -183,7 +183,7 @@ bool HipEngine::import_into(unsigned slot, const ShmTransportOffer& offer, Descr
             release(next);
             return false;
         }
-        fds[i].fd = -1;
+        fds[i] = -1;
         if (api_.hipExternalMemoryGetMappedBuffer(&next.frame[i], next.memory[i], &buffer)) {
             release(next);
             return false;
@@ -194,22 +194,23 @@ bool HipEngine::import_into(unsigned slot, const ShmTransportOffer& offer, Descr
     return true;
 }
 
-Result<void> HipEngine::trace_image(FrameTrace* trace, const struct geometry& g, unsigned pass, const char* stage,
-                                    const void* pointer, unsigned channels)
+Result<void> HipEngine::trace_image(struct frame_trace* trace, const struct geometry& g, unsigned pass,
+                                    const char* stage, const void* pointer, unsigned channels)
 {
     if (!trace) return {};
     DLSSLOP_TRY(synchronize());
     std::vector<float> buffer(std::size_t(g.width) * g.height * channels);
     DLSSLOP_TRY(check(api_.hipMemcpy(buffer.data(), pointer, buffer.size() * sizeof(float), 2),
                       "read diagnostic neural stage"));
-    char name[32];
-    std::snprintf(name, sizeof name, "pass-%02u-%s", pass + 1, stage);
-    trace->image(name, buffer.data(), g, channels);
+    char name[TRACE_STAGE_BYTES];
+    const int length = std::snprintf(name, sizeof name, "pass-%02u-%s", pass + 1, stage);
+    if (length < 0) return fail("name diagnostic neural stage");
+    frame_trace_image(trace, name, std::size_t(length), buffer.data(), &g, channels);
     return {};
 }
 
 Result<void> HipEngine::infer(const Frames& io, unsigned w, unsigned h, unsigned passes,
-                              const ProcessingSettings& settings, FrameTrace* trace, bool verify)
+                              const ProcessingSettings& settings, struct frame_trace* trace, bool verify)
 {
     const uint8_t* const input = io.proxy;
     uint8_t* const output = io.answer;

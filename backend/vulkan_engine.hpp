@@ -44,16 +44,12 @@ public:
     {
         return network_.shape(vulkan_frame(w, h, passes, settings)).transform([](bool) {});
     }
-    bool import_into(unsigned slot, const ShmTransportOffer& offer, Descriptor (&fds)[2])
+    bool import_into(unsigned slot, const ShmTransportOffer& offer, int fds[2])
     {
-        int raw[2] = {fds[0].fd, fds[1].fd};
-        const bool imported = network_.import(slot, offer, raw);
-        fds[0].fd = raw[0];
-        fds[1].fd = raw[1];
-        return imported;
+        return network_.import(slot, offer, fds);
     }
     Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
-                       FrameTrace* = nullptr)
+                       struct frame_trace* = nullptr)
     {
         DLSSLOP_TRY(network_.infer(vulkan_frame(w, h, passes, settings), io.slot, io.proxy, io.answer));
         upload_ms = network_.upload_ms;

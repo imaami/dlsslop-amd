@@ -200,9 +200,9 @@ add_dependencies(dlsslop-network vulkan-nr-shaders)
 # The worker uses a small, versioned HIP ABI loaded with dlopen. The build itself
 # deliberately does not require ROCm headers or a GPU; real inference does.
 add_executable(dlsslopd
-    backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.cpp
+    backend/main.cpp backend/options.cpp backend/paths.cpp backend/serve.cpp backend/transport.c
     backend/open.cpp backend/hip_engine.cpp backend/self_test.cpp
-    backend/channel.cpp backend/files.c backend/trace.cpp backend/vulkan_network.cpp
+    backend/channel.c backend/files.c backend/trace.c backend/vulkan_network.cpp
     backend/processing.cpp)
 target_link_libraries(dlsslopd PRIVATE dlsslop-codec dlsslop-hip dlsslop-vulkan dlsslop-common-c Threads::Threads
     ${CMAKE_DL_LIBS})
@@ -212,7 +212,7 @@ target_link_options(dlsslopd PRIVATE -static-libstdc++ -static-libgcc)
 # size; the frame path (serving loop, engines, codec, networks) stays at -O3.
 # GCC does not inline -O3 code into these callers, so none of it slows down.
 set_source_files_properties(backend/main.cpp backend/options.cpp backend/paths.cpp backend/files.c
-    backend/channel.cpp backend/transport.cpp backend/trace.cpp backend/open.cpp backend/self_test.cpp backend/hip.c
+    backend/channel.c backend/transport.c backend/trace.c backend/open.cpp backend/self_test.cpp backend/hip.c
     backend/hip_plan.c backend/control_selftest.c common/error.c PROPERTIES COMPILE_OPTIONS -Os)
 
 if(BUILD_TESTING)
@@ -353,8 +353,10 @@ if(BUILD_TESTING)
     add_executable(temporal-test tests/temporal_test.cpp)
     target_include_directories(temporal-test PRIVATE backend)
     add_test(NAME temporal COMMAND temporal-test)
-    add_executable(trace-test tests/trace_test.cpp backend/trace.cpp backend/files.c backend/geometry.c)
-    target_link_libraries(trace-test PRIVATE dlsslop-common-c)
+    # The diagnostic traces' files, requests and ownership, in C.
+    add_executable(trace-test tests/trace_test.c backend/trace.c backend/files.c backend/geometry.c)
+    target_include_directories(trace-test PRIVATE backend)
+    target_link_libraries(trace-test PRIVATE dlsslop-common-c test-support)
     add_test(NAME trace COMMAND trace-test ${Python3_EXECUTABLE})
     # files_replace() while another writer replaces the file and a reader reads it, and its failures,
     # in C.

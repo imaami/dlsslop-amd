@@ -1,5 +1,5 @@
 // Paths and whole files for the C++ that calls them: files.h's functions with
-// std::string and Results, and a descriptor's owner.
+// std::string and Results.
 // SPDX-License-Identifier: MIT
 #pragma once
 #include "files.h"
@@ -9,27 +9,8 @@
 #include <cstdlib>
 #include <string>
 #include <string_view>
-#include <utility>
-#include <unistd.h>
 
 namespace dlsslop {
-
-// Owns a descriptor, and with it any flock on the file.
-struct Descriptor {
-    int fd = -1;
-    Descriptor() = default;
-    explicit Descriptor(int fd) : fd(fd) {}
-    Descriptor(Descriptor&& other) noexcept : fd(std::exchange(other.fd, -1)) {}
-    Descriptor& operator=(Descriptor&& other) noexcept
-    {
-        std::swap(fd, other.fd);
-        return *this;
-    }
-    ~Descriptor()
-    {
-        if (fd >= 0) close(fd);
-    }
-};
 
 // TEXT, a path of LENGTH bytes that files.h made on the heap, as a string;
 // TEXT is freed. Without memory for TEXT the program ends, as it does without

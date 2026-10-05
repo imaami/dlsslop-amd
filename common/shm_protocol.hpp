@@ -52,16 +52,6 @@ inline std::string ShmNativeChannelPath()
     return path;
 }
 
-// ShmTransportPath() of CHANNEL, or an empty string if it cannot be formatted.
-inline std::string ShmTransportPath(const std::string& channel)
-{
-    const int length = ShmTransportPath(nullptr, 0, channel.c_str());
-    if (length < 0) return {};
-    std::string path(static_cast<std::size_t>(length), '\0');
-    ShmTransportPath(path.data(), path.size() + 1, channel.c_str());
-    return path;
-}
-
 // ShmLoadString() of the text field FIELD of H, or an empty string if the
 // field changed during every copy.
 inline std::string ShmLoadString(const ShmHeader* h, shm_text field)

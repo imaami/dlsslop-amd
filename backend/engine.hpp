@@ -3,12 +3,11 @@
 // dispatched at run time.
 // SPDX-License-Identifier: MIT
 #pragma once
-#include "files.hpp"
 #include "options.hpp"
 #include "processing.hpp"
 #include "result.hpp"
 #include "shm_protocol.h"
-#include "trace.hpp"
+#include "trace.h"
 #include "tuning_math.hpp"
 
 #include <algorithm>
@@ -52,8 +51,8 @@ public:
 
     // Serving, between frames: imports an offered proxy/answer pair into the slot of
     // its generation, or else the oldest one. The engine owns each descriptor it
-    // imported; fds keeps the rest to close.
-    bool import(const ShmTransportOffer& offer, Descriptor (&fds)[2])
+    // imported and sets it to -1; the caller closes the rest.
+    bool import(const ShmTransportOffer& offer, int fds[2])
     {
         if (!offer.generation) return false;
         unsigned slot = 0;
@@ -72,7 +71,7 @@ public:
     }
 
     // Defaults an engine replaces where it has something to do.
-    bool import_into(unsigned, const ShmTransportOffer&, Descriptor (&)[2]) { return false; }
+    bool import_into(unsigned, const ShmTransportOffer&, int[2]) { return false; }
     // A slot's frames: the slot alone, for an engine that finds them itself.
     Frames frames_of(unsigned slot) const { return {nullptr, nullptr, int(slot)}; }
     // False when a request of this shape needs a build first (reshape): work of
@@ -95,7 +94,7 @@ protected:
 // What serving, the offline mode and --diagnose need of an engine.
 template <class E>
 concept Engine = std::derived_from<E, EngineBase<E>> && requires(E& engine, const E& view, unsigned n,
-                                                                 const ProcessingSettings& settings, FrameTrace* trace) {
+                                                                 const ProcessingSettings& settings, struct frame_trace* trace) {
     { E::max_passes } -> std::convertible_to<unsigned>;
     // Whether a tier change rebuilds it, with the layer presenting its own frames meanwhile.
     { E::rebuilds_for_tier } -> std::convertible_to<bool>;

@@ -70,8 +70,8 @@ class HipEngine : public EngineBase<HipEngine> {
     Result<void> mark(unsigned i) { return check(api_.hipEventRecord(marks_[i], stream_), "record timing event"); }
     Result<void> synchronize() { return check(api_.hipStreamSynchronize(stream_), "network completion"); }
     // A pass's stage, read back into the trace.
-    Result<void> trace_image(FrameTrace* trace, const struct geometry& g, unsigned pass, const char* stage,
-                             const void* pointer, unsigned channels);
+    Result<void> trace_image(struct frame_trace* trace, const struct geometry& g, unsigned pass,
+                             const char* stage, const void* pointer, unsigned channels);
 
 public:
     static constexpr unsigned max_passes = kMaxPasses;
@@ -109,7 +109,7 @@ public:
     {
         if (gpu_codec_.kernels) codec_gpu_pin(&gpu_codec_, input, output, bytes);
     }
-    bool import_into(unsigned slot, const ShmTransportOffer& offer, Descriptor (&fds)[2]);
+    bool import_into(unsigned slot, const ShmTransportOffer& offer, int fds[2]);
     Frames frames_of(unsigned slot) const
     {
         const Imported& pair = imported_[slot];
@@ -124,7 +124,7 @@ public:
     // memory, or an import slot's device frames. verify checks the GPU codec
     // of host frames against the CPU reference inside the timed frame.
     Result<void> infer(const Frames& io, unsigned w, unsigned h, unsigned passes, const ProcessingSettings& settings = {},
-                       FrameTrace* trace = nullptr, bool verify = false);
+                       struct frame_trace* trace = nullptr, bool verify = false);
     // The latest infer()'s raw network answer, read back outside its timing.
     Result<const std::vector<float>*> raw_result();
 };
