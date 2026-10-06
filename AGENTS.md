@@ -1,10 +1,10 @@
-# Native Linux integration conventions
+# Conventions
 
 - Rename only project-introduced identifiers. Preserve upstream names and
   contracts even in patched source; establish their origin from the pinned
   originals.
 - Command-line interfaces use getopt-style short and long options. Settings
-  have direct options, such as `--working-scale 1`; do not add positional
+  have direct options, such as `--name VALUE`; do not add positional
   `set NAME VALUE` or `toggle NAME` command languages.
 - Every option's default belongs in `--help`, including conditional defaults,
   required/unset values, environment-derived paths and disabled flags. Generate
@@ -32,7 +32,8 @@
   found with `dlsym()` or an API's own loader, callbacks across a module's
   ABI, thread start routines, and `qsort()`/`bsearch()` comparators.
 - Update CLI examples and focused parsing/launcher checks when changing tools.
-- Build with CMake and follow `VALIDATION.md` for automated and hardware tests.
+- Follow the repository's build and validation documents for automated and
+  hardware tests.
 
 ## C
 
