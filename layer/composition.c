@@ -1219,14 +1219,14 @@ composition_model_extent (uint32_t                                 width,
 
 /** @brief What a frame holds, as composition_prepare() builds for it. */
 struct frame_domain {
-	uint64_t    flag; //!< Its flag in struct composition.
 	char const *log;  //!< What the build's log line calls it.
+	uint32_t    flag; //!< Its flag in struct composition.
 };
 
 /** @brief The frame's domain, by whether it holds linear light. */
 static struct frame_domain const FRAME_DOMAINS[2] = {
-	{ 0,                      "display-referred" },
-	{ COMPOSITION_LINEAR_HDR, "linear HDR" }
+	{ .log = "display-referred" },
+	{ .log = "linear HDR", .flag = COMPOSITION_LINEAR_HDR }
 };
 
 /** @brief The surfaces that cross, as composition_prepare() builds them. */
@@ -1351,7 +1351,7 @@ composition_prepare (struct composition                      *c,
 	struct frame_domain const *const domain = &FRAME_DOMAINS[linear_hdr];
 	struct proxy_kind const *const proxy = &PROXY_KINDS[hdr_proxy];
 	struct answer_kind const *const answer = &ANSWER_KINDS[network];
-	uint64_t const shape = domain->flag | proxy->flag | answer->flag;
+	uint32_t const shape = domain->flag | proxy->flag | answer->flag;
 	if (c->width == width && c->height == height && c->swapchain_format == swapchain_format
 	    && c->model_w == model.width && c->model_h == model.height
 	    && (c->flags & (COMPOSITION_LINEAR_HDR | COMPOSITION_HDR_PROXY | COMPOSITION_NETWORK)) == shape
@@ -1848,7 +1848,7 @@ composition_record_capture (struct composition                      *c,
 	// re-encodes, the model re-evaluates and the resolve re-composes, so a setting changed now is
 	// answered on the same picture. Freezing the proxy instead would be wrong -- settings must still
 	// re-encode -- and freezing it would also desynchronise it from the frame the resolve reads.
-	uint64_t const held = COMPOSITION_HOLDING | COMPOSITION_FRAME_CAPTURED;
+	uint32_t const held = COMPOSITION_HOLDING | COMPOSITION_FRAME_CAPTURED;
 	bool const freeze = (c->flags & held) == held;
 	if (!freeze) {
 		transition_swapchain(c, cb, swapchain_image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,

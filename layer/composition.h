@@ -113,7 +113,7 @@ struct composition_host_buffer {
 };
 
 /** @brief The state that struct composition records in its flags. */
-enum composition_flags : uint64_t {
+enum composition_flags : uint32_t {
 	COMPOSITION_BLIT_SWAPCHAIN      = 1 << 0, //!< work_format is not the swapchain's twin: blit.
 	COMPOSITION_LINEAR_HDR          = 1 << 1, //!< The frame holds linear light.
 	COMPOSITION_HDR_PROXY           = 1 << 2, //!< The surfaces that cross are float16.
@@ -134,9 +134,8 @@ enum composition_flags : uint64_t {
  * what the composition owns and leaves it empty. A failed Vulkan call leaves its output undefined,
  * so a handle is stored only once the call that made it has succeeded. error is the build's
  * failure, or VK_ERROR_FORMAT_NOT_SUPPORTED once composition_prepare() finds that the device cannot
- * write the swapchain's format. The flags are 64 bits wide, which fills the padding that a narrower
- * member would leave. generation tells the surfaces' builds apart where their handles cannot: a
- * destroyed object's handle can come back for a new one.
+ * write the swapchain's format. generation tells the surfaces' builds apart where their handles
+ * cannot: a destroyed object's handle can come back for a new one.
  *
  * The white point meter: a grid of tile peak luminances measured off the captured frame, and the
  * percentile taken across it -- on the GPU. The reduce pass keeps the percentile, the history and the
@@ -172,7 +171,6 @@ struct composition {
 	VkDescriptorPool                meter_descriptor_pool;   //!< The pool of its set.
 	VkDescriptorSet                 meter_descriptor_set;    //!< Its set.
 	VkSampler                       meter_sampler;           //!< The sampler it reads the grid with.
-	uint64_t                        flags;                   //!< enum composition_flags.
 	uint64_t                        generation;              //!< The surfaces' build, unique; 0: none.
 	struct device_table const      *vk;                      //!< The device's next-layer entry points.
 	struct instance_table const    *instance;                //!< The instance's next-layer entry points.
@@ -190,6 +188,7 @@ struct composition {
 	float                           held_white_point;        //!< The white point that a held frame keeps.
 	uint32_t                        export_family;           //!< The queue family that both legs run on.
 	uint32_t                        transport_gen;           //!< The exported pair's generation.
+	uint32_t                        flags;                   //!< enum composition_flags.
 	VkResult                        error;                   //!< Why the composition cannot run.
 	int                             offer;                   //!< The connection of an offer, or -1.
 };
