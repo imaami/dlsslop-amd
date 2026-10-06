@@ -44,7 +44,7 @@ open_vulkan (struct vulkan_engine *dest,
 	enum error_code code = paths_require_vulkan_model(o->vulkan_model, e);
 	if (code)
 		return code;
-	struct paths_home const home = paths_home();
+	struct paths_home const home = {o->home, o->home_length};
 	char *cache;
 	size_t cache_length;
 	code = paths_vulkan_cache(&cache, &cache_length, &home, e);

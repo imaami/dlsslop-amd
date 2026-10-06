@@ -352,7 +352,7 @@ default_channel (char         **dest,
 	return ERROR_NONE;
 }
 
-/** @brief Makes the options' paths' defaults and the shaders' path.
+/** @brief Makes the options' paths' defaults and the shaders' path, and keeps a copy of the home.
  *
  * @param dest The options, whose paths are unset; receives the paths made, also on a failure.
  * @param home The home.
@@ -364,6 +364,14 @@ default_paths (struct options          *dest,
                struct paths_home const *home,
                struct error            *e)
 {
+	// The engine makes its cache's path below this copy, not below a second look at the home.
+	if (home->path) {
+		dest->home = malloc(home->length + 1);
+		if (!dest->home)
+			return error_fail(e, "out of memory");
+		memcpy(dest->home, home->path, home->length + 1);
+		dest->home_length = home->length;
+	}
 	enum error_code code = paths_default_assets(&dest->assets, &dest->assets_length, home, e);
 	if (code)
 		return code;
@@ -423,6 +431,8 @@ options_fini (struct options *options)
 	options->output = nullptr;
 	free(options->trace_dir);
 	options->trace_dir = nullptr;
+	free(options->home);
+	options->home = nullptr;
 	*options = (struct options){};
 }
 

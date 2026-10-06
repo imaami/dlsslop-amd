@@ -25,7 +25,7 @@ enum options_backend : uint8_t {
  *
  * Each string is a heap string with its length, or nullptr and 0 when it is unset; an empty one
  * counts as unset everywhere but in shm. No option sets shaders: it is found from the binary's
- * path, as the default of modules is.
+ * path, as the default of modules is. Nor home: it is the home that the defaults were made below.
  */
 struct options {
 	char                 *assets;              //!< --assets: the HIP model weights' directory.
@@ -36,6 +36,7 @@ struct options {
 	char                 *input;               //!< --input: the offline mode's input file.
 	char                 *output;              //!< --output: the offline or self-test output file.
 	char                 *trace_dir;           //!< --trace-dir: the trace directory; never empty.
+	char                 *home;                //!< The user's home, as paths_home() found it.
 	size_t                assets_length;       //!< The length of assets.
 	size_t                modules_length;      //!< The length of modules.
 	size_t                shm_length;          //!< The length of shm.
@@ -44,6 +45,7 @@ struct options {
 	size_t                input_length;        //!< The length of input.
 	size_t                output_length;       //!< The length of output.
 	size_t                trace_dir_length;    //!< The length of trace_dir.
+	size_t                home_length;         //!< The length of home.
 	uint32_t              width;               //!< --width: the offline image's width; 0 when unset.
 	uint32_t              height;              //!< --height: the offline image's height; 0 when unset.
 	uint32_t              self_test_runs;      //!< --self-test-runs.
