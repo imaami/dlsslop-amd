@@ -365,10 +365,9 @@ if(BUILD_TESTING)
     # A tracing HIP runtime, which dlsslopd loads as its HIP library, for
     # comparing the network's launches between builds (VALIDATION.md); tested
     # against a fake runtime.
-    add_library(hiptrace MODULE tests/hiptrace/hiptrace.cpp)
-    set_target_properties(hiptrace PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
-    target_link_libraries(hiptrace PRIVATE ${CMAKE_DL_LIBS})
-    add_library(hiptrace-fake-runtime MODULE tests/hiptrace/fake_runtime.cpp)
+    add_library(hiptrace MODULE tests/hiptrace/hiptrace.c)
+    target_link_libraries(hiptrace PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+    add_library(hiptrace-fake-runtime MODULE tests/hiptrace/fake_runtime.c)
     add_test(NAME hiptrace COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/hiptrace/hiptrace-test.py
         $<TARGET_FILE:hiptrace> $<TARGET_FILE:hiptrace-fake-runtime> $<TARGET_FILE:shmclient>)
     add_executable(color-kernel-host-test tests/color_kernel_host_test.cpp)

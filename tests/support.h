@@ -2,7 +2,7 @@
  *
  * What several of the C tests need: a private temporary directory, removed with everything in it,
  * a file's whole contents, a formatted string on the heap, text that grows as it is written, a
- * program run with its output in a file, and a pause.
+ * program run with its output in a file, a pause, and the search of a sorted key array.
  */
 #ifndef DLSSLOP_AMD_TESTS_SUPPORT_H_
 #define DLSSLOP_AMD_TESTS_SUPPORT_H_
@@ -149,5 +149,51 @@ support_spawn (char const        *log,
  */
 extern void
 support_sleep_ms (uint32_t ms);
+
+/** @brief The index of the first key above a key in a sorted array: the key before it, if any, is
+ *         the greatest that is not above the key.
+ *
+ * @param keys  The keys, ascending.
+ * @param count How many.
+ * @param key   The key.
+ * @return      The index of the first greater key, or @a count.
+ */
+static inline size_t
+support_keys_upper_bound (uint64_t const *keys,
+                          size_t          count,
+                          uint64_t        key)
+{
+	size_t low = 0;
+	while (count) {
+		size_t const half = count / 2;
+		if (key < keys[low + half]) {
+			count = half;
+		} else {
+			low += half + 1;
+			count -= half + 1;
+		}
+	}
+	return low;
+}
+
+/** @brief Where a key is in a sorted array, or where it goes.
+ *
+ * @param keys  The keys, ascending.
+ * @param count How many.
+ * @param key   The key.
+ * @param found Receives whether the key is there.
+ * @return      Its index, or the index it goes to.
+ */
+static inline size_t
+support_keys_find (uint64_t const *keys,
+                   size_t          count,
+                   uint64_t        key,
+                   bool           *found)
+{
+	size_t const at = support_keys_upper_bound(keys, count, key);
+	bool const there = at && keys[at - 1] == key;
+	*found = there;
+	return there ? at - 1 : at;
+}
 
 #endif /* DLSSLOP_AMD_TESTS_SUPPORT_H_ */

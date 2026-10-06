@@ -3,8 +3,6 @@
  * The HIP runtime as dlsslopd calls it: the few ROCm 7 types it passes, its entry points, loaded
  * with dlopen(), and code objects loaded from files. The build needs no ROCm headers or GPU; static
  * assertions pin the layouts. hip.c defines the functions.
- *
- * Plain C API, consumable from C++.
  */
 // SPDX-License-Identifier: MIT
 //
@@ -33,27 +31,16 @@
 #ifndef DLSSLOP_AMD_BACKEND_HIP_H_
 #define DLSSLOP_AMD_BACKEND_HIP_H_
 
-#ifdef __cplusplus
-# include <cstddef>
-#else
-# include <stddef.h>
-#endif
+#include <stddef.h>
 
 #include "error.h"
-
-#ifdef __cplusplus
-# define STD(x) std::x
-extern "C" {
-#else
-# define STD(x) x
-#endif
 
 /** @brief hipDeviceProp_tR0600, as ROCm 6 and 7 lay it out, with only the fields dlsslopd reads
  *         named; the runtime writes all of it. */
 struct hip_device_properties {
 	char          name[256];        //!< The device's name.
 	unsigned char reserved0[32];    //!< Fields dlsslopd does not read.
-	STD(size_t)   totalGlobalMem;   //!< The device's memory, in bytes.
+	size_t        totalGlobalMem;   //!< The device's memory, in bytes.
 	unsigned char reserved1[288];   //!< Fields dlsslopd does not read.
 	int           pciBusID;         //!< The PCI bus.
 	int           pciDeviceID;      //!< The PCI device.
@@ -110,16 +97,16 @@ struct hip_api {
 	int          (*hipGetDeviceCount)                (int *);
 	int          (*hipSetDevice)                     (int);
 	int          (*hipSetDeviceFlags)                (unsigned);
-	int          (*hipMalloc)                        (void **, STD(size_t));
+	int          (*hipMalloc)                        (void **, size_t);
 	int          (*hipFree)                          (void *);
-	int          (*hipHostMalloc)                    (void **, STD(size_t), unsigned);
+	int          (*hipHostMalloc)                    (void **, size_t, unsigned);
 	int          (*hipHostFree)                      (void *);
-	int          (*hipHostRegister)                  (void *, STD(size_t), unsigned);
+	int          (*hipHostRegister)                  (void *, size_t, unsigned);
 	int          (*hipHostUnregister)                (void *);
-	int          (*hipMemcpy)                        (void *, void const *, STD(size_t), int);
-	int          (*hipMemcpyAsync)                   (void *, void const *, STD(size_t), int, void *);
-	int          (*hipMemsetAsync)                   (void *, int, STD(size_t), void *);
-	int          (*hipMemGetInfo)                    (STD(size_t) *, STD(size_t) *);
+	int          (*hipMemcpy)                        (void *, void const *, size_t, int);
+	int          (*hipMemcpyAsync)                   (void *, void const *, size_t, int, void *);
+	int          (*hipMemsetAsync)                   (void *, int, size_t, void *);
+	int          (*hipMemGetInfo)                    (size_t *, size_t *);
 	int          (*hipEventCreate)                   (void **);
 	int          (*hipEventRecord)                   (void *, void *);
 	int          (*hipEventElapsedTime)              (float *, void *, void *);
@@ -224,11 +211,5 @@ hip_fail (struct error         *e,
           int                   result,
           char const           *fmt,
           ...);
-
-#undef STD
-
-#ifdef __cplusplus
-} /* extern "C" */
-#endif
 
 #endif /* DLSSLOP_AMD_BACKEND_HIP_H_ */

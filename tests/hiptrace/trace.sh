@@ -84,9 +84,9 @@ Options:
                           input (default: ${frames_default}).
   -D, --deep RANGES       HIPTRACE_DEEP: hash every buffer argument after the
                           launches of these comma-separated ranges A-B (0-based
-                          ordinals, B excluded) and ordinals A, such as
-                          0-10,20, or after every launch with all
-                          (default: unset; none).
+                          ordinals up to 18446744073709551615, B excluded) and
+                          ordinals A, such as 0-10,20, or after every launch
+                          with all (default: unset; none).
   -k, --deep-kernels LIST HIPTRACE_DEEP_KERNELS: hash the buffer arguments of
                           every launch of these comma-separated kernels;
                           c32_post_merge_head_half gives the network's output
@@ -120,8 +120,18 @@ done
 declare -A size=([720]=1280x720 [900]=1600x900 [1080]=1920x1080)
 [[ ${size[$tier]} ]] || fail 2 "trace.sh: --tier must be 720, 900 or 1080"
 [[ $passes =~ ^[1-9][0-9]*$ ]] || fail 2 "trace.sh: --passes must be a positive number"
-if [[ $deep && $deep != all && ! $deep =~ ^[0-9]+(-[0-9]+)?(,[0-9]+(-[0-9]+)?)*$ ]]; then
-    fail 2 "trace.sh: --deep must be all or comma-separated A-B ranges and ordinals, such as 0-10,20"
+if [[ $deep && $deep != all ]]; then
+    [[ $deep =~ ^[0-9]+(-[0-9]+)?(,[0-9]+(-[0-9]+)?)*$ ]] ||
+        fail 2 "trace.sh: --deep must be all or comma-separated A-B ranges and ordinals, such as 0-10,20"
+    # The tracing runtime refuses an ordinal above 2^64 - 1, and hashes nothing by ordinal then.
+    IFS=,- read -r -a ordinals <<< "$deep"
+    for ordinal in "${ordinals[@]}"; do
+        [[ $ordinal =~ ^0*([0-9]+)$ ]]
+        digits=${BASH_REMATCH[1]}
+        if (( ${#digits} > 20 )) || { (( ${#digits} == 20 )) && [[ $digits > 18446744073709551615 ]]; }; then
+            fail 2 "trace.sh: --deep ordinals must not be above 18446744073709551615"
+        fi
+    done
 fi
 if [[ $self_test ]] && [[ $motion || $frames ]]; then
     fail 2 "trace.sh: --motion and --frames apply to served frames, not to --self-test"

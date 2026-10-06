@@ -291,16 +291,24 @@ with tempfile.TemporaryDirectory(prefix='hiptrace-test-') as directory:
     ]
     tool('plan_hashes.py', empty, expected=1)
 
-    # HIPTRACE_DEEP: ordinals and ranges, and a malformed value refused.
-    for value, logged in (('3,5-7', '3-4,5-7'), ('10:20', 'invalid')):
-        header_only = root / 'deep.trace'
+    def load(**variables):
+        """Loads the runtime in a new Python with VARIABLES set; returns its standard error."""
         result = subprocess.run([sys.executable, '-c', f'import ctypes; ctypes.CDLL({str(runtime)!r})'],
-                                env=os.environ | {'HIPTRACE_REAL': str(fake), 'HIPTRACE_FILE': str(header_only),
-                                                  'HIPTRACE_DEEP': value},
-                                text=True, capture_output=True, timeout=60)
+                                env=os.environ | {'HIPTRACE_REAL': str(fake)} | variables, text=True,
+                                capture_output=True, timeout=60)
         assert result.returncode == 0, result
+        return result.stderr
+
+    # HIPTRACE_DEEP: ordinals and ranges, the largest included, and a malformed value and an ordinal
+    # above 2^64 - 1 refused.
+    for value, logged in (('3,5-7', '3-4,5-7'), ('0-018446744073709551615', '0-18446744073709551615'),
+                          ('10:20', 'invalid'), ('1-18446744073709551616', 'invalid')):
+        header_only = root / 'deep.trace'
+        stderr = load(HIPTRACE_FILE=str(header_only), HIPTRACE_DEEP=value)
         assert f' deep={logged} ' in header_only.read_text().splitlines()[0], header_only.read_text()
-        assert ('HIPTRACE_DEEP=10:20 is not' in result.stderr) == (logged == 'invalid'), result.stderr
+        assert (f'HIPTRACE_DEEP={value} is not' in stderr) == (logged == 'invalid'), stderr
+    # A log that could not be written is reported at exit.
+    assert 'hiptrace: writing HIPTRACE_FILE failed; the trace is incomplete\n' in load(HIPTRACE_FILE='/dev/full')
     for name in ('analyze.py', 'compare.py', 'plan_hashes.py'):
         assert '(default: off)' in tool(name, '--help')
 
@@ -321,7 +329,7 @@ with tempfile.TemporaryDirectory(prefix='hiptrace-test-') as directory:
     helptext = run([script, '--help'], env=env | {'XDG_DATA_HOME': '/data', 'XDG_RUNTIME_DIR': '/run/me'})
     assert '(default: /data/dlsslop-amd/model:' in helptext and '(default: /run/me/dlsslop-hiptrace:' in helptext
     for arguments in (['--bogus'], ['--tier', '480'], ['--self-test', '--motion'], ['--passes', '0'], ['--tier'],
-                      ['--deep', '10:20'], ['--deep', '1-2,'], ['serve']):
+                      ['--deep', '10:20'], ['--deep', '1-2,'], ['--deep', '1-18446744073709551616'], ['serve']):
         run([script, *arguments], expected=2, env=env)
     record = root / 'record.json'
     daemon = root / 'dlsslopd'
@@ -338,7 +346,7 @@ with tempfile.TemporaryDirectory(prefix='hiptrace-test-') as directory:
     output, channel = root / 'out', root / 'channel'
     common = ['--build', runtime.parent, '--daemon', daemon, '--modules', modules, '--assets', root / 'assets',
               '--output', output, '--channel', channel]
-    run([script, *common, '--self-test', '-t', '900', '-p', '-D', '0-5'], expected=3, env=env)
+    run([script, *common, '--self-test', '-t', '900', '-p', '-D', '0-5,018446744073709551615'], expected=3, env=env)
     name = 'selftest-900-perf'
     assert stat.S_IMODE(channel.stat().st_mode) == 0o700
     assert 'stand-in dlsslopd' in (output / f'{name}.log').read_text()
@@ -347,7 +355,8 @@ with tempfile.TemporaryDirectory(prefix='hiptrace-test-') as directory:
                  str(modules), '--assets', str(root / 'assets'), '--shm', f'{channel}/{name}.bin', '--performance',
                  '--self-test'],
         'env': {'DLSSLOP_HIP_LIBRARY': str(runtime), 'HIPTRACE_FILE': f'{output}/{name}.trace',
-                'HIPTRACE_MODULES': str(modules), 'HIPTRACE_DEEP': '0-5', 'HIPTRACE_DEEP_KERNELS': ''}}
+                'HIPTRACE_MODULES': str(modules), 'HIPTRACE_DEEP': '0-5,018446744073709551615',
+                'HIPTRACE_DEEP_KERNELS': ''}}
     # Served: the client stores the settings, then starts the stand-in, which
     # exits before it is ready.
     run([script, *common, '--motion', '--passes', '2', '--frames=ABBA', '-k', 'tail'], expected=1, env=env)
