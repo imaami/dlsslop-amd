@@ -391,7 +391,7 @@ check_race (uint32_t round)
 	struct racer *const seen = mmap(nullptr, RACERS * sizeof *seen, PROT_READ | PROT_WRITE,
 	                                MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	require(seen != MAP_FAILED, "mmap failed");
-	int gate[2];
+	int gate[2] = { -1, -1 };
 	require(!pipe2(gate, O_CLOEXEC), "pipe2 failed");
 	require(!fflush(nullptr), "fflush failed");
 	mode_t const mask = missing ? umask(0277) : 0;
@@ -409,6 +409,8 @@ check_race (uint32_t round)
 		umask(mask);
 	// Every racer reads end of file at once.
 	require(!close(gate[1]) && !close(gate[0]), "close failed");
+	gate[1] = -1;
+	gate[0] = -1;
 	uint32_t created = 0;
 	for (uint32_t i = 0; i < RACERS; ++i) {
 		int status;

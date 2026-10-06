@@ -270,12 +270,14 @@ contending_producer_init (struct contending_producer *dest,
 
 	char *name = support_format(nullptr, "%s.producer.lock", path);
 	require(name, "out of memory");
-	int ready[2];
-	int release[2];
+	int ready[2] = { -1, -1 };
+	int release[2] = { -1, -1 };
 	require(pipe(ready) == 0, "contention ready pipe failed");
 	if (pipe(release)) {
 		close(ready[0]);
+		ready[0] = -1;
 		close(ready[1]);
+		ready[1] = -1;
 		fail("contention release pipe failed");
 	}
 	pid_t const child = fork();
@@ -301,10 +303,14 @@ contending_producer_init (struct contending_producer *dest,
 	// A failed fork leaves -1, which is what no process reads as.
 	dest->child = child;
 	dest->release = release[1];
+	release[1] = -1;
 	require(!close(ready[1]) && !close(release[0]), "cannot close the contention pipes");
+	ready[1] = -1;
+	release[0] = -1;
 	uint8_t acquired;
 	bool const success = child > 0 && read(ready[0], &acquired, 1) == 1 && acquired;
 	require(!close(ready[0]), "cannot close the contention ready pipe");
+	ready[0] = -1;
 	if (!success) {
 		contending_producer_fini(dest);
 		fail("contention subprocess could not acquire producer lock");
