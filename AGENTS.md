@@ -12,11 +12,25 @@
 - Project shell scripts and generated launchers use `#!/usr/bin/bash`, Bash
   conditionals and arrays. Do not use global `set -e`, `set -u` or equivalents.
   Handle consequential errors explicitly and preserve arguments and exit status.
-- In C/C++, avoid `using namespace` and use `\n` rather than `std::endl`.
-- Project C++ is built without exceptions or RTTI. Fallible functions return
-  `dlsslop::Result` (`common/result.hpp`); only the vendor boundary files catch
-  what vendored code throws. Choose implementations at compile time (CRTP,
-  concepts, templates), not through virtual calls or type erasure.
+- Write C. Use C++ only where a dependency requires it, such as a C++ GUI
+  toolkit or a C++-based GPU kernel language, and for code that must share
+  one source with such code. C and C++ source never mix: C++ headers end in
+  `.hpp`; a `.h` that C++ also includes only declares (`extern "C"`
+  functions, types, enums, macros), and its definitions are in `.c` files
+  built by the C compiler. Code that both languages need has one source and
+  is never copied into the other language.
+- In C++, avoid `using namespace` and use `\n` rather than `std::endl`. C++
+  is built without exceptions or RTTI: fallible functions return a result
+  type such as `std::expected`, and only code at the boundary with
+  third-party C++ catches what that code throws.
+- C functions that can fail return an error code and write the message a
+  caller may need into a caller-owned error object, which may be null.
+- Choose implementations at compile time: in C with `_Generic`, macros or
+  one translation unit per implementation; in C++ with templates. Not
+  through virtual calls, tables of function pointers or `void *`. Call
+  through a function pointer only what exists only at run time: functions
+  found with `dlsym()` or an API's own loader, callbacks across a module's
+  ABI, thread start routines, and `qsort()`/`bsearch()` comparators.
 - Update CLI examples and focused parsing/launcher checks when changing tools.
 - Build with CMake and follow `VALIDATION.md` for automated and hardware tests.
 
@@ -104,6 +118,12 @@ share.
   usefulness, e.g. before calling `strtoul()` and related functions. These are
   documented workarounds for known gotchas, not a suggestion to adopt `errno`
   as your error propagation channel.
+- Give every atomic object a valid state exactly once (C23 7.17.2): an
+  initializer, static or thread storage, or `atomic_init()` for allocated or
+  mapped storage and for automatic objects declared without an initializer.
+  Never initialize one twice, and never write over atomics in use with
+  `memset()`, `memcpy()` or struct assignment; wiping an object right before
+  `free()` is fine.
 
 ## C coding style
 
