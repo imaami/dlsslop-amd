@@ -470,14 +470,14 @@ layer_word (struct vulkan_dispatch const *d,
 struct block {
 	uint64_t offset; //!< Where it starts.
 	uint64_t size;   //!< Its bytes.
-	int      freed;  //!< The last dispatch of what it held.
+	size_t   freed;  //!< The last dispatch of what it held.
 };
 
 /** @brief A placed value's bytes, and its last dispatch. */
 struct live {
 	uint64_t offset; //!< Where it starts.
 	uint64_t size;   //!< Its bytes.
-	int      last;   //!< Its last dispatch.
+	size_t   last;   //!< Its last dispatch.
 };
 
 /** @brief The arena's free blocks in offset order, merged where they touch. */
@@ -709,8 +709,8 @@ vulkan_schedule_merge (struct vulkan_dispatches       *dest,
 
 /** @brief A span of dispatches. */
 struct span {
-	int first; //!< The first dispatch.
-	int last;  //!< The last.
+	size_t first; //!< The first dispatch.
+	size_t last;  //!< The last.
 };
 
 /** @brief Whether one key goes before another in the arena's order: by first dispatch, the larger
@@ -725,8 +725,8 @@ struct span {
 static bool
 before (struct span const          *span,
         struct vulkan_values const *v,
-        int                         a,
-        int                         b)
+        size_t                      a,
+        size_t                      b)
 {
 	if (span[a].first != span[b].first)
 		return span[a].first < span[b].first;
@@ -750,38 +750,38 @@ vulkan_schedule_share (struct vulkan_dispatches const *dispatches,
                        struct error                   *e)
 {
 	struct vulkan_dispatch const *const d = dispatches->dispatch;
-	int const count = (int)dispatches->count;
+	size_t const count = dispatches->count;
 	// Each value's dispatches: every one whose layers meet the layers that name it, or the whole
-	// frame when none does.
+	// frame when none does, which leaves first at count.
 	struct span span[VULKAN_PLAN_KEYS] = {0};
-	for (int k = 0; k < VULKAN_PLAN_KEYS; ++k) {
+	for (size_t k = 0; k < VULKAN_PLAN_KEYS; ++k) {
 		if (v->first[k] < 0)
 			continue;
-		span[k] = (struct span){count, -1};
-		for (int f = 0; f < count; ++f)
+		span[k] = (struct span){count, 0};
+		for (size_t f = 0; f < count; ++f)
 			if (d[f].first <= v->last[k] && d[f].last >= v->first[k]) {
 				if (f < span[k].first)
 					span[k].first = f;
 				if (span[k].last < f)
 					span[k].last = f;
 			}
-		if (span[k].last < 0)
+		if (span[k].first == count)
 			span[k] = (struct span){0, count};
 	}
 	// A key with no size aliases the value that its plain offset lies in, which lives for it too
-	// (skip(30) and block 0's output).
-	int owner[VULKAN_PLAN_KEYS];
+	// (skip(30) and block 0's output). VULKAN_PLAN_KEYS is no key.
+	size_t owner[VULKAN_PLAN_KEYS];
 	uint64_t delta[VULKAN_PLAN_KEYS] = {0};
-	for (int k = 0; k < VULKAN_PLAN_KEYS; ++k)
-		owner[k] = -1;
-	for (int k = 0; k < VULKAN_PLAN_KEYS; ++k) {
+	for (size_t k = 0; k < VULKAN_PLAN_KEYS; ++k)
+		owner[k] = VULKAN_PLAN_KEYS;
+	for (size_t k = 0; k < VULKAN_PLAN_KEYS; ++k) {
 		if (v->first[k] < 0 || v->size[k])
 			continue;
-		for (int o = 0; o < VULKAN_PLAN_KEYS; ++o)
+		for (size_t o = 0; o < VULKAN_PLAN_KEYS; ++o)
 			if (v->size[o] && v->offset[o] <= v->offset[k] &&
 			    v->offset[k] < v->offset[o] + v->size[o])
 				owner[k] = o;
-		if (owner[k] < 0)
+		if (owner[k] == VULKAN_PLAN_KEYS)
 			return error_fail(e, "network plan: a value without a size aliases no value");
 		delta[k] = v->offset[k] - v->offset[owner[k]];
 		struct span *const o = &span[owner[k]];
@@ -791,13 +791,13 @@ vulkan_schedule_share (struct vulkan_dispatches const *dispatches,
 			o->last = span[k].last;
 	}
 	// Values read past their size live all frame, so the bytes past it stay zero.
-	for (int k = 0; k < VULKAN_PLAN_KEYS; ++k)
+	for (size_t k = 0; k < VULKAN_PLAN_KEYS; ++k)
 		if (v->overread[k] && v->first[k] >= 0)
 			span[k] = (struct span){0, count};
 	// The keys in their order, sorted by insertion.
-	int order[VULKAN_PLAN_KEYS];
+	size_t order[VULKAN_PLAN_KEYS];
 	size_t ordered = 0;
-	for (int k = 0; k < VULKAN_PLAN_KEYS; ++k) {
+	for (size_t k = 0; k < VULKAN_PLAN_KEYS; ++k) {
 		if (v->first[k] < 0 || !v->size[k])
 			continue;
 		size_t at = ordered++;
@@ -807,15 +807,15 @@ vulkan_schedule_share (struct vulkan_dispatches const *dispatches,
 	}
 	// Steps that tile counters order overlap: a value read in such a stretch stays until its end.
 	if (chains) {
-		int *stretch_end = malloc(((size_t)count + 1) * sizeof *stretch_end);
+		size_t *stretch_end = malloc((count + 1) * sizeof *stretch_end);
 		if (!stretch_end)
 			return error_fail(e, "out of memory");
-		for (int f = count; f >= 0; --f) {
+		for (size_t f = count + 1; f--;) {
 			bool const counted_next = f + 1 < count && counted_pair(d[f].kernel, d[f + 1].kernel);
 			stretch_end[f] = counted_next ? stretch_end[f + 1] : f;
 		}
-		for (int k = 0; k < VULKAN_PLAN_KEYS; ++k)
-			if (v->first[k] >= 0 && span[k].last >= 0 && span[k].last < count)
+		for (size_t k = 0; k < VULKAN_PLAN_KEYS; ++k)
+			if (v->first[k] >= 0 && span[k].last < count)
 				span[k].last = stretch_end[span[k].last];
 		free(stretch_end);
 		stretch_end = nullptr;
@@ -833,8 +833,8 @@ vulkan_schedule_share (struct vulkan_dispatches const *dispatches,
 	uint64_t high = 0;
 	uint64_t offset[VULKAN_PLAN_KEYS] = {0};
 	for (size_t i = 0; i < ordered; ++i) {
-		int const k = order[i];
-		int const first = span[k].first;
+		size_t const k = order[i];
+		size_t const first = span[k].first;
 		size_t kept = 0;
 		for (size_t l = 0; l < lists->live_count; ++l)
 			if (lists->live[l].last < first)
@@ -847,7 +847,7 @@ vulkan_schedule_share (struct vulkan_dispatches const *dispatches,
 		size_t best = list->count;
 		for (size_t b = 0; b < list->count; ++b)
 			if (list->block[b].size >= need &&
-			    !(cold && list->block[b].freed + (int)VULKAN_PLAN_ARENA_COLD >= first) &&
+			    !(cold && list->block[b].freed + VULKAN_PLAN_ARENA_COLD >= first) &&
 			    (best == list->count || list->block[b].size < list->block[best].size))
 				best = b;
 		if (best < list->count) {
@@ -869,8 +869,8 @@ vulkan_schedule_share (struct vulkan_dispatches const *dispatches,
 	}
 	free(lists);
 	lists = nullptr;
-	for (int k = 0; k < VULKAN_PLAN_KEYS; ++k)
-		if (owner[k] >= 0)
+	for (size_t k = 0; k < VULKAN_PLAN_KEYS; ++k)
+		if (owner[k] < VULKAN_PLAN_KEYS)
 			offset[k] = offset[owner[k]] + delta[k];
 	memcpy(v->offset, offset, sizeof offset);
 	*end = align(high, 256);
