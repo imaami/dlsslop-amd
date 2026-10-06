@@ -396,7 +396,7 @@ sha256 (uint8_t const *data,
 	uint8_t *message = allocated(calloc(size, 1));
 	memcpy(message, data, bytes);
 	message[bytes] = 0x80;
-	for (int i = 0; i < 8; ++i)
+	for (size_t i = 0; i < 8; ++i)
 		message[size - 1 - i] = (uint8_t)((uint64_t)bytes * 8 >> 8 * i);
 	for (size_t block = 0; block < size; block += 64) {
 		uint32_t w[64];
