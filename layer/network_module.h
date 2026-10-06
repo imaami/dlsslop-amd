@@ -27,9 +27,10 @@ struct ShmHeader;
  *
  * It is odd and has its top bit set, so no pointer equals it: an older layer's struct
  * dlsslop_network_device begins with an aligned VkInstance where this one begins with this number.
- * Bits 8-31 count the versions: 1 with buffers, 2 with images.
+ * Bits 8-31 count the versions: 1 with buffers, 2 with images, 3 with the device's queue family
+ * after its pointers.
  */
-#define DLSSLOP_NETWORK_INTERFACE UINT64_C(0xd155100000000201)
+#define DLSSLOP_NETWORK_INTERFACE UINT64_C(0xd155100000000301)
 
 /** @brief The module's DLSSLOP_NETWORK_INTERFACE, which network_module_load() requires to equal the
  *         layer's. */
@@ -62,13 +63,13 @@ struct dlsslop_network_device {
 	VkPhysicalDevice                  physical;          //!< The device's physical device.
 	VkDevice                          device;            //!< The device.
 	VkQueue                           queue;             //!< The queue that takes the build's uploads.
-	uint32_t                          family;            //!< The queue's family.
 	dlsslop_network_queue_fn         *lock_queue;        //!< Called before each submit of the build.
 	dlsslop_network_queue_fn         *unlock_queue;      //!< Called after each submit of the build.
 	void                             *context;           //!< What lock_queue and unlock_queue take.
 	PFN_vkGetInstanceProcAddr         physical_dispatch; //!< The next layer's vkGetInstanceProcAddr.
 	VkPhysicalDeviceMemoryProperties  memory;            //!< The physical device's memory.
 	dlsslop_network_log_fn           *log;               //!< Where the network's log lines go.
+	uint32_t                          family;            //!< The queue's family.
 };
 
 /** @brief The composition's images that a frame goes through.

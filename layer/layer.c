@@ -2638,12 +2638,12 @@ open_network (struct device_chain          *dc,
 		.physical          = dc->physical,
 		.device            = dc->self,
 		.queue             = queue,
-		.family            = sc->family,
 		.lock_queue        = lock_queue,
 		.unlock_queue      = unlock_queue,
 		.context           = dc,
 		.physical_dispatch = dc->instance->table.next_gipa,
-		.log               = network_log
+		.log               = network_log,
+		.family            = sc->family
 	};
 	dc->instance->table.vkGetPhysicalDeviceMemoryProperties(dc->physical, &device.memory);
 	struct DlsslopNetwork *const network = g_network.open(&device);
