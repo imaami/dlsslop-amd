@@ -8,9 +8,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #include "log.h"
+#include "util.h"
 
 /** @brief A stream that the log's lines go to, which the log file owns unless it is stderr. */
 struct log_file {
@@ -179,8 +179,5 @@ log_time_interval (void)
 double
 log_now_ms (void)
 {
-	struct timespec now;
-	if (clock_gettime(CLOCK_MONOTONIC, &now))
-		return 0.0;
-	return (double)(now.tv_sec * INT64_C(1000000000) + now.tv_nsec) / 1e6;
+	return (double)now_ns() / 1e6;
 }
