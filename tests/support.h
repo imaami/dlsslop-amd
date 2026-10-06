@@ -10,6 +10,7 @@
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 #include <sys/types.h>
 
 /** @brief Formats a string on the heap, measured once.
@@ -195,5 +196,78 @@ support_keys_find (uint64_t const *keys,
 	*found = there;
 	return there ? at - 1 : at;
 }
+
+/** @brief The keys and values that a SUPPORT_SORTED_MAP's first growth makes room for. */
+static constexpr size_t SUPPORT_MAP_MINIMUM = 16;
+
+/** @brief Defines struct NAME, a map from 64-bit keys to values of TYPE that is empty when zeroed: its
+ *         keys ascending, each value at its key's index. The functions that come with it:
+ *         - NAME_find(), a key's value, or nullptr;
+ *         - NAME_slot(), a key's value, added uninitialized if the key is new;
+ *         - NAME_insert(), which makes room for a key at the index that support_keys_find() gave and
+ *           moves the later ones;
+ *         - NAME_erase(), which removes the key and value at an index and moves the later ones;
+ *         - NAME_remove(), which removes a key and its value, if the map has them.
+ *         A value's address holds until the next insert or removal. GROW(pointer, bytes) is the
+ *         including file's realloc(), which ends the process rather than return nullptr.
+ */
+#define SUPPORT_SORTED_MAP(name, type, grow) \
+	struct name { \
+		uint64_t *keys;     /* Ascending. */ \
+		type     *values;   /* Each key's value, at its index. */ \
+		size_t    count;    /* The keys. */ \
+		size_t    capacity; /* The keys and values allocated. */ \
+	}; \
+	\
+	[[maybe_unused]] static type * \
+	name##_find (struct name const *map, uint64_t key) \
+	{ \
+		bool found; \
+		size_t const at = support_keys_find(map->keys, map->count, key, &found); \
+		return found ? &map->values[at] : nullptr; \
+	} \
+	\
+	[[maybe_unused]] static type * \
+	name##_insert (struct name *map, size_t at, uint64_t key) \
+	{ \
+		if (map->count == map->capacity) { \
+			size_t const capacity = map->capacity ? map->capacity * 2 : SUPPORT_MAP_MINIMUM; \
+			map->keys = grow(map->keys, capacity * sizeof *map->keys); \
+			map->values = grow(map->values, capacity * sizeof *map->values); \
+			map->capacity = capacity; \
+		} \
+		memmove(&map->keys[at + 1], &map->keys[at], (map->count - at) * sizeof *map->keys); \
+		memmove(&map->values[at + 1], &map->values[at], (map->count - at) * sizeof *map->values); \
+		++map->count; \
+		map->keys[at] = key; \
+		return &map->values[at]; \
+	} \
+	\
+	[[maybe_unused]] static type * \
+	name##_slot (struct name *map, uint64_t key, bool *added) \
+	{ \
+		bool found; \
+		size_t const at = support_keys_find(map->keys, map->count, key, &found); \
+		*added = !found; \
+		return found ? &map->values[at] : name##_insert(map, at, key); \
+	} \
+	\
+	[[maybe_unused]] static void \
+	name##_erase (struct name *map, size_t at) \
+	{ \
+		--map->count; \
+		memmove(&map->keys[at], &map->keys[at + 1], (map->count - at) * sizeof *map->keys); \
+		memmove(&map->values[at], &map->values[at + 1], (map->count - at) * sizeof *map->values); \
+	} \
+	\
+	[[maybe_unused]] static bool \
+	name##_remove (struct name *map, uint64_t key) \
+	{ \
+		bool found; \
+		size_t const at = support_keys_find(map->keys, map->count, key, &found); \
+		if (found) \
+			name##_erase(map, at); \
+		return found; \
+	}
 
 #endif /* DLSSLOP_AMD_TESTS_SUPPORT_H_ */

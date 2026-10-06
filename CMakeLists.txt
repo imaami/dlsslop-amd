@@ -489,13 +489,16 @@ if(BUILD_TESTING)
     endif()
     set(VKTRACE_VERSION ${CMAKE_MATCH_2}.${CMAKE_MATCH_3}.${CMAKE_MATCH_1})
     set(VKTRACE_DIR ${CMAKE_CURRENT_BINARY_DIR}/vktrace)
-    add_custom_command(OUTPUT ${VKTRACE_DIR}/vkt_names.hpp
+    add_custom_command(OUTPUT ${VKTRACE_DIR}/vkt_names.h
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/vktrace/gen_names.py ${VULKAN_REGISTRY}
-            ${VULKAN_CORE_HEADER} ${VKTRACE_DIR}/vkt_names.hpp
+            ${VULKAN_CORE_HEADER} ${VKTRACE_DIR}/vkt_names.h
         DEPENDS tests/vktrace/gen_names.py ${VULKAN_REGISTRY} ${VULKAN_CORE_HEADER} VERBATIM)
-    add_library(vktrace MODULE tests/vktrace/vktrace.cpp ${VKTRACE_DIR}/vkt_names.hpp)
-    set_target_properties(vktrace PROPERTIES CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+    add_library(vktrace MODULE tests/vktrace/vktrace.c ${VKTRACE_DIR}/vkt_names.h)
     target_include_directories(vktrace PRIVATE ${VKTRACE_DIR})
+    # The loader unloads a layer with its instance; this one stays loaded until the process exits, so
+    # that it makes its pthread key once and all of a process's instances share one trace.
+    target_link_options(vktrace PRIVATE -Wl,-z,nodelete)
+    target_link_libraries(vktrace PRIVATE Threads::Threads)
     file(GENERATE OUTPUT ${VKTRACE_DIR}/VkLayer_LOCAL_vktrace.json CONTENT "{
   \"file_format_version\": \"1.2.0\",
   \"layer\": {
@@ -512,8 +515,8 @@ if(BUILD_TESTING)
         COMMAND ${GLSLANG_VALIDATOR} --quiet -V --target-env vulkan1.3 -o ${VKTRACE_DIR}/probe.spv
             ${CMAKE_CURRENT_SOURCE_DIR}/tests/vktrace/probe.comp
         DEPENDS tests/vktrace/probe.comp VERBATIM)
-    add_executable(vktrace-probe tests/vktrace/probe.cpp ${VKTRACE_DIR}/probe.spv)
-    target_link_libraries(vktrace-probe PRIVATE ${VULKAN_LOADER} Threads::Threads)
+    add_executable(vktrace-probe tests/vktrace/probe.c ${VKTRACE_DIR}/probe.spv)
+    target_link_libraries(vktrace-probe PRIVATE test-support ${VULKAN_LOADER} Threads::Threads)
     add_test(NAME vktrace COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/vktrace/vktrace-test.py
         $<TARGET_FILE:vktrace> $<TARGET_FILE:vktrace-probe> $<TARGET_FILE:shmclient>)
     set_tests_properties(color-gpu hip-plan-abi vulkan-plan-abi vulkan-files lds-barriers codec-isa hdr-shader

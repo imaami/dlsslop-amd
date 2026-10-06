@@ -62,9 +62,6 @@ static constexpr int COPY_KIND_COUNT = (int)(sizeof COPY_KINDS / sizeof *COPY_KI
 /** @brief The deepest MessagePack nesting read: the root is at depth 0. */
 static constexpr unsigned MSG_DEPTH = 32;
 
-/** @brief The keys and values that a map's first growth makes room for. */
-static constexpr size_t MAP_MINIMUM = 16;
-
 /** @brief The most decimal digits of a uint64_t. */
 static constexpr size_t DECIMAL_DIGITS = 20;
 
@@ -640,58 +637,11 @@ struct deep_kernel {
 	size_t      length; //!< Its length.
 };
 
-/** @brief Defines struct NAME, a map from 64-bit keys to values of TYPE, empty when zeroed: its keys
- *         ascending, each value at its key's index; and NAME_insert(), which makes room for a key at
- *         an index and moves the later ones. Memory that runs out ends the process (reallocate()).
- */
-#define SORTED_MAP(name, type) \
-	struct name { \
-		uint64_t *keys;     /* Ascending. */ \
-		type     *values;   /* Each key's value, at its index. */ \
-		size_t    count;    /* The keys. */ \
-		size_t    capacity; /* The keys and values allocated. */ \
-	}; \
-	\
-	static type * \
-	name##_insert (struct name *map, size_t at, uint64_t key) \
-	{ \
-		if (map->count == map->capacity) { \
-			size_t const capacity = map->capacity ? map->capacity * 2 : MAP_MINIMUM; \
-			map->keys = reallocate(map->keys, capacity * sizeof *map->keys); \
-			map->values = reallocate(map->values, capacity * sizeof *map->values); \
-			map->capacity = capacity; \
-		} \
-		memmove(&map->keys[at + 1], &map->keys[at], (map->count - at) * sizeof *map->keys); \
-		memmove(&map->values[at + 1], &map->values[at], (map->count - at) * sizeof *map->values); \
-		++map->count; \
-		map->keys[at] = key; \
-		return &map->values[at]; \
-	}
-
-/** @brief Defines NAME_erase() for a SORTED_MAP: it removes the key and value at an index and moves
- *         the later ones.
- */
-#define SORTED_MAP_ERASE(name) \
-	static void \
-	name##_erase (struct name *map, size_t at) \
-	{ \
-		--map->count; \
-		memmove(&map->keys[at], &map->keys[at + 1], (map->count - at) * sizeof *map->keys); \
-		memmove(&map->values[at], &map->values[at + 1], (map->count - at) * sizeof *map->values); \
-	}
-
-SORTED_MAP(ranges, struct range)
-SORTED_MAP_ERASE(ranges)
-SORTED_MAP(ids, unsigned)
-SORTED_MAP_ERASE(ids)
-SORTED_MAP(modules, struct module)
-SORTED_MAP_ERASE(modules)
-// A module's functions go together (hipModuleUnload()), and a file's name never goes.
-SORTED_MAP(functions, struct function)
-SORTED_MAP(files, struct file_name)
-
-#undef SORTED_MAP_ERASE
-#undef SORTED_MAP
+SUPPORT_SORTED_MAP(ranges, struct range, reallocate)
+SUPPORT_SORTED_MAP(ids, unsigned, reallocate)
+SUPPORT_SORTED_MAP(modules, struct module, reallocate)
+SUPPORT_SORTED_MAP(functions, struct function, reallocate)
+SUPPORT_SORTED_MAP(files, struct file_name, reallocate)
 
 /** @brief The trace. */
 struct state {
