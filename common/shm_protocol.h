@@ -131,8 +131,9 @@ enum : STD(uint32_t) {
 	kNativeDefaultTier = 720, //!< The height of the default tier.
 };
 
-/** @brief The native neural rasters, smallest first, every kNativeTierStep rows from kNativeTierMin. */
-extern struct NativeTier const kNativeTiers[kNativeTierCount];
+/** @brief The native neural rasters, smallest first, every kNativeTierStep rows from kNativeTierMin:
+ *         kNativeTierCount of them. */
+extern struct NativeTier const kNativeTiers[];
 
 /** @brief The pass counts. */
 enum : STD(uint32_t) {

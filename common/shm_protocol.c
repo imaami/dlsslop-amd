@@ -76,6 +76,8 @@ struct NativeTier const kNativeTiers[] = {
 	{kNativeTierMin + kNativeTierStep, 1600, 960},
 	{kNativeTierMin + 2 * kNativeTierStep, 1920, 1152},
 };
+static_assert(sizeof kNativeTiers / sizeof *kNativeTiers == kNativeTierCount,
+              "kNativeTierCount is not the number of kNativeTiers");
 
 int
 shm_runtime_path (char       *buf,
