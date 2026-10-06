@@ -408,13 +408,21 @@ options_fini (struct options *options)
 	if (!options)
 		return;
 	free(options->assets);
+	options->assets = nullptr;
 	free(options->modules);
+	options->modules = nullptr;
 	free(options->shm);
+	options->shm = nullptr;
 	free(options->vulkan_model);
+	options->vulkan_model = nullptr;
 	free(options->shaders);
+	options->shaders = nullptr;
 	free(options->input);
+	options->input = nullptr;
 	free(options->output);
+	options->output = nullptr;
 	free(options->trace_dir);
+	options->trace_dir = nullptr;
 	*options = (struct options){};
 }
 
