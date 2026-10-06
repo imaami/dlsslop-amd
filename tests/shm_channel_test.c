@@ -258,7 +258,11 @@ listing (char const *dir)
 	require(entries, "cannot read %s", dir);
 	char *names[64];
 	uint32_t count = 0;
-	for (struct dirent const *entry; (entry = readdir(entries));) {
+	for (;;) {
+		struct dirent const *entry;
+		require(support_next_entry(entries, &entry), "cannot read %s", dir);
+		if (!entry)
+			break;
 		if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
 			continue;
 		require(count < sizeof names / sizeof *names, "%s holds too many files", dir);

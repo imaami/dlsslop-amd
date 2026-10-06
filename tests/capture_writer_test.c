@@ -212,8 +212,15 @@ is_empty (char const *path)
 	if (!dir)
 		return false;
 	bool empty = true;
-	for (struct dirent *entry; empty && (entry = readdir(dir));)
+	while (empty) {
+		struct dirent const *entry;
+		bool const read = support_next_entry(dir, &entry);
+		if (!entry) {
+			empty = read;
+			break;
+		}
 		empty = !strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..");
+	}
 	return !closedir(dir) && empty;
 }
 
@@ -236,7 +243,11 @@ directories (char const *path)
 	int const fd = dirfd(dir);
 	require(fd >= 0, "cannot list the capture directory");
 	struct directories ret = {};
-	for (struct dirent *entry; (entry = readdir(dir));) {
+	for (;;) {
+		struct dirent const *entry;
+		require(support_next_entry(dir, &entry), "cannot list the capture directory");
+		if (!entry)
+			break;
 		struct stat st;
 		if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, "..")
 		    || fstatat(fd, entry->d_name, &st, 0) || !S_ISDIR(st.st_mode))

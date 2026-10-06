@@ -30,6 +30,7 @@
 
 #include "hotkey_priv.h"
 #include "log.h"
+#include "support.h"
 
 /** @brief Ends the test with a message unless a condition holds. */
 [[gnu::format(printf, 2, 3)]]
@@ -278,9 +279,14 @@ open_descriptors (void)
 	DIR *const dir = opendir("/proc/self/fd");
 	require(dir, "cannot list /proc/self/fd");
 	uint32_t n = 0;
-	for (struct dirent *e; (e = readdir(dir));)
+	for (;;) {
+		struct dirent const *e;
+		require(support_next_entry(dir, &e), "cannot list /proc/self/fd");
+		if (!e)
+			break;
 		n += e->d_name[0] != '.';
-	closedir(dir);
+	}
+	require(!closedir(dir), "cannot close /proc/self/fd");
 	// Without the listing's own.
 	return n - 1;
 }

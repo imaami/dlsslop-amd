@@ -191,12 +191,10 @@ channel_handles (struct context const *c)
 	int const fds = dirfd(directory);
 	require(fds >= 0, "cannot read /proc/self/fd");
 	for (;;) {
-		errno = 0;
-		struct dirent const *const entry = readdir(directory);
-		if (!entry) {
-			require(!errno, "cannot read /proc/self/fd");
+		struct dirent const *entry;
+		require(support_next_entry(directory, &entry), "cannot read /proc/self/fd");
+		if (!entry)
 			break;
-		}
 		// A link reads as far as the canonical path, which is all that a match needs.
 		ssize_t const n = readlinkat(fds, entry->d_name, target, length);
 		held.descriptors += n == (ssize_t)length && !memcmp(target, path, length);

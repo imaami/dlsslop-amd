@@ -986,7 +986,12 @@ descriptor_of (char const *path,
 	int const dir = dirfd(fds);
 	char *target = dir >= 0 ? malloc(length + 1) : nullptr;
 	int found = target ? -1 : -2;
-	for (struct dirent *entry; found == -1 && (entry = readdir(fds));) {
+	while (found == -1) {
+		struct dirent const *entry;
+		if (!support_next_entry(fds, &entry))
+			found = -2;
+		if (!entry)
+			break;
 		ssize_t const n = readlinkat(dir, entry->d_name, target, length + 1);
 		if (n != (ssize_t)length || memcmp(target, path, length))
 			continue;
@@ -1393,9 +1398,14 @@ check_log (void)
 	require(entries, "cannot list %s", dir);
 	int const entries_fd = dirfd(entries);
 	require(entries_fd >= 0, "cannot list %s", dir);
-	for (struct dirent *entry; (entry = readdir(entries));)
+	for (;;) {
+		struct dirent const *entry;
+		require(support_next_entry(entries, &entry), "cannot list %s", dir);
+		if (!entry)
+			break;
 		if (strcmp(entry->d_name, ".") && strcmp(entry->d_name, ".."))
 			require(!unlinkat(entries_fd, entry->d_name, 0), "unlink failed");
+	}
 	require(!closedir(entries), "closedir failed");
 	require(!rmdir(dir), "rmdir failed");
 	free(dir);

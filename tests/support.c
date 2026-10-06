@@ -90,6 +90,17 @@ support_remove_tree (char const *path)
 	return !nftw(path, remove_entry, 16, FTW_DEPTH | FTW_PHYS);
 }
 
+bool
+support_next_entry (DIR                  *dir,
+                    struct dirent const **entry)
+{
+	// readdir() tells a failure from the end only through errno.
+	errno = 0;
+	struct dirent const *const next = readdir(dir);
+	*entry = next;
+	return next || !errno;
+}
+
 char *
 support_read_file (char const *path,
                    size_t     *length)

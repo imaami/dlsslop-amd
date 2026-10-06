@@ -400,7 +400,7 @@ if(BUILD_TESTING)
     # The hotkeys' internals, in C: hotkeys_fini() with fake keyboards, the evdev reads and sweeps,
     # the choice of a backend, and XInput2 on a private Xvfb if Xvfb and libXtst are installed.
     add_executable(hotkey-test tests/hotkey_test.c)
-    target_link_libraries(hotkey-test PRIVATE dlsslop-layer-objects dlsslop-common-c)
+    target_link_libraries(hotkey-test PRIVATE dlsslop-layer-objects dlsslop-common-c test-support)
     add_test(NAME hotkey COMMAND hotkey-test)
     # The composition pass in C, on a fake device: what its build creates and its fini destroys,
     # after a failure at any step too, and what a dispatch records.

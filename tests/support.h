@@ -1,13 +1,14 @@
 /** @file
  *
  * What several of the C tests need: a private temporary directory, removed with everything in it,
- * a file's whole contents, a formatted string on the heap, text that grows as it is written, a
- * program run with its output in a file, a pause, an extent read from a command line, and the
- * search of a sorted key array.
+ * a directory's entries, a file's whole contents, a formatted string on the heap, text that grows as
+ * it is written, a program run with its output in a file, a pause, an extent read from a command
+ * line, and the search of a sorted key array.
  */
 #ifndef DLSSLOP_AMD_TESTS_SUPPORT_H_
 #define DLSSLOP_AMD_TESTS_SUPPORT_H_
 
+#include <dirent.h>
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -59,6 +60,16 @@ support_temp_dir (char const *parent,
  */
 extern bool
 support_remove_tree (char const *path);
+
+/** @brief Reads a directory's next entry, telling a failure from the end of the directory.
+ *
+ * @param dir   The directory.
+ * @param entry Receives the entry, or nullptr at the end and on a failure.
+ * @return      false if readdir() failed.
+ */
+extern bool
+support_next_entry (DIR                  *dir,
+                    struct dirent const **entry);
 
 /** @brief Reads a whole file.
  *
