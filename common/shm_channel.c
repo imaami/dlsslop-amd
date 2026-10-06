@@ -493,6 +493,23 @@ enum shm_default {
 	SHM_DEFAULT_NATIVE, //!< ShmNativeDefaultPath().
 };
 
+/** @brief Whether a default's formatter wrote a path.
+ *
+ * @param path   The path.
+ * @param length The length of its path.
+ * @param buf    What the formatter wrote, in room for @a length bytes and a null.
+ * @param n      What it returned.
+ * @return       true if it wrote the path.
+ */
+static bool
+formatted (char const *path,
+           size_t      length,
+           char const *buf,
+           int         n)
+{
+	return n >= 0 && (size_t)n == length && !memcmp(buf, path, length);
+}
+
 /** @brief Which default channel a path names.
  *
  * @param path   The path.
@@ -503,16 +520,17 @@ static enum shm_default
 default_path (char const *path,
               size_t      length)
 {
-	// The defaults, in enum shm_default's order after SHM_DEFAULT_NONE.
-	static int (*const formats[])(char *, size_t) = { ShmDefaultPath, ShmNativeDefaultPath };
 	char *buf = malloc(length + 1);
 	if (!buf)
 		return SHM_DEFAULT_NONE;
 	enum shm_default which = SHM_DEFAULT_NONE;
-	for (uint32_t i = 0; !which && i < sizeof formats / sizeof *formats; ++i) {
-		int const n = formats[i](buf, length + 1);
-		if (n >= 0 && (size_t)n == length && !memcmp(buf, path, length))
-			which = SHM_DEFAULT_SHARED + i;
+	int n = ShmDefaultPath(buf, length + 1);
+	if (formatted(path, length, buf, n)) {
+		which = SHM_DEFAULT_SHARED;
+	} else {
+		n = ShmNativeDefaultPath(buf, length + 1);
+		if (formatted(path, length, buf, n))
+			which = SHM_DEFAULT_NATIVE;
 	}
 	free(buf);
 	buf = nullptr;
