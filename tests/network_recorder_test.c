@@ -166,11 +166,11 @@ static constexpr uint32_t SET_BINDINGS = 16;
 
 /** @brief What the fake device knows of a handle. */
 struct object {
-	uint8_t           *host;     //!< Its memory, mapped, or nullptr.
-	struct descriptor *bindings; //!< A set's descriptors by binding, or nullptr.
 	VkDeviceSize       size;     //!< A buffer's or an allocation's bytes.
 	uint64_t           image;    //!< A view's image.
 	uint64_t           named_in; //!< The frame that named it last.
+	uint8_t           *host;     //!< Its memory, mapped, or nullptr.
+	struct descriptor *bindings; //!< A set's descriptors by binding, or nullptr.
 	size_t             name;     //!< Its name in that frame.
 	uint32_t           present;  //!< A set's bindings written, bit b for binding b.
 	char               made[48]; //!< What it was made as.
@@ -265,17 +265,17 @@ objects_fini (void)
 
 /** @brief What a frame recorded: its commands, a line each, the descriptor sets it bound, and the
  *         gate of its motion parameters and the seed in the push constants of its pre block, the
- *         first dispatch after the parameters. */
+ *         first dispatch after the parameters. pre is as wide as a pointer, which fills the padding. */
 struct frame {
+	uint64_t            id;        //!< Which frame it is: a handle's name holds in this one.
 	struct support_text commands;  //!< The commands.
 	uint64_t           *sets;      //!< The descriptor sets bound, in order.
 	size_t              set_count; //!< Their number.
 	size_t              set_room;  //!< The sets allocated.
-	uint64_t            id;        //!< Which frame it is: a handle's name holds in this one.
 	size_t              names;     //!< The handles it named.
+	uintptr_t           pre;       //!< Whether the next push constants are the pre block's: 1 if they are.
 	uint32_t            seed;      //!< The pre block's seed.
 	float               gate;      //!< The motion parameters' gate.
-	bool                pre;       //!< The next push constants are the pre block's.
 };
 
 /** @brief The frame being recorded. */
@@ -853,7 +853,7 @@ vkCmdPushConstants (VkCommandBuffer,
 	constexpr size_t seed = (sizeof (struct push_f_swin) + offsetof(struct push_pre_image, seed)) / 4;
 	if (frame.pre && seed < count)
 		frame.seed = words[seed];
-	frame.pre = false;
+	frame.pre = 0;
 }
 
 /** @brief The fake vkCmdDispatch(): logs the groups. */
@@ -892,7 +892,7 @@ vkCmdUpdateBuffer (VkCommandBuffer,
 	say_words(words, count);
 	say("\n");
 	memcpy(&frame.gate, data, sizeof frame.gate);
-	frame.pre = true;
+	frame.pre = 1;
 }
 
 /** @brief The fake vkCmdWriteTimestamp(): logs it. */
@@ -1074,8 +1074,8 @@ history (struct frame const *f)
 
 /** @brief A pipeline as a frame names it at its first use. */
 struct named {
+	size_t length;   //!< The text's length.
 	char   text[48]; //!< "(pipeline HASH)".
-	size_t length;   //!< Its length.
 };
 
 /** @brief A pipeline made from SPIR-V as a frame names it at its first use.
@@ -1665,8 +1665,8 @@ naming (struct frame const *f,
 
 /** @brief An image as the frame recorded last names it. */
 struct name {
+	size_t length;   //!< The text's length.
 	char   text[24]; //!< "#N", or nothing.
-	size_t length;   //!< Its length.
 };
 
 /** @brief An image as the frame recorded last names it, or nothing when that frame does not.

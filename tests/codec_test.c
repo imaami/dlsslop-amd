@@ -676,14 +676,15 @@ fixture_neural (struct geometry const *g,
 	return rgb;
 }
 
-/** @brief A source extent at a tier, and the goldens of a reference's outputs for it. */
+/** @brief A source extent at a tier, and the goldens of a reference's outputs for it. tier is as wide
+ *         as a pointer, which fills the padding. */
 struct fixture {
 	uint64_t    rgba8;  //!< The golden of the RGBA8 source, or of 8-bit feedback.
 	uint64_t    fp16;   //!< The golden of the FP16 source, or of 16-bit feedback.
 	char const *name;   //!< The fixture's name in a message.
+	uintptr_t   tier;   //!< The tier.
 	unsigned    width;  //!< The source's width.
 	unsigned    height; //!< Its height.
-	uint64_t    tier;   //!< The tier.
 };
 
 /** @brief The references' outputs over fixtures, bit for bit (golden.h). */
@@ -693,22 +694,22 @@ test_goldens (void)
 	// Identity, enlarging (bilinear) and reducing (area-weighted) into the
 	// 720 and 1080 tiers, by integral and other ratios, letterboxed or not.
 	static struct fixture const encodes[] = {
-		{0xc84be590d97083e9u, 0x7e7c0cb2abb7a392u, "identity 720", 1280, 720, 720},
-		{0x2a813dfd1dad093bu, 0x6f61916b9ff2a475u, "identity 1080", 1920, 1080, 1080},
-		{0x58b6349f33c931fbu, 0x18200a5975265df7u, "upscale 720", 853, 480, 720},
-		{0xb97db8db0e3062dfu, 0x60680b606aa1a7f2u, "upscale 1080", 640, 480, 1080},
-		{0x13ec170dead5e0d0u, 0x772f278d3e678ad3u, "downscale 720", 1920, 1080, 720},
-		{0x856a00c01416d8beu, 0xd6045436a5eb871cu, "downscale 1080", 3440, 1440, 1080},
+		{0xc84be590d97083e9u, 0x7e7c0cb2abb7a392u, "identity 720", 720, 1280, 720},
+		{0x2a813dfd1dad093bu, 0x6f61916b9ff2a475u, "identity 1080", 1080, 1920, 1080},
+		{0x58b6349f33c931fbu, 0x18200a5975265df7u, "upscale 720", 720, 853, 480},
+		{0xb97db8db0e3062dfu, 0x60680b606aa1a7f2u, "upscale 1080", 1080, 640, 480},
+		{0x13ec170dead5e0d0u, 0x772f278d3e678ad3u, "downscale 720", 720, 1920, 1080},
+		{0x856a00c01416d8beu, 0xd6045436a5eb871cu, "downscale 1080", 1080, 3440, 1440},
 	};
 	// Letterboxed and pillarboxed answers fed into another pass.
 	static struct fixture const feedbacks[] = {
-		{0x1caed93f276895a1u, 0x619a08a80adc808au, "3440x1440 900", 3440, 1440, 900},
-		{0x15ab44c40c58a97eu, 0x9153a140fe206707u, "640x480 720", 640, 480, 720},
+		{0x1caed93f276895a1u, 0x619a08a80adc808au, "3440x1440 900", 900, 3440, 1440},
+		{0x15ab44c40c58a97eu, 0x9153a140fe206707u, "640x480 720", 720, 640, 480},
 	};
 	// Answers reduced to a smaller source and enlarged to a larger one.
 	static struct fixture const decodes[] = {
-		{0xdc22f9dd3cd6bafcu, 0x37c6f22cddf5d104u, "853x480 720", 853, 480, 720},
-		{0x47b36df8fc72ba8eu, 0x734fa59fcffc5ceeu, "3440x1440 1080", 3440, 1440, 1080},
+		{0xdc22f9dd3cd6bafcu, 0x37c6f22cddf5d104u, "853x480 720", 720, 853, 480},
+		{0x47b36df8fc72ba8eu, 0x734fa59fcffc5ceeu, "3440x1440 1080", 1080, 3440, 1440},
 	};
 	unsigned moved = 0;
 	uint32_t seed = 0;

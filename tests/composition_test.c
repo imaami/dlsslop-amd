@@ -58,10 +58,10 @@ enum kind {
 
 /** @brief One object of the fake device. */
 struct object {
-	void     *map;    //!< A memory's mapping, while it is mapped.
 	uint64_t  handle; //!< Its handle.
 	uint64_t  size;   //!< A buffer's or a memory's size, or an image's usage.
 	uint64_t  pool;   //!< A set's pool.
+	void     *map;    //!< A memory's mapping, while it is mapped.
 	enum kind kind;   //!< What it is.
 	uint32_t  live;   //!< Whether it is alive: 32 bits wide, which fills the padding.
 };
@@ -79,10 +79,12 @@ struct image_barrier {
 	uint32_t             images; //!< The call's image barriers.
 };
 
-/** @brief The fake device's state. ownership is a size_t, which fills the padding. */
+/** @brief The fake device's state. */
 static struct {
 	struct object        objects[16384]; //!< Every object handed out, in order.
 	struct image_barrier barriers[64];   //!< The first image barriers since the last mark.
+	size_t               ownership;      //!< Barriers that move a buffer to or from another family.
+	size_t               barrier_count;  //!< Image barriers since the last mark.
 	VkFormatFeatureFlags features;       //!< What every format's optimal tiling supports.
 	VkFormat             no_storage[2];  //!< Formats that cannot be storage images.
 	int                  fds[4];         //!< The descriptors vkGetMemoryFdKHR() made, open or -1.
@@ -99,8 +101,6 @@ static struct {
 	uint32_t             readbacks;      //!< Image-to-buffer copies recorded.
 	uint32_t             uploads;        //!< Buffer-to-image copies recorded.
 	uint32_t             fills;          //!< Buffer fills recorded.
-	size_t               ownership;      //!< Barriers that move a buffer to or from another family.
-	size_t               barrier_count;  //!< Image barriers since the last mark.
 } fake = { .fds = { -1, -1, -1, -1 } };
 
 /** @brief Hands out an object of a kind. */
@@ -1036,19 +1036,19 @@ moves (struct image_barrier const *b,
 
 #undef VALUE
 
-/** @brief An arrangement of the composition's surfaces. objects is a size_t, which fills the padding. */
+/** @brief An arrangement of the composition's surfaces. */
 struct arrangement {
 	char const *name;          //!< What it is called.
+	size_t      objects;       //!< The live objects after a build and both legs.
 	VkFormat    format;        //!< The swapchain's format.
 	float       working_scale; //!< The model's raster over the frame's.
+	uint32_t    bypass;        //!< composition_bypass.
+	uint32_t    leg1;          //!< The dispatches of leg 1.
+	uint32_t    leg2;          //!< The dispatches of leg 2.
 	bool        linear_hdr;    //!< The frame holds linear light.
 	bool        hdr_proxy;     //!< The proxy is float16.
 	bool        export_pair;   //!< The transport pair is exported.
 	bool        measured;      //!< The meter's reading is the white point.
-	uint32_t    bypass;        //!< composition_bypass.
-	uint32_t    leg1;          //!< The dispatches of leg 1.
-	uint32_t    leg2;          //!< The dispatches of leg 2.
-	size_t      objects;       //!< The live objects after a build and both legs.
 };
 
 /** @brief The arrangements, each built on 320x192 frames.
@@ -1062,12 +1062,12 @@ struct arrangement {
  * The raw bypass copies the model's answer and runs no resolve.
  */
 static struct arrangement const ARRANGEMENTS[] = {
-	{ "8-bit",          VK_FORMAT_B8G8R8A8_UNORM,      1.0f,  false, false, false, false, 0, 1, 1, 26 },
-	{ "8-bit sRGB 0.5", VK_FORMAT_R8G8B8A8_SRGB,       0.5f,  false, false, false, false, 0, 1, 1, 26 },
-	{ "linear float16", VK_FORMAT_R16G16B16A16_SFLOAT, 1.0f,  true,  true,  false, false, 0, 3, 1, 38 },
-	{ "linear 0.75",    VK_FORMAT_R16G16B16A16_SFLOAT, 0.75f, true,  false, false, true,  0, 4, 1, 41 },
-	{ "exported",       VK_FORMAT_B8G8R8A8_UNORM,      1.0f,  false, false, true,  false, 0, 1, 1, 26 },
-	{ "raw bypass",     VK_FORMAT_R8G8B8A8_UNORM,      1.0f,  false, false, false, false, 1, 1, 0, 26 }
+	{ "8-bit",          26, VK_FORMAT_B8G8R8A8_UNORM,      1.0f,  0, 1, 1, false, false, false, false },
+	{ "8-bit sRGB 0.5", 26, VK_FORMAT_R8G8B8A8_SRGB,       0.5f,  0, 1, 1, false, false, false, false },
+	{ "linear float16", 38, VK_FORMAT_R16G16B16A16_SFLOAT, 1.0f,  0, 3, 1, true,  true,  false, false },
+	{ "linear 0.75",    41, VK_FORMAT_R16G16B16A16_SFLOAT, 0.75f, 0, 4, 1, true,  false, false, true  },
+	{ "exported",       26, VK_FORMAT_B8G8R8A8_UNORM,      1.0f,  0, 1, 1, false, false, true,  false },
+	{ "raw bypass",     26, VK_FORMAT_R8G8B8A8_UNORM,      1.0f,  1, 1, 0, false, false, false, false }
 };
 
 /** @brief The frames' size. */

@@ -727,9 +727,10 @@ check_replaced (void)
 static void
 check_swept (void)
 {
+	// holds is 32 bits wide, which fills the padding.
 	static struct {
-		uint32_t flags; //!< shm_channel_open()'s flags.
-		bool     holds; //!< sweep_holds.
+		uint32_t flags; // shm_channel_open()'s flags
+		uint32_t holds; // sweep_holds
 	} const opens[] = {
 		{ SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE, false },
 		{ SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE, true  },
@@ -818,13 +819,13 @@ enum sweep_type {
 	SWEEP_FIFO,      //!< A FIFO.
 };
 
-/** @brief A file that a sweep finds. */
+/** @brief A file that a sweep finds. native is 16 bits wide, which fills the padding. */
 struct sweep_case {
 	char const *name;   //!< Its name.
 	uint32_t    hours;  //!< How long ago it was modified.
+	uint16_t    native; //!< Whether it stays in the native tools' default's directory.
 	uint8_t     type;   //!< enum sweep_type.
 	bool        shared; //!< Whether it stays in the shared default's directory.
-	bool        native; //!< Whether it stays in the native tools' default's directory.
 };
 
 /** @brief What a sweep finds: another protocol's channel, its socket and producer lock, old or
@@ -832,35 +833,35 @@ struct sweep_case {
  *         protocol's files; and other names, a creator's temporary name among them.
  */
 static struct sweep_case const SWEEP_CASES[] = {
-	{"shm-v30.bin",                 25, SWEEP_FILE,      false, false},
-	{"shm-v30.bin.sock",            25, SWEEP_SOCKET,    false, false},
-	{"shm-v30.bin.producer.lock",   25, SWEEP_FILE,      false, false},
-	{"shm-v30.bin.Ab9xYz",          25, SWEEP_FILE,      true,  true },
-	{"shm-v30.bin.Ab9xY",           25, SWEEP_FILE,      true,  true },
-	{"shm-v30.bin.lock",            25, SWEEP_FILE,      true,  true },
-	{"shm-v30.binx",                25, SWEEP_FILE,      true,  true },
-	{"shm-v29.bin",                 23, SWEEP_FILE,      true,  true },
-	{"shm-v29.bin.sock",            25, SWEEP_SOCKET,    true,  true },
-	{"shm-v29.bin.producer.lock",   25, SWEEP_FILE,      true,  true },
-	{"shm-v28.bin",                 25, SWEEP_LOCKED,    true,  true },
-	{"shm-v28.bin.sock",            25, SWEEP_SOCKET,    true,  true },
-	{"shm-v23.bin",                 25, SWEEP_HELD,      true,  true },
-	{"shm-v23.bin.producer.lock",   25, SWEEP_FILE,      true,  true },
-	{"shm-v27.bin.producer.lock",   25, SWEEP_FILE,      false, false},
-	{"shm-v27.bin.sock",            23, SWEEP_SOCKET,    true,  true },
-	{"shm-v26.bin",                 25, SWEEP_SYMLINK,   true,  true },
-	{"target",                      25, SWEEP_FILE,      true,  true },
-	{"shm-v25.bin",                 25, SWEEP_DIRECTORY, true,  true },
-	{"shm-v24.bin",                 25, SWEEP_FIFO,      true,  true },
-	{"shm-v1.bin",                  99, SWEEP_FILE,      false, false},
-	{"shm-v.bin",                   25, SWEEP_FILE,      true,  true },
-	{"shm.bin",                     25, SWEEP_FILE,      true,  false},
-	{"shm.bin.sock",                25, SWEEP_SOCKET,    true,  false},
-	{"shm.bin.producer.lock",       25, SWEEP_FILE,      true,  false},
-	{kShmChannelName ".sock",       25, SWEEP_SOCKET,    true,  true },
-	{kShmChannelName ".backup",     25, SWEEP_FILE,      true,  true },
-	{".shm-channel-0123456789abcdef", 25, SWEEP_FILE,    true,  true },
-	{"layer.log",                   25, SWEEP_FILE,      true,  true },
+	{"shm-v30.bin",                   25, false, SWEEP_FILE,      false},
+	{"shm-v30.bin.sock",              25, false, SWEEP_SOCKET,    false},
+	{"shm-v30.bin.producer.lock",     25, false, SWEEP_FILE,      false},
+	{"shm-v30.bin.Ab9xYz",            25, true,  SWEEP_FILE,      true },
+	{"shm-v30.bin.Ab9xY",             25, true,  SWEEP_FILE,      true },
+	{"shm-v30.bin.lock",              25, true,  SWEEP_FILE,      true },
+	{"shm-v30.binx",                  25, true,  SWEEP_FILE,      true },
+	{"shm-v29.bin",                   23, true,  SWEEP_FILE,      true },
+	{"shm-v29.bin.sock",              25, true,  SWEEP_SOCKET,    true },
+	{"shm-v29.bin.producer.lock",     25, true,  SWEEP_FILE,      true },
+	{"shm-v28.bin",                   25, true,  SWEEP_LOCKED,    true },
+	{"shm-v28.bin.sock",              25, true,  SWEEP_SOCKET,    true },
+	{"shm-v23.bin",                   25, true,  SWEEP_HELD,      true },
+	{"shm-v23.bin.producer.lock",     25, true,  SWEEP_FILE,      true },
+	{"shm-v27.bin.producer.lock",     25, false, SWEEP_FILE,      false},
+	{"shm-v27.bin.sock",              23, true,  SWEEP_SOCKET,    true },
+	{"shm-v26.bin",                   25, true,  SWEEP_SYMLINK,   true },
+	{"target",                        25, true,  SWEEP_FILE,      true },
+	{"shm-v25.bin",                   25, true,  SWEEP_DIRECTORY, true },
+	{"shm-v24.bin",                   25, true,  SWEEP_FIFO,      true },
+	{"shm-v1.bin",                    99, false, SWEEP_FILE,      false},
+	{"shm-v.bin",                     25, true,  SWEEP_FILE,      true },
+	{"shm.bin",                       25, false, SWEEP_FILE,      true },
+	{"shm.bin.sock",                  25, false, SWEEP_SOCKET,    true },
+	{"shm.bin.producer.lock",         25, false, SWEEP_FILE,      true },
+	{kShmChannelName ".sock",         25, true,  SWEEP_SOCKET,    true },
+	{kShmChannelName ".backup",       25, true,  SWEEP_FILE,      true },
+	{".shm-channel-0123456789abcdef", 25, true,  SWEEP_FILE,      true },
+	{"layer.log",                     25, true,  SWEEP_FILE,      true },
 };
 
 /** @brief Makes a file of a sweep's directory, modified some hours ago.

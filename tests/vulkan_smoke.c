@@ -609,15 +609,15 @@ require_support (VkPhysicalDevice physical,
  * composed last as layerFrames.
  */
 struct device {
-	VkPhysicalDevice physical;              //!< The physical device.
-	VkDevice         device;                //!< The device.
-	VkQueue          queue;                 //!< Its queue.
 	VkCommandPool    pool;                  //!< The command pool.
-	VkCommandBuffer  cb;                    //!< The frame's command buffer.
 	VkSemaphore      acquired[PRESENT_MAX]; //!< An acquire for each swapchain a present names.
 	VkSemaphore      rendered;              //!< The submit's signal, which the present waits on.
 	uint64_t         composed;              //!< The frames the layer composed.
 	uint64_t         presented;             //!< The frames presented.
+	VkPhysicalDevice physical;              //!< The physical device.
+	VkDevice         device;                //!< The device.
+	VkQueue          queue;                 //!< Its queue.
+	VkCommandBuffer  cb;                    //!< The frame's command buffer.
 };
 
 /** @brief Creates a device with one queue of the family.
@@ -1425,10 +1425,10 @@ two_devices (struct context const *c,
 
 /** @brief An instance with one device that presents to one surface. */
 struct presenter {
-	VkInstance       instance;  //!< The instance.
 	struct surface   surface;   //!< The surface.
 	struct device    device;    //!< The device.
 	struct swapchain swapchain; //!< The swapchain.
+	VkInstance       instance;  //!< The instance.
 };
 
 /** @brief Creates an instance with one device that presents to one surface of the given extent.

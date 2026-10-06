@@ -65,14 +65,14 @@ vk_check (VkResult    result,
 
 /** @brief The test's device and the composition pass on it. */
 struct context {
+	struct dlss_nr_pass   pass;           //!< The composition pass.
+	VkCommandPool         pool;           //!< The command pool.
 	struct instance_table instance_table; //!< The instance's entry points.
 	struct device_table   device_table;   //!< The device's.
-	struct dlss_nr_pass   pass;           //!< The composition pass.
 	VkInstance            instance;       //!< The instance.
 	VkPhysicalDevice      physical;       //!< The physical device.
 	VkDevice              device;         //!< The device.
 	VkQueue               queue;          //!< Its compute queue.
-	VkCommandPool         pool;           //!< The command pool.
 	VkCommandBuffer       cmd;            //!< The command buffer.
 };
 
@@ -498,9 +498,9 @@ struct options {
 	uint32_t hdr_proxy;    //!< HdrProxy; 2: display-encoded native HIP model input.
 	uint32_t debug_view;   //!< The debug view.
 	VkFormat proxy_format; //!< The proxy's format.
+	uint16_t reduced;      //!< Whether the model runs at half size.
 	bool     pq;           //!< Whether the frame is PQ.
 	bool     sdr;          //!< Whether the frame is display-referred.
-	uint16_t reduced;      //!< Whether the model runs at half size.
 };
 
 /** @brief The options of a run that changes nothing: linear HDR, at full size. */

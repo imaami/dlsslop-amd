@@ -827,20 +827,20 @@ log_child_wait (pid_t       child,
 }
 
 /** @brief A switch's value, and whether it is on. The switches do not depend on whether the layer
- *         was asked for. on is 64 bits wide, which fills the padding.
+ *         was asked for. on is as wide as a pointer, which fills the padding.
  */
 struct switch_case {
 	char const *value; //!< The value, or nullptr for none.
-	uint64_t    on;    //!< Whether the switch is on.
+	uintptr_t   on;    //!< Whether the switch is on: 1 if it is.
 };
 
 /** @brief DLSSNR_TIME_EVERY's value, and the interval. A prefix of digits counts, leading blanks and
  *         a sign are skipped, and anything not positive or beyond 32 bits is the default. interval
- *         is 64 bits wide, which fills the padding.
+ *         is as wide as a pointer, which fills the padding.
  */
 struct interval_case {
 	char const *value;    //!< The value, or nullptr for none.
-	uint64_t    interval; //!< The interval.
+	uintptr_t   interval; //!< The interval.
 };
 
 /** @brief The log's switches and its timing interval. */
@@ -848,8 +848,7 @@ static void
 check_log_switches (void)
 {
 	static struct switch_case const switches[] = {
-		{nullptr, false}, {"1", true}, {"10", true}, {"1x", true}, {"0", false}, {"", false}, {" 1", false},
-		{"yes", false}, {"true", false},
+		{nullptr, 0}, {"1", 1}, {"10", 1}, {"1x", 1}, {"0", 0}, {"", 0}, {" 1", 0}, {"yes", 0}, {"true", 0},
 	};
 	static struct interval_case const intervals[] = {
 		{nullptr, 30}, {"", 30}, {"0", 30}, {"-5", 30}, {"abc", 30}, {"1", 1}, {"45", 45}, {"7x", 7},
@@ -886,8 +885,9 @@ check_log_switches (void)
 		pid_t const child = log_child(&(struct env const){"DLSSNR_TIME_EVERY", c->value}, 1);
 		if (!child) {
 			uint32_t const got = log_time_interval();
-			require(got == c->interval, "DLSSNR_TIME_EVERY %s%s%s: log_time_interval() is %u, not %" PRIu64,
-			        q, value, q, got, c->interval);
+			require(got == c->interval,
+			        "DLSSNR_TIME_EVERY %s%s%s: log_time_interval() is %u, not %" PRIuPTR, q, value, q, got,
+			        c->interval);
 			log_child_exit();
 		}
 		log_child_wait(child, "DLSSNR_TIME_EVERY %s%s%s", q, value, q);

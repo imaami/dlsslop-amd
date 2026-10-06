@@ -24,45 +24,45 @@
 
 /** @brief What the traces show at a tier and preset. */
 struct traced {
-	size_t   launches;    //!< The launches per frame.
-	size_t   kernels;     //!< The distinct kernels among them.
 	uint64_t first;       //!< The FNV-1a 64 of the first frame's canonical launch list.
 	uint64_t later;       //!< That of a later frame.
 	uint64_t history;     //!< That of a later frame with a history; 0: not traced.
 	uint64_t uploads;     //!< That of the weight uploads that a launch reads (upload_text()).
+	size_t   launches;    //!< The launches per frame.
+	size_t   kernels;     //!< The distinct kernels among them.
 	uint32_t tier;        //!< The tier.
 	uint32_t performance; //!< 1 with --performance, else 0.
 };
 
 /** @brief The traced tiers and presets. */
 static struct traced const traced_frames[] = {
-	{250, 43, 0xa2dae6593e416beeu, 0x1f7c6f29d1c28a84u, 0x240a88c7eb4b11a6u, 0x0ee01bec21d79f03u, 720, 0},
-	{229, 43, 0x834bc420b12694dcu, 0x892cd4d1d3db66a5u, 0, 0xfd99729c88d07861u, 720, 1},
-	{254, 41, 0x32d0cdfcc08b67e2u, 0x0c823eac9f698da2u, 0, 0xf023500cbbedf100u, 900, 0},
-	{233, 41, 0xff9623a799b34742u, 0x42c5410c76dcbbb9u, 0, 0x38d51bf165148771u, 900, 1},
-	{254, 42, 0x18bff6041650c106u, 0xdffb8c9588486891u, 0x4f31a38dc45a9974u, 0xf023500cbbedf100u, 1080, 0},
-	{233, 42, 0x1f5cb0ebce0e78d8u, 0xfb73f9fd4c0be465u, 0, 0x38d51bf165148771u, 1080, 1},
+	{0xa2dae6593e416beeu, 0x1f7c6f29d1c28a84u, 0x240a88c7eb4b11a6u, 0x0ee01bec21d79f03u, 250, 43, 720, 0},
+	{0x834bc420b12694dcu, 0x892cd4d1d3db66a5u, 0, 0xfd99729c88d07861u, 229, 43, 720, 1},
+	{0x32d0cdfcc08b67e2u, 0x0c823eac9f698da2u, 0, 0xf023500cbbedf100u, 254, 41, 900, 0},
+	{0xff9623a799b34742u, 0x42c5410c76dcbbb9u, 0, 0x38d51bf165148771u, 233, 41, 900, 1},
+	{0x18bff6041650c106u, 0xdffb8c9588486891u, 0x4f31a38dc45a9974u, 0xf023500cbbedf100u, 254, 42, 1080, 0},
+	{0x1f5cb0ebce0e78d8u, 0xfb73f9fd4c0be465u, 0, 0x38d51bf165148771u, 233, 42, 1080, 1},
 };
 
 /** @brief Per tier, with either preset: the pool's buffers in creation order, ending with 0, and
  *         the FNV-1a 64 of the gather maps in the order the launches first read them. */
 struct traced_tier {
-	size_t   buffers[16]; //!< The buffers' bytes.
 	uint64_t gather[2];   //!< The maps' hashes.
+	size_t   buffers[16]; //!< The buffers' bytes.
 	size_t   tier;        //!< The tier.
 };
 
 /** @brief The traced tiers. */
 static struct traced_tier const traced_tiers[] = {
-	{{31457280, 31457280, 15728640, 15925248, 11796480, 3932160, 1966080, 7864320, 1966080, 491520,
-	  1474560, 3145728, 3145728, 3145728, 31457280},
-	 {0x9089c42dbe84bd25u, 0xa6bc7ecb30496925u}, 720},
-	{{49152000, 49152000, 24576000, 24821760, 18432000, 6144000, 3072000, 12288000, 3670016, 3670016,
-	  917504, 2752512, 4587520, 4587520, 49152000},
-	 {0x87ab221ca3c6a125u, 0xc8863327344d5b25u}, 900},
-	{{70778880, 70778880, 35389440, 35684352, 26542080, 8847360, 4423680, 17694720, 5242880, 5242880,
-	  1310720, 3932160, 5242880, 70778880},
-	 {0xd4e847b0089b1b25u, 0xe7cf48cabb5e6325u}, 1080},
+	{{0x9089c42dbe84bd25u, 0xa6bc7ecb30496925u},
+	 {31457280, 31457280, 15728640, 15925248, 11796480, 3932160, 1966080, 7864320, 1966080, 491520,
+	  1474560, 3145728, 3145728, 3145728, 31457280}, 720},
+	{{0x87ab221ca3c6a125u, 0xc8863327344d5b25u},
+	 {49152000, 49152000, 24576000, 24821760, 18432000, 6144000, 3072000, 12288000, 3670016, 3670016,
+	  917504, 2752512, 4587520, 4587520, 49152000}, 900},
+	{{0xd4e847b0089b1b25u, 0xe7cf48cabb5e6325u},
+	 {70778880, 70778880, 35389440, 35684352, 26542080, 8847360, 4423680, 17694720, 5242880, 5242880,
+	  1310720, 3932160, 5242880, 70778880}, 1080},
 };
 
 /** @brief Without and with --performance: the weights uploaded, their bytes, and the FNV-1a 64 of
@@ -76,15 +76,15 @@ static struct traced_tier const traced_tiers[] = {
  * it.
  */
 struct traced_weights {
+	uint64_t identity; //!< The hash of their names.
 	size_t   count;    //!< The weights.
 	size_t   bytes;    //!< Their bytes.
-	uint64_t identity; //!< The hash of their names.
 };
 
 /** @brief The traced weights without and with --performance. */
 static struct traced_weights const traced_weights[] = {
-	{236, 644222504, 0x675dbc4f8229a0b1u},
-	{224, 608027816, 0xec181f70bf0130c9u},
+	{0x675dbc4f8229a0b1u, 236, 644222504},
+	{0xec181f70bf0130c9u, 224, 608027816},
 };
 
 /** @brief The checks that failed. */
@@ -463,9 +463,9 @@ msgpack_ok (struct msgpack const *m)
 /** @brief A value, but for a container's items: a string's text, an unsigned integer, or a
  *         container's length. */
 struct msgpack_head {
+	uint64_t    value;  //!< A number, or a container's items.
 	char const *text;   //!< A string's text, not null-terminated, or nullptr.
 	size_t      length; //!< Its length.
-	uint64_t    value;  //!< A number, or a container's items.
 	enum : uint8_t {
 		MSGPACK_OTHER,
 		MSGPACK_STRING,
@@ -568,19 +568,19 @@ msgpack_skip (struct msgpack            *m,
 
 /** @brief A kernel argument as the metadata describes it: its kind and bytes. */
 struct abi_arg {
+	uint64_t    size;   //!< Its bytes.
 	char const *kind;   //!< Its value kind, not null-terminated, in the module's bytes.
 	size_t      length; //!< The kind's length.
-	uint64_t    size;   //!< Its bytes.
 };
 
 /** @brief A kernel as the metadata describes it: its explicit arguments and its largest group. */
 struct kernel_abi {
+	uint64_t        max_group; //!< The most threads of a group.
 	char const     *name;      //!< Its name, not null-terminated, in the module's bytes.
 	struct abi_arg *args;      //!< Its explicit arguments.
 	size_t          length;    //!< The name's length.
 	size_t          count;     //!< The number of arguments.
 	size_t          capacity;  //!< The arguments that their memory holds.
-	uint64_t        max_group; //!< The most threads of a group.
 };
 
 /** @brief The kernels of a module, and its bytes, which their names point into. */

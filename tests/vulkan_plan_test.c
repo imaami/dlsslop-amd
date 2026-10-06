@@ -1047,10 +1047,10 @@ struct binding {
  * or reaches into.
  */
 struct interface {
+	size_t         binding_count;            //!< The number of bindings.
+	size_t         push_count;               //!< The members.
 	uint32_t       offsets[INTERFACE_MOST];  //!< The members' offsets.
 	struct binding bindings[INTERFACE_MOST]; //!< The bindings by slot.
-	size_t         binding_count;            //!< Their number.
-	size_t         push_count;               //!< The members.
 	char           push[INTERFACE_MOST + 1]; //!< The members' types.
 };
 
@@ -1088,7 +1088,7 @@ used_at (struct interface const *face,
 	return false;
 }
 
-/** @brief What a SPIR-V module says of each id. */
+/** @brief What a SPIR-V module says of each id. reached is 16 bits wide, which fills the padding. */
 struct id_info {
 	uint32_t binding;       //!< OpDecorate Binding.
 	uint32_t set;           //!< OpDecorate DescriptorSet.
@@ -1098,13 +1098,13 @@ struct id_info {
 	uint32_t pointee;       //!< Its type.
 	uint32_t members;       //!< OpTypeStruct's first member type, as a word index.
 	uint32_t member_count;  //!< Its members.
+	uint16_t reached;       //!< Whether it is loaded, stored or chained into.
 	char     scalar;        //!< OpTypeInt's and OpTypeFloat's kind.
 	bool     has_binding;   //!< Whether it has a binding.
 	bool     is_image;      //!< Whether it is an OpTypeImage.
 	bool     is_element;    //!< Whether it is an array.
 	bool     buffer_block;  //!< OpDecorate BufferBlock.
 	bool     sampled_image; //!< OpTypeSampledImage.
-	bool     reached;       //!< Loaded, stored or chained into.
 };
 
 /** @brief A member offset of a struct (OpMemberDecorate Offset). */

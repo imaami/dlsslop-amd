@@ -453,12 +453,12 @@ check_activation_table (void)
 	{VULKAN_DIRECTORY_##directory_, block_, layer_, VULKAN_SUFFIX_##suffix_}
 
 /** @brief An entry that a recipe case reads, and its size in the real model. */
-#define ENTRY(directory_, block_, layer_, suffix_, bytes_) {SOURCE(directory_, block_, layer_, suffix_), bytes_}
+#define ENTRY(directory_, block_, layer_, suffix_, bytes_) {bytes_, SOURCE(directory_, block_, layer_, suffix_)}
 
 /** @brief The entries that the recipe cases read, with their sizes in the real model. */
 static struct {
-	struct vulkan_source source;
 	uint32_t             bytes;
+	struct vulkan_source source;
 } const ENTRIES[] = {
 	ENTRY(UNPACKED, 1, 0, MLP_CONTRACT, 4096),
 	ENTRY(UNPACKED, 1, 0, RESIDUAL_SCALE, 96),
@@ -518,18 +518,18 @@ static struct {
 
 /** @brief A recipe case: a segment and its digest. */
 #define CASE(bytes_, recipe_, flags_, directory_, block_, layer_, suffix_, rows_, cols_, index_, digest_) \
-	{{.bytes = bytes_, .index = index_, .rows = rows_, .cols = cols_, \
+	{UINT64_C(digest_), \
+	 {.bytes = bytes_, .index = index_, .rows = rows_, .cols = cols_, \
 	  .source = SOURCE(directory_, block_, layer_, suffix_), .recipe = VULKAN_RECIPE_##recipe_, \
-	  .flags = flags_}, \
-	 UINT64_C(digest_)}
+	  .flags = flags_}}
 
 /** @brief Segments as the network's plan makes them, each with the FNV-1a 64 of the bytes that
  *         upstream's NrSession::build (nr_graph.cpp at 3dfdddc, built with its rdna4.sh defines)
  *         packed for it from the synthetic pack of the real pack's names and sizes
  *         (vulkan_pack_synthetic_entry()). Offsets are the test's. */
 static struct {
-	struct vulkan_segment segment;
 	uint64_t              digest;
+	struct vulkan_segment segment;
 } const UPSTREAM_CASES[] = {
 	CASE(4096, ACTIVATIONS, 0, UNPACKED, 0, 0, NONE, 0, 0, 0, 0x8802ec9dcae156c8),
 	CASE(4096, MATRIX, REQUANTISE | NPAIR, PREBLOCK, 0, 0, MLP_EXPAND, 128, 32, 0, 0x4a1dd5bc7b7a043f),
@@ -596,8 +596,8 @@ static struct {
 
 /** @brief An entry's name in a buffer. */
 struct name {
+	size_t length;                          //!< The name's length.
 	char   text[VULKAN_WEIGHTS_NAME_BYTES]; //!< The name.
-	size_t length;                          //!< Its length.
 };
 
 /** @brief A source's name. */

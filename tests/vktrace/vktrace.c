@@ -698,20 +698,20 @@ SUPPORT_SORTED_MAP(device_map, struct device_data *, reallocate)
 
 /** @brief A memory allocation the trace knows. */
 struct memory_info {
-	void         *mapped;     //!< The application's mapping, or nullptr.
 	VkDeviceSize  size;       //!< Its bytes.
 	VkDeviceSize  map_offset; //!< Where the mapping starts.
 	VkDeviceSize  map_size;   //!< The mapping's bytes.
+	void         *mapped;     //!< The application's mapping, or nullptr.
 	uint32_t      flags;      //!< Its memory type's VkMemoryPropertyFlags.
 	VkBool32      external;   //!< Imported or exportable. 32 bits wide, which fills the padding.
 };
 
 /** @brief A buffer the trace knows. */
 struct buffer_info {
-	struct device_data *device;   //!< Its device.
 	VkDeviceMemory      memory;   //!< The memory bound to it, or VK_NULL_HANDLE.
 	VkDeviceSize        size;     //!< Its bytes.
 	VkDeviceSize        offset;   //!< Where in the memory.
+	struct device_data *device;   //!< Its device.
 	VkBufferUsageFlags  usage;    //!< Its usage.
 	uint32_t            owner;    //!< The queue family the last submitted ownership transfer gave it
 	                              //!< to; VK_QUEUE_FAMILY_IGNORED until one is seen.
@@ -722,16 +722,16 @@ struct buffer_info {
 
 /** @brief An image the trace knows. */
 struct image_info {
-	struct device_data *device;    //!< Its device.
 	VkDeviceMemory      memory;    //!< The memory bound to it, or VK_NULL_HANDLE.
+	struct device_data *device;    //!< Its device.
 	VkExtent3D          extent;    //!< Its extent.
 	VkFormat            format;    //!< Its format.
 	uint32_t            layers;    //!< Its array layers.
 	VkImageUsageFlags   usage;     //!< Its usage.
 	VkImageLayout       layout;    //!< Its layout after the last submitted barrier.
+	uint16_t            sparse;    //!< As buffer_info's. 16 bits wide, which fills the padding.
 	bool                swapchain; //!< A swapchain's image, or an image bound to the memory of one.
 	bool                external;  //!< Created or bound for external memory.
-	uint16_t            sparse;    //!< As buffer_info's. 16 bits wide, which fills the padding.
 };
 
 /** @brief A descriptor a set holds. */
@@ -748,8 +748,8 @@ SUPPORT_SORTED_MAP(slot_map, struct desc, reallocate)
 /** @brief A descriptor set layout the trace knows. */
 struct layout_info {
 	struct u32_map counts;   //!< The descriptor count of each binding number.
-	uint64_t       variable; //!< Nonzero when the last binding's count is given at allocation.
-	                         //!< 64 bits wide, which fills the padding.
+	uintptr_t      variable; //!< Nonzero when the last binding's count is given at allocation.
+	                         //!< As wide as a pointer, which fills the padding.
 };
 
 /** @brief A descriptor set the trace knows. */
@@ -812,8 +812,8 @@ key_list_remove (struct key_list *list,
 
 /** @brief What a command buffer recorded since it began. */
 struct cb_state {
-	struct device_data   *device;           //!< Its device.
 	VkPipeline            compute;          //!< The pipeline bound for compute.
+	struct device_data   *device;           //!< Its device.
 	struct key_list       sets;             //!< The sets bound for compute, by set number.
 	struct image_layouts  layouts;          //!< The layouts its image barriers set, in order.
 	struct buffer_owners  owners;           //!< Its ownership transfers of buffers, in order.
@@ -838,9 +838,9 @@ SUPPORT_SORTED_MAP(cb_map, struct cb_state, reallocate)
 
 /** @brief A submission whose host ranges are hashed once it is known to be complete. */
 struct pending {
-	VkQueue            queue;  //!< Its queue.
 	VkFence            fence;  //!< Its fence, or VK_NULL_HANDLE.
 	uint64_t           submit; //!< Its number.
+	VkQueue            queue;  //!< Its queue.
 	struct host_ranges ranges; //!< What it copies into host-visible memory.
 };
 
@@ -971,21 +971,21 @@ struct instance_data {
 
 /** @brief A device the trace knows. */
 struct device_data {
-	VkDevice                         device;           //!< The device.
-	PFN_vkSetDeviceLoaderData        set_loader_data;  //!< The loader's, or nullptr.
 	uint64_t                         submits;          //!< Its submits so far.
-	struct pendings                  pending;          //!< Its submissions with host ranges to hash.
+	VkPhysicalDeviceMemoryProperties memory;           //!< Its memory types and heaps.
 	// Content hashing: a command pool per queue family and a staging buffer, which hash_lock gives
 	// to one submitting thread at a time. A thread that destroys a buffer or an image, or frees
 	// memory, holds hash_lock too, so that nothing a hash copy reads goes away while the copy is
 	// recorded, submitted and waited for.
-	struct pool_map                  pools;            //!< The layer's command pools, by family.
 	VkBuffer                         staging;          //!< The staging buffer, or VK_NULL_HANDLE.
 	VkDeviceMemory                   staging_memory;   //!< Its memory, or VK_NULL_HANDLE.
 	VkDeviceSize                     staging_size;     //!< Its bytes; 0 while there is none.
+	struct pool_map                  pools;            //!< The layer's command pools, by family.
 	void                            *staging_mapped;   //!< Its mapping.
 	pthread_mutex_t                  hash_lock;        //!< Held while hashing and while destroying.
-	VkPhysicalDeviceMemoryProperties memory;           //!< Its memory types and heaps.
+	VkDevice                         device;           //!< The device.
+	PFN_vkSetDeviceLoaderData        set_loader_data;  //!< The loader's, or nullptr.
+	struct pendings                  pending;          //!< Its submissions with host ranges to hash.
 	// The next layer's functions.
 #define MEMBER(name, hook) PFN_##name name;
 	DEVICE_CALLS(MEMBER)
@@ -1066,10 +1066,10 @@ static struct list_map g_swapchain_images;
 
 /** @brief A name that VKTRACE_HASH selects: "img" or "buf" and a number. */
 struct hash_name {
-	char const *text;   //!< The item, in config's hash_items.
-	size_t      length; //!< Its length.
 	uint64_t    number; //!< The number it names, or UINT64_MAX for none: digits with a leading zero
 	                    //!< name nothing.
+	char const *text;   //!< The item, in config's hash_items.
+	size_t      length; //!< Its length.
 };
 
 /** @brief A range of submits that VKTRACE_HASH_SUBMITS selects. */
@@ -2730,7 +2730,7 @@ create_descriptor_set_layout (VkDevice                               device,
 		*u32_map_slot(&info.counts, b->binding, &added) = b->descriptorCount;
 		bool const flagged = flags && i < flags->bindingCount;
 		if (flagged && (flags->pBindingFlags[i] & VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT))
-			info.variable = true;
+			info.variable = 1;
 		put("%s%" PRIu32 ":%s*%" PRIu32 "@%s", i ? "," : "", b->binding, dtype_word(b->descriptorType).text,
 		    b->descriptorCount, hex(b->stageFlags).text);
 		if (b->pImmutableSamplers) {
@@ -4665,12 +4665,12 @@ get_swapchain_images_khr (VkDevice        device,
 
 /** @brief A region to hash after a submission: what the selectors named, and what it resolved to. */
 struct job {
-	struct text   label;            //!< The selectors that named it, joined with '|'.
 	uint64_t      handle;           //!< The buffer or image.
 	VkDeviceSize  offset;           //!< A buffer region's offset.
 	VkDeviceSize  size;             //!< Its size as named, or VK_WHOLE_SIZE.
 	VkDeviceSize  bytes;            //!< The bytes to copy.
 	uint64_t      fnv;              //!< The FNV-1a 64 of what was copied.
+	struct text   label;            //!< The selectors that named it, joined with '|'.
 	char const   *skip;             //!< Why it is not copied, or nullptr.
 	VkExtent3D    extent;           //!< An image's extent.
 	VkFormat      format;           //!< An image's format.

@@ -332,16 +332,16 @@ allocate_memory (VkDevice                     device,
 
 /** @brief The test's device, and the image that stands in for a swapchain's. */
 struct context {
+	VkCommandPool         pool;             //!< The command pool.
+	VkImage               swapchain;        //!< The swapchain image's stand-in.
+	VkDeviceMemory        swapchain_memory; //!< Its memory.
 	struct instance_table instance_table;   //!< The instance's entry points.
 	struct device_table   device_table;     //!< The device's, with the tracker's wrappers.
 	VkInstance            instance;         //!< The instance.
 	VkPhysicalDevice      physical;         //!< The physical device.
 	VkDevice              device;           //!< The device.
 	VkQueue               queue;            //!< Its compute queue.
-	VkCommandPool         pool;             //!< The command pool.
 	VkCommandBuffer       cmd;              //!< The command buffer.
-	VkImage               swapchain;        //!< The swapchain image's stand-in.
-	VkDeviceMemory        swapchain_memory; //!< Its memory.
 };
 
 /** @brief Destroys what a context holds, then leaves it empty.

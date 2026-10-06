@@ -250,10 +250,10 @@ submitted (char const *path)
 
 /** @brief What the thread that submits the waiting batch needs. */
 struct waiter {
-	struct probe const *probe;     //!< The device.
-	VkQueue             queue;     //!< The queue.
 	VkSemaphore         semaphore; //!< The timeline semaphore the batch waits for.
 	VkFence             fence;     //!< The batch's fence.
+	struct probe const *probe;     //!< The device.
+	VkQueue             queue;     //!< The queue.
 };
 
 /** @brief Submits a batch that waits for a timeline semaphore to reach 1.
@@ -283,10 +283,11 @@ wait_batch (void *arg)
 	return nullptr;
 }
 
-/** @brief What the thread that churns buffers needs. */
+/** @brief What the thread that churns buffers needs. stop is as wide as a pointer, which fills the
+ *         padding. */
 struct churn {
 	struct probe const *probe; //!< The device.
-	atomic_bool         stop;  //!< Set when it should stop.
+	atomic_uintptr_t    stop;  //!< Whether it should stop: 1 when it should.
 };
 
 /** @brief Makes buffers that live for up to 300 us each, half of them losing their memory first,
@@ -474,7 +475,7 @@ destroy_during_hash (struct probe const         *p,
 	vkFreeMemory(device, sparse_memory.memory, nullptr);
 	vkDestroySemaphore(device, semaphore, nullptr);
 	// The same at any moment, while each submission is hashed.
-	struct churn ch = {.probe = p, .stop = false};
+	struct churn ch = {.probe = p, .stop = 0};
 	pthread_t churner;
 	start(&churner, churn_buffers, &ch);
 	VkSubmitInfo const empty = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO};
@@ -483,7 +484,7 @@ destroy_during_hash (struct probe const         *p,
 		CHECK(vkQueueSubmit(queue, 1, &empty, fence));
 		CHECK(vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX));
 	}
-	atomic_store(&ch.stop, true);
+	atomic_store(&ch.stop, 1);
 	join(churner);
 	if (sparse)
 		printf("destroyed during hash, sparse=%016" PRIx64 "\n", fnv(filled, BYTES, FNV_BASIS));

@@ -184,8 +184,6 @@ check (VkResult    result,
 
 /** @brief What the load makes, destroyed once the device is idle. */
 struct load {
-	VkInstance            instance;   //!< The instance.
-	VkDevice              device;     //!< The device.
 	VkBuffer              buffer;     //!< The results, which nothing reads.
 	VkDeviceMemory        memory;     //!< Their memory.
 	VkDescriptorSetLayout set_layout; //!< The results' set's layout.
@@ -195,6 +193,8 @@ struct load {
 	VkDescriptorPool      pool;       //!< The pool of the results' set.
 	VkCommandPool         commands;   //!< The pool of the one command buffer.
 	VkFence               fence;      //!< Signalled by each submission.
+	VkInstance            instance;   //!< The instance.
+	VkDevice              device;     //!< The device.
 };
 
 /** @brief Destroys what a load holds once its device is idle, then leaves it empty.

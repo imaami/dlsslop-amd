@@ -133,15 +133,15 @@ static struct fake_answers const FAKE_KINDS[] = {
 	[FAKE_MUTE]         = { .type = EV_KEY, .mute = true }
 };
 
-/** @brief A file that answers evdev's ioctls as a device does. dead is 64 bits wide, which fills
- *         the padding.
+/** @brief A file that answers evdev's ioctls as a device does. dead is as wide as a pointer, which
+ *         fills the padding.
  */
 struct fake_device {
 	dev_t          dev;    //!< The file's device.
 	ino_t          ino;    //!< The file's inode.
+	uintptr_t      dead;   //!< Whether it is unplugged: every ioctl fails, as on the plain file it is.
 	uint32_t       probes; //!< How many times its event types were asked for.
 	enum fake_kind kind;   //!< What it claims to be.
-	uint64_t       dead;   //!< Whether it is unplugged: every ioctl fails, as on the plain file it is.
 };
 
 /** @brief The fake devices. */
@@ -755,7 +755,7 @@ check_keyboards (char const *parent)
 
 	// Once it is gone, it is closed and forgotten. Nothing else opens during the sweep, so its
 	// descriptor stays closed.
-	one->dead = true;
+	one->dead = 1;
 	hotkeys_rescan_evdev(&h, dir);
 	require(keyboard_count(&h) == 1 && !node_of(&h, 1) && !is_open(fd), "a keyboard that is gone was kept");
 
@@ -765,14 +765,14 @@ check_keyboards (char const *parent)
 	join(from, dir, "event21.new");
 	join(to, dir, "event21");
 	require(!rename(from, to), "cannot replace event21");
-	late->dead = true;
+	late->dead = 1;
 	hotkeys_rescan_evdev(&h, dir);
 	expect_log("[hotkey] picked up a keyboard that appeared later: %s/event21", dir);
 	require(keyboard_count(&h) == 1 && keyboard(&h, 21, replug) && replug->probes == 1,
 	        "a keyboard plugged in at the path of another was not opened");
 
 	// A keyboard that is gone while its node is still there closes, and its node is rejected.
-	replug->dead = true;
+	replug->dead = 1;
 	hotkeys_rescan_evdev(&h, dir);
 	require(!keyboard_count(&h) && rejected(&h, dir, 21), "a keyboard that is gone was not closed and rejected");
 

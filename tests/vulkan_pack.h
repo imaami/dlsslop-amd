@@ -59,12 +59,13 @@ vulkan_pack_synthetic_entry (char const *name,
                              uint8_t    *data,
                              size_t      bytes);
 
-/** @brief A model pack in memory, which vulkan_model_open() reads through /proc. */
+/** @brief A model pack in memory, which vulkan_model_open() reads through /proc. ok is 32 bits
+ *         wide, which fills the padding. */
 struct vulkan_pack {
-	char     path[32];    //!< /proc/self/fd/FD.
 	int      fd;          //!< The memory file, or -1.
 	uint32_t path_length; //!< The length of path.
-	bool     ok;          //!< Whether its path fit and every byte reached the file.
+	uint32_t ok;          //!< Whether its path fit and every byte reached the file.
+	char     path[32];    //!< /proc/self/fd/FD.
 };
 
 /** @brief Makes an empty model pack in memory.
@@ -149,9 +150,9 @@ vulkan_pack_model_bytes (struct vulkan_source const *source);
 
 /** @brief An entry that a plan reads, by name. */
 struct vulkan_pack_source {
-	char                 name[VULKAN_WEIGHTS_NAME_BYTES]; //!< Its name.
 	size_t               length;                          //!< The name's length.
 	struct vulkan_source source;                          //!< The entry.
+	char                 name[VULKAN_WEIGHTS_NAME_BYTES]; //!< Its name.
 };
 
 /** @brief The entries that a plan's segments read, each once, sorted by name.
