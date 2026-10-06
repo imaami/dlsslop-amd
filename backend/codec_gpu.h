@@ -31,9 +31,9 @@ struct codec_gpu {
 	size_t                       capacity;     //!< The bytes of proxy.
 	size_t                       pinned_bytes; //!< The bytes locked in each slot; 0 for none.
 	struct geometry              uploaded;     //!< The latest encode's geometry.
+	uint16_t                     pinning;      //!< 1 while the runtime can page-lock the slots, else 0.
 	bool                         fp16;         //!< The latest encode's proxy is RGBA16F, not RGBA8.
 	bool                         device;       //!< The latest encode's frames are device memory.
-	uint16_t                     pinning;      //!< 1 while the runtime can page-lock the slots, else 0.
 };
 
 /** @brief Makes a codec: its status word.

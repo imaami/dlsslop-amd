@@ -337,7 +337,7 @@ hip_network_enqueue (struct hip_network *network,
                      void               *output,
                      struct error       *e)
 {
-	network->frame = (struct hip_network_frame){rgba, history ? history : rgba, output, history != nullptr};
+	network->frame = (struct hip_network_frame){history != nullptr, rgba, history ? history : rgba, output};
 	// What every launch reads, read once instead of again after each call.
 	struct hip_api const *const api = network->api;
 	typeof (api->hipModuleLaunchKernel) const launch = api->hipModuleLaunchKernel;

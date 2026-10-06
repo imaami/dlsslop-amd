@@ -28,26 +28,26 @@
  *
  * network_recorder_init() makes one and network_recorder_fini() frees it; a zeroed one is empty.
  * Its runtime points at its device, so it is only ever initialized in place and never copied. The
- * device must have finished the recorder's work before the recorder is freed. external is 64 bits
- * wide, which fills the padding.
+ * device must have finished the recorder's work before the recorder is freed. external is as wide as
+ * a pointer, which fills the padding.
  */
 struct network_recorder {
 	struct vulkan_runtime runtime;     //!< The network; none built while its device is nullptr.
 	struct vulkan_plan    plan;        //!< The plan of an extent to build; width 0 for none.
 	struct vulkan_device  device;      //!< The device, whose queue takes the runtime's build.
-	struct vulkan_paths   paths;       //!< Where the network's files are, in copies.
-	char                 *copies;      //!< The paths' copies, one after another in one heap block.
 	uint64_t              storage;     //!< The device's storage buffers' limit.
 	/** @brief When the next line about a wait that ran out may be logged, in nanoseconds of
 	 *         CLOCK_MONOTONIC. */
 	uint64_t              next_log;
+	struct vulkan_paths   paths;       //!< Where the network's files are, in copies.
+	char                 *copies;      //!< The paths' copies, one after another in one heap block.
+	uintptr_t             external;    //!< Whether frames go through a caller's images, not buffers.
 	/** @brief The history's last frame submitted; width 0 for none since a build. */
 	struct vulkan_frame   last;
 	struct vulkan_frame   recorded;    //!< The last frame recorded; width 0 for none since a build.
 	struct vulkan_shape   shape;       //!< The shape that the runtime has.
 	uint32_t              rejected[2]; //!< The last extent rejected.
 	struct error          rejection;   //!< Why it was; empty for none.
-	uint64_t              external;    //!< Whether frames go through a caller's images, not buffers.
 };
 
 /** @brief Makes a recorder on a device, with no network built.

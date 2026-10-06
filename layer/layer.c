@@ -87,16 +87,16 @@ enum shm_map_flags : uint32_t {
  * shm_map_fini() unmaps and closes what the map holds, and leaves it empty.
  */
 struct shm_map {
+	double            retry_after_ms;     //!< When a heartbeat may end SHM_MAP_DEAD (log_now_ms()).
+	double            start_after_ms;     //!< start_worker()'s rate limit (log_now_ms()).
+	double            open_after_ms;      //!< shm_map_open()'s rate limit (log_now_ms()).
+	uint64_t          open_failure;       //!< The FNV-1a of the failure shm_map_open() last logged, or 0.
 	struct ShmHeader *hdr;                //!< The header, mapped; nullptr until shm_map_open().
 	uint8_t          *in_pixels;          //!< The input region, mapped.
 	uint8_t          *out_pixels;         //!< The output region, mapped.
 	char             *path;               //!< The file's path: the socket and the lock are beside it.
 	size_t            mapped_frame_bytes; //!< The size of each region's mapping.
 	size_t            path_length;        //!< The bytes of path.
-	double            retry_after_ms;     //!< When a heartbeat may end SHM_MAP_DEAD (log_now_ms()).
-	double            start_after_ms;     //!< start_worker()'s rate limit (log_now_ms()).
-	double            open_after_ms;      //!< shm_map_open()'s rate limit (log_now_ms()).
-	uint64_t          open_failure;       //!< The FNV-1a of the failure shm_map_open() last logged, or 0.
 	uint32_t          timeouts;           //!< The requests in a row that the helper did not answer.
 	uint32_t          last_control_seq;   //!< The header's controlSeq, as last seen.
 	uint32_t          last_heartbeat;     //!< The header's heartbeat, as last seen.
@@ -787,18 +787,18 @@ enum swapchain_state_flags : uint32_t {
  */
 struct swapchain_state {
 	struct composition         comp;             //!< The pass and its surfaces.
-	struct list                node;             //!< The state's hook in its device chain's swapchains.
-	struct device_table const *vk;               //!< The device's next-layer entry points.
-	VkDevice                   device;           //!< The device.
 	VkSwapchainKHR             handle;           //!< The swapchain.
-	VkImage                   *images;           //!< The swapchain's images.
-	VkSemaphore               *leg2_done;        //!< Per image, what leg 2 signals.
-	VkPipelineStageFlags      *wait_stages;      //!< The first submit's wait stages, reused.
 	VkFence                    fence_leg1;       //!< Leg 1's fence.
 	VkFence                    fence_leg2;       //!< Leg 2's fence.
 	VkCommandPool              pool;             //!< The pool of cb.
-	VkCommandBuffer            cb;               //!< Both legs' command buffer.
 	double                     offer_expires;    //!< When the offer counts as refused (log_now_ms()).
+	struct list                node;             //!< The state's hook in its device chain's swapchains.
+	struct device_table const *vk;               //!< The device's next-layer entry points.
+	VkDevice                   device;           //!< The device.
+	VkImage                   *images;           //!< The swapchain's images.
+	VkSemaphore               *leg2_done;        //!< Per image, what leg 2 signals.
+	VkPipelineStageFlags      *wait_stages;      //!< The first submit's wait stages, reused.
+	VkCommandBuffer            cb;               //!< Both legs' command buffer.
 	uint32_t                   image_count;      //!< The entries of images and leg2_done.
 	uint32_t                   family;           //!< The present queue's family.
 	uint32_t                   hdr_kind;         //!< enum HdrKind of its format and colour space.
@@ -916,9 +916,11 @@ enum device_chain_flags : uint32_t {
  * closed.
  */
 struct device_chain {
+	struct shm_map             shm;                    //!< The channel.
+	uint64_t                   frames_composed;        //!< The frames composed.
+	uint64_t                   frames_passed_through;  //!< The frames presented untouched.
 	struct list                node;                   //!< The chain's hook in g_devices.
 	struct device_table        table;                  //!< The next layer's device entry points.
-	struct shm_map             shm;                    //!< The channel.
 	struct list                swapchains;             //!< The swapchain_states the layer tracks.
 	struct list                queue_families;         //!< The device_queues of the game's queues.
 	pthread_mutex_t            lock;                   //!< Guards swapchains, queues and presents.
@@ -930,8 +932,6 @@ struct device_chain {
 	struct DlsslopNetwork     *in_layer;               //!< The in-layer network, once it opened.
 	struct swapchain_state    *in_layer_last;          //!< The swapchain whose frame last reached it.
 	struct device_queue       *queue_store;            //!< A device_queue per queue of the device.
-	uint64_t                   frames_composed;        //!< The frames composed.
-	uint64_t                   frames_passed_through;  //!< The frames presented untouched.
 	uint32_t                   queue_store_count;      //!< The entries of queue_store.
 	uint32_t                   queue_store_used;       //!< The entries of queue_store in use.
 	uint32_t                   in_layer_family;        //!< The queue family the network opened on.
@@ -1235,9 +1235,9 @@ wait_device_idle (struct device_chain *dc)
  * raw. The record is global rather than per-device because the overlay builds its own VkDevice.
  */
 struct primary_swap {
-	VkDevice       device;    //!< The swapchain's device.
 	VkSwapchainKHR swapchain; //!< The swapchain, or VK_NULL_HANDLE.
 	uint64_t       area;      //!< Its width times its height.
+	VkDevice       device;    //!< The swapchain's device.
 };
 
 static struct primary_swap g_primary; //!< Under g_primary_mutex.
@@ -3449,8 +3449,8 @@ vkEnumerateInstanceExtensionProperties (char const            *pLayerName,
 	return VK_SUCCESS;
 }
 
-/** @brief Which queries answer a hook. */
-enum hook_scope {
+/** @brief Which queries answer a hook; as wide as a pointer, which fills struct hook's padding. */
+enum hook_scope : uintptr_t {
 	HOOK_INSTANCE, //!< vkGetInstanceProcAddr.
 	HOOK_DEVICE,   //!< vkGetInstanceProcAddr and vkGetDeviceProcAddr.
 	HOOK_QUEUE     //!< Both, while the in-layer network is requested.
@@ -3460,7 +3460,7 @@ enum hook_scope {
 struct hook {
 	char const         *name;  //!< The function's name.
 	PFN_vkVoidFunction  fn;    //!< The layer's function.
-	uint64_t            scope; //!< An enum hook_scope.
+	enum hook_scope     scope; //!< Which queries answer it.
 };
 
 /** @brief The functions the layer answers for.

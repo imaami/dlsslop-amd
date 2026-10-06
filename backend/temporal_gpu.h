@@ -46,9 +46,9 @@ struct temporal_gpu {
 	unsigned                     grid;                            //!< Their spacing: 2^grid pixels a vector.
 	unsigned                     passes;                          //!< Their passes.
 	unsigned                     completed;                       //!< The frame's passes done so far.
+	uint16_t                     level_count;                     //!< The levels allocated; 0 without buffers.
 	bool                         valid;                           //!< Whether the previous frame is a history.
 	bool                         pending;                         //!< Whether a frame is in progress.
-	uint16_t                     level_count;                     //!< The levels allocated; 0 without buffers.
 };
 
 /** @brief Makes a temporal state with no buffers.

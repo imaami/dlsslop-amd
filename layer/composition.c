@@ -1219,14 +1219,14 @@ composition_model_extent (uint32_t                                 width,
 
 /** @brief What a frame holds, as composition_prepare() builds for it. */
 struct frame_domain {
-	char const *log;  //!< What the build's log line calls it.
 	uint64_t    flag; //!< Its flag in struct composition.
+	char const *log;  //!< What the build's log line calls it.
 };
 
 /** @brief The frame's domain, by whether it holds linear light. */
 static struct frame_domain const FRAME_DOMAINS[2] = {
-	{ "display-referred", 0 },
-	{ "linear HDR",       COMPOSITION_LINEAR_HDR }
+	{ 0,                      "display-referred" },
+	{ COMPOSITION_LINEAR_HDR, "linear HDR" }
 };
 
 /** @brief The surfaces that cross, as composition_prepare() builds them. */

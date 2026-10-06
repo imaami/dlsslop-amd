@@ -58,10 +58,10 @@ struct capture_metadata {
  */
 struct capture_writer {
 	struct capture_metadata metadata[CAPTURE_WRITER_FRAMES]; //!< Each frame written so far.
+	uint64_t                control_seq;                     //!< The control sequence of the request.
 	char                   *batch_dir;                       //!< The batch's directory, or nullptr.
 	size_t                  batch_length;                    //!< The length of batch_dir.
 	size_t                  batch_name;                      //!< Where the batch's own name starts in batch_dir.
-	uint64_t                control_seq;                     //!< The control sequence of the request.
 	uint32_t                remaining;                       //!< Frames still to write; 0: idle.
 	uint32_t                index;                           //!< Frames written, and the next one's number.
 };

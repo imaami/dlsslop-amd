@@ -821,11 +821,11 @@ compilers (void)
  * padding.
  */
 struct compile {
+	VkPipelineCache                 cache;          //!< The pipeline cache, or VK_NULL_HANDLE.
 	char const                     *shaders;        //!< The network's SPIR-V directory.
 	size_t const                   *which;          //!< The pipelines to make.
 	struct vulkan_runtime_pipeline *pipelines;      //!< Every pipeline, by index.
 	VkDevice                        device;         //!< The device.
-	VkPipelineCache                 cache;          //!< The pipeline cache, or VK_NULL_HANDLE.
 	size_t                          shaders_length; //!< The length of the directory's path.
 	size_t                          count;          //!< The number of pipelines to make.
 	atomic_size_t                   next;           //!< The next of which to take.
@@ -1093,14 +1093,14 @@ settle (VkImageMemoryBarrier              *layouts,
 }
 
 /** @brief What a build's submission uses, and frees once it has run: never while the device may
- *         still read it, so a submission that is not known to have ended leaks it. running is 64
- *         bits wide, which fills the padding. */
+ *         still read it, so a submission that is not known to have ended leaks it. running is as
+ *         wide as a pointer, which fills the padding. */
 struct setup {
 	struct vulkan_runtime_buffer staging; //!< The weights' upload.
 	VkCommandPool                pool;    //!< The commands' pool.
-	VkCommandBuffer              cmd;     //!< The commands.
 	VkFence                      fence;   //!< The submission's fence.
-	uint64_t                     running; //!< Whether the submission may still run.
+	VkCommandBuffer              cmd;     //!< The commands.
+	uintptr_t                    running; //!< Whether the submission may still run: 1 if it may.
 };
 
 /** @brief Frees what a build's submission used, unless it may still run.
@@ -1240,9 +1240,9 @@ struct image_descriptor {
 /** @brief What a set holds: the buffers that its pipeline names, and its images, sampled with a
  *         sampler or stored into without. */
 struct set_descriptor {
+	struct image_descriptor images[SET_IMAGES]; //!< Its images, in binding order.
 	VkDescriptorSet        *set;                //!< Receives the set.
 	size_t                  pipeline;           //!< The pipeline it is for.
-	struct image_descriptor images[SET_IMAGES]; //!< Its images, in binding order.
 };
 
 /** @brief An image as a set binds it to be stored into.
@@ -1302,7 +1302,7 @@ make_sets (struct vulkan_runtime *rt,
 		if (!o->pipelines[k].pipeline)
 			continue;
 		struct set_descriptor *const set = &sets[n++];
-		*set = (struct set_descriptor){&o->kernel_sets[k], k};
+		*set = (struct set_descriptor){.set = &o->kernel_sets[k], .pipeline = k};
 		switch (VULKAN_PLAN_KERNELS[k].images) {
 		case VULKAN_IMAGES_NONE:
 			break;
@@ -1317,23 +1317,42 @@ make_sets (struct vulkan_runtime *rt,
 		}
 	}
 	if (s->passes > 1) {
-		sets[n++] = (struct set_descriptor){&o->alpha_sets[0], VULKAN_RUNTIME_ALPHA,
-		                                    {stored(&o->answer), first}};
+		sets[n++] = (struct set_descriptor){
+			.images   = {stored(&o->answer), first},
+			.set      = &o->alpha_sets[0],
+			.pipeline = VULKAN_RUNTIME_ALPHA,
+		};
 		if (s->stages)
-			sets[n++] = (struct set_descriptor){&o->alpha_sets[1], VULKAN_RUNTIME_ALPHA,
-			                                    {stored(&o->scratch), first}};
+			sets[n++] = (struct set_descriptor){
+				.images   = {stored(&o->scratch), first},
+				.set      = &o->alpha_sets[1],
+				.pipeline = VULKAN_RUNTIME_ALPHA,
+			};
 	}
 	if (s->stages) {
-		sets[n++] = (struct set_descriptor){&o->stage_sets[0], VULKAN_RUNTIME_STAGES,
-		                                    {stored(&o->answer), first, stored(&o->scratch)}};
-		sets[n++] = (struct set_descriptor){&o->stage_sets[1], VULKAN_RUNTIME_STAGES,
-		                                    {stored(&o->scratch), first, stored(&o->answer)}};
+		sets[n++] = (struct set_descriptor){
+			.images   = {stored(&o->answer), first, stored(&o->scratch)},
+			.set      = &o->stage_sets[0],
+			.pipeline = VULKAN_RUNTIME_STAGES,
+		};
+		sets[n++] = (struct set_descriptor){
+			.images   = {stored(&o->scratch), first, stored(&o->answer)},
+			.set      = &o->stage_sets[1],
+			.pipeline = VULKAN_RUNTIME_STAGES,
+		};
 	}
-	sets[n++] = (struct set_descriptor){&o->verdict_set, VULKAN_RUNTIME_VERDICT};
-	sets[n++] = (struct set_descriptor){&o->fallback_sets[0], VULKAN_RUNTIME_FALLBACK, {target, first}};
+	sets[n++] = (struct set_descriptor){.set = &o->verdict_set, .pipeline = VULKAN_RUNTIME_VERDICT};
+	sets[n++] = (struct set_descriptor){
+		.images   = {target, first},
+		.set      = &o->fallback_sets[0],
+		.pipeline = VULKAN_RUNTIME_FALLBACK,
+	};
 	if (s->stages)
-		sets[n++] = (struct set_descriptor){&o->fallback_sets[1], VULKAN_RUNTIME_FALLBACK,
-		                                    {stored(&o->scratch), first}};
+		sets[n++] = (struct set_descriptor){
+			.images   = {stored(&o->scratch), first},
+			.set      = &o->fallback_sets[1],
+			.pipeline = VULKAN_RUNTIME_FALLBACK,
+		};
 	if (s->motion) {
 		for (uint32_t p = 0; p < 2; ++p) {
 			for (uint32_t k = 0; k < VULKAN_RUNTIME_LEVELS; ++k) {
@@ -1343,23 +1362,35 @@ make_sets (struct vulkan_runtime *rt,
 					&o->luma[p][k ? k - 1 : VULKAN_RUNTIME_LEVELS - 1];
 				struct vulkan_runtime_image const *const coarser =
 					&o->flow[k + 1 < VULKAN_RUNTIME_LEVELS ? k + 1 : k];
-				sets[n++] = (struct set_descriptor){&o->luma_sets[p][k], VULKAN_RUNTIME_LUMA,
-				                                    {frame, stored(finer), stored(&o->luma[p][k])}};
-				sets[n++] = (struct set_descriptor){&o->flow_sets[p][k], VULKAN_RUNTIME_FLOW,
-				                                    {stored(&o->luma[p][k]), stored(&o->luma[1 - p][k]),
-				                                     stored(coarser), stored(&o->flow[k])}};
+				sets[n++] = (struct set_descriptor){
+					.images   = {frame, stored(finer), stored(&o->luma[p][k])},
+					.set      = &o->luma_sets[p][k],
+					.pipeline = VULKAN_RUNTIME_LUMA,
+				};
+				sets[n++] = (struct set_descriptor){
+					.images   = {stored(&o->luma[p][k]), stored(&o->luma[1 - p][k]),
+					             stored(coarser), stored(&o->flow[k])},
+					.set      = &o->flow_sets[p][k],
+					.pipeline = VULKAN_RUNTIME_FLOW,
+				};
 			}
 		}
 		// A pass reads history c and writes the next frame's into the other or, with later passes,
 		// into the second output.
 		for (uint32_t c = 0; c < (s->pingpong ? 2u : 1u); ++c) {
 			struct vulkan_runtime_image const *const next = s->pingpong ? &o->history[c ^ 1] : &o->second;
-			sets[n++] = (struct set_descriptor){&o->pre_sets[c], temporal_pre(rt),
-			                                    {frame, linear(o, &o->flow[0]), linear(o, &o->history[c]),
-			                                     linear(o, &o->depth)}};
-			sets[n++] = (struct set_descriptor){&o->post_sets[c], VULKAN_RUNTIME_POST,
-			                                    {target, stored(next), frame, linear(o, &o->flow[0]),
-			                                     linear(o, &o->history[c])}};
+			sets[n++] = (struct set_descriptor){
+				.images   = {frame, linear(o, &o->flow[0]), linear(o, &o->history[c]),
+				             linear(o, &o->depth)},
+				.set      = &o->pre_sets[c],
+				.pipeline = temporal_pre(rt),
+			};
+			sets[n++] = (struct set_descriptor){
+				.images   = {target, stored(next), frame, linear(o, &o->flow[0]),
+				             linear(o, &o->history[c])},
+				.set      = &o->post_sets[c],
+				.pipeline = VULKAN_RUNTIME_POST,
+			};
 		}
 	}
 	// The pre and post blocks of later passes, which read history 0 and store into the answer: in
@@ -1368,16 +1399,28 @@ make_sets (struct vulkan_runtime *rt,
 	size_t const post = s->motion ? VULKAN_RUNTIME_POST : rt->steps[rt->step_count - 1].kernel;
 	bool const later = s->external && s->passes > 1;
 	if (later && s->motion) {
-		sets[n++] = (struct set_descriptor){&o->later_sets[0], pre,
-		                                    {input, linear(o, &o->flow[0]), linear(o, &o->history[0]),
-		                                     linear(o, &o->depth)}};
-		sets[n++] = (struct set_descriptor){&o->later_sets[1], post,
-		                                    {stored(&o->answer), stored(&o->second), input,
-		                                     linear(o, &o->flow[0]), linear(o, &o->history[0])}};
+		sets[n++] = (struct set_descriptor){
+			.images   = {input, linear(o, &o->flow[0]), linear(o, &o->history[0]), linear(o, &o->depth)},
+			.set      = &o->later_sets[0],
+			.pipeline = pre,
+		};
+		sets[n++] = (struct set_descriptor){
+			.images   = {stored(&o->answer), stored(&o->second), input, linear(o, &o->flow[0]),
+			             linear(o, &o->history[0])},
+			.set      = &o->later_sets[1],
+			.pipeline = post,
+		};
 	} else if (later) {
-		sets[n++] = (struct set_descriptor){&o->later_sets[0], pre, {input}};
-		sets[n++] = (struct set_descriptor){&o->later_sets[1], post,
-		                                    {stored(&o->answer), stored(&o->second), input}};
+		sets[n++] = (struct set_descriptor){
+			.images   = {input},
+			.set      = &o->later_sets[0],
+			.pipeline = pre,
+		};
+		sets[n++] = (struct set_descriptor){
+			.images   = {stored(&o->answer), stored(&o->second), input},
+			.set      = &o->later_sets[1],
+			.pipeline = post,
+		};
 	}
 	// A build in image mode binds none of the caller's images: the sets that would bind them are left
 	// out until a reshape binds them.
@@ -2254,7 +2297,7 @@ end_setup (struct vulkan_runtime *rt,
 	if (device->unlock)
 		device->unlock(device->context);
 	TRY(vulkan_check(submitted, "submit the network's build", e));
-	setup->running = true;
+	setup->running = 1;
 	VkResult const waited = vkWaitForFences(d, 1, &fence, VK_TRUE, UINT64_C(30000000000));
 	if (waited != VK_SUCCESS) {
 		// The device may still read what the build made: it stays.
@@ -2262,7 +2305,7 @@ end_setup (struct vulkan_runtime *rt,
 		log_line(device, "the network's build did not finish; its memory is left to the device");
 		return vulkan_check(waited, "wait for the network's build", e);
 	}
-	setup->running = false;
+	setup->running = 0;
 	return ERROR_NONE;
 }
 

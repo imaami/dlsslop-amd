@@ -463,6 +463,8 @@ struct vulkan_value {
  * Zeroed, it is no plan: a plan's width is never 0.
  */
 struct vulkan_plan {
+	uint64_t               values_end;    //!< Where the values end in the arena.
+	uint64_t               arena_bytes;   //!< The arena's bytes.
 	struct vulkan_step    *steps;         //!< The dispatches.
 	uint32_t              *push;          //!< Their push words.
 	struct vulkan_segment *segments;      //!< The weight blob's segments in offset order.
@@ -475,8 +477,6 @@ struct vulkan_plan {
 	size_t                 table_count;   //!< The number of table words.
 	size_t                 value_count;   //!< The number of values.
 	size_t                 timeout_count; //!< The number of timeouts.
-	uint64_t               values_end;    //!< Where the values end in the arena.
-	uint64_t               arena_bytes;   //!< The arena's bytes.
 	uint32_t               width;         //!< The frames' width.
 	uint32_t               height;        //!< Their height.
 	uint32_t               work_width;    //!< The working extent's width.

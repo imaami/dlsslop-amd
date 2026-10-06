@@ -67,10 +67,10 @@ struct hip_network_launch;
 /** @brief A frame's own arguments, which the bound arguments point to. HIP copies each argument as
  *         a launch is queued, so the next frame may change them. */
 struct hip_network_frame {
+	uint64_t temporal; //!< 1 when it has a history, else 0; 8 bytes, as every argument's value.
 	void    *rgba;     //!< The frame's input.
 	void    *history;  //!< Its history, or its input when it has none.
 	void    *output;   //!< Its RGB output.
-	uint64_t temporal; //!< 1 when it has a history, else 0; 8 bytes, as every argument's value.
 };
 
 /** @brief A tier's network: its pool buffers and gather maps, and each launch of its plan with the
@@ -90,6 +90,7 @@ struct hip_network_frame {
  * bound arguments point into the network, so it is only ever initialized in place and never copied.
  */
 struct hip_network {
+	struct hip_network_frame   frame;        //!< The latest frame's own arguments.
 	struct hip_api const      *api;          //!< The runtime; nullptr when not built.
 	struct hip_model const    *model;        //!< The model whose kernels and weights it binds.
 	void                      *stream;       //!< The stream every launch is queued on.
@@ -101,7 +102,6 @@ struct hip_network {
 	size_t                     buffer_count; //!< The buffers allocated.
 	size_t                     launch_count; //!< The launches.
 	size_t                     bytes;        //!< The device memory of the buffers and maps.
-	struct hip_network_frame   frame;        //!< The latest frame's own arguments.
 	size_t                     warm;         //!< Which argv of a launch a frame uses: 0 for the first, then 1.
 };
 

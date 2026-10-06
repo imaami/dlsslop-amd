@@ -107,9 +107,9 @@ struct composition_image {
 struct composition_host_buffer {
 	VkBuffer       buffer;     //!< The buffer.
 	VkDeviceMemory memory;     //!< Its memory.
+	VkDeviceSize   allocation; //!< Exported device-local memory: its size; otherwise 0.
 	void          *mapped;     //!< The memory, mapped; nullptr for exported memory.
 	size_t         size;       //!< The buffer's size in bytes.
-	VkDeviceSize   allocation; //!< Exported device-local memory: its size; otherwise 0.
 };
 
 /** @brief The state that struct composition records in its flags. */
@@ -164,11 +164,6 @@ struct composition {
 	struct composition_host_buffer  download;                //!< The proxy, for the model.
 	struct composition_host_buffer  upload;                  //!< The model's answer.
 	struct composition_host_buffer  capture_buf;             //!< A capture pair: frame, then result.
-	struct device_table const      *vk;                      //!< The device's next-layer entry points.
-	struct instance_table const    *instance;                //!< The instance's next-layer entry points.
-	char const                     *reason;                  //!< Why it cannot run; nullptr while it can.
-	VkDevice                        device;                  //!< The device.
-	VkPhysicalDevice                physical_device;         //!< The device's physical device.
 	VkBuffer                        meter_state;             //!< The meter's device-local state.
 	VkDeviceMemory                  meter_state_memory;      //!< The state's memory.
 	VkPipeline                      meter_pipeline;          //!< The meter's reduce pass.
@@ -179,6 +174,11 @@ struct composition {
 	VkSampler                       meter_sampler;           //!< The sampler it reads the grid with.
 	uint64_t                        flags;                   //!< enum composition_flags.
 	uint64_t                        generation;              //!< The surfaces' build, unique; 0: none.
+	struct device_table const      *vk;                      //!< The device's next-layer entry points.
+	struct instance_table const    *instance;                //!< The instance's next-layer entry points.
+	char const                     *reason;                  //!< Why it cannot run; nullptr while it can.
+	VkDevice                        device;                  //!< The device.
+	VkPhysicalDevice                physical_device;         //!< The device's physical device.
 	uint32_t                        width;                   //!< The frame's width.
 	uint32_t                        height;                  //!< The frame's height.
 	uint32_t                        model_w;                 //!< The model's width.

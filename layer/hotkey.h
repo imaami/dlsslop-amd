@@ -51,10 +51,10 @@ enum hotkeys_flags : uint64_t {
  * member would leave.
  */
 struct hotkeys {
-	struct hotkey_node *nodes;                   //!< /dev/input's event nodes; hotkey_priv.h.
-	struct hotkey_x11  *x11;                     //!< The XInput2 backend, if it works; hotkey_priv.h.
 	double              last_scan;               //!< log_now_ms() of the last look at /dev/input.
 	uint64_t            flags;                   //!< enum hotkeys_flags.
+	struct hotkey_node *nodes;                   //!< /dev/input's event nodes; hotkey_priv.h.
+	struct hotkey_x11  *x11;                     //!< The XInput2 backend, if it works; hotkey_priv.h.
 	uint32_t            node_count;              //!< The entries of nodes.
 	uint32_t            pending_total;           //!< Presses not answered yet, of every key.
 	uint8_t             pending[HOTKEYS_CODES];  //!< Presses not answered yet, per key, at most 255.

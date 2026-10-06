@@ -43,19 +43,19 @@ struct vulkan_network_pair {
 struct vulkan_network {
 	struct network_recorder          recorder; //!< The network; empty until the device is made.
 	VkPhysicalDeviceMemoryProperties memory;   //!< The device's memory.
-	VkPhysicalDeviceIDProperties     ids;      //!< The device's and its driver's UUIDs.
 	/** @brief Device-local frames that the layer exported, a proxy/answer pair per import slot. */
 	struct vulkan_network_pair       imported[VULKAN_NETWORK_IMPORT_SLOTS];
 	struct vulkan_network_buffer     upload;   //!< The host transport's proxy.
 	struct vulkan_network_buffer     download; //!< The host transport's answer.
+	VkCommandPool                    pool;     //!< The pool of cmd.
+	VkFence                          fence;    //!< Each frame's end.
+	VkQueryPool                      queries;  //!< Each frame's four timestamps.
+	VkPhysicalDeviceIDProperties     ids;      //!< The device's and its driver's UUIDs.
 	VkInstance                       instance; //!< The instance.
 	VkPhysicalDevice                 physical; //!< The physical device.
 	VkDevice                         device;   //!< The device.
 	VkQueue                          queue;    //!< The device's queue of family.
-	VkCommandPool                    pool;     //!< The pool of cmd.
 	VkCommandBuffer                  cmd;      //!< Each frame's commands.
-	VkFence                          fence;    //!< Each frame's end.
-	VkQueryPool                      queries;  //!< Each frame's four timestamps.
 	struct vulkan_network_times      times;    //!< The times of the last frame that had timestamps.
 	float                            period;   //!< A timestamp's period in nanoseconds.
 	uint32_t                         family;   //!< The queue's family.

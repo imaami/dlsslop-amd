@@ -60,6 +60,7 @@ struct vulkan_physical_functions {
  * loader's.
  */
 struct vulkan_device {
+	VkPhysicalDeviceMemoryProperties memory;    //!< The physical device's memory.
 	VkInstance                       instance;  //!< The device's instance.
 	VkPhysicalDevice                 physical;  //!< Its physical device.
 	VkDevice                         device;    //!< The device.
@@ -69,7 +70,6 @@ struct vulkan_device {
 	void                            *context;   //!< What lock and unlock take.
 	vulkan_device_log_fn            *log;       //!< Where the runtime's log lines go, or nullptr: nowhere.
 	struct vulkan_physical_functions functions; //!< The physical-device queries.
-	VkPhysicalDeviceMemoryProperties memory;    //!< The physical device's memory.
 	uint32_t                         family;    //!< The queue's family.
 };
 
@@ -172,7 +172,6 @@ struct vulkan_runtime_objects {
 	struct vulkan_runtime_buffer   params;                                   //!< The motion parameters.
 	/** @brief The verdict: the fallback's grid, which the host reads mapped at grid. */
 	struct vulkan_runtime_buffer   verdict;
-	uint32_t                      *grid;                                     //!< The verdict, mapped.
 	/** @brief The network's input, sampled. In image mode the caller's frame stands in for the first
 	 *         pass's input. */
 	struct vulkan_runtime_image    input;
@@ -211,6 +210,7 @@ struct vulkan_runtime_objects {
 	 *         where the first samples the frame: in image mode sets of their own, otherwise the first
 	 *         pass's. */
 	VkDescriptorSet                later_sets[2];
+	uint32_t                      *grid;                                     //!< The verdict, mapped.
 };
 
 /** @brief How a runtime records frames. stored is 32 bits wide, which fills the padding. */
@@ -268,6 +268,14 @@ struct vulkan_runtime_history {
  *   says that the last frame recorded was submitted, and start over at a reshape.
  */
 struct vulkan_runtime {
+	uint64_t                      values_end;    //!< The plan's values_end.
+	/** @brief Whether a frame submitted since the last build or reshape moved the images into their
+	 *         layouts. 64 bits wide, which fills the padding where 64-bit members are 8-byte
+	 *         aligned (x86-64, armv7); on i686 the struct gains 4 bytes. */
+	uint64_t                      settled;
+	/** @brief In image mode, the caller's images bound; none: generation 0. */
+	struct vulkan_frame_images    images;
+	struct vulkan_runtime_objects objects;       //!< Every object the runtime owns.
 	/** @brief The device, borrowed: it must outlive the runtime. nullptr: none is built. */
 	struct vulkan_device const   *device;
 	struct vulkan_step           *steps;         //!< The plan's steps, which the runtime frees.
@@ -275,17 +283,10 @@ struct vulkan_runtime {
 	uint32_t                     *timeouts;      //!< The plan's timeouts, which the runtime frees.
 	size_t                        step_count;    //!< The number of steps.
 	size_t                        timeout_count; //!< The number of timeouts.
-	uint64_t                      values_end;    //!< The plan's values_end.
-	/** @brief In image mode, the caller's images bound; none: generation 0. */
-	struct vulkan_frame_images    images;
-	struct vulkan_runtime_objects objects;       //!< Every object the runtime owns.
 	struct vulkan_shape           shape;         //!< The shape it is built or reshaped for.
 	struct vulkan_runtime_state   state;         //!< How frames of that shape are recorded.
 	struct vulkan_runtime_history history;       //!< The history after the last frame submitted.
 	struct vulkan_runtime_history recorded;      //!< The history after the last frame recorded.
-	/** @brief Whether a frame submitted since the last build or reshape moved the images into their
-	 *         layouts. 64 bits wide, which fills the padding. */
-	uint64_t                      settled;
 };
 
 /** @brief Checks a Vulkan result.

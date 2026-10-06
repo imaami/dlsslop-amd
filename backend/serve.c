@@ -76,11 +76,12 @@ serve_publish_raster (struct options const *o,
 }
 
 /** @brief The channel's heartbeat, counted every 100 ms from heartbeat_init() until
- *         heartbeat_fini(), so that the layer sees a live daemon even while it builds a network. */
+ *         heartbeat_fini(), so that the layer sees a live daemon even while it builds a network.
+ *         stopping is as wide as a pointer, which fills the padding. */
 struct heartbeat {
 	struct ShmHeader *h;        //!< The channel's header.
 	pthread_t         thread;   //!< The thread that counts it.
-	_Atomic(uint64_t) stopping; //!< Whether heartbeat_fini() asked the thread to stop: 1 if it did.
+	atomic_uintptr_t  stopping; //!< Whether heartbeat_fini() asked the thread to stop: 1 if it did.
 };
 
 /** @brief Counts the heartbeat until asked to stop.

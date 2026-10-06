@@ -69,13 +69,13 @@ struct vulkan_values {
  * and the build fails once its stage ends.
  */
 struct vulkan_blob {
+	uint64_t               bytes;            //!< The blob's bytes so far.
 	struct vulkan_segment *segments;         //!< The segments in offset order.
 	uint32_t              *tables;           //!< The words that TABLE segments copy.
 	size_t                 segment_count;    //!< The number of segments.
 	size_t                 segment_capacity; //!< The number that their memory holds.
 	size_t                 table_count;      //!< The number of table words.
 	size_t                 table_capacity;   //!< The number that their memory holds.
-	uint64_t               bytes;            //!< The blob's bytes so far.
 	enum error_code        error;            //!< ERROR_FAILED once a put ran out of memory.
 };
 

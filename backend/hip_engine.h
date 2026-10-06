@@ -43,8 +43,10 @@ struct hip_engine_import {
  *         hip_engine_fini() frees it.
  *
  * The network binds addresses inside the engine, so the engine is never copied once prepared.
+ * warned_conditioning is as wide as a pointer, which fills the padding.
  */
 struct hip_engine {
+	struct hip_network         network;                //!< The tier's network; none while zeroed.
 	struct options const      *options;                //!< The options, which outlive the engine.
 	/** @brief The one stream of the network and of every kernel and copy of the daemon's, from the
 	 *         first hip_engine_prepare() on; nullptr before. */
@@ -68,15 +70,14 @@ struct hip_engine {
 	 *         checks it), and they differ only with --performance, which is fixed for the engine's
 	 *         life. */
 	struct hip_model           model;
-	struct hip_network         network;                //!< The tier's network; none while zeroed.
 	struct native_kernels      kernels;                //!< The daemon's kernels; none while zeroed.
 	struct codec_gpu           gpu_codec;              //!< The GPU codec; none while zeroed, as with --cpu-codec.
 	struct temporal_gpu        temporal;               //!< The motion history; none while zeroed.
 	struct engine_slots        slots;                  //!< The generations in the import slots.
+	uintptr_t                  warned_conditioning;    //!< 1 once the ignored conditioning was mentioned, else 0.
 	struct processing_settings previous_settings;      //!< The latest completed frame's settings.
 	struct engine_times        times;                  //!< The latest frame's times.
 	uint32_t                   tier;                   //!< The tier the network is built for.
-	uint64_t                   warned_conditioning;    //!< 1 once the ignored conditioning was mentioned, else 0.
 };
 
 /** @brief Makes the engine, with nothing built.
