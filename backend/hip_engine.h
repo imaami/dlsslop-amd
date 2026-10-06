@@ -99,9 +99,10 @@ extern void
 hip_engine_fini (struct hip_engine *engine);
 
 /** @brief Loads the HIP runtime for a HIP engine, with the gfx1201 device that o->device names, or
- *         the first, selected and recorded there; every visible device is listed on the way.
+ *         the first, selected and recorded there; every visible device is listed on the way. A
+ *         failure after the runtime's first call leaves it loaded.
  *
- * @param dest Receives the runtime; unchanged on a failure.
+ * @param dest Receives the runtime, which stays loaded for the process; unchanged on a failure.
  * @param o    The options, whose device receives the device selected.
  * @param e    Receives the words for what stopped it, or nullptr.
  * @return     ERROR_NONE, or ERROR_FAILED.

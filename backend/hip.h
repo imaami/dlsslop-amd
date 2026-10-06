@@ -88,8 +88,9 @@ static_assert(sizeof (struct hip_memory_desc) == 104 && sizeof (struct hip_buffe
               "HIP external memory ABI");
 
 /** @brief The loaded runtime: the entry points dlsslopd calls, each under its own name, null for an
- *         optional one that the runtime does not export. Every handle is a void *. The runtime
- *         stays loaded for the process: the driver's threads may outlive every user. */
+ *         optional one that the runtime does not export. Every handle is a void *. From its first
+ *         call on, the runtime stays loaded for the process: the driver's threads may outlive every
+ *         user. */
 struct hip_api {
 	int          (*hipGetDevicePropertiesR0600)      (struct hip_device_properties *, int);
 	int          (*hipInit)                          (unsigned);
@@ -167,7 +168,8 @@ struct hip_api {
 	X(hipGetErrorName, true)
 
 /** @brief Loads the runtime: DLSSLOP_HIP_LIBRARY when it is set and not empty, else the
- *         libamdhip64 sonames, then /opt/rocm/lib's.
+ *         libamdhip64 sonames, then /opt/rocm/lib's. It calls nothing in the runtime, so a failure
+ *         leaves nothing loaded; once the runtime is called, it stays loaded for the process.
  *
  * @param dest Receives the runtime; unchanged on a failure.
  * @param e    Receives every candidate's loader error, or the missing export, or nullptr.

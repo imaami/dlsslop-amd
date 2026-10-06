@@ -81,8 +81,12 @@ hip_load (struct hip_api *dest,
 	struct hip_api api;
 	for (size_t i = 0; i < ENTRY_COUNT; ++i) {
 		void *const symbol = dlsym(dll, entry_names[i]);
-		if (!symbol && entry_required[i])
+		if (!symbol && entry_required[i]) {
+			// Nothing holds the library: struct hip_api keeps only its entry points.
+			dlclose(dll);
+			dll = nullptr;
 			return error_fail(e, "missing HIP export %s", entry_names[i]);
+		}
 		// POSIX makes the address dlsym() gives for a function a valid pointer to it.
 		memcpy((char *)&api + i * sizeof symbol, &symbol, sizeof symbol);
 	}
