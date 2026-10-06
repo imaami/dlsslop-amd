@@ -1330,7 +1330,7 @@ main (int    argc,
 			break;
 		case 'h':
 			fputs(USAGE, stdout);
-			return 0;
+			return support_written("hip-weights test", 0);
 		default:
 			return 2;
 		}
@@ -1357,7 +1357,7 @@ main (int    argc,
 			}
 		}
 		hip_plan_fini(&plan);
-		return status;
+		return support_written("hip-weights test", status);
 	}
 	struct scratch s = {.directory = support_temp_dir("/tmp", "dlsslop-amd-hip-weights", nullptr)};
 	if (!expect(s.directory, "cannot create a directory in /tmp"))
@@ -1379,5 +1379,5 @@ main (int    argc,
 	s.directory = nullptr;
 	if (!failures)
 		puts("hip-weights test: every check passed");
-	return failures ? 1 : 0;
+	return support_written("hip-weights test", failures ? 1 : 0);
 }

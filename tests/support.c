@@ -275,3 +275,13 @@ support_extent (char const *text,
 	*height = h;
 	return true;
 }
+
+int
+support_written (char const *program,
+                 int         status)
+{
+	if (!fflush(stdout) && !ferror(stdout))
+		return status;
+	fprintf(stderr, "%s: cannot write the output\n", program);
+	return 1;
+}

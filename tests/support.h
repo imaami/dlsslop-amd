@@ -3,7 +3,7 @@
  * What several of the C tests need: a private temporary directory, removed with everything in it,
  * a directory's entries, a file's whole contents, a formatted string on the heap, text that grows as
  * it is written, a program run with its output in a file, a pause, an extent read from a command
- * line, and the search of a sorted key array.
+ * line, an exit status that says whether stdout was written, and the search of a sorted key array.
  */
 #ifndef DLSSLOP_AMD_TESTS_SUPPORT_H_
 #define DLSSLOP_AMD_TESTS_SUPPORT_H_
@@ -175,6 +175,16 @@ extern bool
 support_extent (char const *text,
                 uint32_t   *width,
                 uint32_t   *height);
+
+/** @brief A status, unless what went to stdout did not all reach it.
+ *
+ * @param program The program's name, which starts the message.
+ * @param status  The status.
+ * @return        The status, or 1 after a message if stdout cannot be written.
+ */
+extern int
+support_written (char const *program,
+                 int         status);
 
 /** @brief The index of the first key above a key in a sorted array: the key before it, if any, is
  *         the greatest that is not above the key.

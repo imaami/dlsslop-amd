@@ -980,7 +980,7 @@ main (int    argc,
 			break;
 		case 'h':
 			fputs(USAGE, stdout);
-			return 0;
+			return support_written("hip-plan test", 0);
 		default:
 			return 2;
 		}
@@ -988,11 +988,11 @@ main (int    argc,
 	if (optind != argc || (*tier && *modules))
 		return 2;
 	if (*tier)
-		return print(tier, performance, first, history);
+		return support_written("hip-plan test", print(tier, performance, first, history));
 	if (*modules)
-		return check_abi(modules);
+		return support_written("hip-plan test", check_abi(modules));
 	check_plans();
 	if (!failures)
 		puts("hip-plan test: every check passed");
-	return failures ? 1 : 0;
+	return support_written("hip-plan test", failures ? 1 : 0);
 }

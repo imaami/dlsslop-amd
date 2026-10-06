@@ -1542,7 +1542,7 @@ main (int    argc,
 			break;
 		case 'h':
 			fputs(USAGE, stdout);
-			return 0;
+			return support_written("vulkan-plan test", 0);
 		default:
 			return 2;
 		}
@@ -1550,22 +1550,22 @@ main (int    argc,
 	if (optind != argc || !!*extent + !!*model + !!*spirv + list_markers + list_defines + list_read > 1)
 		return 2;
 	if (*extent)
-		return print(extent);
+		return support_written("vulkan-plan test", print(extent));
 	if (*model)
-		return check_model(model);
+		return support_written("vulkan-plan test", check_model(model));
 	if (*spirv)
-		return check_spirv(spirv);
+		return support_written("vulkan-plan test", check_spirv(spirv));
 	if (list_markers)
-		return markers();
+		return support_written("vulkan-plan test", markers());
 	if (list_defines)
-		return defines();
+		return support_written("vulkan-plan test", defines());
 	if (list_read)
-		return list_entries();
+		return support_written("vulkan-plan test", list_entries());
 	check_kernels();
 	check_goldens();
 	check_rejections();
 	check_synthetic();
 	if (!failures)
 		puts("vulkan-plan test: every check passed");
-	return failures ? 1 : 0;
+	return support_written("vulkan-plan test", failures ? 1 : 0);
 }
