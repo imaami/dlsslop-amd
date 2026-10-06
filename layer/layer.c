@@ -329,9 +329,11 @@ shm_map_neural_enabled (struct shm_map *s)
 		return false;
 	}
 	uint32_t const ctrl = atomic_load(&s->hdr->controlSeq);
+	// Read after controlSeq, which a controller bumps after it stores the setting.
+	bool const enabled = ShmNeuralEnabled(s->hdr);
 	if (ctrl != s->last_control_seq) {
 		s->last_control_seq = ctrl;
-		if ((s->flags & SHM_MAP_DEAD) && ShmNeuralEnabled(s->hdr)) {
+		if ((s->flags & SHM_MAP_DEAD) && enabled) {
 			s->flags &= ~SHM_MAP_DEAD;
 			s->timeouts = 0;
 			log_printf("[shm] control changed, re-enabling");
@@ -344,15 +346,13 @@ shm_map_neural_enabled (struct shm_map *s)
 		// sits idle, so a helper that is up but not answering used to re-enable the layer the moment
 		// it had given up -- which cost the game another round of full-length waits, over and over.
 		// That is the stutter: recover, stall, give up, recover.
-		if ((s->flags & SHM_MAP_DEAD) && log_now_ms() >= s->retry_after_ms && ShmNeuralEnabled(s->hdr)) {
+		if ((s->flags & SHM_MAP_DEAD) && log_now_ms() >= s->retry_after_ms && enabled) {
 			s->flags &= ~SHM_MAP_DEAD;
 			s->timeouts = 0;
 			log_printf("[shm] helper heartbeat, trying again");
 		}
 	}
-	if (s->flags & SHM_MAP_DEAD)
-		return false;
-	return ShmNeuralEnabled(s->hdr);
+	return !(s->flags & SHM_MAP_DEAD) && enabled;
 }
 
 /** @brief Gives up waiting for the helper's answer to a request.
@@ -526,7 +526,7 @@ shm_map_process_frame (struct shm_map *s,
 	                && atomic_load(&s->hdr->answeredH) == h;
 	if (!ok)
 		log_printf("[shm] helper could not use frame %u (ok=%u)", req, atomic_load(&s->hdr->seq_ok));
-	if (ok && !transport_gen)
+	else if (!transport_gen)
 		memcpy(model_out, s->out_pixels, bytes);
 	// Every device's frames, which presents on other threads count too.
 	static _Atomic(uint32_t) frame_no;
