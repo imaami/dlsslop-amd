@@ -28,8 +28,8 @@
  * members. C code uses the atomic_* functions of <stdatomic.h>, which have the same orders. The
  * functions name a text field by the header and an enum shm_text, not by its words, as a C++ word
  * is another type than a C one.
- * shm_protocol.hpp has versions that return a std::string of those that write a string into the
- * caller's buffer.
+ * gui/shm_protocol.hpp has, for the GUI, versions that return a std::string of those that write a
+ * string into the caller's buffer.
  */
 #ifndef DLSSLOP_AMD_COMMON_SHM_PROTOCOL_H_
 #define DLSSLOP_AMD_COMMON_SHM_PROTOCOL_H_

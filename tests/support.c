@@ -2,12 +2,16 @@
  *
  * What several of the C tests need: support.h.
  */
+#include <errno.h>
+#include <fcntl.h>
 #include <ftw.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
 
 #include "support.h"
 
@@ -196,4 +200,29 @@ support_text_fini (struct support_text *text)
 		text->bytes = nullptr;
 		*text = (struct support_text){};
 	}
+}
+
+pid_t
+support_spawn (char const        *log,
+               char const *const  argv[])
+{
+	pid_t const child = fork();
+	if (child)
+		return child;
+	// Only async-signal-safe calls from here: the parent may have threads. The file becomes
+	// descriptors 1 and 2, and a descriptor of its own, if it got one, goes.
+	int const fd = open(log, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	if (fd < 0 || dup2(fd, 1) < 0 || dup2(fd, 2) < 0 || (fd > 2 && close(fd)))
+		_exit(127);
+	// execv() declares char *const[] for older code; it changes neither the array nor the strings.
+	execv(argv[0], (char *const *)argv);
+	_exit(127);
+}
+
+void
+support_sleep_ms (uint32_t ms)
+{
+	struct timespec wait = { .tv_sec = ms / 1000, .tv_nsec = ms % 1000 * 1000000 };
+	// nanosleep() fails otherwise only for a time that this cannot be.
+	while (nanosleep(&wait, &wait) && errno == EINTR) {}
 }

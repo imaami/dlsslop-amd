@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include "channel.hpp"
-#include "../common/shm_protocol.hpp"
+#include "shm_protocol.hpp"
 #include "absolute_slider.hpp"
 #include "slider_scale.hpp"
 #include "theme.hpp"

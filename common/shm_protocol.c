@@ -15,7 +15,7 @@
 
 static_assert(sizeof (struct ShmHeader) <= kHeaderBytes, "ShmHeader outgrew its region");
 
-// The words, pinned. shm_protocol.hpp pins them and the layout below in C++ too.
+// The words, pinned. gui/shm_protocol.hpp pins them and the layout below in the GUI's C++ too.
 //
 // A word is shared by processes that may have been built from different languages, so its size and
 // alignment must not depend on the language. And it must be lock-free: a word that is not goes

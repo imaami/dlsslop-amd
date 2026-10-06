@@ -337,7 +337,7 @@ A change to the HIP network's host code must leave its launches as they were,
 unless it means to change them. `tests/hiptrace` checks this on the GPU. The
 build's `libhiptrace.so` is a HIP runtime that dlsslopd loads in place of
 ROCm's: it forwards every call to the real runtime and logs it. `shmclient`,
-from `tests/shmclient.cpp`, is a minimal layer that serves dlsslopd frames on
+from `tests/shmclient.c`, is a minimal layer that serves dlsslopd frames on
 a private channel. `trace.sh` runs one configuration with both and writes
 `NAME.trace`:
 

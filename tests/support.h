@@ -1,13 +1,16 @@
 /** @file
  *
  * What several of the C tests need: a private temporary directory, removed with everything in it,
- * a file's whole contents, a formatted string on the heap, and text that grows as it is written.
+ * a file's whole contents, a formatted string on the heap, text that grows as it is written, a
+ * program run with its output in a file, and a pause.
  */
 #ifndef DLSSLOP_AMD_TESTS_SUPPORT_H_
 #define DLSSLOP_AMD_TESTS_SUPPORT_H_
 
 #include <stdarg.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <sys/types.h>
 
 /** @brief Formats a string on the heap, measured once.
  *
@@ -125,5 +128,26 @@ support_text_equal (struct support_text const *a,
  */
 extern void
 support_text_fini (struct support_text *text);
+
+/** @brief Starts a program in a child process, its standard output and error in a file.
+ *
+ * The child opens the file, created or emptied with mode 0600, as both, then runs the program with
+ * execv(). Only async-signal-safe calls run in the child.
+ *
+ * @param log  The file.
+ * @param argv The program's path and its arguments, ending in nullptr.
+ * @return     The child's process ID, or -1 if fork() failed. A child that cannot open the file or
+ *             run the program exits with status 127.
+ */
+extern pid_t
+support_spawn (char const        *log,
+               char const *const  argv[]);
+
+/** @brief Sleeps, also through signals that interrupt it.
+ *
+ * @param ms The milliseconds to sleep.
+ */
+extern void
+support_sleep_ms (uint32_t ms);
 
 #endif /* DLSSLOP_AMD_TESTS_SUPPORT_H_ */

@@ -50,7 +50,7 @@ the include paths that the move broke: one line each in `layer/capture.cpp`
 | `layer_linux/src/shaders/meter_reduce.comp` | `layer/meter_reduce.comp` |
 | `layer_linux/dlssnr.map` | `layer/dlssnr.map` |
 | `tools/shmctl.cpp` | `layer/shmctl.cpp` (now `shmctl.c`) |
-| `common/shm_protocol.h` | `common/shm_protocol.h` (its functions now in `shm_protocol.c` and `shm_protocol.hpp`) |
+| `common/shm_protocol.h` | `common/shm_protocol.h` (its functions now in `shm_protocol.c`, and for the GUI in `gui/shm_protocol.hpp`) |
 | `ATTRIBUTION.md` | `layer/ATTRIBUTION.md` |
 | `core/stb_image_write.h`, `standalone_runner/third_party/stb_image.h` | `third_party/stb/` |
 | `third_party/optiscaler/LICENSE`, `RenoDX_ATTRIBUTION.txt` | `third_party/optiscaler/` |
@@ -119,8 +119,8 @@ which `ShmStore64` and `ShmLoad64` write and read one word at a time, so a
 reader can take halves of two different counts. Here each count is one 64-bit
 atomic, `helperFrames` or `layerFrames`, and `layerFrames` is at the end of the
 header, because its words do not start at a multiple of eight bytes.
-`common/shm_protocol.hpp` holds overloads that return a `std::string` of the
-functions that write a string into the caller's buffer and that C++ calls:
+`gui/shm_protocol.hpp` holds overloads that return a `std::string` of the
+functions that write a string into the caller's buffer and that the GUI calls:
 `ShmNativeChannelPath` and `ShmLoadString`.
 
 Upstream's layer created the channel under its name, initialized it there with

@@ -1,8 +1,8 @@
-// The channel for C++ (shm_protocol.h): its words and layout as C++ sees them,
-// pinned, and the functions that write a string into the caller's buffer as
-// functions that return a std::string.
+// The channel for the GUI's C++ (../common/shm_protocol.h): its words and
+// layout as C++ sees them, pinned, and the functions that write a string into
+// the caller's buffer as functions that return a std::string.
 #pragma once
-#include "shm_protocol.h"
+#include "../common/shm_protocol.h"
 
 #include <atomic>
 #include <cstddef>

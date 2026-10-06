@@ -241,8 +241,8 @@ set_source_files_properties(backend/main.c backend/options.c backend/paths.c bac
     backend/hip_plan.c backend/control_selftest.c common/error.c common/shm_channel.c PROPERTIES COMPILE_OPTIONS -Os)
 
 if(BUILD_TESTING)
-    # What several C tests need: a temporary directory removed with what it holds, a whole file and a
-    # formatted string on the heap.
+    # What several C tests need: a temporary directory removed with what it holds, a whole file, a
+    # formatted string on the heap, a program run with its output in a file, and a pause.
     add_library(test-support OBJECT tests/support.c)
     add_test(NAME control-cli COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/control-cli.py $<TARGET_FILE:dlssnr-shmctl>)
@@ -264,8 +264,8 @@ if(BUILD_TESTING)
     add_test(NAME worker-cli COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/worker-cli.py $<TARGET_FILE:dlsslopd>
         $<TARGET_FILE:hip-loader-stub> $<TARGET_FILE:hip-fake-runtime> $<TARGET_FILE:hip-fake-incomplete>)
-    add_executable(worker-channel-test tests/worker_channel_test.cpp)
-    target_link_libraries(worker-channel-test PRIVATE dlsslop-common-c)
+    add_executable(worker-channel-test tests/worker_channel_test.c)
+    target_link_libraries(worker-channel-test PRIVATE dlsslop-common-c test-support)
     add_test(NAME worker-channel COMMAND worker-channel-test $<TARGET_FILE:dlsslopd>)
     add_test(NAME packaging COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/packaging_test.py ${CMAKE_CURRENT_BINARY_DIR})
@@ -358,8 +358,8 @@ if(BUILD_TESTING)
         --model-files ${VKNR_ROOT}/package/model-tools/model-files.txt)
     # A fake layer that serves dlsslopd frames for the tracers below; tested
     # against dlsslopd's identity mode.
-    add_executable(shmclient tests/shmclient.cpp)
-    target_link_libraries(shmclient PRIVATE dlsslop-common-c)
+    add_executable(shmclient tests/shmclient.c)
+    target_link_libraries(shmclient PRIVATE dlsslop-common-c test-support)
     add_test(NAME shmclient COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/shmclient-test.py
         $<TARGET_FILE:shmclient> $<TARGET_FILE:dlsslopd> $<TARGET_FILE:dlssnr-shmctl>)
     # A tracing HIP runtime, which dlsslopd loads as its HIP library, for
