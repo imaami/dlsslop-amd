@@ -2,7 +2,8 @@
  *
  * What several of the C tests need: a private temporary directory, removed with everything in it,
  * a file's whole contents, a formatted string on the heap, text that grows as it is written, a
- * program run with its output in a file, a pause, and the search of a sorted key array.
+ * program run with its output in a file, a pause, an extent read from a command line, and the
+ * search of a sorted key array.
  */
 #ifndef DLSSLOP_AMD_TESTS_SUPPORT_H_
 #define DLSSLOP_AMD_TESTS_SUPPORT_H_
@@ -150,6 +151,19 @@ support_spawn (char const        *log,
  */
 extern void
 support_sleep_ms (uint32_t ms);
+
+/** @brief Reads an extent, WxH: two decimal numbers of 32 bits, digits only.
+ *
+ * @param text   The extent.
+ * @param width  Receives its width; untouched on a failure.
+ * @param height Receives its height; untouched on a failure.
+ * @return       true if the text is such an extent; false for anything else, a number out of
+ *               range included.
+ */
+extern bool
+support_extent (char const *text,
+                uint32_t   *width,
+                uint32_t   *height);
 
 /** @brief The index of the first key above a key in a sorted array: the key before it, if any, is
  *         the greatest that is not above the key.

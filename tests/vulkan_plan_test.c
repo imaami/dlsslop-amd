@@ -24,6 +24,7 @@
 
 #include "error.h"
 #include "files.h"
+#include "support.h"
 #include "vulkan_pack.h"
 #include "vulkan_plan.h"
 #include "vulkan_weights.h"
@@ -897,10 +898,9 @@ check_model (char const *path)
 static int
 print (char const *extent)
 {
-	unsigned width;
-	unsigned height;
-	char end;
-	if (sscanf(extent, "%ux%u%c", &width, &height, &end) != 2)
+	uint32_t width;
+	uint32_t height;
+	if (!support_extent(extent, &width, &height))
 		return 2;
 	struct vulkan_plan p;
 	struct error e;

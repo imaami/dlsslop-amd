@@ -1990,8 +1990,7 @@ main (int    argc,
 		}
 	}
 	uint32_t width = 64, height = 64;
-	char end;
-	if (optind + 1 != argc || (extent && sscanf(extent, "%" SCNu32 "x%" SCNu32 "%c", &width, &height, &end) != 2))
+	if (optind + 1 != argc || (extent && !support_extent(extent, &width, &height)))
 		return 2;
 	frame_start();
 	struct vulkan_plan plan;

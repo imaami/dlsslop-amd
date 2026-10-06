@@ -226,3 +226,41 @@ support_sleep_ms (uint32_t ms)
 	// nanosleep() fails otherwise only for a time that this cannot be.
 	while (nanosleep(&wait, &wait) && errno == EINTR) {}
 }
+
+/** @brief Reads a decimal number of 32 bits at the start of a text: digits only.
+ *
+ * @param text The text.
+ * @param end  Receives where the number ends.
+ * @param dest Receives the number; untouched on a failure.
+ * @return     true if the text starts with such a number.
+ */
+static bool
+number32 (char const  *text,
+          char       **end,
+          uint32_t    *dest)
+{
+	if (*text < '0' || *text > '9')
+		return false;
+	// strtoul() reports a value out of its range only through errno.
+	errno = 0;
+	unsigned long const n = strtoul(text, end, 10);
+	if (errno || n > UINT32_MAX)
+		return false;
+	*dest = (uint32_t)n;
+	return true;
+}
+
+bool
+support_extent (char const *text,
+                uint32_t   *width,
+                uint32_t   *height)
+{
+	char *end;
+	uint32_t w;
+	uint32_t h;
+	if (!number32(text, &end, &w) || *end != 'x' || !number32(end + 1, &end, &h) || *end)
+		return false;
+	*width = w;
+	*height = h;
+	return true;
+}

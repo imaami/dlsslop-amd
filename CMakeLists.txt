@@ -349,7 +349,7 @@ if(BUILD_TESTING)
     add_executable(vulkan-plan-test tests/vulkan_plan_test.c tests/vulkan_pack.c common/vulkan_plan.c
         common/vulkan_schedule.c common/vulkan_weights.c backend/files.c)
     target_include_directories(vulkan-plan-test PRIVATE backend)
-    target_link_libraries(vulkan-plan-test PRIVATE dlsslop-common-c)
+    target_link_libraries(vulkan-plan-test PRIVATE dlsslop-common-c test-support)
     add_dependencies(vulkan-plan-test vulkan-nr-shaders)
     add_test(NAME vulkan-plan COMMAND vulkan-plan-test)
     add_test(NAME vulkan-plan-abi COMMAND vulkan-plan-test --spirv ${VKNR_SHADERS})
