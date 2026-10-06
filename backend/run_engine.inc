@@ -194,16 +194,17 @@ describe_frame (struct serve_request const *r,
 	if (!copy)
 		return error_fail(e, "out of memory");
 	enum error_code code = E(read_back)(engine, copy, proxy, r->bytes, e);
-	if (!code) {
-		uint64_t hash = UINT64_C(14695981039346656037);
-		for (size_t i = 0; i < r->bytes; ++i)
-			hash = (hash ^ copy[i]) * UINT64_C(1099511628211);
-		m.source_proxy_hash = hash;
+	if (code) {
+		free(copy);
+		copy = nullptr;
+		return code;
 	}
+	uint64_t hash = UINT64_C(14695981039346656037);
+	for (size_t i = 0; i < r->bytes; ++i)
+		hash = (hash ^ copy[i]) * UINT64_C(1099511628211);
 	free(copy);
 	copy = nullptr;
-	if (code)
-		return code;
+	m.source_proxy_hash = hash;
 	m.passes = r->passes;
 	code = geometry_init(&m.geometry, r->width, r->height, engine->tier, e);
 	if (code)

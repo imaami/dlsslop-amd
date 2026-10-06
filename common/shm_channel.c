@@ -232,23 +232,28 @@ create_named (int                 dir,
 
 	struct ShmHeader *h;
 	enum error_code const code = prepare(fd, path, bytes, &h, e);
-	int const err = code ? 0 : linkat(dir, temporary, dir, name, 0) ? errno : 0;
+	if (code) {
+		// The file never has the channel's name. Nothing was written through the descriptor:
+		// close() has nothing to report.
+		unlinkat(dir, temporary, 0);
+		close(fd);
+		fd = -1;
+		return code;
+	}
+	int const err = linkat(dir, temporary, dir, name, 0) ? errno : 0;
 	// The channel has its own name now, or never will through this file.
 	unlinkat(dir, temporary, 0);
-	if (!code && !err) {
+	if (!err) {
 		*dest = (struct shm_channel){
 			.h = h, .bytes = bytes, .fd = fd, .flags = flags | SHM_CHANNEL_CREATED
 		};
 		*linked = true;
 		return ERROR_NONE;
 	}
-	if (!code)
-		munmap(h, bytes);
+	munmap(h, bytes);
 	// Nothing was written through the descriptor: close() has nothing to report.
 	close(fd);
 	fd = -1;
-	if (code)
-		return code;
 	if (err != EEXIST)
 		return fail_errno(e, "name shared-memory file", path, err);
 	*linked = false;
@@ -315,22 +320,25 @@ create (int                 dir,
 	}
 
 	struct ShmHeader *h;
-	enum error_code code = prepare(fd, path, bytes, &h, e);
-	int const err = code ? 0 : link_unnamed(fd, dir, name);
-	if (!code && !err) {
+	enum error_code const code = prepare(fd, path, bytes, &h, e);
+	if (code) {
+		// The file goes with its descriptor: nobody else ever saw it.
+		close(fd);
+		fd = -1;
+		return code;
+	}
+	int const err = link_unnamed(fd, dir, name);
+	if (!err) {
 		*dest = (struct shm_channel){
 			.h = h, .bytes = bytes, .fd = fd, .flags = flags | SHM_CHANNEL_CREATED
 		};
 		*linked = true;
 		return ERROR_NONE;
 	}
-	if (!code)
-		munmap(h, bytes);
+	munmap(h, bytes);
 	// The file goes with its descriptor: nobody else ever saw it.
 	close(fd);
 	fd = -1;
-	if (code)
-		return code;
 	if (err == EEXIST) {
 		*linked = false;
 		return ERROR_NONE;
@@ -371,13 +379,16 @@ open_in (int                 dir,
 		if (fd >= 0) {
 			bool gone;
 			enum error_code const code = map_existing(fd, path, bytes, flags, dest, &gone, e);
-			if (!code && !gone)
+			if (code) {
+				// Nothing was written through the descriptor: close() has nothing to report.
+				close(fd);
+				fd = -1;
+				return code;
+			}
+			if (!gone)
 				return ERROR_NONE;
-			// Nothing was written through the descriptor: close() has nothing to report.
 			close(fd);
 			fd = -1;
-			if (code)
-				return code;
 			continue;
 		}
 		int const err = errno;
