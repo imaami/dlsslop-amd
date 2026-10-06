@@ -84,9 +84,9 @@ vulkan_network_device_index (struct vulkan_network const *n);
 
 /** @brief Whether vulkan_network_shape() would build for a frame.
  *
- * @param n     The network.
+ * @param n     The network, or nullptr.
  * @param frame The frame.
- * @return      true if it would.
+ * @return      true if it would, and for no network.
  */
 extern bool
 vulkan_network_shape_differs (struct vulkan_network const *n,

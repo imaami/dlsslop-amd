@@ -1914,13 +1914,13 @@ vulkan_runtime_submitted (struct vulkan_runtime *runtime)
 bool
 vulkan_runtime_timed_out (struct vulkan_runtime const *runtime)
 {
-	return runtime->objects.grid[0] != 0;
+	return runtime && runtime->objects.grid[0] != 0;
 }
 
 uint64_t
 vulkan_runtime_bound (struct vulkan_runtime const *runtime)
 {
-	return runtime->images.generation;
+	return runtime ? runtime->images.generation : 0;
 }
 
 /** @brief Returns a function's code unless it is ERROR_NONE. */

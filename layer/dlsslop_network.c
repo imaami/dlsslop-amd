@@ -307,7 +307,7 @@ dlsslop_network_submitted (struct DlsslopNetwork *n)
 char const *
 dlsslop_network_error (struct DlsslopNetwork const *n)
 {
-	return n->error.what;
+	return n ? n->error.what : nullptr;
 }
 
 void

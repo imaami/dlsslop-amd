@@ -480,7 +480,7 @@ bool
 vulkan_network_shape_differs (struct vulkan_network const *n,
                               struct vulkan_frame const   *frame)
 {
-	return network_recorder_shape_differs(&n->recorder, frame);
+	return !n || network_recorder_shape_differs(&n->recorder, frame);
 }
 
 enum error_code

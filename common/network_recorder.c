@@ -106,6 +106,8 @@ bool
 network_recorder_shape_differs (struct network_recorder const *recorder,
                                 struct vulkan_frame const     *frame)
 {
+	if (!recorder)
+		return true;
 	struct vulkan_shape const *const s = &recorder->shape;
 	// Pass stages stay built for frames without them: such a frame blits its answer out instead of
 	// copying it.
@@ -118,7 +120,7 @@ bool
 network_recorder_has_extent (struct network_recorder const *recorder,
                              struct vulkan_frame const     *frame)
 {
-	return recorder->runtime.device && recorder->shape.width == frame->width &&
+	return recorder && recorder->runtime.device && recorder->shape.width == frame->width &&
 	       recorder->shape.height == frame->height;
 }
 
@@ -347,5 +349,5 @@ network_recorder_submitted (struct network_recorder *recorder)
 bool
 network_recorder_timed_out (struct network_recorder const *recorder)
 {
-	return vulkan_runtime_timed_out(&recorder->runtime);
+	return recorder && vulkan_runtime_timed_out(&recorder->runtime);
 }

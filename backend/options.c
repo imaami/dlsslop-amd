@@ -429,6 +429,8 @@ options_fini (struct options *options)
 char const *
 options_hip_only (struct options const *options)
 {
+	if (!options)
+		return nullptr;
 	if (options->cpu_codec)
 		return "--cpu-codec";
 	if (options->trace_dir_length)

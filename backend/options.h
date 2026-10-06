@@ -103,8 +103,8 @@ options_fini (struct options *options);
 /** @brief The first option set that only the HIP network serves: auto takes HIP for it and the
  *         Vulkan backend refuses it.
  *
- * @param options The options.
- * @return        The option's name, such as "--cpu-codec", or nullptr for none.
+ * @param options The options, or nullptr.
+ * @return        The option's name, such as "--cpu-codec", or nullptr for none and for no options.
  */
 extern char const *
 options_hip_only (struct options const *options);

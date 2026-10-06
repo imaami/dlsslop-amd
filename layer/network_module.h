@@ -151,8 +151,8 @@ dlsslop_network_submitted_fn (struct DlsslopNetwork *network);
 
 /** @brief Why the network rejected a frame or failed.
  *
- * @param network The network.
- * @return        The reason.
+ * @param network The network, or nullptr.
+ * @return        The reason, or nullptr for no network.
  */
 typedef char const *
 dlsslop_network_error_fn (struct DlsslopNetwork const *network);

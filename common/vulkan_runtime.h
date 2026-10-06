@@ -441,16 +441,16 @@ vulkan_runtime_submitted (struct vulkan_runtime *runtime);
  * Its answer is then its proxy, and the sync regions and counters may stay short of their counts
  * until a frame starts over.
  *
- * @param runtime The runtime.
- * @return        true if one ran out.
+ * @param runtime The runtime, or nullptr.
+ * @return        true if one ran out; false for no runtime.
  */
 extern bool
 vulkan_runtime_timed_out (struct vulkan_runtime const *runtime);
 
 /** @brief The generation of the caller's images that vulkan_runtime_reshape() bound.
  *
- * @param runtime The runtime.
- * @return        The generation; 0 for none.
+ * @param runtime The runtime, or nullptr.
+ * @return        The generation; 0 for none, and for no runtime.
  */
 extern uint64_t
 vulkan_runtime_bound (struct vulkan_runtime const *runtime);

@@ -76,9 +76,9 @@ network_recorder_fini (struct network_recorder *recorder);
 
 /** @brief Whether network_recorder_shape() would build or reshape for a frame.
  *
- * @param recorder The recorder.
+ * @param recorder The recorder, or nullptr.
  * @param frame    The frame.
- * @return         true if it would.
+ * @return         true if it would, and for no recorder.
  */
 extern bool
 network_recorder_shape_differs (struct network_recorder const *recorder,
@@ -87,9 +87,9 @@ network_recorder_shape_differs (struct network_recorder const *recorder,
 /** @brief Whether the runtime is built for a frame's extent, so that network_recorder_shape() at
  *         most reshapes it: a fraction of a millisecond, and no GPU work.
  *
- * @param recorder The recorder.
+ * @param recorder The recorder, or nullptr.
  * @param frame    The frame.
- * @return         true if it is.
+ * @return         true if it is; false for no recorder.
  */
 extern bool
 network_recorder_has_extent (struct network_recorder const *recorder,
@@ -190,8 +190,8 @@ network_recorder_submitted (struct network_recorder *recorder);
 /** @brief Whether a wait of the frame submitted last ran out, so that its answer is its proxy; that
  *         frame must have finished.
  *
- * @param recorder The recorder.
- * @return         true if one ran out.
+ * @param recorder The recorder, or nullptr.
+ * @return         true if one ran out; false for no recorder.
  */
 extern bool
 network_recorder_timed_out (struct network_recorder const *recorder);
