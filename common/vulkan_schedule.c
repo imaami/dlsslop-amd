@@ -1101,7 +1101,7 @@ downsampling_table (struct vulkan_dispatch const *p,
 	if (ds.mode == 2 || ds.raster != ds.crow || rows != ds.rows)
 		return ERROR_NONE;
 	if (vulkan_plan_persistent(q->kernel)) {
-		uint32_t x = 0;
+		uint32_t x;
 		enum error_code const code = layer_word(q, blob, TILES_X, true, &x, e);
 		if (code)
 			return code;
@@ -1173,8 +1173,8 @@ run_table (struct vulkan_dispatch const *p,
            bool                         *fits,
            struct error                 *e)
 {
-	uint32_t tx = 0;
-	uint32_t ty = 0;
+	uint32_t tx;
+	uint32_t ty;
 	enum error_code code = layer_word(p, blob, TILES_X, false, &tx, e);
 	if (code)
 		return code;
@@ -1207,8 +1207,8 @@ run_tiles (struct vulkan_dispatch const *d,
            uint32_t                     *tiles,
            struct error                 *e)
 {
-	uint32_t x = 0;
-	uint32_t y = 0;
+	uint32_t x;
+	uint32_t y;
 	enum error_code code = layer_word(d, blob, TILES_X, first, &x, e);
 	if (code)
 		return code;
@@ -1273,8 +1273,8 @@ chain_pairs (struct vulkan_dispatches *ds,
 		if (!counted_pair(p->kernel, q->kernel) ||
 		    (big && !kept && (run_or_fused(p->kernel) || run_or_fused(q->kernel))))
 			continue;
-		uint32_t in = 0;
-		uint32_t out = 0;
+		uint32_t in;
+		uint32_t out;
 		TRY(input(q, blob, &in, e));
 		TRY(output(p, blob, &out, e));
 		if (in != out)
@@ -1283,7 +1283,7 @@ chain_pairs (struct vulkan_dispatches *ds,
 		uint32_t ity = 0;
 		bool const up = upsampling_run(q->kernel) || q->kernel == VULKAN_KERNEL_FSWIN_FUSED_UP32;
 		if (up) {
-			bool has = false;
+			bool has;
 			TRY(gather_raster(q, blob, &has, &itx, &ity, e));
 			if (!has)
 				continue;
@@ -1293,13 +1293,13 @@ chain_pairs (struct vulkan_dispatches *ds,
 		// its first layer as a consumer, of its last as a producer.
 		uint32_t tiles = 4096;
 		if (vulkan_plan_persistent(q->kernel)) {
-			uint32_t run = 0;
+			uint32_t run;
 			TRY(run_tiles(q, blob, true, &run, e));
 			if (tiles < run)
 				tiles = run;
 		}
 		if (vulkan_plan_persistent(p->kernel)) {
-			uint32_t run = 0;
+			uint32_t run;
 			TRY(run_tiles(p, blob, false, &run, e));
 			if (tiles < run)
 				tiles = run;

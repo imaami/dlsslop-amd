@@ -610,7 +610,7 @@ packer_read (struct packer               *p,
              size_t                      *size,
              struct error                *e)
 {
-	size_t got = 0;
+	size_t got;
 	enum error_code code = vulkan_model_read(p->model, &s->source, &p->entry, &got, e);
 	if (code)
 		return code;
@@ -641,7 +641,7 @@ packer_halves (struct packer               *p,
                uint8_t const              **values,
                struct error                *e)
 {
-	size_t size = 0;
+	size_t size;
 	enum error_code code = vulkan_model_read(p->model, &s->source, &p->entry, &size, e);
 	if (code)
 		return code;
@@ -685,7 +685,7 @@ packer_put_halves (struct packer               *p,
                    struct error                *e)
 {
 	size_t const count = s->bytes / 2;
-	size_t size = 0;
+	size_t size;
 	enum error_code code = vulkan_model_read(p->model, &s->source, &p->entry, &size, e);
 	if (code)
 		return code;
@@ -701,7 +701,7 @@ packer_put_halves (struct packer               *p,
 	struct vulkan_source const residual = {
 		s->source.directory, s->source.block, s->source.layer, VULKAN_SUFFIX_RESIDUAL_SCALE,
 	};
-	size_t scales_size = 0;
+	size_t scales_size;
 	code = vulkan_model_read(p->model, &residual, &p->tail, &scales_size, e);
 	if (code)
 		return code;
@@ -742,7 +742,7 @@ packer_put (struct packer               *p,
 		vulkan_weights_activation_table(out);
 		return ERROR_NONE;
 	case VULKAN_RECIPE_MATRIX: {
-		uint8_t *codes = nullptr;
+		uint8_t *codes;
 		enum error_code code = packer_read(p, s, bytes, &codes, nullptr, e);
 		if (code)
 			return code;
@@ -753,7 +753,7 @@ packer_put (struct packer               *p,
 		return ERROR_NONE;
 	}
 	case VULKAN_RECIPE_FFWD: {
-		uint8_t *record = nullptr;
+		uint8_t *record;
 		enum error_code code = packer_read(p, s, FFWD_RECORD, &record, nullptr, e);
 		if (code)
 			return code;
@@ -772,7 +772,7 @@ packer_put (struct packer               *p,
 		return ERROR_NONE;
 	}
 	case VULKAN_RECIPE_VIT_QKV: {
-		uint8_t *record = nullptr;
+		uint8_t *record;
 		enum error_code code = packer_read(p, s, QKV_SCALES + bytes, &record, nullptr, e);
 		if (code)
 			return code;
@@ -786,7 +786,7 @@ packer_put (struct packer               *p,
 	case VULKAN_RECIPE_BIAS: {
 		// Each head's values reordered to [i][j] (upstream: deswizzle_bias) and baked.
 		size_t const heads = bytes / 16384;
-		uint8_t *biases = nullptr;
+		uint8_t *biases;
 		enum error_code code = packer_read(p, s, heads * 8192, &biases, nullptr, e);
 		if (code)
 			return code;
@@ -800,7 +800,7 @@ packer_put (struct packer               *p,
 		return ERROR_NONE;
 	}
 	case VULKAN_RECIPE_SCALES: {
-		uint8_t const *values = nullptr;
+		uint8_t const *values;
 		enum error_code code = packer_halves(p, s, bytes / 4, &values, e);
 		if (code)
 			return code;
@@ -812,7 +812,7 @@ packer_put (struct packer               *p,
 		return packer_put_halves(p, s, out, e);
 	case VULKAN_RECIPE_DIAGONAL: {
 		// Block b, row r, column c holds value 16b + r where r is c, else zero.
-		uint8_t const *values = nullptr;
+		uint8_t const *values;
 		enum error_code code = packer_halves(p, s, bytes / 32, &values, e);
 		if (code)
 			return code;
@@ -825,7 +825,7 @@ packer_put (struct packer               *p,
 		return ERROR_NONE;
 	}
 	case VULKAN_RECIPE_BYTES: {
-		uint8_t *entry = nullptr;
+		uint8_t *entry;
 		enum error_code code = packer_read(p, s, bytes, &entry, nullptr, e);
 		if (code)
 			return code;
@@ -835,7 +835,7 @@ packer_put (struct packer               *p,
 	case VULKAN_RECIPE_LIFT: {
 		// The lift's [channel][k] as the input kernel addressed its packed operand
 		// (nr_graph.cpp:2133-2140).
-		uint8_t *lift = nullptr;
+		uint8_t *lift;
 		enum error_code code = packer_read(p, s, bytes, &lift, nullptr, e);
 		if (code)
 			return code;
@@ -922,14 +922,14 @@ audit (struct packer               *p,
 		if (s->recipe != VULKAN_RECIPE_BIAS || !(s->flags & VULKAN_SEGMENT_AFFINE))
 			continue;
 		size_t const heads = s->bytes / 16384;
-		uint8_t *biases = nullptr;
+		uint8_t *biases;
 		enum error_code code = packer_read(p, s, heads * 8192, &biases, nullptr, e);
 		if (code)
 			return code;
 		struct vulkan_source const of = {
 			s->source.directory, s->source.block, s->source.layer, VULKAN_SUFFIX_SCALARS_B,
 		};
-		size_t scales_size = 0;
+		size_t scales_size;
 		code = vulkan_model_read(p->model, &of, &p->tail, &scales_size, e);
 		if (code)
 			return code;
