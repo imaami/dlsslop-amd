@@ -94,15 +94,16 @@ same_text (struct file_text const *a,
 
 /** @brief Whether a file's bytes are a string.
  *
- * @param f    The file's bytes.
- * @param text The string.
- * @return     true if they are.
+ * @param f      The file's bytes.
+ * @param text   The string.
+ * @param length Its length.
+ * @return       true if they are.
  */
 static bool
 text_is (struct file_text const *f,
-         char const             *text)
+         char const             *text,
+         size_t                  length)
 {
-	size_t const length = strlen(text);
 	return f->length == length && !memcmp(f->text, text, length);
 }
 
@@ -115,41 +116,47 @@ struct field_value {
 /** @brief A manifest field's value: what follows the first "KEY ", which must start a line, up to
  *         the end of the line.
  *
- * @param manifest The manifest.
- * @param key      The field's name.
- * @return         Its value.
+ * @param manifest   The manifest.
+ * @param key        The field's name.
+ * @param key_length Its length.
+ * @return           Its value.
  */
 static struct field_value
 field (struct file_text const *manifest,
-       char const             *key)
+       char const             *key,
+       size_t                  key_length)
 {
-	size_t const key_length = strlen(key);
+	char const *const text_end = manifest->text + manifest->length;
 	char const *found = manifest->text;
-	while ((found = strstr(found, key)) && found[key_length] != ' ')
+	while ((found = memmem(found, (size_t)(text_end - found), key, key_length))
+	       && found[key_length] != ' ')
 		++found;
 	require(found && (found == manifest->text || found[-1] == '\n'), "missing manifest field");
 	char const *const start = found + key_length + 1;
 	char const *end = strchr(start, '\n');
 	if (!end)
-		end = manifest->text + manifest->length;
+		end = text_end;
 	return (struct field_value){start, (int)(end - start)};
 }
 
 /** @brief Whether a manifest field's value is a string.
  *
- * @param manifest The manifest.
- * @param key      The field's name.
- * @param value    The string.
- * @return         true if it is.
+ * @param manifest     The manifest.
+ * @param key          The field's name.
+ * @param key_length   Its length.
+ * @param value        The string.
+ * @param value_length Its length.
+ * @return             true if it is.
  */
 static bool
 field_is (struct file_text const *manifest,
           char const             *key,
-          char const             *value)
+          size_t                  key_length,
+          char const             *value,
+          size_t                  value_length)
 {
-	struct field_value const f = field(manifest, key);
-	size_t const length = strlen(value);
-	return (size_t)f.length == length && !memcmp(f.start, value, length);
+	struct field_value const f = field(manifest, key, key_length);
+	return (size_t)f.length == value_length && !memcmp(f.start, value, value_length);
 }
 
 /** @brief Formats a path on the heap, which must succeed.
@@ -657,6 +664,9 @@ append_component (char   **path,
 	*path = grown;
 }
 
+/** @brief A string literal and its length, as two arguments. */
+#define LITERAL(text) "" text, sizeof "" text - 1
+
 int
 main (void)
 {
@@ -723,14 +733,17 @@ main (void)
 	capture_writer_write_frame(&writer, bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
 	require(!capture_writer_active(&writer) && !writer.batch_dir, "completed batch remains active");
 	struct file_text first = file_text(published);
-	require(field_is(&first, "capture_metadata_version", "2"), "wrong metadata version");
-	require(field_is(&first, "capture_control_seq", "123"), "wrong capture token");
-	require(field_is(&first, "frame_1_before_hash", "c2de31fd48ac5f39"), "wrong input hash");
-	require(field_is(&first, "frame_1_inference_seq", "55"), "wrong inference provenance");
-	require(field_is(&first, "debug_view", "2"), "wrong renderer view");
-	require(field_is(&first, "color", "0.25"), "wrong renderer color");
+	require(field_is(&first, LITERAL("capture_metadata_version"), LITERAL("2")),
+	        "wrong metadata version");
+	require(field_is(&first, LITERAL("capture_control_seq"), LITERAL("123")), "wrong capture token");
+	require(field_is(&first, LITERAL("frame_1_before_hash"), LITERAL("c2de31fd48ac5f39")),
+	        "wrong input hash");
+	require(field_is(&first, LITERAL("frame_1_inference_seq"), LITERAL("55")),
+	        "wrong inference provenance");
+	require(field_is(&first, LITERAL("debug_view"), LITERAL("2")), "wrong renderer view");
+	require(field_is(&first, LITERAL("color"), LITERAL("0.25")), "wrong renderer color");
 	// The whole manifest, as the C++ writer wrote it.
-	struct field_value const first_batch = field(&first, "batch_dir");
+	struct field_value const first_batch = field(&first, LITERAL("batch_dir"));
 	size_t manifest_length = 0;
 	char *manifest = first_manifest(first_batch, &manifest_length);
 	require(first.length == manifest_length && !memcmp(first.text, manifest, manifest_length),
@@ -762,10 +775,10 @@ main (void)
 	png_path = nullptr;
 	require(correct, "BGRA capture channels were not converted to RGBA PNG");
 	text = file_text(legacy);
-	require(text_is(&text, "old capture"), "overwrote an existing capture");
+	require(text_is(&text, LITERAL("old capture")), "overwrote an existing capture");
 	file_text_fini(&text);
 	text = file_text(notes);
-	require(text_is(&text, "keep"), "removed unrelated content");
+	require(text_is(&text, LITERAL("keep")), "removed unrelated content");
 	file_text_fini(&text);
 
 	capture_writer_begin(&writer, 1, 124);
@@ -774,8 +787,9 @@ main (void)
 	file_text_fini(&text);
 	capture_writer_write_frame(&writer, bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
 	text = file_text(published);
-	require(field_is(&text, "capture_control_seq", "124"), "new completion not published");
-	struct field_value const second_batch = field(&text, "batch_dir");
+	require(field_is(&text, LITERAL("capture_control_seq"), LITERAL("124")),
+	        "new completion not published");
+	struct field_value const second_batch = field(&text, LITERAL("batch_dir"));
 	require(second_batch.length != first_batch.length
 	        || memcmp(second_batch.start, first_batch.start, (size_t)first_batch.length),
 	        "reused batch directory");
@@ -790,11 +804,13 @@ main (void)
 	static uint16_t const fp16[] = {0x3800, 0x3800, 0x3800, 0x3c00};
 	capture_writer_write_frame(&writer, fp16, fp16, 1, 1, VK_FORMAT_R16G16B16A16_SFLOAT, &metadata);
 	struct file_text third = file_text(published);
-	require(field_is(&third, "encoding", "raw"), "FP16 capture was not raw");
-	require(field_is(&third, "bytes_per_pixel", "8"), "FP16 capture byte count incorrect");
+	require(field_is(&third, LITERAL("encoding"), LITERAL("raw")), "FP16 capture was not raw");
+	require(field_is(&third, LITERAL("bytes_per_pixel"), LITERAL("8")),
+	        "FP16 capture byte count incorrect");
 	// Eight bytes take the hash's word step; the BGRA pixel above takes its byte tail.
-	require(field_is(&third, "before_hash", "736955abadf41fdf"), "wrong FP16 input hash");
-	struct field_value const third_batch = field(&third, "batch_dir");
+	require(field_is(&third, LITERAL("before_hash"), LITERAL("736955abadf41fdf")),
+	        "wrong FP16 input hash");
+	struct field_value const third_batch = field(&third, LITERAL("batch_dir"));
 	char *raw = path_of(nullptr, "%s/%.*s/before_00.raw", root, third_batch.length, third_batch.start);
 	text = file_text(raw);
 	require(text.length == sizeof fp16 && !memcmp(text.text, fp16, sizeof fp16), "FP16 bytes changed");
@@ -832,9 +848,9 @@ main (void)
 		capture_writer_write_frame(&writer, bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
 	}
 	struct file_text full = file_text(published);
-	require(!capture_writer_active(&writer) && field_is(&full, "frames", "64")
-	        && field_is(&full, "frame_63_inference_seq", "63")
-	        && field_is(&full, "frame_63_detail", "0.100000001"),
+	require(!capture_writer_active(&writer) && field_is(&full, LITERAL("frames"), LITERAL("64"))
+	        && field_is(&full, LITERAL("frame_63_inference_seq"), LITERAL("63"))
+	        && field_is(&full, LITERAL("frame_63_detail"), LITERAL("0.100000001")),
 	        "a full batch was not written");
 	metadata.inference_seq = 55;
 	metadata.detail = 0.5f;
@@ -902,8 +918,9 @@ main (void)
 	moved = nullptr;
 	capture_writer_write_frame(&writer, bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
 	struct file_text fourth = file_text(published);
-	require(field_is(&fourth, "capture_control_seq", "127"), "batch did not publish where it began");
-	struct field_value const fourth_batch = field(&fourth, "batch_dir");
+	require(field_is(&fourth, LITERAL("capture_control_seq"), LITERAL("127")),
+	        "batch did not publish where it began");
+	struct field_value const fourth_batch = field(&fourth, LITERAL("batch_dir"));
 	char *fourth_manifest = path_of(nullptr, "%s/%.*s/manifest.txt", root, fourth_batch.length,
 	                                fourth_batch.start);
 	text = file_text(fourth_manifest);
@@ -932,7 +949,7 @@ main (void)
 	require(logged(&log_text, SIZE_MAX, "[capture] wrote 2 pairs to %s/%.*s", root, first_batch.length,
 	               first_batch.start),
 	        "the first batch's end was not logged");
-	struct field_value const full_batch = field(&full, "batch_dir");
+	struct field_value const full_batch = field(&full, LITERAL("batch_dir"));
 	require(logged(&log_text, SIZE_MAX, "[capture] capturing 64 frames, control 128, to %s/%.*s", root,
 	               full_batch.length, full_batch.start),
 	        "the cut batch's start was not logged");
@@ -989,3 +1006,5 @@ main (void)
 		return 1;
 	return 0;
 }
+
+#undef LITERAL

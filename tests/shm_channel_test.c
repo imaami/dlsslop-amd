@@ -997,21 +997,25 @@ sweep_open (char const    *path,
 
 /** @brief Writes a file of /proc.
  *
- * @param path The file.
- * @param text What to write.
- * @return     true if it was written whole.
+ * @param path   The file.
+ * @param text   What to write.
+ * @param length Its length.
+ * @return       true if it was written whole.
  */
 static bool
 proc_write (char const *path,
-            char const *text)
+            char const *text,
+            size_t      length)
 {
 	int fd = open(path, O_WRONLY | O_CLOEXEC);
 	if (fd < 0)
 		return false;
-	size_t const length = strlen(text);
 	bool const written = write(fd, text, length) == (ssize_t)length;
 	return !close(fd) && written;
 }
+
+/** @brief A string literal and its length, as two arguments. */
+#define LITERAL(text) "" text, sizeof "" text - 1
 
 /** @brief Gives this process a /tmp of its own: a tmpfs in a mount namespace of a user namespace
  *         in which the user keeps its IDs.
@@ -1026,13 +1030,19 @@ private_tmp (void)
 	if (unshare(CLONE_NEWUSER | CLONE_NEWNS))
 		return false;
 	char map[32];
-	snprintf(map, sizeof map, "%u %u 1\n", uid, uid);
-	if (!proc_write("/proc/self/setgroups", "deny\n") || !proc_write("/proc/self/uid_map", map))
+	int length = snprintf(map, sizeof map, "%u %u 1\n", uid, uid);
+	require(length >= 0 && length < (int)sizeof map, "cannot format the UID map");
+	if (!proc_write("/proc/self/setgroups", LITERAL("deny\n"))
+	    || !proc_write("/proc/self/uid_map", map, (size_t)length))
 		return false;
-	snprintf(map, sizeof map, "%u %u 1\n", gid, gid);
-	return proc_write("/proc/self/gid_map", map) && !mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr)
+	length = snprintf(map, sizeof map, "%u %u 1\n", gid, gid);
+	require(length >= 0 && length < (int)sizeof map, "cannot format the GID map");
+	return proc_write("/proc/self/gid_map", map, (size_t)length)
+	       && !mount(nullptr, "/", nullptr, MS_REC | MS_PRIVATE, nullptr)
 	       && !mount("tmpfs", "/tmp", "tmpfs", MS_NOSUID | MS_NODEV, "mode=1777");
 }
+
+#undef LITERAL
 
 /** @brief A default's path, made with its function, in a directory made private for the sweep.
  *
