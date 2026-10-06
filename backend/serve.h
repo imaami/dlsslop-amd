@@ -73,14 +73,14 @@ serve_stopping (void);
  * worker-upscaled answer for native-resolution output and skips its detail-preserving composition
  * branch. The identity mode publishes none: the mapping may retain a preceding neural worker's.
  *
- * @param o    The options.
- * @param h    The channel's header.
- * @param tier The tier.
+ * @param h      The channel's header.
+ * @param tier   The tier.
+ * @param neural Whether a network serves: false in the identity mode.
  */
 extern void
-serve_publish_raster (struct options const *o,
-                      struct ShmHeader     *h,
-                      uint32_t              tier);
+serve_publish_raster (struct ShmHeader *h,
+                      uint32_t          tier,
+                      bool              neural);
 
 /** @brief Waits up to 100 ms for a request after the latest, then decides on --idle-exit.
  *
@@ -105,18 +105,17 @@ serve_wait (struct options const *o,
 /** @brief Reads and checks a request's settings. A pass count beyond what the engine runs is
  *         replaced in the channel with the most it can, as an unusable tier is.
  *
- * @param o               The options.
  * @param h               The channel's header.
  * @param r               The request, whose sequence numbers and extent are sampled; receives its
  *                        settings, its frames' bytes and its passes.
  * @param max_passes      The most passes the engine runs.
- * @param previous_passes The passes logged last; updated when they change.
+ * @param previous_passes The passes logged last, updated when they change; nullptr to log none, as
+ *                        in the identity mode.
  * @param e               Receives the words of a rejection, or nullptr.
  * @return                ERROR_NONE, or ERROR_REJECTED.
  */
 extern enum error_code
-serve_read_request (struct options const *o,
-                    struct ShmHeader     *h,
+serve_read_request (struct ShmHeader     *h,
                     struct serve_request *r,
                     uint32_t              max_passes,
                     uint32_t             *previous_passes,

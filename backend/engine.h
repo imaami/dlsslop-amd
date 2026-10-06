@@ -20,9 +20,10 @@
  *   a frame, and memory copied to the host for a trace;
  * - ENGINE_self_test().
  *
- * Its traits are constants: ENGINE_NAME, the most passes a frame chains (ENGINE_MAX_PASSES), and
+ * Its traits are constants: ENGINE_NAME, the most passes a frame chains (ENGINE_MAX_PASSES),
  * whether a tier change rebuilds it, with the layer presenting its own frames meanwhile
- * (ENGINE_REBUILDS_FOR_TIER).
+ * (ENGINE_REBUILDS_FOR_TIER), and whether it runs a network (ENGINE_NEURAL): only the identity
+ * engine of --test-identity does not.
  */
 // SPDX-License-Identifier: MIT
 #ifndef DLSSLOP_AMD_BACKEND_ENGINE_H_

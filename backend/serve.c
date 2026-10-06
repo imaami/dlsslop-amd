@@ -66,11 +66,10 @@ wake (_Atomic(uint32_t) *word)
 }
 
 void
-serve_publish_raster (struct options const *o,
-                      struct ShmHeader     *h,
-                      uint32_t              tier)
+serve_publish_raster (struct ShmHeader *h,
+                      uint32_t          tier,
+                      bool              neural)
 {
-	bool const neural = !o->test_identity;
 	atomic_store(&h->nativeModelMaxWidth, neural ? ShmNativeTier(tier)->width : 0);
 	atomic_store(&h->nativeModelMaxHeight, neural ? tier : 0);
 }
@@ -168,8 +167,7 @@ serve_wait (struct options const *o,
 }
 
 enum error_code
-serve_read_request (struct options const *o,
-                    struct ShmHeader     *h,
+serve_read_request (struct ShmHeader     *h,
                     struct serve_request *r,
                     uint32_t              max_passes,
                     uint32_t             *previous_passes,
@@ -188,7 +186,7 @@ serve_read_request (struct options const *o,
 		r->passes = max_passes;
 		atomic_store(&h->passes, max_passes);
 	}
-	if (!o->test_identity && r->passes != *previous_passes) {
+	if (previous_passes && r->passes != *previous_passes) {
 		fprintf(stderr, "neural passes=%" PRIu32 "; one final composition per frame\n", r->passes);
 		*previous_passes = r->passes;
 	}
@@ -273,7 +271,7 @@ run_traced (struct options              *o,
 	if (o->passes)
 		atomic_store(&h->passes, o->passes);
 	atomic_store(&h->compositionBypass, o->test_identity ? 1 : 0);
-	serve_publish_raster(o, h, tier);
+	serve_publish_raster(h, tier, !o->test_identity);
 	struct heartbeat heartbeat;
 	enum error_code code = heartbeat_init(&heartbeat, h, e);
 	if (code)

@@ -27,6 +27,7 @@ enum : uint32_t {
 	IDENTITY_ENGINE_MAX_PASSES = kMaxPasses, //!< The most passes a frame chains.
 	/** @brief Like the HIP engine, so that a GPU-less daemon follows a tier through its rebuild. */
 	IDENTITY_ENGINE_REBUILDS_FOR_TIER = 1,
+	IDENTITY_ENGINE_NEURAL = 0, //!< It runs no network: its answer is the frame.
 };
 
 /** @brief The engine: identity_engine() makes one; it holds nothing to free. */

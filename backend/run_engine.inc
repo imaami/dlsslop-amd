@@ -5,7 +5,8 @@
  * header and defines
  *
  * - ENGINE, the engine's prefix, such as vulkan_engine;
- * - ENGINE_NAME, ENGINE_MAX_PASSES and ENGINE_REBUILDS_FOR_TIER, the engine's traits (engine.h).
+ * - ENGINE_NAME, ENGINE_MAX_PASSES, ENGINE_REBUILDS_FOR_TIER and ENGINE_NEURAL, the engine's traits
+ *   (engine.h).
  *
  * It defines run_ENGINE() (open.h) and undefines those macros at its end. It has no include guard:
  * each file includes it once, and no header does.
@@ -35,8 +36,9 @@
 #include "transport.h"
 #include "util.h"
 
-#if !defined ENGINE || !defined ENGINE_NAME || !defined ENGINE_MAX_PASSES || !defined ENGINE_REBUILDS_FOR_TIER
-# error "run_engine.inc needs ENGINE, ENGINE_NAME, ENGINE_MAX_PASSES and ENGINE_REBUILDS_FOR_TIER"
+#if !defined ENGINE || !defined ENGINE_NAME || !defined ENGINE_MAX_PASSES || !defined ENGINE_REBUILDS_FOR_TIER \
+    || !defined ENGINE_NEURAL
+# error "run_engine.inc needs ENGINE, ENGINE_NAME, ENGINE_MAX_PASSES, ENGINE_REBUILDS_FOR_TIER and ENGINE_NEURAL"
 #endif
 
 /** @brief A and B pasted, once both are expanded. */
@@ -110,7 +112,6 @@ accept_offers (struct transport_listener const *listener,
  * active tier for the next daemon.
  *
  * @param engine  The engine.
- * @param o       The options.
  * @param mapping The channel.
  * @param ready   The status text of a ready daemon.
  * @param rebuilt Receives whether the engine was rebuilt.
@@ -118,12 +119,11 @@ accept_offers (struct transport_listener const *listener,
  * @return        ERROR_NONE, or the code of the rebuild's failure.
  */
 static enum error_code
-follow_tier (struct ENGINE        *engine,
-             struct options const *o,
-             struct mapping       *mapping,
-             char const           *ready,
-             bool                 *rebuilt,
-             struct error         *e)
+follow_tier (struct ENGINE  *engine,
+             struct mapping *mapping,
+             char const     *ready,
+             bool           *rebuilt,
+             struct error   *e)
 {
 	struct ShmHeader *const h = mapping->channel.h;
 	*rebuilt = false;
@@ -141,7 +141,7 @@ follow_tier (struct ENGINE        *engine,
 		if (code)
 			return code;
 		fprintf(stderr, "neural tier %" PRIu32 " -> %" PRIu32 "\n", active, wanted);
-		serve_publish_raster(o, h, wanted);
+		serve_publish_raster(h, wanted, ENGINE_NEURAL);
 		return ERROR_NONE;
 	}
 	atomic_store(&h->helperState, kHelperStarting);
@@ -156,9 +156,9 @@ follow_tier (struct ENGINE        *engine,
 		atomic_store(&h->nativeTier, active);
 		return code;
 	}
-	serve_publish_raster(o, h, wanted);
+	serve_publish_raster(h, wanted, ENGINE_NEURAL);
 	mapping_reason(mapping, ready);
-	atomic_store(&h->modelUp, o->test_identity ? 0 : 1);
+	atomic_store(&h->modelUp, ENGINE_NEURAL);
 	atomic_store_explicit(&h->helperState, kHelperRunning, memory_order_release);
 	*rebuilt = true;
 	return ERROR_NONE;
@@ -308,16 +308,18 @@ serve_frames (struct options const *o,
 	// Only serving stops gracefully, from the ready announcement on.
 	// Before it, and in every other mode, SIGINT and SIGTERM terminate.
 	serve_catch_signals();
-	atomic_store(&h->modelUp, o->test_identity ? 0 : 1);
+	atomic_store(&h->modelUp, ENGINE_NEURAL);
 	atomic_store_explicit(&h->helperState, kHelperRunning, memory_order_release);
-	char const *const ready = o->test_identity ? "IDENTITY TEST: no neural rendering"
-	                                           : "native " ENGINE_NAME " ready; display-encoded RGBA8/FP16 proxy";
+	char const *const ready = ENGINE_NEURAL ? "native " ENGINE_NAME " ready; display-encoded RGBA8/FP16 proxy"
+	                                        : "IDENTITY TEST: no neural rendering";
 	mapping_reason(s->mapping, ready);
-	fprintf(stderr, "worker ready: %s%s\n", o->shm, o->test_identity ? " [IDENTITY TEST]" : "");
-	if (!o->test_identity) {
+	if (ENGINE_NEURAL) {
+		fprintf(stderr, "worker ready: %s\n", o->shm);
 		char processing[ENGINE_DESCRIPTION_BYTES];
 		fprintf(stderr, "neural tier=%" PRIu32 "; %s; native-resolution Vulkan composition; "
 		        "live controls enabled\n", engine->tier, E(describe_processing)(engine, processing));
+	} else {
+		fprintf(stderr, "worker ready: %s [IDENTITY TEST]\n", o->shm);
 	}
 	uint64_t frames_answered = 0;
 	uint32_t previous_passes = 0;
@@ -338,7 +340,7 @@ serve_frames (struct options const *o,
 		uint32_t const number = atomic_load_explicit(&h->seq_req, memory_order_acquire);
 		if (number == last) {
 			bool rebuilt;
-			code = follow_tier(engine, o, s->mapping, ready, &rebuilt, e);
+			code = follow_tier(engine, s->mapping, ready, &rebuilt, e);
 			if (code)
 				return code;
 			if (rebuilt)
@@ -362,7 +364,8 @@ serve_frames (struct options const *o,
 		char metadata[TRACE_METADATA_BYTES];
 		// The trace, the channel and the log need the words of a failed frame.
 		struct error why;
-		code = serve_read_request(o, h, &request, ENGINE_MAX_PASSES, &previous_passes, &why);
+		code = serve_read_request(h, &request, ENGINE_MAX_PASSES, ENGINE_NEURAL ? &previous_passes : nullptr,
+		                          &why);
 		if (!code)
 			code = process(&request, engine, s->mapping, pending->path ? pending : nullptr, metadata, &why);
 		if (!code) {
@@ -493,6 +496,7 @@ RUN_ENGINE_PASTE(run_, ENGINE) (struct options const *o,
 #undef E
 #undef RUN_ENGINE_PASTE_
 #undef RUN_ENGINE_PASTE
+#undef ENGINE_NEURAL
 #undef ENGINE_REBUILDS_FOR_TIER
 #undef ENGINE_MAX_PASSES
 #undef ENGINE_NAME

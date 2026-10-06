@@ -31,6 +31,7 @@ struct options;
 enum : uint32_t {
 	HIP_ENGINE_MAX_PASSES = kMaxPasses, //!< The most passes a frame chains.
 	HIP_ENGINE_REBUILDS_FOR_TIER = 1,   //!< A tier is a raster that the network is built for.
+	HIP_ENGINE_NEURAL = 1,              //!< It runs the network.
 };
 
 /** @brief The device-local pair in an import slot; nullptr where it has none. */

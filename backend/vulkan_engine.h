@@ -29,6 +29,7 @@ enum : uint32_t {
 	/** @brief The network sizes itself to each frame: a tier only changes the raster the layer
 	 *         targets. */
 	VULKAN_ENGINE_REBUILDS_FOR_TIER = 0,
+	VULKAN_ENGINE_NEURAL = 1, //!< It runs the network.
 };
 
 static_assert(ENGINE_SLOTS == VULKAN_NETWORK_IMPORT_SLOTS, "an engine slot is not a network slot");
