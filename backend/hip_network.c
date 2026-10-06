@@ -83,8 +83,8 @@ load (struct hip_model             *model,
 {
 	struct hip_api const *const api = model->api;
 	for (size_t m = 0; m < HIP_MODULE_COUNT; ++m) {
-		char const *const file = HIP_PLAN_MODULE_FILES[m];
-		char *path = files_join(modules, modules_length, file, strlen(file), nullptr);
+		struct hip_module_file const *const file = &HIP_PLAN_MODULE_FILES[m];
+		char *path = files_join(modules, modules_length, file->name, file->length, nullptr);
 		if (!path)
 			return error_fail(e, "out of memory");
 		enum error_code const code = hip_load_module(api, path, &model->modules[m], e);

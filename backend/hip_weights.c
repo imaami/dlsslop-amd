@@ -726,7 +726,7 @@ hip_weights_load (struct hip_weight_file       *dest,
 		return error_fail(e, "no %s packing of %s", HIP_WEIGHTS_RECIPE_SUFFIX[spec->recipe], spec->stem);
 
 	size_t length = 0;
-	dest->path = files_join(assets, assets_length, spec->stem, strlen(spec->stem), &length);
+	dest->path = files_join(assets, assets_length, spec->stem, spec->length, &length);
 	char *const path = dest->path ? realloc(dest->path, length + 5) : nullptr;
 	if (!path) {
 		hip_weight_file_fini(dest);

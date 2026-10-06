@@ -134,7 +134,7 @@ shape (struct hip_weight_spec const *spec)
 {
 	// A C32 attention weight's E4M3 values come first, an FFN weight's after its first 512.
 	static char const attention[] = "attention";
-	size_t const length = strlen(spec->stem), suffix = sizeof attention - 1;
+	size_t const length = spec->length, suffix = sizeof attention - 1;
 	bool const is_attention = length >= suffix && !memcmp(spec->stem + length - suffix, attention, suffix);
 	return (struct shape){
 		.c = hip_weights_channels(spec),
@@ -415,39 +415,39 @@ synthetic_file (struct shape const *w,
 
 /** @brief One weight per recipe and channel count that upstream's production path packs. */
 static struct hip_weight_spec const cases[] = {
-	{"post70-scales", HIP_RECIPE_RAW},
-	{"post70-head", HIP_RECIPE_RAW},
-	{"block23-ffwd", HIP_RECIPE_RAW},
-	{"block0-ffn", HIP_RECIPE_C32},
-	{"block0-attention", HIP_RECIPE_C32},
-	{"block4-ds", HIP_RECIPE_DS_CAST},
-	{"block8-ds", HIP_RECIPE_DS_FRAG},
-	{"block14-ds", HIP_RECIPE_DS_FRAG},
-	{"block22-ds", HIP_RECIPE_DS_FRAG},
-	{"head-matrix", HIP_RECIPE_DS_FRAG},
-	{"block5-ffn", HIP_RECIPE_MH_FFN},
-	{"block9-ffn", HIP_RECIPE_MH_FFN},
-	{"block5-attention", HIP_RECIPE_MH_ATTENTION},
-	{"block9-attention", HIP_RECIPE_MH_ATTENTION},
-	{"block15-attention", HIP_RECIPE_MH_ATTENTION},
-	{"block23-attention", HIP_RECIPE_MH_ATTENTION},
-	{"block5-attention", HIP_RECIPE_MH_ATTENTION_DIAG},
-	{"block9-attention", HIP_RECIPE_MH_ATTENTION_DIAG},
-	{"block15-attention", HIP_RECIPE_MH_ATTENTION_DIAG},
-	{"block15-ffn", HIP_RECIPE_FFN_FRAG},
-	{"block15-attention", HIP_RECIPE_QKV_FRAG_ONLY},
-	{"block23-ffwd", HIP_RECIPE_SPLIT_MIX_F16},
-	{"block23-ffwd-projection", HIP_RECIPE_PROJ_FRAG},
-	{"block23-attention", HIP_RECIPE_QKV_FRAG},
-	{"block31-expand", HIP_RECIPE_VIT_FRAG},
-	{"block31-contract", HIP_RECIPE_VIT_FRAG},
-	{"block31-qkv", HIP_RECIPE_QKV_F16_FRAG},
-	{"block31-projection", HIP_RECIPE_VIT_PROJ_FRAG},
-	{"decoder39-weights", HIP_RECIPE_DECODER_F16R},
-	{"block48-weights", HIP_RECIPE_DECODER_F16R},
-	{"block56-weights", HIP_RECIPE_DECODER_F16R},
-	{"block62-weights", HIP_RECIPE_DECODER_F16R},
-	{"block66-weights", HIP_RECIPE_DECODER_F16R},
+	HIP_WEIGHT_SPEC("post70-scales", HIP_RECIPE_RAW),
+	HIP_WEIGHT_SPEC("post70-head", HIP_RECIPE_RAW),
+	HIP_WEIGHT_SPEC("block23-ffwd", HIP_RECIPE_RAW),
+	HIP_WEIGHT_SPEC("block0-ffn", HIP_RECIPE_C32),
+	HIP_WEIGHT_SPEC("block0-attention", HIP_RECIPE_C32),
+	HIP_WEIGHT_SPEC("block4-ds", HIP_RECIPE_DS_CAST),
+	HIP_WEIGHT_SPEC("block8-ds", HIP_RECIPE_DS_FRAG),
+	HIP_WEIGHT_SPEC("block14-ds", HIP_RECIPE_DS_FRAG),
+	HIP_WEIGHT_SPEC("block22-ds", HIP_RECIPE_DS_FRAG),
+	HIP_WEIGHT_SPEC("head-matrix", HIP_RECIPE_DS_FRAG),
+	HIP_WEIGHT_SPEC("block5-ffn", HIP_RECIPE_MH_FFN),
+	HIP_WEIGHT_SPEC("block9-ffn", HIP_RECIPE_MH_FFN),
+	HIP_WEIGHT_SPEC("block5-attention", HIP_RECIPE_MH_ATTENTION),
+	HIP_WEIGHT_SPEC("block9-attention", HIP_RECIPE_MH_ATTENTION),
+	HIP_WEIGHT_SPEC("block15-attention", HIP_RECIPE_MH_ATTENTION),
+	HIP_WEIGHT_SPEC("block23-attention", HIP_RECIPE_MH_ATTENTION),
+	HIP_WEIGHT_SPEC("block5-attention", HIP_RECIPE_MH_ATTENTION_DIAG),
+	HIP_WEIGHT_SPEC("block9-attention", HIP_RECIPE_MH_ATTENTION_DIAG),
+	HIP_WEIGHT_SPEC("block15-attention", HIP_RECIPE_MH_ATTENTION_DIAG),
+	HIP_WEIGHT_SPEC("block15-ffn", HIP_RECIPE_FFN_FRAG),
+	HIP_WEIGHT_SPEC("block15-attention", HIP_RECIPE_QKV_FRAG_ONLY),
+	HIP_WEIGHT_SPEC("block23-ffwd", HIP_RECIPE_SPLIT_MIX_F16),
+	HIP_WEIGHT_SPEC("block23-ffwd-projection", HIP_RECIPE_PROJ_FRAG),
+	HIP_WEIGHT_SPEC("block23-attention", HIP_RECIPE_QKV_FRAG),
+	HIP_WEIGHT_SPEC("block31-expand", HIP_RECIPE_VIT_FRAG),
+	HIP_WEIGHT_SPEC("block31-contract", HIP_RECIPE_VIT_FRAG),
+	HIP_WEIGHT_SPEC("block31-qkv", HIP_RECIPE_QKV_F16_FRAG),
+	HIP_WEIGHT_SPEC("block31-projection", HIP_RECIPE_VIT_PROJ_FRAG),
+	HIP_WEIGHT_SPEC("decoder39-weights", HIP_RECIPE_DECODER_F16R),
+	HIP_WEIGHT_SPEC("block48-weights", HIP_RECIPE_DECODER_F16R),
+	HIP_WEIGHT_SPEC("block56-weights", HIP_RECIPE_DECODER_F16R),
+	HIP_WEIGHT_SPEC("block62-weights", HIP_RECIPE_DECODER_F16R),
+	HIP_WEIGHT_SPEC("block66-weights", HIP_RECIPE_DECODER_F16R),
 };
 
 /** @brief The number of f32 bit patterns in the sample. */
@@ -913,9 +913,9 @@ static void
 check_grouped_contract (void)
 {
 	struct hip_weight_spec const specs[] = {
-		{"block5-ffn", HIP_RECIPE_MH_FFN},
-		{"block9-ffn", HIP_RECIPE_MH_FFN},
-		{"block15-ffn", HIP_RECIPE_FFN_FRAG},
+		HIP_WEIGHT_SPEC("block5-ffn", HIP_RECIPE_MH_FFN),
+		HIP_WEIGHT_SPEC("block9-ffn", HIP_RECIPE_MH_FFN),
+		HIP_WEIGHT_SPEC("block15-ffn", HIP_RECIPE_FFN_FRAG),
 	};
 	for (size_t s = 0; s < sizeof specs / sizeof *specs; ++s) {
 		unsigned const c = hip_weights_channels(&specs[s]);
@@ -1099,6 +1099,9 @@ pack_code (struct hip_weight_spec const *spec,
 	return code;
 }
 
+/** @brief A weight of a literal stem, as a pointer to a compound literal. */
+#define SPEC(stem, recipe) (&(struct hip_weight_spec)HIP_WEIGHT_SPEC(stem, recipe))
+
 /** @brief Checks the reader's and the packers' errors.
  *
  * @param s The scratch.
@@ -1107,13 +1110,13 @@ static void
 check_errors (struct scratch *s)
 {
 	char const *const dir = s->directory;
-	struct hip_weight_spec const ffn = {"block5-ffn", HIP_RECIPE_MH_FFN};
+	struct hip_weight_spec const ffn = HIP_WEIGHT_SPEC("block5-ffn", HIP_RECIPE_MH_FFN);
 	struct error e;
-	expect_error(load_code(s, &(struct hip_weight_spec){"block5-bogus", HIP_RECIPE_DS_FRAG}, &e), &e,
+	expect_error(load_code(s, SPEC("block5-bogus", HIP_RECIPE_DS_FRAG), &e), &e,
 	             "unknown weight block5-bogus");
-	expect_error(load_code(s, &(struct hip_weight_spec){"block10-ffn", HIP_RECIPE_SPLIT_MIX_F16}, &e), &e,
+	expect_error(load_code(s, SPEC("block10-ffn", HIP_RECIPE_SPLIT_MIX_F16), &e), &e,
 	             "no split-mix-f16 packing of block10-ffn");
-	expect_error(load_code(s, &(struct hip_weight_spec){"block66-ffn", HIP_RECIPE_MH_FFN}, &e), &e,
+	expect_error(load_code(s, SPEC("block66-ffn", HIP_RECIPE_MH_FFN), &e), &e,
 	             "no fp8-g128 packing of block66-ffn");
 	expect_error(load_code(s, &ffn, &e), &e, "missing weight %s/block5-ffn (neither .f32 nor .f16)", dir);
 	// A file that does not hold exactly its stem's values is rejected with both sizes.
@@ -1152,14 +1155,14 @@ check_errors (struct scratch *s)
 	free(f32);
 	f32 = nullptr;
 	scratch_zeros(s, "post70-head.f32", 95 * 4);
-	expect_error(load_code(s, &(struct hip_weight_spec){"post70-head", HIP_RECIPE_RAW}, &e), &e,
+	expect_error(load_code(s, SPEC("post70-head", HIP_RECIPE_RAW), &e), &e,
 	             "%s/post70-head.f32: 380 bytes, expected 384", dir);
 	// The ds-cast, ds-frag and decoder files as well, which upstream's loaders read at any size of
 	// at least 2c² values.
 	struct hip_weight_spec const sized[] = {
-		{"block4-ds", HIP_RECIPE_DS_CAST},
-		{"block8-ds", HIP_RECIPE_DS_FRAG},
-		{"block62-weights", HIP_RECIPE_DECODER_F16R},
+		HIP_WEIGHT_SPEC("block4-ds", HIP_RECIPE_DS_CAST),
+		HIP_WEIGHT_SPEC("block8-ds", HIP_RECIPE_DS_FRAG),
+		HIP_WEIGHT_SPEC("block62-weights", HIP_RECIPE_DECODER_F16R),
 	};
 	for (size_t i = 0; i < sizeof sized / sizeof *sized; ++i) {
 		size_t const n = hip_weights_file_elements(&sized[i]);
@@ -1173,7 +1176,7 @@ check_errors (struct scratch *s)
 		}
 	}
 	// Encoding errors name the file read and the element.
-	struct hip_weight_spec const attention = {"block0-attention", HIP_RECIPE_C32};
+	struct hip_weight_spec const attention = HIP_WEIGHT_SPEC("block0-attention", HIP_RECIPE_C32);
 	size_t const size = 2 * hip_weights_file_elements(&attention);
 	uint8_t *input = calloc(size, 1);
 	allocated(input);
@@ -1190,28 +1193,30 @@ check_errors (struct scratch *s)
 
 	// So do the other encodings' errors, here of a file named PATH.
 	expect_error(pack_code(&attention, 7, 0.3f, &e), &e, "PATH: element 7: matrix weight not exact finite FP8");
-	expect_error(pack_code(&(struct hip_weight_spec){"block0-ffn", HIP_RECIPE_C32}, 600, INFINITY, &e), &e,
+	expect_error(pack_code(SPEC("block0-ffn", HIP_RECIPE_C32), 600, INFINITY, &e), &e,
 	             "PATH: element 600: nonfinite FP8 matrix weight");
-	expect_error(pack_code(&(struct hip_weight_spec){"block5-attention", HIP_RECIPE_MH_ATTENTION}, 12288,
+	expect_error(pack_code(SPEC("block5-attention", HIP_RECIPE_MH_ATTENTION), 12288,
 	                       0x1p-12f, &e), &e,
 	             "PATH: element 12288: matrix weight not exact FP8 subnormal");
 	expect_error(pack_code(&ffn, 4 * 4096 + 128, 1.f, &e), &e,
 	             "PATH: element 16512: nonzero outside grouped contraction");
-	expect_error(pack_code(&(struct hip_weight_spec){"block23-ffwd", HIP_RECIPE_SPLIT_MIX_F16}, 262149, 1.f / 3,
+	expect_error(pack_code(SPEC("block23-ffwd", HIP_RECIPE_SPLIT_MIX_F16), 262149, 1.f / 3,
 	                       &e), &e,
 	             "PATH: element 262149: weight not exact half");
-	expect_error(pack_code(&(struct hip_weight_spec){"block31-qkv", HIP_RECIPE_QKV_F16_FRAG}, 2097153, 0x1p16f,
+	expect_error(pack_code(SPEC("block31-qkv", HIP_RECIPE_QKV_F16_FRAG), 2097153, 0x1p16f,
 	                       &e), &e,
 	             "PATH: element 2097153: half weight overflow");
-	expect_error(pack_code(&(struct hip_weight_spec){"block22-ds", HIP_RECIPE_DS_FRAG}, 70000, 0x1p-26f, &e), &e,
+	expect_error(pack_code(SPEC("block22-ds", HIP_RECIPE_DS_FRAG), 70000, 0x1p-26f, &e), &e,
 	             "PATH: element 70000: weight not exact half subnormal");
-	expect_error(pack_code(&(struct hip_weight_spec){"block31-projection", HIP_RECIPE_VIT_PROJ_FRAG}, 1048575,
+	expect_error(pack_code(SPEC("block31-projection", HIP_RECIPE_VIT_PROJ_FRAG), 1048575,
 	                       NAN, &e), &e,
 	             "PATH: element 1048575: nonfinite FP8 matrix weight");
 	// Values outside the regions a recipe encodes are kept, whatever they are.
-	expect(!pack_code(&(struct hip_weight_spec){"decoder39-weights", HIP_RECIPE_DECODER_F16R}, 524799, NAN, &e),
+	expect(!pack_code(SPEC("decoder39-weights", HIP_RECIPE_DECODER_F16R), 524799, NAN, &e),
 	       "a NaN scale rejected");
 }
+
+#undef SPEC
 
 /** @brief The weights dlsslopd uploads, in upload order: those of the plan at the first tier.
  *         hip-plan checks that the plan at every tier lists the same.

@@ -11,16 +11,21 @@
 
 #include "hip_plan.h"
 
-char const *const HIP_PLAN_MODULE_FILES[] = {
-	"multihead-reference.hsaco",
-	"deep_reference.hsaco",
-	"c32_fused_ffn_attention-packed.hsaco",
-	"multihead_fused_attention.hsaco",
-	"deep_fast-packed.hsaco",
-	"multihead-fast-padded-wave-packed.hsaco",
+/** @brief A struct hip_module_file of a literal name. */
+#define MODULE_FILE(name) {name, sizeof (name) - 1}
+
+struct hip_module_file const HIP_PLAN_MODULE_FILES[] = {
+	MODULE_FILE("multihead-reference.hsaco"),
+	MODULE_FILE("deep_reference.hsaco"),
+	MODULE_FILE("c32_fused_ffn_attention-packed.hsaco"),
+	MODULE_FILE("multihead_fused_attention.hsaco"),
+	MODULE_FILE("deep_fast-packed.hsaco"),
+	MODULE_FILE("multihead-fast-padded-wave-packed.hsaco"),
 };
 static_assert(sizeof HIP_PLAN_MODULE_FILES / sizeof *HIP_PLAN_MODULE_FILES == HIP_MODULE_COUNT,
               "a file per module");
+
+#undef MODULE_FILE
 
 struct hip_kernel_info const HIP_PLAN_KERNELS[] = {
 	{"c32_fast_ffn_attention_fused_half_prefix_finish_main8", 128, HIP_MODULE_C32_FUSED, HIP_GRID_GROUPS},
@@ -395,7 +400,7 @@ listed_weight (struct builder               *b,
 }
 
 /** @brief The weight of a literal stem packed by a recipe. */
-#define NAMED_WEIGHT(b, stem, recipe) listed_weight((b), &(struct hip_weight_spec){stem, (recipe)})
+#define NAMED_WEIGHT(b, stem, recipe) listed_weight((b), &(struct hip_weight_spec)HIP_WEIGHT_SPEC(stem, recipe))
 
 /** @brief The weight blockBLOCK-PART packed by a recipe, listed the first time upstream asks for
  *         it.
@@ -419,6 +424,7 @@ weight (struct builder  *b,
 			b->error = error_fail(b->e, "weight stem block%u-%s is too long", block, part);
 		return (struct hip_plan_weight){0};
 	}
+	spec.length = (uint8_t)length;
 	return listed_weight(b, &spec);
 }
 

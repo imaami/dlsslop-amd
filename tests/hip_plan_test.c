@@ -200,7 +200,7 @@ canonical_text (struct hip_plan const *plan,
 	for (size_t n = 0; n < plan->launch_count; ++n) {
 		struct hip_launch const *const l = &plan->launches[n];
 		struct hip_kernel_info const *const k = &HIP_PLAN_KERNELS[l->kernel];
-		add(text, "%s:%s\t%" PRIu32 "x1x1\t%ux1x1\t0\t", HIP_PLAN_MODULE_FILES[k->module], k->name,
+		add(text, "%s:%s\t%" PRIu32 "x1x1\t%ux1x1\t0\t", HIP_PLAN_MODULE_FILES[k->module].name, k->name,
 		    l->grid, (unsigned)k->threads);
 		for (uint16_t i = 0; i < l->count; ++i) {
 			struct hip_arg const a = l->args[i];
@@ -815,8 +815,8 @@ check_abi (char const *directory)
 	size_t const directory_length = strlen(directory);
 	int status = 0;
 	for (size_t m = 0; m < HIP_MODULE_COUNT && !status; ++m) {
-		char *path = files_join(directory, directory_length, HIP_PLAN_MODULE_FILES[m],
-		                        strlen(HIP_PLAN_MODULE_FILES[m]), nullptr);
+		struct hip_module_file const *const file = &HIP_PLAN_MODULE_FILES[m];
+		char *path = files_join(directory, directory_length, file->name, file->length, nullptr);
 		allocated(path);
 		struct error e;
 		if (!files_is_regular_file(path)) {
@@ -842,7 +842,7 @@ check_abi (char const *directory)
 	for (uint8_t k = 0; k < HIP_KERNEL_COUNT; ++k) {
 		struct hip_kernel_info const *const i = &HIP_PLAN_KERNELS[k];
 		abis[k] = module_abi_find(&modules[i->module], i->name);
-		expect(abis[k], "%s has no kernel %s", HIP_PLAN_MODULE_FILES[i->module], i->name);
+		expect(abis[k], "%s has no kernel %s", HIP_PLAN_MODULE_FILES[i->module].name, i->name);
 	}
 	bool reported[HIP_KERNEL_COUNT] = {0};
 	for (size_t t = 0; t < kNativeTierCount; ++t) {

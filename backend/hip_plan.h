@@ -25,8 +25,14 @@ enum hip_module : uint8_t {
 	HIP_MODULE_COUNT           //!< The number of modules; no module.
 };
 
+/** @brief A module's file. */
+struct hip_module_file {
+	char const *name;   //!< The file's name.
+	size_t      length; //!< The name's length.
+};
+
 /** @brief Each module's file, by enum hip_module. */
-extern char const *const HIP_PLAN_MODULE_FILES[];
+extern struct hip_module_file const HIP_PLAN_MODULE_FILES[];
 
 /** @brief How upstream's Run() makes a launch's groups of the count it is given. */
 enum hip_grid : uint8_t {

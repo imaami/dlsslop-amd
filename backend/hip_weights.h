@@ -52,7 +52,11 @@ extern char const *const HIP_WEIGHTS_RECIPE_SUFFIX[];
 struct hip_weight_spec {
 	char            stem[HIP_WEIGHTS_STEM_BYTES]; //!< The stem, such as block23-ffwd-projection, and a null.
 	enum hip_recipe recipe;                       //!< The recipe.
+	uint8_t         length;                       //!< The stem's length.
 };
+
+/** @brief The initializer of a struct hip_weight_spec of a literal stem and a recipe. */
+#define HIP_WEIGHT_SPEC(stem, recipe) {stem, (recipe), sizeof (stem) - 1}
 
 /** @brief The values in a weight's file (upstream: WeightElements).
  *
