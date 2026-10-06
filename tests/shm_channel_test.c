@@ -250,6 +250,21 @@ path_in (size_t     *length,
 	return path;
 }
 
+/** @brief Ends a path at its last '/', which leaves its directory.
+ *
+ * @param path   The path, which has a '/'.
+ * @param length Its length.
+ * @return       Where the '/' was.
+ */
+static char *
+cut_name (char   *path,
+          size_t  length)
+{
+	char *const slash = memrchr(path, '/', length);
+	*slash = '\0';
+	return slash;
+}
+
 /** @brief The names in a directory, but . and .., sorted and joined by spaces, on the heap. */
 static char *
 listing (char const *dir)
@@ -293,17 +308,19 @@ listing (char const *dir)
  *
  * @param channel Receives the channel.
  * @param path    Its path.
+ * @param length  The path's length.
  * @param bytes   How much of it to map.
  * @param flags   shm_channel_open()'s flags.
  */
 static void
 open_channel (struct shm_channel *channel,
               char const         *path,
+              size_t              length,
               size_t              bytes,
               uint32_t            flags)
 {
 	struct error e;
-	require(!shm_channel_open(channel, path, strlen(path), bytes, flags, &e), "%s", e.what);
+	require(!shm_channel_open(channel, path, length, bytes, flags, &e), "%s", e.what);
 	require(channel->h && channel->fd >= 0 && channel->bytes == bytes, "an open channel is not mapped");
 }
 
@@ -311,17 +328,19 @@ open_channel (struct shm_channel *channel,
  *         that hold each of the needles.
  *
  * @param path    The channel's path.
+ * @param length  The path's length.
  * @param flags   shm_channel_open()'s flags.
  * @param needles The words, ending with nullptr.
  */
 static void
 refused (char const         *path,
+         size_t              length,
          uint32_t            flags,
          char const *const  *needles)
 {
 	struct shm_channel channel;
 	struct error e;
-	require(shm_channel_open(&channel, path, strlen(path), kHeaderBytes, flags, &e) == ERROR_FAILED,
+	require(shm_channel_open(&channel, path, length, kHeaderBytes, flags, &e) == ERROR_FAILED,
 	        "%s was not refused", path);
 	require(!channel.h && channel.fd == -1, "a refused channel is open");
 	for (; *needles; ++needles)
@@ -337,14 +356,16 @@ struct racer {
 
 /** @brief Opens a channel once the gate opens, and records what it saw.
  *
- * @param gate  The gate's end to read: its end of file opens it.
- * @param path  The channel.
- * @param bytes How much of it to map.
- * @param seen  Receives what the racer saw.
+ * @param gate   The gate's end to read: its end of file opens it.
+ * @param path   The channel.
+ * @param length The path's length.
+ * @param bytes  How much of it to map.
+ * @param seen   Receives what the racer saw.
  */
 [[noreturn]] static void
 race (int            gate,
       char const    *path,
+      size_t         length,
       size_t         bytes,
       struct racer  *seen)
 {
@@ -353,7 +374,7 @@ race (int            gate,
 		_exit(1);
 	struct shm_channel channel;
 	struct error e;
-	if (shm_channel_open(&channel, path, strlen(path), bytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE, &e)) {
+	if (shm_channel_open(&channel, path, length, bytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE, &e)) {
 		seen->failed = __LINE__;
 		_exit(1);
 	}
@@ -386,7 +407,8 @@ check_race (uint32_t round)
 	require(race_dir && !mkdir(race_dir, 0700), "cannot make a race's directory");
 	char *dir = missing ? support_format(nullptr, "%s/sub", race_dir) : race_dir;
 	require(dir, "out of memory");
-	char *path = support_format(nullptr, "%s/channel", dir);
+	size_t length;
+	char *path = support_format(&length, "%s/channel", dir);
 	require(path, "out of memory");
 	struct racer *const seen = mmap(nullptr, RACERS * sizeof *seen, PROT_READ | PROT_WRITE,
 	                                MAP_SHARED | MAP_ANONYMOUS, -1, 0);
@@ -402,7 +424,7 @@ check_race (uint32_t round)
 		require(racers[i] >= 0, "fork failed");
 		if (!racers[i]) {
 			close(gate[1]);
-			race(gate[0], path, i & 1 ? ShmTotalBytes() : kHeaderBytes, &seen[i]);
+			race(gate[0], path, length, i & 1 ? ShmTotalBytes() : kHeaderBytes, &seen[i]);
 		}
 	}
 	if (missing)
@@ -451,10 +473,11 @@ check_create (void)
 	for (force = FORCE_NONE; force < FORCE_COUNT; ++force) {
 		char name[32];
 		snprintf(name, sizeof name, "made-%u/channel", (unsigned)force);
-		char *path = path_in(nullptr, name);
+		size_t length;
+		char *path = path_in(&length, name);
 		unnamed_files = descriptor_links = proc_links = named_links = 0;
 		struct shm_channel channel;
-		open_channel(&channel, path, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
+		open_channel(&channel, path, length, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
 		require(channel.flags == (SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE | SHM_CHANNEL_CREATED),
 		        "%s: a new channel's flags are %#x", FORCE_NAMES[force], channel.flags);
 		require(!memcmp(channel.h, defaults, sizeof *defaults), "%s: a new channel lacks the defaults",
@@ -474,8 +497,9 @@ check_create (void)
 		shm_channel_fini(&channel);
 		require(channel.fd == -1 && !channel.h && !channel.flags, "fini left a channel open");
 
-		char *dir = path_in(nullptr, name);
-		*strrchr(dir, '/') = '\0';
+		size_t dir_length;
+		char *dir = path_in(&dir_length, name);
+		cut_name(dir, dir_length);
 		require(!stat(dir, &st) && (st.st_mode & 0777) == 0700, "a created directory is not private");
 		char *names = listing(dir);
 		require(!strcmp(names, "channel"), "%s: creating left %s", FORCE_NAMES[force], names);
@@ -485,11 +509,11 @@ check_create (void)
 		dir = nullptr;
 
 		// Opened again, nothing is created, also without asking to write.
-		open_channel(&channel, path, ShmTotalBytes(), SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
+		open_channel(&channel, path, length, ShmTotalBytes(), SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
 		require(channel.flags == (SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE), "an existing channel was created");
 		atomic_store(&channel.h->passes, 3);
 		shm_channel_fini(&channel);
-		open_channel(&channel, path, kHeaderBytes, 0);
+		open_channel(&channel, path, length, kHeaderBytes, 0);
 		require(!channel.flags && atomic_load(&channel.h->passes) == 3, "a channel was not opened as it was");
 		shm_channel_fini(&channel);
 		free(path);
@@ -497,13 +521,14 @@ check_create (void)
 	}
 	umask(mask);
 
-	char *nested = path_in(nullptr, "nested/parent/dir/channel");
+	size_t nested_length;
+	char *nested = path_in(&nested_length, "nested/parent/dir/channel");
 	struct shm_channel channel;
-	open_channel(&channel, nested, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
+	open_channel(&channel, nested, nested_length, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
 	require(channel.flags & SHM_CHANNEL_CREATED, "a channel in missing parents was not created");
 	shm_channel_fini(&channel);
 	struct stat st;
-	*strrchr(nested, '/') = '\0';
+	cut_name(nested, nested_length);
 	require(!stat(nested, &st) && (st.st_mode & 0777) == 0700, "a created directory is not private");
 	free(nested);
 	nested = nullptr;
@@ -512,12 +537,13 @@ check_create (void)
 	// a reader opens it as it is, and a creator gives it mode 0700.
 	char *narrow = path_in(nullptr, "narrow");
 	require(!mkdir(narrow, 0700) && !chmod(narrow, 0500), "cannot make a narrow directory");
-	char *in_narrow = path_in(nullptr, "narrow/channel");
+	size_t in_narrow_length;
+	char *in_narrow = path_in(&in_narrow_length, "narrow/channel");
 	struct error e;
-	require(shm_channel_open(&channel, in_narrow, strlen(in_narrow), kHeaderBytes, 0, &e)
+	require(shm_channel_open(&channel, in_narrow, in_narrow_length, kHeaderBytes, 0, &e)
 	        && channel.flags == SHM_CHANNEL_MISSING, "a reader refused a narrow directory: %s", e.what);
 	require(!stat(narrow, &st) && (st.st_mode & 0777) == 0500, "a reader changed a directory's mode");
-	open_channel(&channel, in_narrow, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
+	open_channel(&channel, in_narrow, in_narrow_length, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
 	require(channel.flags & SHM_CHANNEL_CREATED, "a channel in a narrow directory was not created");
 	shm_channel_fini(&channel);
 	require(!stat(narrow, &st) && (st.st_mode & 0777) == 0700, "a creator left a directory narrow");
@@ -557,9 +583,10 @@ write_file (char const *path,
 static void
 check_refusals (void)
 {
-	char *path = path_in(nullptr, "other-version");
+	size_t length;
+	char *path = path_in(&length, "other-version");
 	struct shm_channel channel;
-	open_channel(&channel, path, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
+	open_channel(&channel, path, length, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
 	atomic_store(&channel.h->version, kShmVersion + 1);
 	shm_channel_fini(&channel);
 	char other[16], ours[16];
@@ -568,63 +595,63 @@ check_refusals (void)
 	struct stat before, after;
 	require(!stat(path, &before), "stat failed");
 	for (uint32_t flags = 0; flags <= SHM_CHANNEL_CREATE; flags += SHM_CHANNEL_CREATE)
-		refused(path, flags | SHM_CHANNEL_WRITE,
+		refused(path, length, flags | SHM_CHANNEL_WRITE,
 		        (char const *const[]){ path, other, ours, "remove it, or use another channel", nullptr });
 	require(!stat(path, &after) && after.st_ino == before.st_ino
 	        && after.st_mtim.tv_sec == before.st_mtim.tv_sec && after.st_mtim.tv_nsec == before.st_mtim.tv_nsec,
 	        "a refused channel was changed");
 
 	// No channel at all: zeros, or a file of another size.
-	char *zeros = path_in(nullptr, "zeros");
+	char *zeros = path_in(&length, "zeros");
 	write_file(zeros, "", 0, (off_t)ShmTotalBytes());
-	refused(zeros, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
+	refused(zeros, length, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
 	        (char const *const[]){ zeros, "holds no channel (magic 0, version 0;", nullptr });
-	char *notes = path_in(nullptr, "notes");
+	char *notes = path_in(&length, "notes");
 	write_file(notes, "notes\n", 6, 6);
 	char size[64];
 	snprintf(size, sizeof size, "holds no v%u channel: it has 6 bytes, not %zu;", (unsigned)kShmVersion,
 	         ShmTotalBytes());
-	refused(notes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE, (char const *const[]){ notes, size, nullptr });
+	refused(notes, length, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE, (char const *const[]){ notes, size, nullptr });
 	uint32_t const head[2] = { kShmMagic, kShmVersion - 1 };
-	char *short_channel = path_in(nullptr, "short");
+	char *short_channel = path_in(&length, "short");
 	write_file(short_channel, head, sizeof head, 4096);
 	snprintf(other, sizeof other, "v%u,", (unsigned)kShmVersion - 1);
-	refused(short_channel, 0, (char const *const[]){ short_channel, other, ours, nullptr });
+	refused(short_channel, length, 0, (char const *const[]){ short_channel, other, ours, nullptr });
 	char *text = support_read_file(notes, nullptr);
 	require(text && !strcmp(text, "notes\n"), "a refused file was changed");
 	free(text);
 	text = nullptr;
 
 	// A symbolic link to a channel, a FIFO, and a directory.
-	char *good = path_in(nullptr, "good");
-	open_channel(&channel, good, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
+	char *good = path_in(&length, "good");
+	open_channel(&channel, good, length, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
 	shm_channel_fini(&channel);
-	char *link = path_in(nullptr, "link");
+	char *link = path_in(&length, "link");
 	require(!symlink(good, link), "symlink failed");
-	refused(link, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
+	refused(link, length, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
 	        (char const *const[]){ "must not be a symlink", link, nullptr });
-	char *fifo = path_in(nullptr, "fifo");
+	char *fifo = path_in(&length, "fifo");
 	require(!mkfifo(fifo, 0600), "mkfifo failed");
-	refused(fifo, 0, (char const *const[]){ "must be regular and owned by the current user", nullptr });
-	char *dir = path_in(nullptr, "a directory");
+	refused(fifo, length, 0, (char const *const[]){ "must be regular and owned by the current user", nullptr });
+	char *dir = path_in(&length, "a directory");
 	require(!mkdir(dir, 0700), "mkdir failed");
-	refused(dir, 0, (char const *const[]){ "must be regular", nullptr });
-	refused(dir, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
+	refused(dir, length, 0, (char const *const[]){ "must be regular", nullptr });
+	refused(dir, length, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
 	        (char const *const[]){ "open shared-memory file ", dir, nullptr });
-	char *trailing = path_in(nullptr, "a directory/");
-	refused(trailing, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
+	char *trailing = path_in(&length, "a directory/");
+	refused(trailing, length, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
 	        (char const *const[]){ "names a directory", nullptr });
 
 	// A directory that others may enter, and one that is a symbolic link, receive no channel.
 	char *shared = path_in(nullptr, "shared");
 	require(!mkdir(shared, 0700) && !chmod(shared, 0755), "cannot make a shared directory");
-	char *in_shared = path_in(nullptr, "shared/channel");
-	refused(in_shared, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
+	char *in_shared = path_in(&length, "shared/channel");
+	refused(in_shared, length, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
 	        (char const *const[]){ "shared-memory directory must be private (mode 0700): ", shared, nullptr });
 	char *linked = path_in(nullptr, "linked");
 	require(!symlink(dir, linked), "symlink failed");
-	char *in_linked = path_in(nullptr, "linked/channel");
-	refused(in_linked, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
+	char *in_linked = path_in(&length, "linked/channel");
+	refused(in_linked, length, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
 	        (char const *const[]){ "must be owned by the current user and not a symlink", nullptr });
 	char *names = listing(shared);
 	require(!*names, "a shared directory received %s", names);
@@ -671,11 +698,12 @@ check_replaced (void)
 {
 	char *dir = path_in(nullptr, "replaced");
 	require(!mkdir(dir, 0700), "mkdir failed");
-	char *path = path_in(nullptr, "replaced/channel");
+	size_t length;
+	char *path = path_in(&length, "replaced/channel");
 	struct shm_channel channel;
 	struct error e;
 	replace = dir;
-	require(shm_channel_open(&channel, path, strlen(path), kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
+	require(shm_channel_open(&channel, path, length, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE,
 	                         &e) == ERROR_FAILED && strstr(e.what, path),
 	        "a channel was created in a replaced directory");
 	require(!replace, "the directory was not replaced");
@@ -710,9 +738,10 @@ check_swept (void)
 	for (uint32_t i = 0; i < sizeof opens / sizeof *opens; ++i) {
 		char name[16];
 		snprintf(name, sizeof name, "swept-%u", i);
-		char *path = path_in(nullptr, name);
+		size_t length;
+		char *path = path_in(&length, name);
 		struct shm_channel channel;
-		open_channel(&channel, path, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
+		open_channel(&channel, path, length, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
 		// A mark of the channel that the sweep removes.
 		uint32_t const passes = atomic_load(&defaults->passes);
 		atomic_store(&channel.h->passes, passes + 1);
@@ -720,7 +749,7 @@ check_swept (void)
 		sweep_name = name;
 		sweep_holds = opens[i].holds;
 		struct error e;
-		bool const opened = !shm_channel_open(&channel, path, strlen(path), kHeaderBytes, opens[i].flags, &e);
+		bool const opened = !shm_channel_open(&channel, path, length, kHeaderBytes, opens[i].flags, &e);
 		require(!sweep_name && sweeper < 0, "the sweep did not end");
 		struct stat st;
 		if (opens[i].flags)
@@ -741,26 +770,28 @@ check_swept (void)
 static void
 check_missing (void)
 {
-	char *missing_dir = path_in(nullptr, "missing/channel");
-	char *missing = path_in(nullptr, "missing-channel");
+	size_t lengths[2];
+	char *missing_dir = path_in(&lengths[0], "missing/channel");
+	char *missing = path_in(&lengths[1], "missing-channel");
+	char const *const paths[] = { missing_dir, missing };
 	for (uint32_t flags = 0; flags <= SHM_CHANNEL_WRITE; ++flags)
-		for (char const *const *path = (char const *const[]){ missing_dir, missing, nullptr }; *path; ++path) {
+		for (uint32_t i = 0; i < sizeof paths / sizeof *paths; ++i) {
 			struct shm_channel channel;
 			struct error e;
-			require(shm_channel_open(&channel, *path, strlen(*path), kHeaderBytes, flags, &e)
+			require(shm_channel_open(&channel, paths[i], lengths[i], kHeaderBytes, flags, &e)
 			        && channel.flags == SHM_CHANNEL_MISSING && channel.fd == -1 && !channel.h
-			        && strstr(e.what, "no channel at ") && strstr(e.what, *path),
+			        && strstr(e.what, "no channel at ") && strstr(e.what, paths[i]),
 			        "a missing channel was not reported as missing: %s", e.what);
 		}
 	struct stat st;
 	require(stat(missing, &st) && errno == ENOENT, "a reader created a channel");
-	*strrchr(missing_dir, '/') = '\0';
+	cut_name(missing_dir, lengths[0]);
 	require(stat(missing_dir, &st) && errno == ENOENT, "a reader created a directory");
 
 	char *cwd = getcwd(nullptr, 0);
 	require(cwd && !chdir(root), "chdir failed");
 	struct shm_channel channel;
-	open_channel(&channel, "bare", kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
+	open_channel(&channel, "bare", sizeof "bare" - 1, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
 	require(channel.flags & SHM_CHANNEL_CREATED, "a bare name was not created");
 	shm_channel_fini(&channel);
 	require(!chdir(cwd), "chdir failed");
@@ -890,16 +921,19 @@ enum sweep_at {
 /** @brief Opens a channel in a directory of SWEEP_CASES' files and ends the test unless exactly the
  *         files that should go have gone.
  *
- * @param path The channel's path.
- * @param at   Where that is.
+ * @param path   The channel's path.
+ * @param length The path's length.
+ * @param at     Where that is.
  */
 static void
 sweep_open (char const    *path,
+            size_t         length,
             enum sweep_at  at)
 {
-	char *dir = strdup(path);
+	char *dir = malloc(length + 1);
 	require(dir, "out of memory");
-	*strrchr(dir, '/') = '\0';
+	memcpy(dir, path, length + 1);
+	cut_name(dir, length);
 	time_t const now = time(nullptr);
 	require(now != (time_t)-1, "time failed");
 	char const *kept[sizeof SWEEP_CASES / sizeof *SWEEP_CASES + 1];
@@ -926,7 +960,7 @@ sweep_open (char const    *path,
 	kept[count++] = kShmChannelName;
 
 	struct shm_channel channel;
-	open_channel(&channel, path, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
+	open_channel(&channel, path, length, kHeaderBytes, SHM_CHANNEL_CREATE | SHM_CHANNEL_WRITE);
 	require(channel.flags & SHM_CHANNEL_CREATED, "the sweep's channel was not created");
 	shm_channel_fini(&channel);
 	for (uint32_t i = 0; i < sizeof fds / sizeof *fds; ++i) {
@@ -1002,17 +1036,19 @@ private_tmp (void)
 /** @brief A default's path, made with its function, in a directory made private for the sweep.
  *
  * @param format ShmDefaultPath() or ShmNativeDefaultPath().
+ * @param length Receives the path's length.
  * @return       The path, which the caller frees.
  */
 static char *
-default_in_private (int (*format)(char *, size_t))
+default_in_private (int     (*format)(char *, size_t),
+                    size_t   *length)
 {
-	int const length = format(nullptr, 0);
-	require(length > 0, "cannot format a default path");
-	char *path = malloc((size_t)length + 1);
-	require(path && format(path, (size_t)length + 1) == length, "cannot format a default path");
-	char *const slash = strrchr(path, '/');
-	*slash = '\0';
+	int const n = format(nullptr, 0);
+	require(n > 0, "cannot format a default path");
+	*length = (size_t)n;
+	char *path = malloc(*length + 1);
+	require(path && format(path, *length + 1) == n, "cannot format a default path");
+	char *const slash = cut_name(path, *length);
 	require(!mkdir(path, 0700), "cannot make %s", path);
 	*slash = '/';
 	return path;
@@ -1029,9 +1065,10 @@ check_sweeps (void)
 {
 	char *chosen = path_in(nullptr, "chosen");
 	require(!mkdir(chosen, 0700), "mkdir failed");
-	char *chosen_path = support_format(nullptr, "%s/%s", chosen, kShmChannelName);
+	size_t length;
+	char *chosen_path = support_format(&length, "%s/%s", chosen, kShmChannelName);
 	require(chosen_path, "out of memory");
-	sweep_open(chosen_path, SWEEP_AT_CHOSEN);
+	sweep_open(chosen_path, length, SWEEP_AT_CHOSEN);
 	free(chosen_path);
 	chosen_path = nullptr;
 	free(chosen);
@@ -1055,8 +1092,8 @@ check_sweeps (void)
 			{ ShmNativeDefaultPath, SWEEP_AT_AGAIN  },
 		};
 		for (uint32_t i = 0; i < sizeof opens / sizeof *opens; ++i) {
-			char *path = default_in_private(opens[i].format);
-			sweep_open(path, opens[i].at);
+			char *path = default_in_private(opens[i].format, &length);
+			sweep_open(path, length, opens[i].at);
 			free(path);
 			path = nullptr;
 		}
@@ -1073,14 +1110,13 @@ check_sweeps (void)
 	char *dir = support_temp_dir("/tmp", "dlssnr-shm-channel-test", nullptr);
 	require(dir, "cannot make a temporary directory");
 	require(!setenv("DLSSNR_UID", dir + sizeof "/tmp/dlssnr-" - 1, 1), "setenv failed");
-	size_t length;
 	char *shared = support_format(&length, "%s/%s", dir, kShmChannelName);
 	require(shared, "out of memory");
 	char buf[256];
 	int const n = ShmDefaultPath(buf, sizeof buf);
 	require(n >= 0 && (size_t)n == length && !memcmp(buf, shared, length),
 	        "DLSSNR_UID did not name the test's directory");
-	sweep_open(shared, SWEEP_AT_SHARED);
+	sweep_open(shared, length, SWEEP_AT_SHARED);
 	free(shared);
 	shared = nullptr;
 	free(dir);

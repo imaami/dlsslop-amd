@@ -1529,7 +1529,7 @@ check_unclamped (char const *spirv,
 	struct vulkan_paths const paths = {
 		.model          = model.path,
 		.shaders        = spirv,
-		.model_length   = strlen(model.path),
+		.model_length   = model.path_length,
 		.shaders_length = length,
 	};
 	for (size_t i = 0; i < 2; ++i) {
@@ -2003,7 +2003,7 @@ main (int    argc,
 	struct vulkan_paths const paths = {
 		.model          = model.path,
 		.shaders        = spirv,
-		.model_length   = strlen(model.path),
+		.model_length   = model.path_length,
 		.shaders_length = spirv_length,
 	};
 	if (extent) {

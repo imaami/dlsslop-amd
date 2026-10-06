@@ -61,9 +61,10 @@ vulkan_pack_synthetic_entry (char const *name,
 
 /** @brief A model pack in memory, which vulkan_model_open() reads through /proc. */
 struct vulkan_pack {
-	char path[32]; //!< /proc/self/fd/FD.
-	int  fd;       //!< The memory file, or -1.
-	bool ok;       //!< Whether its path fit and every byte reached the file.
+	char     path[32];    //!< /proc/self/fd/FD.
+	int      fd;          //!< The memory file, or -1.
+	uint32_t path_length; //!< The length of path.
+	bool     ok;          //!< Whether its path fit and every byte reached the file.
 };
 
 /** @brief Makes an empty model pack in memory.

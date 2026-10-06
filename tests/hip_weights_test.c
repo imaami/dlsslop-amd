@@ -969,18 +969,20 @@ scratch_clear (struct scratch *s)
 
 /** @brief Writes a file in a scratch directory.
  *
- * @param s    The scratch.
- * @param file The file's name.
- * @param data Its bytes.
- * @param size Their number.
+ * @param s           The scratch.
+ * @param file        The file's name.
+ * @param file_length The name's length.
+ * @param data        Its bytes.
+ * @param size        Their number.
  */
 static void
 scratch_write (struct scratch *s,
                char const     *file,
+               size_t          file_length,
                void const     *data,
                size_t          size)
 {
-	char *const path = files_join(s->directory, s->length, file, strlen(file), nullptr);
+	char *const path = files_join(s->directory, s->length, file, file_length, nullptr);
 	allocated(path && s->count < SCRATCH_FILES);
 	struct error e;
 	expect(!files_write(path, data, size, &e), "cannot write %s: %s", path, e.what);
@@ -989,18 +991,20 @@ scratch_write (struct scratch *s,
 
 /** @brief Writes a file of zero bytes in a scratch directory.
  *
- * @param s    The scratch.
- * @param file The file's name.
- * @param size Its bytes.
+ * @param s           The scratch.
+ * @param file        The file's name.
+ * @param file_length The name's length.
+ * @param size        Its bytes.
  */
 static void
 scratch_zeros (struct scratch *s,
                char const     *file,
+               size_t          file_length,
                size_t          size)
 {
 	void *zeros = calloc(size ? size : 1, 1);
 	allocated(zeros);
-	scratch_write(s, file, zeros, size);
+	scratch_write(s, file, file_length, zeros, size);
 	free(zeros);
 	zeros = nullptr;
 }
@@ -1027,8 +1031,9 @@ check_recipes (struct scratch *s)
 			size_t size;
 			uint8_t *input = synthetic_file(&w, weight, length, elements, half, &size);
 			char file[HIP_WEIGHTS_STEM_BYTES + 4];
-			format(file, sizeof file, "%s%s", spec->stem, half ? ".f16" : ".f32");
-			scratch_write(s, file, input, size);
+			size_t const file_length = format(file, sizeof file, "%s%s", spec->stem,
+			                                  half ? ".f16" : ".f32");
+			scratch_write(s, file, file_length, input, size);
 			struct error e;
 			struct hip_weight_file weights;
 			enum error_code const code = hip_weights_load(&weights, s->directory, s->length, spec, &e);
@@ -1102,6 +1107,9 @@ pack_code (struct hip_weight_spec const *spec,
 /** @brief A weight of a literal stem, as a pointer to a compound literal. */
 #define SPEC(stem, recipe) (&(struct hip_weight_spec)HIP_WEIGHT_SPEC(stem, recipe))
 
+/** @brief A string literal and its length, as two arguments. */
+#define LITERAL(text) "" text, sizeof "" text - 1
+
 /** @brief Checks the reader's and the packers' errors.
  *
  * @param s The scratch.
@@ -1121,17 +1129,17 @@ check_errors (struct scratch *s)
 	expect_error(load_code(s, &ffn, &e), &e, "missing weight %s/block5-ffn (neither .f32 nor .f16)", dir);
 	// A file that does not hold exactly its stem's values is rejected with both sizes.
 	size_t const elements = hip_weights_file_elements(&ffn);
-	scratch_write(s, "block5-ffn.f16", "", 0);
+	scratch_write(s, LITERAL("block5-ffn.f16"), "", 0);
 	expect_error(load_code(s, &ffn, &e), &e, "%s/block5-ffn.f16: 0 bytes, expected %zu", dir, 2 * elements);
-	scratch_write(s, "block5-ffn.f16", "abc", 3);
+	scratch_write(s, LITERAL("block5-ffn.f16"), "abc", 3);
 	expect_error(load_code(s, &ffn, &e), &e, "%s/block5-ffn.f16: 3 bytes, expected %zu", dir, 2 * elements);
-	scratch_zeros(s, "block5-ffn.f16", 2 * elements);
+	scratch_zeros(s, LITERAL("block5-ffn.f16"), 2 * elements);
 	expect(!load_code(s, &ffn, &e), "a zero block5-ffn.f16 rejected");
 	// Whenever the f32 file exists, it is the one read.
-	scratch_zeros(s, "block5-ffn.f32", 2 * elements);
+	scratch_zeros(s, LITERAL("block5-ffn.f32"), 2 * elements);
 	expect_error(load_code(s, &ffn, &e), &e, "%s/block5-ffn.f32: %zu bytes, expected %zu", dir, 2 * elements,
 	             4 * elements);
-	scratch_zeros(s, "block5-ffn.f32", 4 * elements);
+	scratch_zeros(s, LITERAL("block5-ffn.f32"), 4 * elements);
 	char *f32 = support_format(nullptr, "%s/block5-ffn.f32", dir);
 	char *f16 = support_format(nullptr, "%s/block5-ffn.f16", dir);
 	allocated(f32 && f16);
@@ -1154,7 +1162,7 @@ check_errors (struct scratch *s)
 	f16 = nullptr;
 	free(f32);
 	f32 = nullptr;
-	scratch_zeros(s, "post70-head.f32", 95 * 4);
+	scratch_zeros(s, LITERAL("post70-head.f32"), 95 * 4);
 	expect_error(load_code(s, SPEC("post70-head", HIP_RECIPE_RAW), &e), &e,
 	             "%s/post70-head.f32: 380 bytes, expected 384", dir);
 	// The ds-cast, ds-frag and decoder files as well, which upstream's loaders read at any size of
@@ -1167,10 +1175,10 @@ check_errors (struct scratch *s)
 	for (size_t i = 0; i < sizeof sized / sizeof *sized; ++i) {
 		size_t const n = hip_weights_file_elements(&sized[i]);
 		char name[HIP_WEIGHTS_STEM_BYTES + 4];
-		format(name, sizeof name, "%s.f16", sized[i].stem);
+		size_t const name_length = format(name, sizeof name, "%s.f16", sized[i].stem);
 		size_t const counts[] = {n - 1, n + 1};
 		for (size_t j = 0; j < 2; ++j) {
-			scratch_zeros(s, name, 2 * counts[j]);
+			scratch_zeros(s, name, name_length, 2 * counts[j]);
 			expect_error(load_code(s, &sized[i], &e), &e, "%s/%s: %zu bytes, expected %zu", dir, name,
 			             2 * counts[j], 2 * n);
 		}
@@ -1182,7 +1190,7 @@ check_errors (struct scratch *s)
 	allocated(input);
 	input[2 * 7] = 0x55; // 0x3555, about a third in binary16, which E4M3 cannot hold.
 	input[2 * 7 + 1] = 0x35;
-	scratch_write(s, "block0-attention.f16", input, size);
+	scratch_write(s, LITERAL("block0-attention.f16"), input, size);
 	free(input);
 	input = nullptr;
 	struct hip_weight_file file;
@@ -1216,6 +1224,7 @@ check_errors (struct scratch *s)
 	       "a NaN scale rejected");
 }
 
+#undef LITERAL
 #undef SPEC
 
 /** @brief The weights dlsslopd uploads, in upload order: those of the plan at the first tier.
@@ -1364,10 +1373,11 @@ main (int    argc,
 		hip_plan_fini(&plan);
 		return support_written("hip-weights test", status);
 	}
-	struct scratch s = {.directory = support_temp_dir("/tmp", "dlsslop-amd-hip-weights", nullptr)};
-	if (!expect(s.directory, "cannot create a directory in /tmp"))
+	size_t length;
+	char *const directory = support_temp_dir("/tmp", "dlsslop-amd-hip-weights", &length);
+	if (!expect(directory, "cannot create a directory in /tmp"))
 		return 1;
-	s.length = strlen(s.directory);
+	struct scratch s = {.directory = directory, .length = length};
 	check_upstream_primitives();
 	check_fp8();
 	check_halves();

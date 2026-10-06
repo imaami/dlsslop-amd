@@ -71,6 +71,7 @@ vulkan_pack_init (struct vulkan_pack *dest)
 	*dest = (struct vulkan_pack){.fd = memfd_create("vulkan-test-pack", MFD_CLOEXEC)};
 	int const n = snprintf(dest->path, sizeof dest->path, "/proc/self/fd/%d", dest->fd);
 	dest->ok = n > 0 && n < (int)sizeof dest->path;
+	dest->path_length = dest->ok ? (uint32_t)n : 0;
 }
 
 void

@@ -618,6 +618,23 @@ remove_temporary (void)
 	temporary = nullptr;
 }
 
+/** @brief Copies the start of a string to the heap, which must succeed.
+ *
+ * @param text   The string.
+ * @param length The bytes to copy, at most its length.
+ * @return       Those bytes and a null, which the caller frees.
+ */
+static char *
+copy_of (char const *text,
+         size_t      length)
+{
+	char *const copy = malloc(length + 1);
+	require(copy, "out of memory");
+	memcpy(copy, text, length);
+	copy[length] = '\0';
+	return copy;
+}
+
 /** @brief Appends a slash and a component of a letter to a path on the heap.
  *
  * @param path   The path.
@@ -645,11 +662,11 @@ main (void)
 {
 	check_channel_paths();
 	check_text_fields();
-	temporary = support_temp_dir("/tmp", "dlsslop-amd-capture-test", nullptr);
+	size_t temporary_length;
+	temporary = support_temp_dir("/tmp", "dlsslop-amd-capture-test", &temporary_length);
 	require(temporary, "mkdtemp failed");
 	// At exit, so a failed check that exits removes it too.
 	require(!atexit(remove_temporary), "atexit failed");
-	size_t const temporary_length = strlen(temporary);
 	// The log reads its variables at its first line, which comes below.
 	char *log_path = path_of(nullptr, "%s/layer.log", temporary);
 	require(!setenv("DLSSNR_ENABLE", "1", 1) && !setenv("DLSSNR_LOG", log_path, 1), "setenv failed");
@@ -834,12 +851,11 @@ main (void)
 	// value under test here, not a buffer's size.
 	size_t const size = PATH_MAX;
 	size_t too_long_length = temporary_length;
-	char *too_long = strdup(temporary);
+	char *too_long = copy_of(temporary, temporary_length);
 	size_t almost_length = temporary_length;
-	char *almost = strdup(temporary);
+	char *almost = copy_of(temporary, temporary_length);
 	size_t exact_length = temporary_length;
-	char *exact = strdup(temporary);
-	require(too_long && almost && exact, "out of memory");
+	char *exact = copy_of(temporary, temporary_length);
 	while (too_long_length < size)
 		append_component(&too_long, &too_long_length, 'x', 200);
 	while (almost_length + 201 < size - 30)
@@ -862,8 +878,8 @@ main (void)
 		capture_writer_write_frame(&writer, bgra, bgra, 1, 1, VK_FORMAT_B8G8R8A8_UNORM, &metadata);
 		require(!capture_writer_active(&writer), "an idle writer wrote a frame");
 	}
-	char *too_long_parent = strndup(too_long, (size_t)(strrchr(too_long, '/') - too_long));
-	require(too_long_parent, "out of memory");
+	char const *const too_long_slash = memrchr(too_long, '/', too_long_length);
+	char *too_long_parent = copy_of(too_long, (size_t)(too_long_slash - too_long));
 	require(is_directory(too_long_parent),
 	        "the directories that fit were not created for a capture directory longer than PATH_MAX");
 	free(too_long_parent);
