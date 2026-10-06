@@ -530,6 +530,8 @@ create_view (VkDevice                     d,
 	CREATE(VkImageView, KIND_VIEW, 0, out);
 }
 
+#undef CREATE
+
 /** @brief The fake vkDestroyImageView(). */
 static VKAPI_ATTR void VKAPI_CALL
 destroy_view (VkDevice                     d,
@@ -538,6 +540,8 @@ destroy_view (VkDevice                     d,
 {
 	DESTROY(v, KIND_VIEW);
 }
+
+#undef DESTROY
 
 /** @brief The fake vkUpdateDescriptorSets(): every set, view, sampler and buffer is alive. */
 static VKAPI_ATTR void VKAPI_CALL
@@ -833,9 +837,6 @@ format_properties (VkPhysicalDevice    p,
 	}
 	*out = (VkFormatProperties){ .optimalTilingFeatures = features };
 }
-
-#undef DESTROY
-#undef CREATE
 
 /** @brief The fake device's table. */
 static struct device_table device_table;

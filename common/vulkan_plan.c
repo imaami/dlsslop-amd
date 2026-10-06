@@ -1246,6 +1246,8 @@ lower_swin (struct lowering    *l,
 	return push_dispatch(l->dispatches, &d, e);
 }
 
+#undef SWIN_WORDS
+
 /** @brief Lowers the decoder's input: a projection into binary16, then upsampled with the encoder's
  *         skip added (upstream: nr_graph.cpp:2735-2799).
  *
@@ -1542,6 +1544,8 @@ lower_gemm (struct lowering    *l,
 	return push_dispatch(l->dispatches, &d, e);
 }
 
+#undef ENTRY
+
 /** @brief Lowers every layer.
  *
  * @param l The lowering.
@@ -1587,8 +1591,7 @@ lower (struct lowering *l,
 	return l->blob->error ? error_fail(e, "out of memory") : ERROR_NONE;
 }
 
-#undef ENTRY
-#undef SWIN_WORDS
+#undef LAYERS
 
 uint64_t
 vulkan_blob_put (struct vulkan_blob    *blob,

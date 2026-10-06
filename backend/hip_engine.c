@@ -29,9 +29,6 @@
 #include "temporal_gpu.h"
 #include "trace.h"
 
-/** @brief The native kernels' code object, in the modules' directory. */
-#define NATIVE_MODULE "/linux_native.hsaco"
-
 // "processing=WIDTHxHEIGHT" and "device INDEX" fit.
 static_assert(sizeof "processing=4294967295x4294967295" <= ENGINE_DESCRIPTION_BYTES);
 static_assert(sizeof "device -2147483648" <= ENGINE_DESCRIPTION_BYTES);
@@ -256,6 +253,9 @@ synchronize (struct hip_engine *engine,
 	return r ? hip_fail(e, &engine->api, r, "network completion") : ERROR_NONE;
 }
 
+/** @brief The native kernels' code object, in the modules' directory. */
+#define NATIVE_MODULE "/linux_native.hsaco"
+
 /** @brief hip_engine_prepare() once the plan and its placement are made.
  *
  * @param engine    The engine, with its stream.
@@ -345,6 +345,8 @@ prepare_planned (struct hip_engine          *engine,
 	// The kernels on synthetic inputs, independent of model weights.
 	return control_selftest_run(&engine->kernels, e);
 }
+
+#undef NATIVE_MODULE
 
 enum error_code
 hip_engine_prepare (struct hip_engine *engine,

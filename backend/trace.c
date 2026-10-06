@@ -357,6 +357,8 @@ frame_trace_init (struct frame_trace *dest,
 	return ERROR_NONE;
 }
 
+#undef TAIL_BYTES
+
 /** @brief Writes a trace directory's owner.json: the daemon's process, its channel and the
  *         metadata's schema.
  *

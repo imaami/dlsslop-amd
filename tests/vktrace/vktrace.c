@@ -1862,6 +1862,8 @@ create_instance (VkInstanceCreateInfo const  *ci,
 	return r;
 }
 
+#undef INSTANCE_CALLS
+
 /** @brief vkDestroyInstance. */
 static VKAPI_ATTR void VKAPI_CALL
 destroy_instance (VkInstance                   instance,
@@ -2006,6 +2008,8 @@ create_device (VkPhysicalDevice             physical,
 	unlock();
 	return r;
 }
+
+#undef DEVICE_CALLS
 
 /** @brief Destroys a device's hashing objects.
  *
@@ -5361,6 +5365,8 @@ queue_submit (VkQueue             queue,
 
 VECTOR(cb_list, VkCommandBuffer)
 
+#undef VECTOR
+
 /** @brief The command buffers of a vkQueueSubmit2 batch, gathered for batch_begin() and batch_end().
  *         Caller holds g_lock.
  */
@@ -5515,9 +5521,7 @@ static struct entry const INSTANCE_ENTRIES[] = {
 static struct entry const DEVICE_ENTRIES[] = {DEVICE_HOOKS(ENTRY)};
 
 #undef ENTRY
-#undef DEVICE_CALLS
 #undef DEVICE_HOOKS
-#undef INSTANCE_CALLS
 
 /** @brief The layer's function for a device function, if the device's next layer has that function
  *         too: an intercept for a function the device lacks must not be handed out.
@@ -5586,5 +5590,3 @@ vkNegotiateLoaderLayerInterfaceVersion (VkNegotiateLayerInterface *v)
 	v->pfnGetPhysicalDeviceProcAddr = nullptr;
 	return VK_SUCCESS;
 }
-
-#undef VECTOR

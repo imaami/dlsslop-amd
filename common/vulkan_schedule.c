@@ -707,6 +707,8 @@ vulkan_schedule_merge (struct vulkan_dispatches       *dest,
 	return ERROR_NONE;
 }
 
+#undef RUN_LAYERS
+
 /** @brief A span of dispatches. */
 struct span {
 	size_t first; //!< The first dispatch.
@@ -1142,6 +1144,11 @@ downsampling_table (struct vulkan_dispatch const *p,
 	return ERROR_NONE;
 }
 
+#undef SWIN_WORDS
+#undef GRID_X
+#undef GRID_Y
+#undef REC_WORDS
+
 /** @brief Fills a table for an upsampling run's last layer: a window a tile.
  *
  * @param p     The producer.
@@ -1211,6 +1218,9 @@ run_tiles (struct vulkan_dispatch const *d,
 	*tiles = x * y;
 	return ERROR_NONE;
 }
+
+#undef TILES_X
+#undef TILES_Y
 
 /** @brief Whether a kernel's barriers stay on a big frame but between BIG_FRAME_PAIRS: a persistent
  *         run, or the fused C=32 downsample or upsample. */
@@ -1414,10 +1424,3 @@ vulkan_schedule_chain (struct vulkan_dispatches *ds,
 }
 
 #undef RECORD_WORDS
-#undef RUN_LAYERS
-#undef REC_WORDS
-#undef GRID_Y
-#undef GRID_X
-#undef TILES_Y
-#undef TILES_X
-#undef SWIN_WORDS

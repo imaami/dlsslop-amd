@@ -88,6 +88,8 @@ kernel_math_decode_neural_proxy (STD(uint8_t) const    *original,
                                  float const           *neural_rgb,
                                  STD(uint8_t)          *output);
 
+#undef STD
+
 /** @brief Tunes a pass's answer, as tuning_gpu.hip does.
  *
  * @param input_rgba The pass's input: g->width x g->height pixels of RGBA32F.
@@ -154,8 +156,6 @@ kernel_math_tuning_is_default (struct native_tuning const *tuning);
 extern bool
 kernel_math_tuning_equal (struct native_tuning const *a,
                           struct native_tuning const *b);
-
-#undef STD
 
 #ifdef __cplusplus
 } /* extern "C" */

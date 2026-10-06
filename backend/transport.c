@@ -16,9 +16,6 @@
 
 #include "transport.h"
 
-/** @brief The first descriptor that systemd passes (SD_LISTEN_FDS_START). */
-#define LISTEN_FDS_START 3
-
 /** @brief Logs why the daemon serves without the transport.
  *
  * @param channel The channel file's path, which the socket's path extends.
@@ -35,6 +32,9 @@ unavailable (char const *channel,
 	        strerror_r(err, buf, sizeof buf));
 	return ERROR_NONE;
 }
+
+/** @brief The first descriptor that systemd passes (SD_LISTEN_FDS_START). */
+#define LISTEN_FDS_START 3
 
 /** @brief Takes the socket that systemd passed, bound and listening, and makes it nonblocking.
  *
@@ -58,6 +58,8 @@ adopt (struct transport_listener *dest,
 	dest->socket = fd;
 	return ERROR_NONE;
 }
+
+#undef LISTEN_FDS_START
 
 /** @brief Binds the socket beside the channel file and listens on it.
  *

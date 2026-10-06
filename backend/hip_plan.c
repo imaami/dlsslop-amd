@@ -476,12 +476,12 @@ same_arg (struct hip_arg a)
 
 /** @brief A kernel argument of a value. A literal's type must say whether it is a value or a
  *         pointer: an int has no association. */
-#define arg(x) _Generic((x),                     \
-	struct hip_plan_tensor: tensor_arg,      \
-	struct hip_plan_weight: weight_arg,      \
-	unsigned:               u32_arg,         \
-	float:                  f32_arg,         \
-	nullptr_t:              null_arg,        \
+#define arg(x) _Generic((x), \
+	struct hip_plan_tensor: tensor_arg, \
+	struct hip_plan_weight: weight_arg, \
+	unsigned:               u32_arg, \
+	float:                  f32_arg, \
+	nullptr_t:              null_arg, \
 	struct hip_arg:         same_arg)(x)
 
 /** @brief The frame's input. */
@@ -521,10 +521,10 @@ launch (struct builder       *b,
 
 /** @brief Records a launch of a kernel over some elements with the arguments that follow, each an
  *         arg(). */
-#define LAUNCH(b, kernel, count, ...) do {                                                    \
-	struct hip_arg const args_[] = {__VA_ARGS__};                                         \
+#define LAUNCH(b, kernel, count, ...) do { \
+	struct hip_arg const args_[] = {__VA_ARGS__}; \
 	static_assert(sizeof args_ / sizeof *args_ <= HIP_LAUNCH_ARGS, "too many arguments"); \
-	launch((b), (kernel), (count), args_, sizeof args_ / sizeof *args_);                  \
+	launch((b), (kernel), (count), args_, sizeof args_ / sizeof *args_); \
 } while (0)
 
 /** @brief Upstream's C32Result, less what production never reads. */

@@ -675,6 +675,8 @@ check_recipes (struct vulkan_model const *model)
 	blob = nullptr;
 }
 
+#undef CASE_COUNT
+
 /** @brief A table and zeros are packed as words.
  *
  * @param model The synthetic pack.
@@ -806,6 +808,8 @@ check_pack_errors (struct vulkan_model const *model)
 	free(blob);
 	blob = nullptr;
 }
+
+#undef ERROR_BLOB
 
 #undef EXPECT_ONE
 
@@ -988,6 +992,8 @@ check_clamp_free (void)
 	}
 }
 
+#undef SEGMENT
+
 /** @brief Expects a pack to be refused with given words after its path.
  *
  * @param pack  The pack, written.
@@ -1120,7 +1126,6 @@ check_model (void)
 }
 
 #undef LITERAL
-#undef SEGMENT
 #undef SOURCE
 
 int

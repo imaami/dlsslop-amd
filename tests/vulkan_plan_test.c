@@ -932,6 +932,8 @@ print (char const *extent)
 	return 0;
 }
 
+#undef VALUE_LINE_BYTES
+
 /** @brief --markers: the markers the plan expects beside the SPIR-V, each line of each file after
  *         the file's name.
  *
@@ -1029,6 +1031,8 @@ list_entries (void)
 	all = nullptr;
 	return listed ? 0 : 1;
 }
+
+#undef GOLDEN_COUNT
 
 /** @brief A binding of a SPIR-V module's set. */
 struct binding {
@@ -1462,6 +1466,8 @@ check_spirv (char const *directory)
 		puts("vulkan-plan test: every kernel's push block and bindings are the plan's");
 	return failures ? 1 : 0;
 }
+
+#undef INTERFACE_MOST
 
 /** @brief Every kernel's bindings within VULKAN_KERNEL_MOST_BINDINGS, which the runtime's binding
  *         arrays hold. */

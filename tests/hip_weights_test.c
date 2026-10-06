@@ -717,6 +717,8 @@ check_halves (void)
 	       "round_half does not make NaN 0x7e00 with its sign");
 }
 
+#undef SAMPLE_COUNT
+
 /** @brief Checks the saturating E4M3 rounding and the scale pieces. */
 static void
 check_saturation (void)
@@ -988,6 +990,8 @@ scratch_write (struct scratch *s,
 	expect(!files_write(path, data, size, &e), "cannot write %s: %s", path, e.what);
 	s->files[s->count++] = path;
 }
+
+#undef SCRATCH_FILES
 
 /** @brief Writes a file of zero bytes in a scratch directory.
  *
@@ -1304,6 +1308,8 @@ pack_model (char const            *assets,
 	return 0;
 }
 
+#undef FNV1A_BASIS
+
 /** @brief The usage that --help prints. */
 static char const USAGE[] =
 	"Usage: hip-weights-test [OPTION]...\n"
@@ -1396,3 +1402,5 @@ main (int    argc,
 		puts("hip-weights test: every check passed");
 	return support_written("hip-weights test", failures ? 1 : 0);
 }
+
+#undef KEY_BYTES

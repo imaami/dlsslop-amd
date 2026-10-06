@@ -1234,6 +1234,8 @@ read_arg (struct msg_reader *r,
 	return true;
 }
 
+#undef TEXT_STARTS
+
 /** @brief Reads a kernel's .args value: an array of arguments, or any other value, which gives none.
  *
  * @param r      The reader, at the value, which a checked note holds; it moves past it.
@@ -1323,7 +1325,6 @@ read_kernel (struct msg_reader *r,
 	return true;
 }
 
-#undef TEXT_STARTS
 #undef TEXT_IS
 
 /** @brief Adds the kernel of a metadata list's item to a module's, unless the module has one of its

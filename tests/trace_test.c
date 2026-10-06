@@ -541,5 +541,7 @@ main (int    argc,
 	return 0;
 }
 
+#undef NAME_BYTES
+
 #undef AT
 #undef LITERAL

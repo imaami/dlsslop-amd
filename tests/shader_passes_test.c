@@ -496,6 +496,8 @@ create_view (VkDevice                     d,
 	CREATE(VkImageView, KIND_VIEW, out);
 }
 
+#undef CREATE
+
 /** @brief The fake vkDestroyImageView(). */
 static VKAPI_ATTR void VKAPI_CALL
 destroy_view (VkDevice                     d,
@@ -504,6 +506,8 @@ destroy_view (VkDevice                     d,
 {
 	DESTROY(v, KIND_VIEW);
 }
+
+#undef DESTROY
 
 /** @brief The fake vkUpdateDescriptorSets(): records the writes. */
 static VKAPI_ATTR void VKAPI_CALL
@@ -619,9 +623,6 @@ memory_properties (VkPhysicalDevice                  p,
 	                                    ? VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
 	                                    : VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 }
-
-#undef DESTROY
-#undef CREATE
 
 /** @brief The fake device's table. */
 static struct device_table device_table;
@@ -912,7 +913,6 @@ check_pass_dispatch (void)
 		}
 	}
 }
-
 
 #undef HANDLE
 
