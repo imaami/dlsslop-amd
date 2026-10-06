@@ -817,7 +817,8 @@ compilers (void)
 
 /** @brief Pipelines being made by several threads, each taking the next one.
  *
- * Once one has failed, no thread takes another.
+ * Once one has failed, no thread takes another. failed is as wide as a pointer, which fills the
+ * padding.
  */
 struct compile {
 	char const                     *shaders;        //!< The network's SPIR-V directory.
@@ -828,7 +829,7 @@ struct compile {
 	size_t                          shaders_length; //!< The length of the directory's path.
 	size_t                          count;          //!< The number of pipelines to make.
 	atomic_size_t                   next;           //!< The next of which to take.
-	atomic_bool                     failed;         //!< One has failed.
+	atomic_uintptr_t                failed;         //!< Whether one has failed: 1 if one has.
 };
 
 /** @brief A thread that makes pipelines of a struct compile. */
@@ -856,7 +857,7 @@ compile_run (void *arg)
 		if (make_pipeline(pool->device, pool->cache, pool->shaders, pool->shaders_length, pipeline,
 		                  &pool->pipelines[pipeline], &c->e)) {
 			c->failed = i;
-			atomic_store_explicit(&pool->failed, true, memory_order_relaxed);
+			atomic_store_explicit(&pool->failed, 1, memory_order_relaxed);
 		}
 	}
 	return nullptr;
@@ -1092,13 +1093,14 @@ settle (VkImageMemoryBarrier              *layouts,
 }
 
 /** @brief What a build's submission uses, and frees once it has run: never while the device may
- *         still read it, so a submission that is not known to have ended leaks it. */
+ *         still read it, so a submission that is not known to have ended leaks it. running is 64
+ *         bits wide, which fills the padding. */
 struct setup {
 	struct vulkan_runtime_buffer staging; //!< The weights' upload.
 	VkCommandPool                pool;    //!< The commands' pool.
 	VkCommandBuffer              cmd;     //!< The commands.
 	VkFence                      fence;   //!< The submission's fence.
-	bool                         running; //!< The submission may still run.
+	uint64_t                     running; //!< Whether the submission may still run.
 };
 
 /** @brief Frees what a build's submission used, unless it may still run.
@@ -1196,7 +1198,7 @@ make_pipelines (struct vulkan_runtime     *rt,
 		.shaders_length = paths->shaders_length,
 		.count          = n,
 		.next           = 0,
-		.failed         = false,
+		.failed         = 0,
 	};
 	struct compiler workers[COMPILERS];
 	size_t const most = compilers();

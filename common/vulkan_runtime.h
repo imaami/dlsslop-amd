@@ -104,7 +104,8 @@ struct vulkan_frame_images {
 };
 
 /** @brief A frame's controls (upstream: nr::Controls, whose pass count is the shape's here), in the
- *         ranges that dlsslopd's settings allow. */
+ *         ranges that dlsslopd's settings allow. auto_mask is 32 bits wide, which fills the
+ *         padding. */
 struct vulkan_controls {
 	uint32_t style;          //!< DLSSNR.Style.
 	float    intensity;      //!< DLSSNR.Intensity.
@@ -114,7 +115,7 @@ struct vulkan_controls {
 	float    skin;
 	float    sharpness;      //!< dlsslop-amd's sharpening stage after every pass, 0..1; 0 skips it.
 	float    color_preserve; //!< Its color preservation stage, 0..1; 0 skips it.
-	bool     auto_mask;      //!< The automatic mask.
+	uint32_t auto_mask;      //!< Whether the automatic mask is on.
 };
 
 /** @brief A runtime's image, null until made, and what it was made as. */
@@ -212,13 +213,16 @@ struct vulkan_runtime_objects {
 	VkDescriptorSet                later_sets[2];
 };
 
-/** @brief How a runtime records frames. */
+/** @brief How a runtime records frames. stored is 32 bits wide, which fills the padding. */
 struct vulkan_runtime_state {
 	uint32_t level_width[VULKAN_RUNTIME_LEVELS];  //!< The pyramid's levels' widths.
 	uint32_t level_height[VULKAN_RUNTIME_LEVELS]; //!< Their heights.
 	uint32_t width;                               //!< The frames' width.
 	uint32_t height;                              //!< Their height.
 	uint32_t passes;                              //!< The passes, 1..VULKAN_RUNTIME_MAX_PASSES.
+	/** @brief Whether, with more passes and motion, each pass's post block writes its history into
+	 *         the second output, which that pass's history_store keeps. */
+	uint32_t stored;
 	bool     motion;                              //!< With motion history.
 	bool     stages;                              //!< With the pass stages.
 	bool     rgba8;                               //!< RGBA8 frames.
@@ -231,18 +235,15 @@ struct vulkan_runtime_state {
 	/** @brief One pass with motion: the post block writes the history the next frame reads, in turn
 	 *         into history[0] and history[1]. */
 	bool     pingpong;
-	/** @brief More passes with motion: each pass's post block writes its history into the second
-	 *         output, which that pass's history_store keeps. */
-	bool     stored;
 };
 
-/** @brief The motion history that a frame reads. */
+/** @brief The motion history that a frame reads. latch is 32 bits wide, which fills the padding. */
 struct vulkan_runtime_history {
 	uint32_t parity;  //!< This frame's luma pyramid.
 	uint32_t current; //!< The history it reads.
 	/** @brief The pre block's noise seed for the frame, unless it starts the history over. */
 	uint32_t seed;
-	bool     latch;   //!< There is a last frame to follow.
+	uint32_t latch;   //!< Whether there is a last frame to follow.
 };
 
 /** @brief The network built for one frame extent on a device, for one shape of that extent at a time.
@@ -282,9 +283,9 @@ struct vulkan_runtime {
 	struct vulkan_runtime_state   state;         //!< How frames of that shape are recorded.
 	struct vulkan_runtime_history history;       //!< The history after the last frame submitted.
 	struct vulkan_runtime_history recorded;      //!< The history after the last frame recorded.
-	/** @brief A frame submitted since the last build or reshape moved the images into their
-	 *         layouts. */
-	bool                          settled;
+	/** @brief Whether a frame submitted since the last build or reshape moved the images into their
+	 *         layouts. 64 bits wide, which fills the padding. */
+	uint64_t                      settled;
 };
 
 /** @brief Checks a Vulkan result.

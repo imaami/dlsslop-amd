@@ -12,7 +12,7 @@
  *
  * The frame is width x height tightly packed RGBA8, or RGBA16F with fp16, holding display-encoded
  * values, and the answer comes back in the same form. VULKAN_FRAME_DEFAULTS initializes one; a frame
- * of width 0 is no frame.
+ * of width 0 is no frame. motion is 16 bits wide, which fills the padding.
  */
 struct vulkan_frame {
 	uint32_t width;           //!< The frame's width.
@@ -33,11 +33,11 @@ struct vulkan_frame {
 	 *         pass count does. */
 	float    sharpness;
 	float    color_preserve;  //!< See sharpness.
+	/** @brief Whether the network keeps a history, fed by the runtime's motion estimate. It starts
+	 *         over whenever the frame's shape, pass count or controls change. */
+	uint16_t motion;
 	bool     fp16;            //!< The frame is RGBA16F, not RGBA8.
 	bool     auto_mask;       //!< The automatic mask, under which skin takes its own structure.
-	/** @brief The network's history, fed by the runtime's motion estimate. It starts over whenever
-	 *         the frame's shape, pass count or controls change. */
-	bool     motion;
 };
 
 /** @brief A frame's defaults, as an initializer: one pass, the network's controls at 1, the skin

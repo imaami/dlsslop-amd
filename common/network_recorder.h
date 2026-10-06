@@ -28,7 +28,8 @@
  *
  * network_recorder_init() makes one and network_recorder_fini() frees it; a zeroed one is empty.
  * Its runtime points at its device, so it is only ever initialized in place and never copied. The
- * device must have finished the recorder's work before the recorder is freed.
+ * device must have finished the recorder's work before the recorder is freed. external is 64 bits
+ * wide, which fills the padding.
  */
 struct network_recorder {
 	struct vulkan_runtime runtime;     //!< The network; none built while its device is nullptr.
@@ -46,7 +47,7 @@ struct network_recorder {
 	struct vulkan_shape   shape;       //!< The shape that the runtime has.
 	uint32_t              rejected[2]; //!< The last extent rejected.
 	struct error          rejection;   //!< Why it was; empty for none.
-	bool                  external;    //!< Frames go through a caller's images instead of buffers.
+	uint64_t              external;    //!< Whether frames go through a caller's images, not buffers.
 };
 
 /** @brief Makes a recorder on a device, with no network built.
