@@ -12,7 +12,9 @@
 
 #include "list.h"
 
-/** @brief An entry whose hook is not at offset 0. value is 64 bits wide, which fills the padding. */
+/** @brief An entry whose hook is not at offset 0. value is 64 bits wide, which fills the padding
+ *         where 64-bit members are 8-byte aligned (x86-64, armv7); on i686 the struct gains 4 bytes.
+ */
 struct item {
 	double      weight; //!< Something before the hook.
 	uint64_t    value;  //!< What the walks report.

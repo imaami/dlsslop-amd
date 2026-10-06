@@ -48,7 +48,8 @@ enum hotkeys_flags : uint64_t {
  *
  * A zeroed object is an empty one: the first hotkeys_pressed() opens a backend. hotkeys_fini()
  * closes what that opened. The flags are 64 bits wide, which fills the padding that a narrower
- * member would leave.
+ * member would leave where 64-bit members are 8-byte aligned (x86-64, armv7); on i686 the struct
+ * gains 4 bytes.
  */
 struct hotkeys {
 	double              last_scan;               //!< log_now_ms() of the last look at /dev/input.
