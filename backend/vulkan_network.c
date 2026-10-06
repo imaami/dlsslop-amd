@@ -137,25 +137,26 @@ host_buffer (struct vulkan_network        *n,
 		.usage = usage,
 	};
 	VkBuffer buffer;
-	TRY(vulkan_check(vkCreateBuffer(n->device, &info, nullptr, &buffer), "create transfer buffer", e));
+	TRY(vulkan_runtime_check(vkCreateBuffer(n->device, &info, nullptr, &buffer), "create transfer buffer", e));
 	b->buffer = buffer;
 	VkMemoryRequirements req;
 	vkGetBufferMemoryRequirements(n->device, buffer, &req);
 	uint32_t type;
-	TRY(vulkan_memory_type(&n->memory, req.memoryTypeBits,
-	                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT | extra,
-	                       &type, e));
+	TRY(vulkan_runtime_memory_type(&n->memory, req.memoryTypeBits,
+	                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+	                               extra, &type, e));
 	VkMemoryAllocateInfo const alloc = {
 		.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
 		.allocationSize  = req.size,
 		.memoryTypeIndex = type,
 	};
 	VkDeviceMemory memory;
-	TRY(vulkan_check(vkAllocateMemory(n->device, &alloc, nullptr, &memory), "allocate transfer buffer", e));
+	TRY(vulkan_runtime_check(vkAllocateMemory(n->device, &alloc, nullptr, &memory), "allocate transfer buffer", e));
 	b->memory = memory;
-	TRY(vulkan_check(vkBindBufferMemory(n->device, buffer, memory, 0), "bind transfer buffer", e));
+	TRY(vulkan_runtime_check(vkBindBufferMemory(n->device, buffer, memory, 0), "bind transfer buffer", e));
 	void *mapped;
-	TRY(vulkan_check(vkMapMemory(n->device, memory, 0, VK_WHOLE_SIZE, 0, &mapped), "map transfer buffer", e));
+	TRY(vulkan_runtime_check(vkMapMemory(n->device, memory, 0, VK_WHOLE_SIZE, 0, &mapped),
+	                         "map transfer buffer", e));
 	b->mapped = mapped;
 	b->size = bytes;
 	return ERROR_NONE;
@@ -208,14 +209,15 @@ choose_device (struct vulkan_network  *n,
                struct error           *e)
 {
 	uint32_t count = 0;
-	TRY(vulkan_check(vkEnumeratePhysicalDevices(n->instance, &count, nullptr), "enumerate Vulkan devices", e));
+	TRY(vulkan_runtime_check(vkEnumeratePhysicalDevices(n->instance, &count, nullptr),
+	                         "enumerate Vulkan devices", e));
 	if (count) {
 		VkPhysicalDevice *const listed = malloc(count * sizeof *listed);
 		if (!listed)
 			return error_fail(e, "out of memory");
 		*p_devices = listed;
-		TRY(vulkan_check(vkEnumeratePhysicalDevices(n->instance, &count, listed),
-		                 "enumerate Vulkan devices", e));
+		TRY(vulkan_runtime_check(vkEnumeratePhysicalDevices(n->instance, &count, listed),
+		                         "enumerate Vulkan devices", e));
 	}
 	VkPhysicalDevice const *const devices = *p_devices;
 	// The devices to examine: the one that --device names, or all of them.
@@ -303,7 +305,7 @@ open_network (struct vulkan_network     *n,
 		.pApplicationInfo = &app,
 	};
 	VkInstance instance;
-	TRY(vulkan_check(vkCreateInstance(&instance_info, nullptr, &instance), "create Vulkan instance", e));
+	TRY(vulkan_runtime_check(vkCreateInstance(&instance_info, nullptr, &instance), "create Vulkan instance", e));
 	n->instance = instance;
 	VkPhysicalDevice *devices = nullptr;
 	enum error_code const code = choose_device(n, &devices, device, e);
@@ -334,7 +336,7 @@ open_network (struct vulkan_network     *n,
 		.ppEnabledExtensionNames = extensions,
 	};
 	VkDevice d;
-	TRY(vulkan_check(vkCreateDevice(n->physical, &device_info, nullptr, &d), "create Vulkan device", e));
+	TRY(vulkan_runtime_check(vkCreateDevice(n->physical, &device_info, nullptr, &d), "create Vulkan device", e));
 	n->device = d;
 	vkGetDeviceQueue(d, n->family, 0, &n->queue);
 	vkGetPhysicalDeviceMemoryProperties(n->physical, &n->memory);
@@ -352,7 +354,7 @@ open_network (struct vulkan_network     *n,
 		.queueFamilyIndex = n->family,
 	};
 	VkCommandPool pool;
-	TRY(vulkan_check(vkCreateCommandPool(d, &pool_info, nullptr, &pool), "create command pool", e));
+	TRY(vulkan_runtime_check(vkCreateCommandPool(d, &pool_info, nullptr, &pool), "create command pool", e));
 	n->pool = pool;
 	VkCommandBufferAllocateInfo const cmd_info = {
 		.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -361,11 +363,11 @@ open_network (struct vulkan_network     *n,
 		.commandBufferCount = 1,
 	};
 	VkCommandBuffer cmd;
-	TRY(vulkan_check(vkAllocateCommandBuffers(d, &cmd_info, &cmd), "allocate command buffer", e));
+	TRY(vulkan_runtime_check(vkAllocateCommandBuffers(d, &cmd_info, &cmd), "allocate command buffer", e));
 	n->cmd = cmd;
 	VkFenceCreateInfo const fence_info = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
 	VkFence fence;
-	TRY(vulkan_check(vkCreateFence(d, &fence_info, nullptr, &fence), "create fence", e));
+	TRY(vulkan_runtime_check(vkCreateFence(d, &fence_info, nullptr, &fence), "create fence", e));
 	n->fence = fence;
 	VkQueryPoolCreateInfo const queries_info = {
 		.sType      = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
@@ -373,7 +375,8 @@ open_network (struct vulkan_network     *n,
 		.queryCount = 4,
 	};
 	VkQueryPool queries;
-	TRY(vulkan_check(vkCreateQueryPool(d, &queries_info, nullptr, &queries), "create timestamp queries", e));
+	TRY(vulkan_runtime_check(vkCreateQueryPool(d, &queries_info, nullptr, &queries),
+	                         "create timestamp queries", e));
 	n->queries = queries;
 
 	struct vulkan_device const on = {
@@ -490,7 +493,7 @@ vulkan_network_shape (struct vulkan_network     *n,
 {
 	if (!network_recorder_shape_differs(&n->recorder, frame))
 		return ERROR_NONE;
-	enum error_code const code = vulkan_check(vkDeviceWaitIdle(n->device), "wait for the device", e);
+	enum error_code const code = vulkan_runtime_check(vkDeviceWaitIdle(n->device), "wait for the device", e);
 	if (code)
 		return code;
 	bool changed;
@@ -541,8 +544,8 @@ import_buffer (struct vulkan_network        *n,
 	// The layer exports from the first device-local type the buffer allows; on the same GPU and
 	// driver that is this device's too.
 	uint32_t type;
-	if (vulkan_memory_type(&n->memory, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &type, nullptr) ||
-	    req.size != allocation)
+	if (vulkan_runtime_memory_type(&n->memory, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &type,
+	                               nullptr) || req.size != allocation)
 		return false;
 	VkMemoryDedicatedAllocateInfo const dedicated = {
 		.sType  = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
@@ -652,12 +655,12 @@ vulkan_network_infer (struct vulkan_network     *n,
 		target = n->download.buffer;
 	}
 	VkCommandBuffer const cmd = n->cmd;
-	TRY(vulkan_check(vkResetCommandBuffer(cmd, 0), "reset command buffer", e));
+	TRY(vulkan_runtime_check(vkResetCommandBuffer(cmd, 0), "reset command buffer", e));
 	VkCommandBufferBeginInfo const begin = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
 		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
 	};
-	TRY(vulkan_check(vkBeginCommandBuffer(cmd, &begin), "begin command buffer", e));
+	TRY(vulkan_runtime_check(vkBeginCommandBuffer(cmd, &begin), "begin command buffer", e));
 	vkCmdResetQueryPool(cmd, n->queries, 0, 4);
 	vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, n->queries, 0);
 	// The layer's exported buffers change hands at every frame.
@@ -672,18 +675,18 @@ vulkan_network_infer (struct vulkan_network     *n,
 		                     nullptr, 0, nullptr);
 	}
 	vkCmdWriteTimestamp(cmd, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, n->queries, 3);
-	TRY(vulkan_check(vkEndCommandBuffer(cmd), "end command buffer", e));
+	TRY(vulkan_runtime_check(vkEndCommandBuffer(cmd), "end command buffer", e));
 	VkSubmitInfo const submit = {
 		.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
 		.commandBufferCount = 1,
 		.pCommandBuffers    = &cmd,
 	};
-	TRY(vulkan_check(vkResetFences(n->device, 1, &n->fence), "reset fence", e));
-	TRY(vulkan_check(vkQueueSubmit(n->queue, 1, &submit, n->fence), "submit frame", e));
+	TRY(vulkan_runtime_check(vkResetFences(n->device, 1, &n->fence), "reset fence", e));
+	TRY(vulkan_runtime_check(vkQueueSubmit(n->queue, 1, &submit, n->fence), "submit frame", e));
 	network_recorder_submitted(&n->recorder);
 	// A healthy frame takes milliseconds; ten seconds means the device is gone.
-	TRY(vulkan_check(vkWaitForFences(n->device, 1, &n->fence, VK_TRUE, UINT64_C(10000000000)),
-	                 "wait for the frame", e));
+	TRY(vulkan_runtime_check(vkWaitForFences(n->device, 1, &n->fence, VK_TRUE, UINT64_C(10000000000)),
+	                         "wait for the frame", e));
 	uint64_t stamps[4];
 	if (vkGetQueryPoolResults(n->device, n->queries, 0, 4, sizeof stamps, stamps, sizeof stamps[0],
 	                          VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {

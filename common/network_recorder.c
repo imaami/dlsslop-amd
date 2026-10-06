@@ -85,7 +85,7 @@ network_recorder_init (struct network_recorder    *dest,
 		.shaders_length = paths->shaders_length,
 		.cache_length   = paths->cache_length,
 	};
-	dest->storage = vulkan_storage_limit(device);
+	dest->storage = vulkan_runtime_storage_limit(device);
 	dest->external = external;
 	return ERROR_NONE;
 }

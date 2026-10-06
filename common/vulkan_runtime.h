@@ -297,9 +297,9 @@ struct vulkan_runtime {
  * @return       ERROR_NONE for VK_SUCCESS, otherwise ERROR_FAILED.
  */
 extern enum error_code
-vulkan_check (VkResult      result,
-              char const   *what,
-              struct error *e);
+vulkan_runtime_check (VkResult      result,
+                      char const   *what,
+                      struct error *e);
 
 /** @brief Finds the first of a device's memory types among bits with every property wanted.
  *
@@ -311,11 +311,11 @@ vulkan_check (VkResult      result,
  * @return       ERROR_NONE, or ERROR_FAILED when no type is suitable.
  */
 extern enum error_code
-vulkan_memory_type (VkPhysicalDeviceMemoryProperties const *memory,
-                    uint32_t                                bits,
-                    VkMemoryPropertyFlags                   want,
-                    uint32_t                               *type,
-                    struct error                           *e);
+vulkan_runtime_memory_type (VkPhysicalDeviceMemoryProperties const *memory,
+                            uint32_t                                bits,
+                            VkMemoryPropertyFlags                   want,
+                            uint32_t                               *type,
+                            struct error                           *e);
 
 /** @brief The most bytes one of a device's storage buffers holds bound whole, as vulkan_plan_init()
  *         takes it.
@@ -325,15 +325,15 @@ vulkan_memory_type (VkPhysicalDeviceMemoryProperties const *memory,
  *               when the device cannot say, which fails its build.
  */
 extern uint64_t
-vulkan_storage_limit (struct vulkan_device const *device);
+vulkan_runtime_storage_limit (struct vulkan_device const *device);
 
 /** @brief Builds the network for a shape on a device, from a plan of the shape's extent.
  *
- * The plan is of the shape's extent on the device's vulkan_storage_limit(), with the kernels without
- * the upper clamp that the model's weights allow (vulkan_plan_unclamp()). The SPIR-V comes from
- * paths->shaders, the weights from paths->model and the pipeline cache from paths->cache, with the
- * pipelines of every shape of that extent. The queue must be free of the frames of a runtime being
- * replaced.
+ * The plan is of the shape's extent on the device's vulkan_runtime_storage_limit(), with the kernels
+ * without the upper clamp that the model's weights allow (vulkan_plan_unclamp()). The SPIR-V comes
+ * from paths->shaders, the weights from paths->model and the pipeline cache from paths->cache, with
+ * the pipelines of every shape of that extent. The queue must be free of the frames of a runtime
+ * being replaced.
  *
  * @param dest   Receives the runtime; none on a failure.
  * @param device The device, which must outlive the runtime.

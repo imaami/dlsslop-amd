@@ -289,9 +289,9 @@ describe (struct vulkan_runtime_state const *s)
 }
 
 enum error_code
-vulkan_check (VkResult      result,
-              char const   *what,
-              struct error *e)
+vulkan_runtime_check (VkResult      result,
+                      char const   *what,
+                      struct error *e)
 {
 	if (result == VK_SUCCESS)
 		return ERROR_NONE;
@@ -299,11 +299,11 @@ vulkan_check (VkResult      result,
 }
 
 enum error_code
-vulkan_memory_type (VkPhysicalDeviceMemoryProperties const *memory,
-                    uint32_t                                bits,
-                    VkMemoryPropertyFlags                   want,
-                    uint32_t                               *type,
-                    struct error                           *e)
+vulkan_runtime_memory_type (VkPhysicalDeviceMemoryProperties const *memory,
+                            uint32_t                                bits,
+                            VkMemoryPropertyFlags                   want,
+                            uint32_t                               *type,
+                            struct error                           *e)
 {
 	for (uint32_t i = 0; i < memory->memoryTypeCount; ++i) {
 		if ((bits & (1u << i)) && (memory->memoryTypes[i].propertyFlags & want) == want) {
@@ -519,8 +519,8 @@ query (struct vulkan_device const *d,
 {
 	*caps = (struct capabilities){};
 	struct vulkan_physical_functions const *const f = &d->functions;
-	// Nothing here calls vkGetPhysicalDeviceProperties2, but without it vulkan_storage_limit() gives
-	// the plan no limit, so the build must fail here.
+	// Nothing here calls vkGetPhysicalDeviceProperties2, but without it
+	// vulkan_runtime_storage_limit() gives the plan no limit, so the build must fail here.
 	char const *const missing = !f->queue_families    ? "vkGetPhysicalDeviceQueueFamilyProperties"
 	                          : !f->properties        ? "vkGetPhysicalDeviceProperties2"
 	                          : !f->format_properties ? "vkGetPhysicalDeviceFormatProperties2"
@@ -1123,7 +1123,7 @@ setup_fini (VkDevice      device,
 }
 
 uint64_t
-vulkan_storage_limit (struct vulkan_device const *device)
+vulkan_runtime_storage_limit (struct vulkan_device const *device)
 {
 	if (!device->functions.properties)
 		return UINT64_MAX;
@@ -1477,8 +1477,8 @@ make_sets (struct vulkan_runtime *rt,
 			.poolSizeCount = size_count,
 			.pPoolSizes    = sizes,
 		};
-		code = vulkan_check(vkCreateDescriptorPool(d, &pool_info, nullptr, &pool),
-		                    "create the network's descriptor pool", e);
+		code = vulkan_runtime_check(vkCreateDescriptorPool(d, &pool_info, nullptr, &pool),
+		                            "create the network's descriptor pool", e);
 	}
 	VkDescriptorSet made[MOST_SETS];
 	if (!code) {
@@ -1489,8 +1489,8 @@ make_sets (struct vulkan_runtime *rt,
 			.descriptorSetCount = (uint32_t)n,
 			.pSetLayouts        = layouts,
 		};
-		code = vulkan_check(vkAllocateDescriptorSets(d, &alloc, made),
-		                    "allocate the network's descriptor sets", e);
+		code = vulkan_runtime_check(vkAllocateDescriptorSets(d, &alloc, made),
+		                            "allocate the network's descriptor sets", e);
 	}
 	if (!code) {
 		uint32_t write_count = 0, buffer_count = 0, written_images = 0;
@@ -1957,7 +1957,7 @@ make_buffer (struct vulkan_device const   *d,
 		.usage = usage,
 	};
 	VkBuffer buffer;
-	TRY(vulkan_check(vkCreateBuffer(d->device, &info, nullptr, &buffer), what, e));
+	TRY(vulkan_runtime_check(vkCreateBuffer(d->device, &info, nullptr, &buffer), what, e));
 	b->buffer = buffer;
 	VkMemoryRequirements req;
 	vkGetBufferMemoryRequirements(d->device, buffer, &req);
@@ -1976,9 +1976,9 @@ make_buffer (struct vulkan_device const   *d,
 		.memoryTypeIndex = type,
 	};
 	VkDeviceMemory memory;
-	TRY(vulkan_check(vkAllocateMemory(d->device, &alloc, nullptr, &memory), what, e));
+	TRY(vulkan_runtime_check(vkAllocateMemory(d->device, &alloc, nullptr, &memory), what, e));
 	b->memory = memory;
-	return vulkan_check(vkBindBufferMemory(d->device, buffer, memory, 0), what, e);
+	return vulkan_runtime_check(vkBindBufferMemory(d->device, buffer, memory, 0), what, e);
 }
 
 /** @brief Makes an image what a shape wants: a width x height image of a format for a usage in its
@@ -2025,7 +2025,7 @@ make_image (struct vulkan_device const  *d,
 		.usage       = usage,
 	};
 	VkImage image;
-	TRY(vulkan_check(vkCreateImage(d->device, &info, nullptr, &image), "create a network image", e));
+	TRY(vulkan_runtime_check(vkCreateImage(d->device, &info, nullptr, &image), "create a network image", e));
 	i->image = image;
 	VkMemoryRequirements req;
 	vkGetImageMemoryRequirements(d->device, image, &req);
@@ -2037,9 +2037,9 @@ make_image (struct vulkan_device const  *d,
 	if (alloc.memoryTypeIndex == d->memory.memoryTypeCount)
 		return error_fail(e, "no device-local memory type for an image");
 	VkDeviceMemory memory;
-	TRY(vulkan_check(vkAllocateMemory(d->device, &alloc, nullptr, &memory), "allocate a network image", e));
+	TRY(vulkan_runtime_check(vkAllocateMemory(d->device, &alloc, nullptr, &memory), "allocate a network image", e));
 	i->memory = memory;
-	TRY(vulkan_check(vkBindImageMemory(d->device, image, memory, 0), "bind a network image", e));
+	TRY(vulkan_runtime_check(vkBindImageMemory(d->device, image, memory, 0), "bind a network image", e));
 	if (!(usage & (VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT)))
 		return ERROR_NONE;
 	VkImageViewCreateInfo const view_info = {
@@ -2050,7 +2050,8 @@ make_image (struct vulkan_device const  *d,
 		.subresourceRange = COLOR,
 	};
 	VkImageView view;
-	TRY(vulkan_check(vkCreateImageView(d->device, &view_info, nullptr, &view), "create a network image view", e));
+	TRY(vulkan_runtime_check(vkCreateImageView(d->device, &view_info, nullptr, &view),
+	                         "create a network image view", e));
 	i->view = view;
 	return ERROR_NONE;
 }
@@ -2081,7 +2082,7 @@ make_sampler (VkDevice             device,
 		.addressModeW = address,
 	};
 	VkSampler made;
-	TRY(vulkan_check(vkCreateSampler(device, &info, nullptr, &made), "create a network sampler", e));
+	TRY(vulkan_runtime_check(vkCreateSampler(device, &info, nullptr, &made), "create a network sampler", e));
 	*sampler = made;
 	return ERROR_NONE;
 }
@@ -2204,7 +2205,8 @@ begin_setup (struct vulkan_runtime const *rt,
 		.queueFamilyIndex = rt->device->family,
 	};
 	VkCommandPool pool;
-	TRY(vulkan_check(vkCreateCommandPool(d, &pool_info, nullptr, &pool), "create the network's build commands", e));
+	TRY(vulkan_runtime_check(vkCreateCommandPool(d, &pool_info, nullptr, &pool),
+	                         "create the network's build commands", e));
 	setup->pool = pool;
 	VkCommandBufferAllocateInfo const alloc = {
 		.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
@@ -2213,13 +2215,14 @@ begin_setup (struct vulkan_runtime const *rt,
 		.commandBufferCount = 1,
 	};
 	VkCommandBuffer cmd;
-	TRY(vulkan_check(vkAllocateCommandBuffers(d, &alloc, &cmd), "allocate the network's build commands", e));
+	TRY(vulkan_runtime_check(vkAllocateCommandBuffers(d, &alloc, &cmd),
+	                         "allocate the network's build commands", e));
 	setup->cmd = cmd;
 	VkCommandBufferBeginInfo const begin = {
 		.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
 		.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
 	};
-	return vulkan_check(vkBeginCommandBuffer(cmd, &begin), "begin the network's build commands", e);
+	return vulkan_runtime_check(vkBeginCommandBuffer(cmd, &begin), "begin the network's build commands", e);
 }
 
 /** @brief Records a build's part of its submission: the weights packed straight into the staging
@@ -2244,8 +2247,8 @@ upload (struct vulkan_runtime const *rt,
 	TRY(make_buffer(rt->device, plan->blob_bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true, "the network's upload",
 	                &setup->staging, e));
 	void *mapped;
-	TRY(vulkan_check(vkMapMemory(d, setup->staging.memory, 0, VK_WHOLE_SIZE, 0, &mapped),
-	                 "map the network's upload", e));
+	TRY(vulkan_runtime_check(vkMapMemory(d, setup->staging.memory, 0, VK_WHOLE_SIZE, 0, &mapped),
+	                         "map the network's upload", e));
 	TRY(vulkan_weights_pack(plan->segments, plan->segment_count, plan->tables, plan->table_count, model, mapped,
 	                        plan->blob_bytes, e));
 	VkCommandBuffer const cmd = setup->cmd;
@@ -2281,10 +2284,11 @@ end_setup (struct vulkan_runtime *rt,
 	                              VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT};
 	vkCmdPipelineBarrier(setup->cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1,
 	                     &done, 0, nullptr, 0, nullptr);
-	TRY(vulkan_check(vkEndCommandBuffer(setup->cmd), "record the network's build commands", e));
+	TRY(vulkan_runtime_check(vkEndCommandBuffer(setup->cmd), "record the network's build commands", e));
 	VkFenceCreateInfo const fence_info = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
 	VkFence fence;
-	TRY(vulkan_check(vkCreateFence(d, &fence_info, nullptr, &fence), "create the network's build fence", e));
+	TRY(vulkan_runtime_check(vkCreateFence(d, &fence_info, nullptr, &fence),
+	                         "create the network's build fence", e));
 	setup->fence = fence;
 	VkSubmitInfo const submit = {
 		.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO,
@@ -2296,14 +2300,14 @@ end_setup (struct vulkan_runtime *rt,
 	VkResult const submitted = vkQueueSubmit(device->queue, 1, &submit, fence);
 	if (device->unlock)
 		device->unlock(device->context);
-	TRY(vulkan_check(submitted, "submit the network's build", e));
+	TRY(vulkan_runtime_check(submitted, "submit the network's build", e));
 	setup->running = 1;
 	VkResult const waited = vkWaitForFences(d, 1, &fence, VK_TRUE, UINT64_C(30000000000));
 	if (waited != VK_SUCCESS) {
 		// The device may still read what the build made: it stays.
 		rt->objects = (struct vulkan_runtime_objects){};
 		log_line(device, "the network's build did not finish; its memory is left to the device");
-		return vulkan_check(waited, "wait for the network's build", e);
+		return vulkan_runtime_check(waited, "wait for the network's build", e);
 	}
 	setup->running = 0;
 	return ERROR_NONE;
@@ -2357,8 +2361,8 @@ make_with_model (struct vulkan_runtime     *rt,
 	                VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, true,
 	                "the network's verdict", &o->verdict, e));
 	void *grid;
-	TRY(vulkan_check(vkMapMemory(d->device, o->verdict.memory, 0, VK_WHOLE_SIZE, 0, &grid),
-	                 "map the network's verdict", e));
+	TRY(vulkan_runtime_check(vkMapMemory(d->device, o->verdict.memory, 0, VK_WHOLE_SIZE, 0, &grid),
+	                         "map the network's verdict", e));
 	o->grid = memset(grid, 0, sizeof (VkDispatchIndirectCommand));
 	TRY(make_sampler(d->device, VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT, &o->nearest, e));
 	uint64_t const compiling = now_ns();
