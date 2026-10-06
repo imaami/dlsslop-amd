@@ -393,6 +393,8 @@ open_network (struct vulkan_network     *n,
 	return network_recorder_init(&n->recorder, &on, paths, false, e);
 }
 
+#undef TRY
+
 /** @brief Waits for a network's device and frees what the network holds, but not the network.
  *
  * @param n The network.
@@ -488,7 +490,9 @@ vulkan_network_shape (struct vulkan_network     *n,
 {
 	if (!network_recorder_shape_differs(&n->recorder, frame))
 		return ERROR_NONE;
-	TRY(vulkan_check(vkDeviceWaitIdle(n->device), "wait for the device", e));
+	enum error_code const code = vulkan_check(vkDeviceWaitIdle(n->device), "wait for the device", e);
+	if (code)
+		return code;
 	bool changed;
 	return network_recorder_shape(&n->recorder, frame, nullptr, &changed, e);
 }
@@ -613,6 +617,13 @@ milliseconds (uint64_t from,
 {
 	return (float)((double)(to - from) * period / 1e6);
 }
+
+/** @brief Returns a function's code unless it is ERROR_NONE. */
+#define TRY(call) do { \
+	enum error_code const code_ = (call); \
+	if (code_) \
+		return code_; \
+} while (0)
 
 enum error_code
 vulkan_network_infer (struct vulkan_network     *n,

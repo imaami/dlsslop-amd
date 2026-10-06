@@ -212,6 +212,8 @@ check_tuning_with (struct native_kernels const *kernels,
 	return ERROR_NONE;
 }
 
+#undef TRY
+
 /** @brief The native tuning in five states against its CPU reference.
  *
  * @param kernels The kernels.
@@ -276,6 +278,14 @@ struct temporal_step {
 	unsigned               passes;   //!< Its passes.
 	unsigned               history;  //!< 1 when its passes find a history, else 0.
 };
+
+/** @brief Returns a failed call's code from the function that makes the call. */
+#define TRY(call) \
+	do { \
+		enum error_code const try_code_ = (call); \
+		if (try_code_) \
+			return try_code_; \
+	} while (0)
 
 /** @brief Queues a pass's answer into its history, as a pass's last stage writes it.
  *
@@ -477,6 +487,8 @@ check_temporal_with (struct native_kernels const *kernels,
 	return ERROR_NONE;
 }
 
+#undef TRY
+
 /** @brief The motion history: static frames find their own history bit for bit, a translated one
  *         its history moved, an unrelated one none, and new sizes and placements keep or drop it.
  *
@@ -528,6 +540,14 @@ struct codec_fixture {
 	float           *floats; //!< The host floats: a reference, a read back and an answer.
 	uint8_t         *source; //!< The large source.
 };
+
+/** @brief Returns a failed call's code from the function that makes the call. */
+#define TRY(call) \
+	do { \
+		enum error_code const try_code_ = (call); \
+		if (try_code_) \
+			return try_code_; \
+	} while (0)
 
 /** @brief Runs one FP16 frame of the small source through the codec.
  *
@@ -674,6 +694,8 @@ check_codec_with (struct native_kernels const *kernels,
 	return ERROR_NONE;
 }
 
+#undef TRY
+
 /** @brief The codec's FP16 encode, decode, rejection and feedback, and its downscaling encode,
  *         against the CPU references.
  *
@@ -702,9 +724,11 @@ enum error_code
 control_selftest_run (struct native_kernels const *kernels,
                       struct error                *e)
 {
-	TRY(check_tuning(kernels, e));
-	TRY(check_temporal(kernels, e));
+	enum error_code code = check_tuning(kernels, e);
+	if (code)
+		return code;
+	code = check_temporal(kernels, e);
+	if (code)
+		return code;
 	return check_codec(kernels, e);
 }
-
-#undef TRY
