@@ -79,7 +79,15 @@ struct NativeTier const kNativeTiers[] = {
 static_assert(sizeof kNativeTiers / sizeof *kNativeTiers == kNativeTierCount,
               "kNativeTierCount is not the number of kNativeTiers");
 
-int
+/** @brief Writes a path in the shared runtime directory: the directory, then @a file.
+ *
+ * @param buf  Receives the path; may be nullptr if @a size is 0.
+ * @param size The size of @a buf.
+ * @param uid  The value of DLSSNR_UID, or nullptr if it is not set.
+ * @param file What follows the directory.
+ * @return     What snprintf() returns.
+ */
+static int
 shm_runtime_path (char       *buf,
                   size_t      size,
                   char const *uid,

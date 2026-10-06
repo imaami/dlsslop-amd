@@ -79,18 +79,6 @@ struct vulkan_blob {
 	enum error_code        error;            //!< ERROR_FAILED once a put ran out of memory.
 };
 
-/** @brief Puts a segment at the next multiple of an alignment.
- *
- * @param blob    The blob.
- * @param segment The segment; its offset is set.
- * @param align   The alignment.
- * @return        Its offset.
- */
-extern uint64_t
-vulkan_blob_put (struct vulkan_blob    *blob,
-                 struct vulkan_segment  segment,
-                 uint32_t               align);
-
 /** @brief Puts words as a table at the next multiple of 16.
  *
  * @param blob  The blob.

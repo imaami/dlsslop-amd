@@ -919,6 +919,35 @@ start (struct lowering const *l,
 	};
 }
 
+/** @brief Puts a segment at the next multiple of an alignment.
+ *
+ * @param blob      The blob.
+ * @param segment   The segment; its offset is set.
+ * @param alignment The alignment.
+ * @return          Its offset.
+ */
+static uint64_t
+vulkan_blob_put (struct vulkan_blob    *blob,
+                 struct vulkan_segment  segment,
+                 uint32_t               alignment)
+{
+	blob->bytes = align(blob->bytes, alignment);
+	segment.offset = (uint32_t)blob->bytes;
+	if (blob->segment_count == blob->segment_capacity) {
+		size_t const capacity = blob->segment_capacity ? 2 * blob->segment_capacity : 1024;
+		struct vulkan_segment *const grown = realloc(blob->segments, capacity * sizeof *grown);
+		if (!grown) {
+			blob->error = ERROR_FAILED;
+			return segment.offset;
+		}
+		blob->segments = grown;
+		blob->segment_capacity = capacity;
+	}
+	blob->segments[blob->segment_count++] = segment;
+	blob->bytes += segment.bytes;
+	return segment.offset;
+}
+
 /** @brief Puts a segment of the blob that has rows, columns or an index.
  *
  * @param l      The lowering.
@@ -1592,28 +1621,6 @@ lower (struct lowering *l,
 }
 
 #undef LAYERS
-
-uint64_t
-vulkan_blob_put (struct vulkan_blob    *blob,
-                 struct vulkan_segment  segment,
-                 uint32_t               alignment)
-{
-	blob->bytes = align(blob->bytes, alignment);
-	segment.offset = (uint32_t)blob->bytes;
-	if (blob->segment_count == blob->segment_capacity) {
-		size_t const capacity = blob->segment_capacity ? 2 * blob->segment_capacity : 1024;
-		struct vulkan_segment *const grown = realloc(blob->segments, capacity * sizeof *grown);
-		if (!grown) {
-			blob->error = ERROR_FAILED;
-			return segment.offset;
-		}
-		blob->segments = grown;
-		blob->segment_capacity = capacity;
-	}
-	blob->segments[blob->segment_count++] = segment;
-	blob->bytes += segment.bytes;
-	return segment.offset;
-}
 
 uint64_t
 vulkan_blob_put_words (struct vulkan_blob *blob,

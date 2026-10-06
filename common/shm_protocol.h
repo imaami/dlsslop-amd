@@ -287,20 +287,6 @@ enum MVecPixelSize : STD(uint32_t) {
 	kMVecPixels8 = 3,
 };
 
-/** @brief Writes a path in the shared runtime directory: the directory, then @a file.
- *
- * @param buf  Receives the path; may be nullptr if @a size is 0.
- * @param size The size of @a buf.
- * @param uid  The value of DLSSNR_UID, or nullptr if it is not set.
- * @param file What follows the directory.
- * @return     What snprintf() returns.
- */
-extern int
-shm_runtime_path (char        *buf,
-                  STD(size_t)  size,
-                  char const  *uid,
-                  char const  *file);
-
 /** @brief Where the mapping lives.
  *
  * It has to name the same file in every process that touches it, and a Steam game does not share a
